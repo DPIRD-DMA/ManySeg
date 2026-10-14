@@ -47,6 +47,8 @@ def main(argv=None) -> int:
                     help="JSON overrides for the dataset's task (e.g. instance decoders)")
     tp.add_argument("--subset", type=int, default=None,
                     help="debug: use only the first N samples of each split (recorded)")
+    tp.add_argument("--split", default="official",
+                    help="'official' or 'events:K:F' (leave-events-out fold F of K)")
     tp.add_argument("--save-model", action="store_true",
                     help="save the trained state_dict under <data root>/checkpoints")
     tp.add_argument("--evaluate-test", action="store_true",
@@ -79,7 +81,8 @@ def main(argv=None) -> int:
             r = run_training(a.provider, _spec(a), a.dataset, a.recipe, seed, a.device, a.out,
                              a.data, a.evaluate_test, json.loads(a.set), a.tag,
                              save_model=a.save_model,
-                             task_overrides=json.loads(a.task_kwargs), subset=a.subset)
+                             task_overrides=json.loads(a.task_kwargs), subset=a.subset,
+                             split=a.split)
             pm = r.get("primary_metric", "miou")
             name = "mIoU" if pm == "miou" else pm
             extra = "".join(f" {sp} {name} {r[sp][pm]:.4f}"

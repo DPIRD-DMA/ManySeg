@@ -20,7 +20,11 @@ def data_root(path: str | os.PathLike | None = None) -> Path:
 class DatasetInfo:
     """Static dataset description. For multi-input datasets ``inputs`` maps input names to
     channel counts and ``mean``/``std`` are dicts keyed by input name (in stored units, filled
-    from the prepared cache's ``meta.json`` when computed from the training split)."""
+    from the prepared cache's ``meta.json`` when computed from the training split).
+
+    ``vectors`` declares non-raster (metadata) inputs, ``{name: {"fields": {...}}}`` in
+    ManySeg's vector-input format; their values come from the dataset module's
+    ``load_vectors`` (``(N, columns)`` float32, NaN = missing)."""
 
     name: str
     num_classes: int
@@ -34,6 +38,7 @@ class DatasetInfo:
     splits: tuple[str, ...] = ("train", "val", "test")
     test_splits: tuple[str, ...] = ("test",)
     inputs: dict | None = None
+    vectors: dict | None = None
     notes: tuple[str, ...] = field(default_factory=tuple)
 
     def to_dict(self) -> dict:
@@ -45,6 +50,7 @@ class Split:
     images: np.ndarray | dict[str, np.ndarray]  # (N, H, W, C) or {input: (N, H, W, C)}
     masks: np.ndarray   # (N, H, W) uint8
     names: list[str]
+    vectors: dict[str, np.ndarray] | None = None  # {name: (N, columns) float32}
 
 
 def save_split(cache: Path, split: str, images, masks: np.ndarray, names: list[str]) -> None:

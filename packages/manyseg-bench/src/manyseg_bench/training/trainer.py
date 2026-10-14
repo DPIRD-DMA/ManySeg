@@ -30,8 +30,9 @@ def autocast(device: torch.device, precision: str):
 
 
 def _channels_last(x):
-    if isinstance(x, dict):
-        return {k: v.contiguous(memory_format=torch.channels_last) for k, v in x.items()}
+    if isinstance(x, dict):  # vector (metadata) inputs are (B, N): left as they are
+        return {k: v.contiguous(memory_format=torch.channels_last) if v.ndim == 4 else v
+                for k, v in x.items()}
     return x.contiguous(memory_format=torch.channels_last)
 
 

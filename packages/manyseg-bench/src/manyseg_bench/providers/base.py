@@ -31,6 +31,8 @@ class ModelSpec:
             which every built-in provider can load for ResNets. ``None`` = random init.
         in_channels / num_classes: I/O channels.
         inputs: For multi-input datasets, ``{name: channels}``; set by the runner.
+        vectors: Vector (metadata) inputs, ``{name: ManySeg vector-input config}``; set by the
+            runner, used in dict mode only.
         input_mode: ``"stack"`` (inputs concatenated: one tensor, any provider) or ``"dict"``
             (named inputs; only providers whose ``supports_dict_inputs`` is True).
         options: Provider-specific options (e.g. decoder widths). Recorded in results.
@@ -42,6 +44,7 @@ class ModelSpec:
     in_channels: int = 3
     num_classes: int = 2
     inputs: dict[str, int] | None = None
+    vectors: dict[str, dict] | None = None
     input_mode: str = "stack"
     options: dict[str, Any] = field(default_factory=dict)
 

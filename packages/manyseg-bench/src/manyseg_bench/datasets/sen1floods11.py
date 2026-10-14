@@ -11,6 +11,18 @@ Preprocessing (identical for every model): S2 reflectance / 1e4; S1 dB as is; DE
 per-chip median (relative relief); per-channel mean/std computed on the training split only and
 stored in ``meta.json``. Training uses random-resized 256x256 crops with h/v flips; evaluation
 uses full 512x512 chips.
+
+Metadata (``sen1floods11_meta*`` variants, read from the raw download; nothing is cached):
+
+* per chip: ``latlon``, the chip centre from the GeoTIFF georeferencing (EPSG:4326 tie point
+  and pixel scale);
+* per flood event, from ``Sen1Floods11_Metadata.geojson``: ``doy`` (day of year of the S2
+  acquisition) and ``orbit`` (S1 pass, 0 = ascending, 1 = descending). The catalogue has dates
+  but no times, and neither it nor the GeoTIFF tags have sun or view angles.
+
+Every field except ``latlon`` is constant within an event, and ``latlon`` clusters by event, so
+on the official splits (which share events) metadata can identify the event. Use
+``event_folds`` (leave-events-out) whenever metadata is an input.
 """
 
 from __future__ import annotations
@@ -50,6 +62,13 @@ INFO_S1 = DatasetInfo(**{**INFO.to_dict(), "name": "sen1floods11_s1", "inputs": 
                          "in_channels": 2})
 INFO_S2 = DatasetInfo(**{**INFO.to_dict(), "name": "sen1floods11_s2", "inputs": {"s2": 13},
                          "in_channels": 13})
+META_FIELDS = {"latlon": {"type": "coords"}, "doy": {"type": "cyclic", "period": 365.25},
+               "orbit": {"type": "categorical", "num": 2}}
+INFO_META = DatasetInfo(**{**INFO.to_dict(), "name": "sen1floods11_meta",
+                           "vectors": {"meta": {"fields": META_FIELDS}}})
+INFO_META_NOGEO = DatasetInfo(**{
+    **INFO.to_dict(), "name": "sen1floods11_meta_nogeo",
+    "vectors": {"meta": {"fields": {k: v for k, v in META_FIELDS.items() if k != "latlon"}}}})
 LOADER_KWARGS = {"out_size": (256, 256), "scale": (0.25, 1.0), "vflip": True}
 EVAL_BATCH_SIZE = 8
 
@@ -118,3 +137,84 @@ def prepare(raw: Path, cache: Path, size: int = 512, workers: int = 4) -> dict:
                                        for k, v in arrays.items()}}
     (cache / "meta.json").write_text(json.dumps({**stats, "summary": summary}, indent=1))
     return summary
+
+
+# --- metadata and event-level splits ----------------------------------------------------------
+
+EVENT_ALIASES = {"Mekong": "Cambodia"}  # chip-name prefix -> catalogue "location"
+
+
+def event_of(name: str) -> str:
+    """Flood event of a chip name such as ``Sri-Lanka_120804``."""
+    return name.rsplit("_", 1)[0]
+
+
+def event_table(root: Path) -> dict[str, dict]:
+    """``{event: catalogue properties}`` from ``Sen1Floods11_Metadata.geojson``."""
+    feats = json.loads((root / "Sen1Floods11_Metadata.geojson").read_text())["features"]
+    by_loc = {f["properties"]["location"]: f["properties"] for f in feats}
+    return {**by_loc, **{a: by_loc[t] for a, t in EVENT_ALIASES.items() if t in by_loc}}
+
+
+def chip_centre(path: Path) -> tuple[float, float]:
+    """(lat, lon) of a GeoTIFF's centre from its tie point and pixel scale (EPSG:4326)."""
+    import tifffile
+
+    with tifffile.TiffFile(path) as t:
+        p = t.pages[0]
+        sx, sy = p.tags["ModelPixelScaleTag"].value[:2]
+        tie = p.tags["ModelTiepointTag"].value
+        h, w = p.shape[-2:]
+    i, j, lon0, lat0 = tie[0], tie[1], tie[3], tie[4]
+    return lat0 - (h / 2 - j) * sy, lon0 + (w / 2 - i) * sx
+
+
+def _doy(date: str) -> float:
+    import datetime
+
+    return float(datetime.date(*map(int, date.split("/"))).timetuple().tm_yday)
+
+
+def _field_values(field: str, name: str, root: Path, events: dict) -> list[float]:
+    ev = events.get(event_of(name))
+    if field == "latlon":
+        return list(chip_centre(root / "data" / "S2L1CHand" / f"{name}_S2Hand.tif"))
+    if ev is None:
+        return [float("nan")]
+    if field == "doy":
+        return [_doy(ev["s2_date"])]
+    if field == "orbit":
+        return [{"ASCENDING": 0.0, "DESCENDING": 1.0}.get(ev["orbit"], float("nan"))]
+    raise ValueError(f"no extractor for Sen1Floods11 metadata field {field!r}")
+
+
+def load_vectors(raw: Path, names: list[str], vectors: dict) -> dict[str, np.ndarray]:
+    """``{vector input: (N, columns) float32}`` for chips ``names`` (columns in field order;
+    NaN where the catalogue has no entry)."""
+    root = _root(Path(raw))
+    events = event_table(root)
+    out = {}
+    for vname, cfg in vectors.items():
+        rows = [[v for f in cfg["fields"] for v in _field_values(f, n, root, events)]
+                for n in names]
+        out[vname] = np.asarray(rows, dtype=np.float32)
+    return out
+
+
+def event_folds(names: list[str], k: int = 5, fold: int = 0) -> dict[str, list[int]]:
+    """Leave-events-out split of ``names`` (the pooled official train+val+test chips).
+
+    Events are sorted by name; fold ``f`` tests on events ``f, f+k, ...`` and validates on the
+    next fold's events; the rest train. Across ``k`` folds every event is tested exactly once,
+    and no event ever contributes chips to two of train/val/test.
+    """
+    events = sorted({event_of(n) for n in names})
+    if not 0 <= fold < k or k < 3 or len(events) < k:
+        raise ValueError(f"need 0 <= fold < k, k >= 3 and >= k events; got fold={fold}, k={k}, "
+                         f"{len(events)} events")
+    test, val = set(events[fold::k]), set(events[(fold + 1) % k::k])
+    part = {"train": [], "val": [], "test": []}
+    for i, n in enumerate(names):
+        e = event_of(n)
+        part["test" if e in test else "val" if e in val else "train"].append(i)
+    return part

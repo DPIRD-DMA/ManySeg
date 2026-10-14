@@ -7,6 +7,15 @@ geometric transform jointly to every input and the mask.
 Inputs may be a single array ``(N, H, W, C)`` or a dict of such arrays (multi-input datasets,
 all on the same grid). ``stack=True`` concatenates dict inputs along channels in key order, so
 single-input libraries can be benchmarked on multi-input data (early fusion).
+
+``vectors`` (``{name: (N, columns)}`` float arrays, NaN = missing) are per-sample metadata. In
+dict mode they are yielded as extra ``(B, columns)`` entries of the input dict, unaugmented
+(a random-resized crop moves a chip centre by at most half a chip, which we ignore). In
+``stack`` mode they are dropped: stacking is the library-neutral early-fusion baseline for
+rasters, and a provider that takes one tensor has no place for a vector. Dropping keeps such
+providers runnable as the no-metadata control on identical data; "metadata as extra channels"
+is ManySeg's ``channels`` conditioning mode, which encodes fields (cyclic dates, unit-sphere
+coordinates) before broadcasting them instead of stacking raw numbers.
 """
 
 from __future__ import annotations
@@ -42,6 +51,7 @@ class GPULoader:
         drop_last: bool | None = None,
         stack: bool = True,
         device_resident: bool = True,
+        vectors: Mapping[str, np.ndarray] | None = None,
     ) -> None:
         self.multi = isinstance(images, Mapping)
         imgs = dict(images) if self.multi else {"image": images}
@@ -69,6 +79,11 @@ class GPULoader:
         self.scale, self.ratio, self.hflip, self.vflip = scale, ratio, hflip, vflip
         self.drop_last = train if drop_last is None else drop_last
         self.stack = stack
+        self.vectors = {} if stack or not vectors else {
+            k: _to_device(np.asarray(v, dtype=np.float32), device) for k, v in vectors.items()}
+        for k, v in self.vectors.items():
+            if v.shape[0] != self.n:
+                raise ValueError(f"vector input {k!r} has {v.shape[0]} rows for {self.n} samples")
 
     def _fetch(self, idx: Tensor):
         if self.device_resident:
@@ -126,4 +141,7 @@ class GPULoader:
             if self.multi and not self.stack:
                 x = dict(zip(self.names, torch.split(x, [self.channels[k] for k in self.names],
                                                      dim=1)))
+            if self.vectors:
+                x = x if isinstance(x, dict) else {self.names[0]: x}
+                x.update({k: v[idx.to(v.device)] for k, v in self.vectors.items()})
             yield x, y

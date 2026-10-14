@@ -30,6 +30,51 @@ def _select(split, info, subset: int | None = None):
     return split
 
 
+def split_getter(ds, cache: Path, raw: Path, scheme: str = "official", mmap: bool = False,
+                 subset: int | None = None):
+    """``get(split_name) -> Split`` for a split scheme, with vector (metadata) inputs attached.
+
+    ``"official"``: the cached splits. ``"events:K:F"`` (datasets with ``event_folds``): pool
+    the official train/val/test chips and re-split them leave-events-out (fold F of K); other
+    splits (e.g. an event holdout such as Sen1Floods11's Bolivia) are used as cached.
+    Normalisation statistics stay those of the official training split.
+    """
+    import numpy as np
+
+    from ..datasets import Split
+
+    info = ds.INFO
+    pooled, part = None, None
+    if scheme.startswith("events:"):
+        if not hasattr(ds, "event_folds"):
+            raise ValueError(f"dataset {info.name!r} has no event-level split")
+        _, k, fold = scheme.split(":")
+        parts = [_select(load_split(cache, n, mmap=False), info) for n in ("train", "val", "test")]
+        cat = np.concatenate
+        images = ({k_: cat([p.images[k_] for p in parts]) for k_ in parts[0].images}
+                  if isinstance(parts[0].images, dict) else cat([p.images for p in parts]))
+        pooled = Split(images, cat([p.masks for p in parts]), sum((p.names for p in parts), []))
+        del parts
+        part = ds.event_folds(pooled.names, int(k), int(fold))
+    elif scheme != "official":
+        raise ValueError(f"unknown split scheme {scheme!r}; use 'official' or 'events:K:F'")
+
+    def get(name: str):
+        if part is not None and name in part:
+            idx = part[name]
+            images = ({k_: v[idx] for k_, v in pooled.images.items()}
+                      if isinstance(pooled.images, dict) else pooled.images[idx])
+            split = _select(Split(images, pooled.masks[idx], [pooled.names[i] for i in idx]),
+                            info, subset)
+        else:
+            split = _select(load_split(cache, name, mmap=mmap), info, subset)
+        if info.vectors:
+            split.vectors = ds.load_vectors(raw, split.names, info.vectors)
+        return split
+
+    return get
+
+
 def info_loader_kwargs(ds) -> dict:
     """Dataset-specific augmentation settings (e.g. vertical flips for overhead imagery)."""
     return dict(getattr(ds, "LOADER_KWARGS", {}))
@@ -50,6 +95,7 @@ def run_training(
     save_model: bool = False,
     task_overrides: dict | None = None,
     subset: int | None = None,
+    split: str = "official",
 ) -> dict:
     dev = torch.device(device)
     ds = get_dataset(dataset)
@@ -61,7 +107,12 @@ def run_training(
     if info.inputs:
         mean, std = {k: mean[k] for k in info.inputs}, {k: std[k] for k in info.inputs}
     spec = ModelSpec(**{**spec.to_dict(), "num_classes": info.num_classes,
-                        "in_channels": info.in_channels, "inputs": info.inputs})
+                        "in_channels": info.in_channels, "inputs": info.inputs,
+                        "vectors": info.vectors})
+    raw = data_root(data) / "raw" / getattr(ds, "CACHE_NAME", info.name)
+    # Datasets too large for the (shared) GPU stay memory-mapped on the host.
+    mmap = not info_loader_kwargs(ds).get("device_resident", True)
+    get_split = split_getter(ds, cache, raw, split, mmap=mmap, subset=subset)
 
     seed_everything(seed)
     torch.backends.cudnn.benchmark = True
@@ -79,19 +130,18 @@ def run_training(
     if spec.input_mode == "dict" and not prov.supports_dict_inputs:
         raise ValueError(f"provider {provider!r} does not support dict inputs; "
                          "use input_mode='stack'")
-    # Datasets too large for the (shared) GPU stay memory-mapped on the host.
-    mmap = not info_loader_kwargs(ds).get("device_resident", True)
-    train_split = _select(load_split(cache, "train", mmap=mmap), info, subset)
+    train_split = get_split("train")
     img_size = tuple(train_split.masks.shape[1:3])
     built = prov.build(spec, img_size=img_size)
 
     stack = spec.input_mode != "dict"
     common = dict(mean=mean, std=std, device=dev, stack=stack, **info_loader_kwargs(ds))
     train_loader = GPULoader(train_split.images, train_split.masks, rec.batch_size, train=True,
-                             seed=seed, **common)
-    val = _select(load_split(cache, "val", mmap=mmap), info, subset)
+                             seed=seed, vectors=train_split.vectors, **common)
+    val = get_split("val")
     eval_bs = getattr(ds, "EVAL_BATCH_SIZE", 32)
-    val_loader = GPULoader(val.images, val.masks, eval_bs, train=False, **common)
+    val_loader = GPULoader(val.images, val.masks, eval_bs, train=False, vectors=val.vectors,
+                           **common)
 
     env = environment(dev)
     if dev.type == "cuda":
@@ -114,15 +164,19 @@ def run_training(
         "task_kwargs": task_kwargs,
         "subset": subset,
         "seed": seed,
+        "split_scheme": split,
+        "split_sizes": {"train": len(train_split.names), "val": len(val.names)},
+        "vectors_dropped": bool(info.vectors) and stack,
         "env": env,
         "gpu_contention_at_end": gpu_contention() if dev.type == "cuda" else None,
         **result,
     }
     if evaluate_test:
-        for split in info.test_splits:
-            test = _select(load_split(cache, split, mmap=mmap), info, subset)
-            test_loader = GPULoader(test.images, test.masks, eval_bs, train=False, **common)
-            record[split] = evaluate(built.model, test_loader, info.num_classes, dev,
+        for test_split in info.test_splits:
+            test = get_split(test_split)
+            test_loader = GPULoader(test.images, test.masks, eval_bs, train=False,
+                                    vectors=test.vectors, **common)
+            record[test_split] = evaluate(built.model, test_loader, info.num_classes, dev,
                                      rec.precision, info.ignore_index, task=task)
             del test, test_loader
     if save_model:

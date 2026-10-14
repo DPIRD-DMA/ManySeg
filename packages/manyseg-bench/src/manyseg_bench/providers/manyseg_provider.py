@@ -25,6 +25,7 @@ class ManySegProvider(Provider):
         n_cls = None if "heads" in opts else spec.num_classes
         if spec.input_mode == "dict" and spec.inputs:
             inputs = {n: {"channels": c} for n, c in spec.inputs.items()}
+            inputs.update({n: {"kind": "vector", **cfg} for n, cfg in (spec.vectors or {}).items()})
             for n, extra in opts.pop("input_options", {}).items():
                 inputs[n].update(extra)
             opts.setdefault("fusion", {"type": "intermediate"})
