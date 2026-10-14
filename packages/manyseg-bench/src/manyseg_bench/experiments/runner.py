@@ -40,6 +40,7 @@ def run_training(
     evaluate_test: bool = False,
     recipe_overrides: dict | None = None,
     tag: str = "",
+    save_model: bool = False,
 ) -> dict:
     dev = torch.device(device)
     ds = get_dataset(dataset)
@@ -101,6 +102,15 @@ def run_training(
             record[split] = evaluate(built.model, test_loader, info.num_classes, dev,
                                      rec.precision, info.ignore_index)
             del test, test_loader
+    if save_model:
+        import hashlib
+
+        ckpt_dir = data_root(data) / "checkpoints"
+        ckpt_dir.mkdir(parents=True, exist_ok=True)
+        ckpt = ckpt_dir / f"{record['run_id']}.pt"
+        torch.save(built.model.state_dict(), ckpt)
+        record["checkpoint"] = {"path": str(ckpt),
+                                "sha256": hashlib.sha256(ckpt.read_bytes()).hexdigest()}
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     path = out / f"{record['run_id']}_{provider}_{spec.arch}_{spec.encoder}_s{seed}.json"

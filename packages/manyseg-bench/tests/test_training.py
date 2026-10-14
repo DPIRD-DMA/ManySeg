@@ -89,3 +89,25 @@ def test_freeze_encoder_epoch_leaves_encoder_conv_weights_unchanged():
           num_classes=3, recipe=rec, device=torch.device("cpu"), log=lambda *_: None)
     after = [p for p in b.encoder_params if p.ndim > 1]
     assert all(torch.equal(u, v) for u, v in zip(before, after))
+
+
+def test_run_training_saves_checkpoint(tmp_path, monkeypatch):
+    """End-to-end runner on a tiny prepared dataset; --save-model writes a loadable state_dict."""
+    import json
+
+    from manyseg_bench.datasets.base import save_split
+    from manyseg_bench.experiments import run_training
+
+    imgs, masks = synthetic(n=8)
+    cache = tmp_path / "cache" / "oxford_pet"
+    for split in ("train", "val"):
+        save_split(cache, split, imgs, (masks > 0).astype("uint8"), [str(i) for i in range(8)])
+    rec = run_training("manyseg", ModelSpec("unet", "resnet18", weights=None), "oxford_pet",
+                       "smoke", device="cpu", out_dir=tmp_path / "runs", data=tmp_path,
+                       recipe_overrides={"precision": "fp32"}, save_model=True)
+    ck = rec["checkpoint"]["path"]
+    sd = torch.load(ck, weights_only=True)
+    assert any(k.startswith("backbone.") for k in sd)
+    with open(rec["path"]) as f:
+        saved = json.load(f)
+    assert saved["checkpoint"]["sha256"] == rec["checkpoint"]["sha256"]
