@@ -30,7 +30,8 @@ def config_of(tag):  # "e006-unet-s2" -> "unet:2"; "e006-fpn-snative" -> "fpn:na
 def load(runs):
     train, prof = defaultdict(list), {}
     for path in sorted(glob.glob(f"{runs}/**/*.json", recursive=True)):
-        r = json.load(open(path))
+        with open(path) as f:
+            r = json.load(f)
         if not r.get("tag", "").startswith("e006-"):
             continue
         cfg = config_of(r["tag"])
