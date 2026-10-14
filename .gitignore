@@ -232,3 +232,4 @@ experiments/queue2.log*
 experiments/queue4*.log*
 .claude/
 experiments/queue5*.log*
+experiments/queue3*.log*
