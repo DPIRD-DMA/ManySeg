@@ -177,29 +177,79 @@ def test_split_getter_events_scheme_with_vectors(tmp_path):
         split_getter(ds, cache, raw, "random")
 
 
-@pytest.mark.parametrize("mode", ["dict", "stack"])
-def test_run_training_end_to_end_with_metadata(tmp_path, mode):
-    """CLI-equivalent run on a synthetic Sen1Floods11 cache + raw catalogue (CPU)."""
-    from manyseg_bench.experiments import run_training
-
+def fake_dataset(tmp_path):
+    """Synthetic Sen1Floods11 cache + raw catalogue. Chip i's S2 values are ~ 10 * i, so
+    normalisation statistics reveal which chips they were computed from."""
     fake_raw(tmp_path / "data" / "raw" / "sen1floods11")
     cache = tmp_path / "data" / "cache" / "sen1floods11"
     groups = {"train": CHIPS[:4], "val": CHIPS[4:6], "test": CHIPS[6:], "bolivia": CHIPS[:2]}
     rng = np.random.default_rng(0)
     for split, names in groups.items():
         n = len(names)
+        s2 = rng.normal(size=(n, 32, 32, 13)) + 10 * np.array(
+            [CHIPS.index(c) for c in names])[:, None, None, None]
         save_split(cache, split, {"s1": rng.normal(size=(n, 32, 32, 2)).astype(np.float16),
-                                  "s2": rng.normal(size=(n, 32, 32, 13)).astype(np.float16),
+                                  "s2": s2.astype(np.float16),
                                   "dem": np.zeros((n, 32, 32, 1), np.float16)},
                    rng.integers(0, 2, (n, 32, 32)).astype(np.uint8), names)
     (cache / "meta.json").write_text(json.dumps({
         "mean": {"s1": [0] * 2, "s2": [0] * 13, "dem": [0]},
         "std": {"s1": [1] * 2, "s2": [1] * 13, "dem": [1]}}))
+    return tmp_path / "data", cache
+
+
+def _run(tmp_path, data, mode="dict", split="events:3:0"):
+    from manyseg_bench.experiments import run_training
+
     spec = ModelSpec("unet", "resnet18", weights=None, input_mode=mode)
-    rec = run_training("manyseg", spec, "sen1floods11_meta", "smoke", device="cpu",
-                       out_dir=tmp_path / "runs", data=tmp_path / "data", evaluate_test=True,
-                       recipe_overrides={"batch_size": 2, "precision": "fp32"},
-                       split="events:3:0")
+    return run_training("manyseg", spec, "sen1floods11_meta", "smoke", device="cpu",
+                        out_dir=tmp_path / "runs", data=data, evaluate_test=True,
+                        recipe_overrides={"batch_size": 2, "precision": "fp32"}, split=split)
+
+
+@pytest.mark.parametrize("mode", ["dict", "stack"])
+def test_run_training_end_to_end_with_metadata(tmp_path, mode):
+    """CLI-equivalent run on a synthetic Sen1Floods11 cache + raw catalogue (CPU)."""
+    data, _ = fake_dataset(tmp_path)
+    rec = _run(tmp_path, data, mode)
     assert rec["split_scheme"] == "events:3:0" and rec["vectors_dropped"] == (mode == "stack")
     assert {"test", "bolivia"} <= set(rec)
     assert rec["spec"]["vectors"] == {"meta": {"fields": sen1floods11.META_FIELDS}}
+
+
+def test_channel_stats_match_numpy_with_nans_and_chunks():
+    from manyseg_bench.datasets.base import channel_stats
+
+    rng = np.random.default_rng(0)
+    a = (rng.normal(size=(7, 5, 6, 3)) * [1, 2, 3] + [0, 5, -2]).astype(np.float16)
+    a[0, 0, 0, 1] = np.nan
+    mean, std = channel_stats(a, chunk=2)
+    flat = a.reshape(-1, 3).astype(np.float64)
+    np.testing.assert_allclose(mean, np.nanmean(flat, 0), rtol=1e-6)
+    np.testing.assert_allclose(std, np.nanstd(flat, 0) + 1e-6, rtol=1e-5)
+    u8 = rng.integers(0, 256, (4, 3, 3, 2)).astype(np.uint8)
+    m8, _ = channel_stats(u8)
+    np.testing.assert_allclose(m8, u8.reshape(-1, 2).mean(0) / 255, rtol=1e-6)  # loader units
+
+
+def test_event_split_normalises_with_training_events_only(tmp_path):
+    """Regression: event folds pool the official splits, so meta.json statistics (official
+    train) would leak held-out events; stats must come from the fold's training chips."""
+    from manyseg_bench.experiments.runner import split_getter
+
+    data, cache = fake_dataset(tmp_path)
+    rec = _run(tmp_path, data)
+    train = split_getter(get_dataset("sen1floods11_meta"), cache, data / "raw" / "sen1floods11",
+                         "events:3:0")("train")
+    expected = train.images["s2"].astype(np.float64).reshape(-1, 13).mean(0)
+    norm = rec["norm_stats"]
+    assert norm["source"] == "train split of events:3:0"
+    np.testing.assert_allclose(norm["mean"]["s2"], expected, rtol=1e-4)
+    assert set(norm["mean"]) == {"s1", "s2"}
+
+
+def test_official_split_keeps_meta_json_statistics(tmp_path):
+    data, _ = fake_dataset(tmp_path)
+    norm = _run(tmp_path, data, split="official")["norm_stats"]
+    assert norm["source"] == "meta.json (official train split)"
+    assert norm["mean"]["s2"] == [0] * 13 and norm["std"]["s2"] == [1] * 13

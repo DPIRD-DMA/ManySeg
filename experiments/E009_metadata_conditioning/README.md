@@ -29,8 +29,8 @@ Status: **planned** (registered 2026-10-14 before any E009 run). The roadmap res
   the official train+val+test chips (431, 10 events) are pooled and split by event. Fold F
   tests on 2 events and validates on 2 others. Across the 5 folds, every event is tested
   exactly once. Bolivia (15 chips, its own event) is also reported for every run.
-  Normalisation statistics are the official training split's (the same for every arm; this
-  is a small, shared leak of pixel statistics, not of labels).
+  Raster normalisation statistics are computed from each fold's training chips only. They are
+  recorded per run as `norm_stats`. The official-split arms use `meta.json` (official train).
 * Model: ManySeg, `--input-mode dict`, intermediate fusion (concat) of S1 and S2, each with
   resnet34 `tv_in1k` (default `repeat` adapter), U-Net decoder. Recipe `fastai_like`,
   60 epochs, batch 16, 256² random-resized crops with flips, full 512² evaluation, last-epoch

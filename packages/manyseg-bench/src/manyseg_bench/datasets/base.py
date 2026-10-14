@@ -79,6 +79,25 @@ def load_split(cache: Path, split: str, mmap: bool = True) -> Split:
     return Split(images, np.load(masks, mmap_mode=mode), json.loads(names.read_text()))
 
 
+def channel_stats(images: np.ndarray, chunk: int = 16) -> tuple[list[float], list[float]]:
+    """Per-channel NaN-aware mean and std (+1e-6, as in dataset preparation) of ``(N, H, W, C)``
+    images, accumulated in float64 over ``chunk`` samples at a time (bounded memory). uint8
+    images are reported in [0, 1] units, as ``DatasetInfo.mean`` / the loader expect."""
+    c = images.shape[-1]
+    s, ss, n = np.zeros(c), np.zeros(c), np.zeros(c)
+    for i in range(0, images.shape[0], chunk):
+        x = images[i:i + chunk].reshape(-1, c).astype(np.float64)
+        ok = np.isfinite(x)
+        x = np.where(ok, x, 0.0)
+        s += x.sum(0)
+        ss += (x * x).sum(0)
+        n += ok.sum(0)
+    mean = s / np.maximum(n, 1)
+    std = np.sqrt(np.maximum(ss / np.maximum(n, 1) - mean ** 2, 0.0))
+    unit = 255.0 if images.dtype == np.uint8 else 1.0
+    return (mean / unit).tolist(), (std / unit + 1e-6).tolist()
+
+
 def load_meta(cache: Path) -> dict:
     p = cache / "meta.json"
     return json.loads(p.read_text()) if p.exists() else {}

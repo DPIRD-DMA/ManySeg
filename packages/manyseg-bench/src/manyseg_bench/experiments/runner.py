@@ -10,7 +10,7 @@ from pathlib import Path
 import torch
 
 from ..datasets import GPULoader, data_root, get_dataset, load_split
-from ..datasets.base import load_meta
+from ..datasets.base import channel_stats, load_meta
 from ..env import environment, gpu_contention
 from ..providers import ModelSpec, get_provider
 from ..tasks import build_task
@@ -37,7 +37,8 @@ def split_getter(ds, cache: Path, raw: Path, scheme: str = "official", mmap: boo
     ``"official"``: the cached splits. ``"events:K:F"`` (datasets with ``event_folds``): pool
     the official train/val/test chips and re-split them leave-events-out (fold F of K); other
     splits (e.g. an event holdout such as Sen1Floods11's Bolivia) are used as cached.
-    Normalisation statistics stay those of the official training split.
+    ``run_training`` normalises event splits with statistics of the fold's training chips
+    (``meta.json`` holds the official train split's, which would include held-out events).
     """
     import numpy as np
 
@@ -131,6 +132,16 @@ def run_training(
         raise ValueError(f"provider {provider!r} does not support dict inputs; "
                          "use input_mode='stack'")
     train_split = get_split("train")
+    norm_source = "meta.json (official train split)"
+    if split != "official":  # pooled splits: never let held-out chips into the statistics
+        imgs = train_split.images
+        stats = ({k: channel_stats(v) for k, v in imgs.items()} if isinstance(imgs, dict)
+                 else {None: channel_stats(imgs)})
+        mean = {k: m for k, (m, _) in stats.items()}
+        std = {k: sd for k, (_, sd) in stats.items()}
+        if None in mean:
+            mean, std = mean[None], std[None]
+        norm_source = f"train split of {split}"
     img_size = tuple(train_split.masks.shape[1:3])
     built = prov.build(spec, img_size=img_size)
 
@@ -167,6 +178,7 @@ def run_training(
         "split_scheme": split,
         "split_sizes": {"train": len(train_split.names), "val": len(val.names)},
         "vectors_dropped": bool(info.vectors) and stack,
+        "norm_stats": {"source": norm_source, "mean": mean, "std": std},
         "env": env,
         "gpu_contention_at_end": gpu_contention() if dev.type == "cuda" else None,
         **result,
