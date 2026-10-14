@@ -1,6 +1,6 @@
 # Roadmap
 
-Status as of 2026-10-14 (night update). ✅ done · 🔄 in progress · ⏳ planned.
+Status as of 2026-10-15 (morning update). ✅ done · 🔄 in progress · ⏳ planned.
 
 ## Phase 1: research and architecture ✅
 
@@ -39,8 +39,9 @@ Status as of 2026-10-14 (night update). ✅ done · 🔄 in progress · ⏳ plan
 * ✅ Execution on Pawsey Setonix (MI250X) via Slurm arrays: `scripts/setonix/` (see its README for the container, offline weights, MIOpen and Lustre gotchas).
 * ✅ Datasets prepared: AI4Boundaries ortho (13 GB cache), OAM-TCD (CC-BY, 1024², ~22 GB cache).
 * ✅ CloudSEN12+ high (clouds/shadows, S2 L1C; CC0 labels + Copernicus Sentinel notice): `cloudsen12` (S2), `cloudsen12_s2_aux` (+ static S1GBM backscatter + DEM) and `cloudsen12_meta` (+ lat/lon, date, sun angles) on ROI-disjoint splits; 2048² samples tiled to 512².
-* ⏳ Profiling sweep (eager vs compile; fp32, bf16, fp16; batch sizes), on an idle GPU.
-* ⏳ CI workflow (CPU unit tests; slow tier nightly).
+* 🔄 E013 (CloudSEN12+; Setonix 8-GCD pack jobs): auxiliary S1GBM/DEM layers, metadata conditioning on unseen locations, and `input_cross` on a second dataset. Pre-registered; the cache is being built on Setonix.
+* 🔄 E014 (profiling sweep on an idle 4090): eager vs compile × fp32/bf16/fp16, 60 configs, with compile cost. Running.
+* ✅ CI workflow (Linux unit tests on every push; macOS/MPS on PRs and nightly; slow tier nightly).
 
 ## Phase 4: expanded architecture support 🔄
 
