@@ -9,6 +9,16 @@ Composable dense-prediction models for PyTorch: any timm backbone, any channel c
 inputs and outputs. Compile- and export-friendly, and checked against an independent
 benchmark.
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/architecture-dark.svg">
+    <img alt="ManySeg architecture: per-input encoders feed a fusion block, a decoder and named heads; every stage is swappable" src="docs/assets/architecture-light.svg" width="860">
+  </picture>
+</p>
+
+Each stage is configured independently. The row under the line lists the options for each
+stage. The diagram shows the model built by the multi-input example below.
+
 > Status: pre-alpha (Phases 1–4 in progress). APIs may change. See `docs/roadmap.md`.
 
 This monorepo holds two independent packages:

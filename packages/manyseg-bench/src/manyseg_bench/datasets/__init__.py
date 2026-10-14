@@ -13,7 +13,8 @@ class _Variant:
         self.INFO, self.prepare, self.CACHE_NAME = info, base.prepare, cache_name
 
 
-DATASETS["sen1floods11_dem"] = _Variant(sen1floods11, sen1floods11.INFO_DEM, "sen1floods11")
+for _info in (sen1floods11.INFO_DEM, sen1floods11.INFO_S1, sen1floods11.INFO_S2):
+    DATASETS[_info.name] = _Variant(sen1floods11, _info, "sen1floods11")
 
 
 def get_dataset(name: str):

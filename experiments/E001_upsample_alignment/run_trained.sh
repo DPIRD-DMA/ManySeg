@@ -3,7 +3,7 @@
 set -u
 export MANYSEG_BENCH_DATA="$MANYSEG_BENCH_DATA"
 RECIPE=${RECIPE:?set RECIPE}
-OUT=experiments/E001_upsample_alignment/runs
+OUT=${OUT_ROOT:-.}/experiments/E001_upsample_alignment/runs
 for seed in 0 1 2; do
   for up in bilinear aligned; do  # nearest baseline = E003 unet runs (identical config)
     echo "=== upsample=$up seed=$seed recipe=$RECIPE"

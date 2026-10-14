@@ -31,6 +31,12 @@ def autocast(device: torch.device, precision: str):
     return nullcontext() if dt is None else torch.autocast(device.type, dtype=dt)
 
 
+def _channels_last(x):
+    if isinstance(x, dict):
+        return {k: v.contiguous(memory_format=torch.channels_last) for k, v in x.items()}
+    return x.contiguous(memory_format=torch.channels_last)
+
+
 def _is_no_decay(p: nn.Parameter) -> bool:
     return p.ndim <= 1  # norm weights/biases and conv/linear biases
 
@@ -85,7 +91,7 @@ def evaluate(model: nn.Module, loader, num_classes: int, device: torch.device,
         pred = logits.argmax(1)
         cm.update(pred, y)
         bf1_sum += float(boundary_f1(pred, y, ignore_index=ignore_index).sum())
-        n_img += x.shape[0]
+        n_img += y.shape[0]
     out = cm.compute()
     out["boundary_f1"] = bf1_sum / max(1, n_img)
     out["loss"] = loss_sum / max(1, n_img * y.shape[-1] * y.shape[-2])
@@ -130,7 +136,7 @@ def train(
         loss_sum, nb, nonfinite = 0.0, 0, 0
         for x, y in train_loader:
             if recipe.channels_last:
-                x = x.contiguous(memory_format=torch.channels_last)
+                x = _channels_last(x)
             f = lr_factor(step, total, warmup, recipe.schedule)
             for g in opt.param_groups:
                 g["lr"] = g["base_lr"] * f

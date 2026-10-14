@@ -2,7 +2,7 @@
 set -u
 export MANYSEG_BENCH_DATA="$MANYSEG_BENCH_DATA"
 RECIPE=${RECIPE:?set RECIPE}
-OUT=experiments/E003_decoders_pet/runs
+OUT=${OUT_ROOT:-.}/experiments/E003_decoders_pet/runs
 for seed in 0 1 2; do
   for dec in unet fastai_unet fpn deeplabv3plus upernet segformer; do
     echo "=== decoder=$dec seed=$seed recipe=$RECIPE"

@@ -62,3 +62,19 @@ def test_manyseg_provider_multi_input(mode):
     model = get_provider("manyseg").build(spec).model.eval()
     x, _ = next(iter(loader(stack=mode == "stack", train=False)))
     assert model(x).shape == (3, 2, 32, 32)
+
+
+@pytest.mark.parametrize("channels_last", [False, True])
+def test_trainer_runs_with_dict_inputs(channels_last):
+    """Regression: evaluate() used x.shape and channels_last assumed a Tensor."""
+    from manyseg_bench.training import get_recipe, train
+
+    spec = ModelSpec("unet", "resnet18", weights=None, num_classes=2, in_channels=5,
+                     inputs={"a": 2, "b": 3}, input_mode="dict")
+    b = get_provider("manyseg").build(spec)
+    rec = get_recipe("standard", epochs=1, batch_size=3, precision="fp32", warmup_epochs=0,
+                     channels_last=channels_last)
+    res = train(b.model, b.encoder_params, b.decoder_params, loader(False, True),
+                loader(False, False), num_classes=2, recipe=rec, device=torch.device("cpu"),
+                log=lambda *_: None)
+    assert 0 <= res["final_val"]["miou"] <= 1

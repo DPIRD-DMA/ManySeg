@@ -46,6 +46,10 @@ INFO = DatasetInfo(
 )
 INFO_DEM = DatasetInfo(**{**INFO.to_dict(), "name": "sen1floods11_dem",
                           "inputs": ALL_INPUTS, "in_channels": sum(ALL_INPUTS.values())})
+INFO_S1 = DatasetInfo(**{**INFO.to_dict(), "name": "sen1floods11_s1", "inputs": {"s1": 2},
+                         "in_channels": 2})
+INFO_S2 = DatasetInfo(**{**INFO.to_dict(), "name": "sen1floods11_s2", "inputs": {"s2": 13},
+                         "in_channels": 13})
 LOADER_KWARGS = {"out_size": (256, 256), "scale": (0.25, 1.0), "vflip": True}
 EVAL_BATCH_SIZE = 8
 

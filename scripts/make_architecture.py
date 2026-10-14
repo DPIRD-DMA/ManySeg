@@ -1,0 +1,183 @@
+"""Generate the README architecture diagram (light/dark SVGs, text converted to outlines).
+
+Usage: uv run --no-project --with fonttools python scripts/make_architecture.py docs/assets
+"""
+import sys
+from pathlib import Path
+
+from fontTools.pens.svgPathPen import SVGPathPen
+from fontTools.pens.transformPen import TransformPen
+from fontTools.ttLib import TTFont
+
+OUT = Path(sys.argv[1])
+FONTS = {}
+for weight, file in (("regular", "Lato-Regular.ttf"), ("bold", "Lato-Bold.ttf"), ("mono", None)):
+    if file:
+        f = TTFont(f"/usr/share/fonts/truetype/lato/{file}")
+        FONTS[weight] = (f, f.getGlyphSet(), f.getBestCmap(), f["head"].unitsPerEm, f["hmtx"])
+FONTS["mono"] = FONTS["regular"]
+
+
+def text_width(s, size, weight="regular", tracking=0.0):
+    _, _, cmap, upm, hmtx = FONTS[weight]
+    return sum(hmtx[cmap[ord(c)]][0] * size / upm + tracking * size for c in s)
+
+
+def text(s, x, y, size, fill, weight="regular", anchor="start", tracking=0.0):
+    _, gs, cmap, upm, hmtx = FONTS[weight]
+    if anchor == "middle":
+        x -= text_width(s, size, weight, tracking) / 2
+    elif anchor == "end":
+        x -= text_width(s, size, weight, tracking)
+    scale = size / upm
+    pen = SVGPathPen(gs)
+    for c in s:
+        g = cmap[ord(c)]
+        gs[g].draw(TransformPen(pen, (scale, 0, 0, -scale, x, y)))
+        x += hmtx[g][0] * scale + tracking * size
+    return f'<path fill="{fill}" d="{pen.getCommands()}"/>'
+
+
+THEMES = {
+    "light": dict(ink="#0F172A", muted="#64748B", line="#94A3B8", plate="#F8FAFC", edge="#CBD5E1",
+                  soft="#E2E8F0", a="#0D9488", a_soft="#CCFBF1", b="#6366F1", b_soft="#E0E7FF",
+                  bg="#FFFFFF"),
+    "dark": dict(ink="#F1F5F9", muted="#94A3B8", line="#64748B", plate="#1E293B", edge="#475569",
+                 soft="#334155", a="#2DD4BF", a_soft="#134E4A", b="#818CF8", b_soft="#312E81",
+                 bg="#0D1117"),
+}
+
+W, H = 1000, 470
+COLS = {"in": 95, "enc": 290, "fuse": 490, "dec": 680, "out": 885}
+BRANCH_Y = {"a": 130, "b": 290}
+LEVELS = 4
+FUSE_PORTS = [158, 186, 214, 242]
+DEC_Y = [158, 186, 214, 242]
+
+
+def build(theme):
+    t = THEMES[theme]
+    el = []
+    add = el.append
+
+    # column headers
+    for key, label in (("in", "INPUTS"), ("enc", "ENCODERS"), ("fuse", "FUSION"),
+                       ("dec", "DECODER"), ("out", "HEADS")):
+        add(text(label, COLS[key], 34, 12.5, t["muted"], "bold", "middle", tracking=0.12))
+
+    # ---- inputs: stacked channel tiles; sar is smaller (half resolution)
+    def stack(cx, cy, size, n, col, soft):
+        off = 7
+        x0 = cx - size / 2 - (n - 1) * off / 2
+        y0 = cy - size / 2 + (n - 1) * off / 2
+        for i in reversed(range(n)):
+            fill = col if i == 0 else soft
+            add(f'<rect x="{x0 + i*off:.1f}" y="{y0 - i*off:.1f}" width="{size}" height="{size}" '
+                f'rx="7" fill="{fill}" stroke="{t["bg"]}" stroke-width="1.5"/>')
+
+    stack(COLS["in"], BRANCH_Y["a"], 68, 4, t["a"], t["a_soft"])
+    stack(COLS["in"], BRANCH_Y["b"], 42, 2, t["b"], t["b_soft"])
+    add(text("optical", COLS["in"], BRANCH_Y["a"] + 62, 15, t["ink"], "bold", "middle"))
+    add(text("4 ch · full res", COLS["in"], BRANCH_Y["a"] + 80, 12.5, t["muted"], anchor="middle"))
+    add(text("sar", COLS["in"], BRANCH_Y["b"] + 50, 15, t["ink"], "bold", "middle"))
+    add(text("2 ch · ½ res", COLS["in"], BRANCH_Y["b"] + 68, 12.5, t["muted"], anchor="middle"))
+
+    # ---- encoders: feature pyramids (wide = shallow, narrow = deep)
+    def pyramid_bars(cx, cy, widths, col):
+        ys = []
+        for i, w in enumerate(widths):
+            y = cy - (LEVELS - 1) * 14 + i * 28
+            add(f'<rect x="{cx - w/2:.1f}" y="{y - 7}" width="{w}" height="14" rx="4" fill="{col}"/>')
+            ys.append((cx + w / 2, y))
+        return ys
+
+    enc_w = [104, 82, 60, 38]
+    ends = {}
+    for br, name, col in (("a", "convnext_tiny", t["a"]), ("b", "resnet18", t["b"])):
+        cy = BRANCH_Y[br]
+        # input -> encoder arrow
+        x_from = COLS["in"] + (52 if br == "a" else 36)
+        add(f'<path d="M{x_from} {cy} L{COLS["enc"] - 64} {cy}" stroke="{t["line"]}" stroke-width="1.5" '
+            f'fill="none" marker-end="url(#arrow)"/>')
+        ends[br] = pyramid_bars(COLS["enc"], cy, enc_w, col)
+        add(text(name, COLS["enc"], cy + 70, 13, t["muted"], anchor="middle"))
+
+    # multi-scale features from both encoders converge on the fusion block
+    fx0, fx1 = COLS["fuse"] - 48, COLS["fuse"] + 48
+    for br in ("a", "b"):
+        col = t["a"] if br == "a" else t["b"]
+        for (x, y), py in zip(ends[br], FUSE_PORTS):
+            mx = (x + fx0) / 2
+            add(f'<path d="M{x + 4:.1f} {y} C{mx:.1f} {y}, {mx:.1f} {py}, {fx0} {py}" stroke="{col}" '
+                f'stroke-width="1.5" stroke-opacity="0.55" fill="none"/>')
+
+    # ---- fusion block
+    add(f'<rect x="{fx0}" y="128" width="{fx1 - fx0}" height="144" rx="12" fill="{t["plate"]}" '
+        f'stroke="{t["edge"]}" stroke-width="1.5"/>')
+    for py in FUSE_PORTS:
+        add(f'<circle cx="{fx0}" cy="{py}" r="3" fill="{t["line"]}"/>')
+        add(f'<circle cx="{fx1}" cy="{py}" r="3" fill="{t["line"]}"/>')
+    add(text("gated", COLS["fuse"], 205, 16, t["ink"], "bold", "middle"))
+    add(text("per level", COLS["fuse"], 223, 12, t["muted"], anchor="middle"))
+
+    # ---- decoder: takes fused multi-scale features, emits full-res features
+    dec_w = [104, 82, 60, 38]
+    dx = COLS["dec"]
+    for i, (w, y) in enumerate(zip(dec_w, DEC_Y)):
+        add(f'<path d="M{fx1} {y} L{dx - w/2 - 4:.1f} {y}" stroke="{t["line"]}" stroke-width="1.5" fill="none"/>')
+        add(f'<rect x="{dx - w/2:.1f}" y="{y - 7}" width="{w}" height="14" rx="4" fill="{t["ink"]}" '
+            f'fill-opacity="{0.85 - i*0.15:.2f}"/>')
+    add(text("unet", dx, 286, 16, t["ink"], "bold", "middle"))
+
+    # ---- heads
+    hx = COLS["out"]
+    mask = [[0, 0, 1, 1], [0, 1, 1, 1], [2, 2, 1, 0], [2, 2, 2, 0]]
+    fill = {0: t["soft"], 1: t["a"], 2: t["b"]}
+    cell, gap = 14, 3
+    gw = 4 * cell + 3 * gap
+    gx, gy = hx - gw / 2, 92
+    add(f'<rect x="{gx - 5}" y="{gy - 5}" width="{gw + 10}" height="{gw + 10}" rx="8" fill="{t["plate"]}" '
+        f'stroke="{t["edge"]}" stroke-width="1.5"/>')
+    for r, row in enumerate(mask):
+        for c, v in enumerate(row):
+            add(f'<rect x="{gx + c*(cell+gap)}" y="{gy + r*(cell+gap)}" width="{cell}" height="{cell}" rx="3" fill="{fill[v]}"/>')
+    add(text("water", hx, gy + gw + 26, 15, t["ink"], "bold", "middle"))
+    add(text("segmentation · per pixel", hx, gy + gw + 43, 12.5, t["muted"], anchor="middle"))
+
+    px, py = hx, 282
+    add(f'<rect x="{px - 34}" y="{py - 17}" width="68" height="34" rx="17" fill="{t["plate"]}" '
+        f'stroke="{t["edge"]}" stroke-width="1.5"/>')
+    add(text("0.37", px, py + 6, 16, t["ink"], "bold", "middle"))
+    add(text("water_area", hx, py + 40, 15, t["ink"], "bold", "middle"))
+    add(text("regression · per image", hx, py + 57, 12.5, t["muted"], anchor="middle"))
+
+    # decoder -> heads
+    sx = dx + 58
+    add(f'<path d="M{sx} {DEC_Y[0]} C{sx + 40} {DEC_Y[0]}, {hx - 90} {gy + gw/2}, {gx - 12} {gy + gw/2}" '
+        f'stroke="{t["line"]}" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>')
+    add(f'<path d="M{sx} {DEC_Y[0]} C{sx + 40} {DEC_Y[0]}, {hx - 90} {py}, {px - 40} {py}" '
+        f'stroke="{t["line"]}" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>')
+
+    # ---- swappable options under each column
+    opts = {
+        "in": ["any channel count", "any H × W"],
+        "enc": ["any timm backbone", "CNN · hierarchical · ViT", "shared or independent"],
+        "fuse": ["early · intermediate · late", "concat · add · gated", "attention · cross-attn"],
+        "dec": ["unet · fastai_unet · fpn", "deeplabv3+ · upernet", "segformer"],
+        "out": ["named, any number", "segmentation · regression", "classification"],
+    }
+    add(f'<line x1="24" y1="384" x2="{W - 24}" y2="384" stroke="{t["edge"]}" stroke-width="1"/>')
+    for key, lines in opts.items():
+        for i, s in enumerate(lines):
+            add(text(s, COLS[key], 410 + i * 18, 12.5, t["muted"], anchor="middle"))
+
+    defs = (f'<defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" '
+            f'orient="auto-start-reverse"><path d="M0 1 L9 5 L0 9 z" fill="{t["line"]}"/></marker></defs>')
+    body = "\n  ".join(el)
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" width="{W}" height="{H}" role="img" '
+            f'aria-label="ManySeg architecture: inputs, encoders, fusion, decoder, heads">\n  {defs}\n  {body}\n</svg>\n')
+
+
+for theme in THEMES:
+    (OUT / f"architecture-{theme}.svg").write_text(build(theme))
+print("ok")
