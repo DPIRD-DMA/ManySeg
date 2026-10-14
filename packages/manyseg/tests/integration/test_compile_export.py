@@ -134,7 +134,7 @@ def test_swin_dynamic_export_known_limitation():
 
 
 @pytest.mark.parametrize("decoder", ["fpn", "deeplabv3plus", "upernet", "segformer",
-                                     "fastai_unet"])
+                                     "fastai_unet", "unetplusplus"])
 def test_decoder_export_and_compile_dynamic(decoder):
     model = model_(decoder=decoder)
     h = torch.export.Dim("h", min=33, max=1024)

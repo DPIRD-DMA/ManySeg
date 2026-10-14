@@ -30,7 +30,15 @@ def build(name, specs, **kw):
 
 
 def test_expected_decoders_registered():
-    assert {"unet", "fpn", "deeplabv3plus", "upernet", "segformer", "fastai_unet"} <= set(ALL)
+    assert {"unet", "unetplusplus", "fpn", "deeplabv3plus", "upernet", "segformer",
+            "fastai_unet"} <= set(ALL)
+
+
+def test_unetplusplus_has_nested_nodes():
+    """X[i][j] nodes for i + j <= L-1 (L-1 = 4 skip levels -> 10 nested nodes)."""
+    dec = DECODERS["unetplusplus"](SPECS5)
+    assert len(dec.nodes) == 10
+    assert dec.out_spec.stride == 1
 
 
 @pytest.mark.parametrize("name", ALL)

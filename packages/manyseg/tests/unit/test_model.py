@@ -173,3 +173,19 @@ def test_channels_last():
     model = model.to(memory_format=torch.channels_last)
     out = model(x.contiguous(memory_format=torch.channels_last))
     torch.testing.assert_close(out, ref, atol=1e-4, rtol=1e-4)
+
+
+def test_regression_head_with_uncertainty_outputs_mean_and_logvar():
+    model = small(num_classes=None, heads={
+        "depth": {"type": "regression", "channels": 2, "uncertainty": True},
+        "area": {"type": "regression", "channels": 1, "scope": "image", "uncertainty": True},
+    }).eval()
+    out = model(torch.randn(2, 3, 65, 97))
+    assert out["depth"].shape == (2, 4, 65, 97)  # [mean(2), log_var(2)]
+    assert out["area"].shape == (2, 2)
+
+
+def test_uncertainty_only_for_regression():
+    with pytest.raises(ValueError, match="regression"):
+        small(num_classes=None, heads={"s": {"type": "segmentation", "channels": 2,
+                                             "uncertainty": True}})

@@ -4,7 +4,9 @@ from .fastai_unet import FastaiUNetDecoder
 from .fpn import FPNDecoder
 from .segformer import SegFormerDecoder
 from .unet import UNetDecoder
+from .unetplusplus import UNetPlusPlusDecoder
 from .upernet import UPerNetDecoder
 
 __all__ = ["DECODERS", "DeepLabV3PlusDecoder", "FPNDecoder", "FastaiUNetDecoder",
-           "SegFormerDecoder", "UNetDecoder", "UPerNetDecoder", "pyramid_levels"]
+           "SegFormerDecoder", "UNetDecoder", "UNetPlusPlusDecoder", "UPerNetDecoder",
+           "pyramid_levels"]
