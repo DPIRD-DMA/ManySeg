@@ -221,7 +221,7 @@ __marimo__/
 
 # ManySeg
 data/
-runs/
+/runs/
 *.pt
 *.pth
 *.onnx
