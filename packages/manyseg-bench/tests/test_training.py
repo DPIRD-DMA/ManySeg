@@ -111,3 +111,27 @@ def test_run_training_saves_checkpoint(tmp_path, monkeypatch):
     with open(rec["path"]) as f:
         saved = json.load(f)
     assert saved["checkpoint"]["sha256"] == rec["checkpoint"]["sha256"]
+
+
+def test_runner_passes_label_smoothing_to_semantic_task(tmp_path, monkeypatch):
+    """Regression (Codex review): runner-built SemanticTask must keep recipe.label_smoothing."""
+    from manyseg_bench import tasks
+    from manyseg_bench.datasets.base import save_split
+    from manyseg_bench.experiments import run_training
+
+    seen = {}
+    orig = tasks.SemanticTask.__init__
+
+    def spy(self, *a, **kw):
+        orig(self, *a, **kw)
+        seen["ls"] = self.label_smoothing
+
+    monkeypatch.setattr(tasks.SemanticTask, "__init__", spy)
+    imgs, masks = synthetic(n=8)
+    cache = tmp_path / "cache" / "oxford_pet"
+    for split in ("train", "val"):
+        save_split(cache, split, imgs, masks, [str(i) for i in range(8)])
+    run_training("manyseg", ModelSpec("unet", "resnet18", weights=None), "oxford_pet", "smoke",
+                 device="cpu", out_dir=tmp_path / "runs", data=tmp_path,
+                 recipe_overrides={"precision": "fp32", "label_smoothing": 0.1})
+    assert seen["ls"] == 0.1

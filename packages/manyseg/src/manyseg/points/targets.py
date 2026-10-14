@@ -73,23 +73,30 @@ def density_map(points: Sequence[Tensor], size: tuple[int, int], sigma=3.0) -> T
     return torch.stack(out)[:, None]
 
 
+def _instance_stats(mi: Tensor):
+    """(ids, area, centroid (K, 2)) via bincount over compacted ids (no K x H x W tensors)."""
+    h, w = mi.shape
+    ids, inv = torch.unique(mi.reshape(-1), return_inverse=True)
+    ys = torch.arange(h, device=mi.device, dtype=torch.float64).repeat_interleave(w)
+    xs = torch.arange(w, device=mi.device, dtype=torch.float64).repeat(h)
+    k = len(ids)
+    area = torch.bincount(inv, minlength=k).double()
+    cy = torch.bincount(inv, weights=ys, minlength=k) / area.clamp(min=1)
+    cx = torch.bincount(inv, weights=xs, minlength=k) / area.clamp(min=1)
+    keep = ids > 0
+    return ids[keep], area[keep].float(), torch.stack([cy, cx], 1)[keep].float()
+
+
 @torch.no_grad()
 def centers_from_instances(instance_mask: Tensor) -> list[tuple[Tensor, Tensor]]:
     """Per image: (centroids ``(K, 2)`` float ``(y, x)``, instance ids ``(K,)``), ids ascending."""
     m = instance_mask.long()
     if m.dim() == 2:
         m = m[None]
-    h, w = m.shape[-2:]
-    ys, xs = _grid(h, w, m.device)
     res = []
     for mi in m:
-        ids = torch.unique(mi)
-        ids = ids[ids > 0]
-        onehot = (mi[None] == ids[:, None, None]).float()  # (K, H, W)
-        area = onehot.sum((1, 2)).clamp(min=1)
-        cy = (onehot * ys[None, :, None]).sum((1, 2)) / area
-        cx = (onehot * xs[None, None, :]).sum((1, 2)) / area
-        res.append((torch.stack([cy, cx], 1), ids))
+        ids, _, c = _instance_stats(mi)
+        res.append((c, ids))
     return res
 
 
@@ -105,10 +112,10 @@ def heatmap_from_instances(instance_mask: Tensor, sigma: float | None = 2.0,
     if m.dim() == 2:
         m = m[None]
     pts, sig = [], []
-    for (c, ids), mi in zip(centers_from_instances(m), m):
+    for mi in m:
+        ids, area, c = _instance_stats(mi)
         pts.append(torch.floor(c + 0.5))
         if sigma_scale is not None:
-            area = (mi[None] == ids[:, None, None]).sum((1, 2)).float()
             sig.append((sigma_scale * area.sqrt()).clamp(min=min_sigma))
         else:
             sig.append(torch.full((len(ids),), float(sigma), device=m.device))

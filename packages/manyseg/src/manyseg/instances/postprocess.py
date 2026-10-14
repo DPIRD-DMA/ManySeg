@@ -61,6 +61,31 @@ def relabel_sequential(labels: Tensor) -> Tensor:
     return out
 
 
+def _ensure_seed_per_component(fg: Tensor, seeds: Tensor, dist: Tensor) -> Tensor:
+    """Give every foreground component without a seed one seed at its distance maximum.
+
+    Objects that lie entirely inside the boundary band (tiny or thin instances) would otherwise
+    vanish. Touching objects that are *both* entirely boundary still merge (inherent to the
+    representation).
+    """
+    comp = connected_components(fg)
+    b = fg.shape[0]
+    n = int(comp.max()) + 1
+    flat = comp + torch.arange(b, device=fg.device)[:, None, None] * n
+    flat = flat.reshape(-1)
+    has_seed = torch.zeros(b * n, dtype=torch.bool, device=fg.device)
+    has_seed[flat[seeds.reshape(-1)]] = True
+    d = torch.where(fg, dist, torch.full_like(dist, -1.0)).reshape(-1)
+    dmax = torch.full((b * n,), -1.0, device=fg.device).scatter_reduce(0, flat, d, "amax")
+    at_max = (d == dmax[flat]) & fg.reshape(-1) & ~has_seed[flat]
+    pix = torch.arange(flat.numel(), device=fg.device)
+    first = torch.full((b * n,), flat.numel(), device=fg.device).scatter_reduce(
+        0, flat[at_max], pix[at_max], "amin")
+    extra = torch.zeros_like(at_max)
+    extra[first[first < flat.numel()]] = True
+    return seeds | extra.view_as(seeds)
+
+
 def _foreground(extent: Tensor, logits: bool, threshold: float) -> Tensor:
     if extent.dtype in (torch.long, torch.int32, torch.int64, torch.uint8, torch.bool):
         return (extent if extent.dim() == 3 else extent[:, 0]) > 0
@@ -96,6 +121,7 @@ def instances_from_outputs(
     bnd = boundary[:, 0].sigmoid() if logits else boundary[:, 0]
     dist = distance[:, 0].float()
     seeds = fg & (bnd < boundary_threshold) & (dist > seed_threshold)
+    seeds = _ensure_seed_per_component(fg, seeds, dist)
     markers = connected_components(seeds)
     if backend == "auto":
         try:

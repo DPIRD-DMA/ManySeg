@@ -182,3 +182,39 @@ def test_preset_model_shapes_and_gradients(decoders, hw):
     assert all(p.grad is not None for p in model.parameters() if p.requires_grad)
     if decoders == "separate":
         assert set(model.task_decoders) == {"extent", "boundary", "distance"}
+
+
+# --- regressions from Codex review 2026-10-14 ----------------------------------------------
+
+@pytest.mark.parametrize("backend", ["torch", "skimage"])
+def test_round_trip_keeps_instances_inside_boundary_band(backend):
+    """Single-pixel and 1-px-wide instances are all boundary; they must still get a seed."""
+    if backend == "skimage":
+        pytest.importorskip("skimage")
+    m = torch.zeros(20, 20, dtype=torch.long)
+    m[3, 3] = 1                 # single pixel
+    m[8, 2:15] = 2              # thin line
+    m[12:18, 12:18] = 3         # normal block
+    t = instance_targets(m, boundary_width=2)
+    labels = instances_from_outputs(t["extent"], t["boundary"], t["distance"], backend=backend)
+    assert same_partition(labels[0], m)
+
+
+def test_full_tile_instance_has_distance_and_round_trips():
+    m = torch.ones(1, 16, 20, dtype=torch.long)
+    t = instance_targets(m)
+    d = t["distance"][0, 0]
+    assert torch.isfinite(d).all() and d.max() == 1.0 and d.min() > 0
+    labels = instances_from_outputs(t["extent"], t["boundary"], t["distance"], backend="torch")
+    assert same_partition(labels[0], m[0])
+
+
+def test_edt_large_dimension_memory_bounded(monkeypatch):
+    """The brute-force EDT must tile both query and source rows within its element cap."""
+    import manyseg.instances.targets as T
+
+    monkeypatch.setattr(T, "_MAX_ELEMS", 4096)
+    feat = torch.zeros(1, 300, 7, dtype=torch.bool)
+    feat[0, 0, 0] = True
+    d = T.edt(feat)
+    assert d[0, 299, 6] == pytest.approx((299**2 + 6**2) ** 0.5)

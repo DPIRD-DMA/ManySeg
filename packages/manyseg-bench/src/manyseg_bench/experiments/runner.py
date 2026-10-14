@@ -42,6 +42,7 @@ def run_training(
     recipe_overrides: dict | None = None,
     tag: str = "",
     save_model: bool = False,
+    task_overrides: dict | None = None,
 ) -> dict:
     dev = torch.device(device)
     ds = get_dataset(dataset)
@@ -57,8 +58,11 @@ def run_training(
 
     seed_everything(seed)
     torch.backends.cudnn.benchmark = True
-    task = build_task(getattr(ds, "TASK", "semantic"), info.num_classes, info.ignore_index,
-                      **getattr(ds, "TASK_KWARGS", {}))
+    task_name = getattr(ds, "TASK", "semantic")
+    task_kwargs = {**getattr(ds, "TASK_KWARGS", {}), **(task_overrides or {})}
+    if task_name == "semantic":
+        task_kwargs.setdefault("label_smoothing", rec.label_smoothing)
+    task = build_task(task_name, info.num_classes, info.ignore_index, **task_kwargs)
     if task.heads() is not None:
         if provider != "manyseg":
             raise ValueError(f"task {task.name!r} needs named heads; provider {provider!r} "
@@ -98,6 +102,7 @@ def run_training(
         "dataset": info.to_dict(),
         "img_size": list(img_size),
         "recipe": rec.to_dict(),
+        "task_kwargs": task_kwargs,
         "seed": seed,
         "env": env,
         "gpu_contention_at_end": gpu_contention() if dev.type == "cuda" else None,

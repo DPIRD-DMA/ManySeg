@@ -148,3 +148,18 @@ def test_heatmap_preset_kind():
     assert point_heads(heatmap="segmentation")["heatmap"]["type"] == "segmentation"
     with pytest.raises(ValueError):
         point_heads(heatmap="nope")
+
+
+# --- regressions from Codex review 2026-10-14 ----------------------------------------------
+
+def test_centers_many_instances_without_k_h_w_tensors():
+    m = torch.zeros(1, 128, 128, dtype=torch.long)
+    m[0] = torch.arange(128 * 128).view(128, 128) // 4 + 1   # 4096 tiny instances
+    centers, ids = centers_from_instances(m)[0]
+    assert len(ids) == 4096
+    torch.testing.assert_close(centers[0], torch.tensor([0.0, 1.5]))
+
+
+def test_find_peaks_rejects_even_kernel():
+    with pytest.raises(ValueError, match="odd"):
+        find_peaks(torch.zeros(1, 1, 8, 8), kernel=4)

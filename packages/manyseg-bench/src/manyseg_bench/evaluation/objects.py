@@ -32,6 +32,32 @@ def _overlaps(pred: Tensor, gt: Tensor):
     return inter, gsize, psize, inter / union.clamp(min=1)
 
 
+def _one_to_one(iou: Tensor, thr: float) -> Tensor:
+    """Boolean (G, P) match matrix. For thr >= 0.5, IoU > thr matches are unique already;
+    below that, use a maximum-IoU one-to-one assignment (scipy if available, else greedy)."""
+    cand = iou > thr
+    if thr >= 0.5 or not bool(cand.any()):
+        return cand
+    out = torch.zeros_like(cand)
+    try:
+        from scipy.optimize import linear_sum_assignment
+
+        r, c = linear_sum_assignment(-torch.where(cand, iou, -1.0).numpy())
+        for i, j in zip(r, c):
+            out[i, j] = bool(cand[i, j])
+    except ImportError:
+        used_g, used_p = set(), set()
+        for flat in torch.argsort(iou.reshape(-1), descending=True).tolist():
+            i, j = divmod(flat, iou.shape[1])
+            if not cand[i, j]:
+                break
+            if i not in used_g and j not in used_p:
+                out[i, j] = True
+                used_g.add(i)
+                used_p.add(j)
+    return out
+
+
 def panoptic_quality(pred: Tensor, gt: Tensor, iou_threshold: float = 0.5) -> dict:
     om = ObjectMetrics(iou_threshold)
     om.update(pred, gt)
@@ -51,7 +77,7 @@ class ObjectMetrics:
         for p, g in zip(pred.reshape(-1, *pred.shape[-2:]), gt.reshape(-1, *gt.shape[-2:])):
             inter, gsize, psize, iou = _overlaps(p.cpu(), g.cpu())
             n_g, n_p = iou.shape
-            match = iou > self.thr
+            match = _one_to_one(iou, self.thr)
             tp = int(match.sum())
             self.tp += tp
             self.fp += n_p - int(match.any(0).sum())

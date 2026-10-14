@@ -86,3 +86,13 @@ def test_count_metrics():
     cm.update(torch.tensor([10.0, 4.0]), torch.tensor([8.0, 4.0]))
     r = cm.compute()
     assert r["mae"] == pytest.approx(1.0) and r["rmse"] == pytest.approx(math.sqrt(2))
+
+
+def test_low_iou_threshold_matching_is_one_to_one():
+    """Regression (Codex review): one prediction merging two GTs must count as one TP at most."""
+    gt = lab((0, 10, 0, 5), (0, 10, 5, 10))
+    pred = lab((0, 10, 0, 10))
+    om = ObjectMetrics(iou_threshold=0.4)
+    om.update(pred, gt)
+    r = om.compute()
+    assert r["tp"] == 1 and r["fp"] == 0 and r["fn"] == 1

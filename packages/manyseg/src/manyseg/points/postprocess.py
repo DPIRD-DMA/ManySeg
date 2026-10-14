@@ -14,6 +14,8 @@ def find_peaks(heatmap: Tensor, threshold: float = 0.5, kernel: int = 3,
                max_points: int | None = None) -> list[tuple[Tensor, Tensor]]:
     """Local maxima via max-pool NMS. Returns per image ``(points (K, 2) long (y, x), scores)``,
     sorted by score descending. Pass probabilities (apply ``sigmoid`` to logits first)."""
+    if kernel % 2 != 1:
+        raise ValueError(f"kernel must be odd, got {kernel}")
     hm = heatmap[:, 0] if heatmap.dim() == 4 else heatmap
     pooled = F.max_pool2d(hm[:, None], kernel, stride=1, padding=kernel // 2)[:, 0]
     keep = (hm == pooled) & (hm > threshold)
