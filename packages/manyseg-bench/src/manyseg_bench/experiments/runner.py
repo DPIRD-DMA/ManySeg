@@ -116,7 +116,9 @@ def run_training(
     get_split = split_getter(ds, cache, raw, split, mmap=mmap, subset=subset)
 
     seed_everything(seed)
-    torch.backends.cudnn.benchmark = True
+    # cuDNN autotuning helps on CUDA; on ROCm it makes PyTorch request an *exhaustive* MIOpen
+    # search per conv shape (minutes per run, ignoring MIOPEN_FIND_MODE), so keep it off there.
+    torch.backends.cudnn.benchmark = torch.version.hip is None
     task_name = getattr(ds, "TASK", "semantic")
     task_kwargs = {**getattr(ds, "TASK_KWARGS", {}), **(task_overrides or {})}
     if task_name == "semantic":
@@ -173,6 +175,7 @@ def run_training(
         "img_size": list(img_size),
         "recipe": rec.to_dict(),
         "task_kwargs": task_kwargs,
+        "cudnn_benchmark": torch.backends.cudnn.benchmark,
         "subset": subset,
         "seed": seed,
         "split_scheme": split,
