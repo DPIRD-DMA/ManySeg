@@ -96,6 +96,15 @@ def create_model(
     """
     if (num_classes is None) == (heads is None):
         raise ValueError("pass exactly one of num_classes= or heads=")
+    if inputs is not None:
+        from ..conditioning.build import build_conditioned_model, has_kinds
+
+        if has_kinds(inputs):  # vector (metadata) inputs: see manyseg.conditioning
+            return build_conditioned_model(
+                create_model, inputs=inputs, fusion=fusion, backbone=backbone,
+                pretrained=pretrained, channel_adapter=channel_adapter, out_indices=out_indices,
+                backbone_kwargs=backbone_kwargs, decoder=decoder, decoder_kwargs=decoder_kwargs,
+                num_classes=num_classes, heads=heads, pad_to_stride=pad_to_stride)
 
     ftype, fopts = None, {}
     if inputs is not None:

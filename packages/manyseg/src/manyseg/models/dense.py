@@ -22,6 +22,9 @@ class DenseModel(nn.Module):
         head_sources: ``{name: "decoder" | "encoder" | "task"}`` (default ``"decoder"``);
             ``"task"`` heads read ``task_decoders[name]``.
         task_decoders: Optional per-head decoders.
+        conditioner: Optional :class:`~manyseg.conditioning.Conditioner` for vector
+            (metadata) inputs: it splits them off the input dict and modulates the decoders
+            (keyed ``"decoder"`` / ``"task_<head>"``) and heads.
         single_output: If set, ``forward`` returns only this head's tensor.
         pad_to_stride: Zero-pad bottom/right to ``backbone.input_divisor`` and crop outputs
             back, which keeps outputs pixel-aligned with inputs. If False, pixel outputs are
@@ -37,8 +40,10 @@ class DenseModel(nn.Module):
         single_output: str | None = None,
         pad_to_stride: bool = True,
         task_decoders: Mapping[str, nn.Module] | None = None,
+        conditioner: nn.Module | None = None,
     ) -> None:
         super().__init__()
+        self.conditioner = conditioner
         self.backbone = backbone
         self.decoder = decoder
         self.task_decoders = nn.ModuleDict(task_decoders or {})
@@ -70,21 +75,28 @@ class DenseModel(nn.Module):
     def _decode(decoder: nn.Module, x: Tensor | None, feats: list[Tensor]) -> Tensor:
         return decoder([x, *feats] if getattr(decoder, "wants_input", False) else feats)
 
-    def _run_head(self, name: str, dec, feats: list[Tensor], x, h: int, w: int) -> Tensor:
+    def _decode_cond(self, key: str, decoder: nn.Module, x, feats: list[Tensor], cond) -> Tensor:
+        if cond is None:
+            return self._decode(decoder, x, feats)
+        c = self.conditioner
+        return c.output(key, self._decode(decoder, x, c.features(key, feats, cond)), cond)
+
+    def _run_head(self, name: str, dec, feats: list[Tensor], x, h: int, w: int,
+                  cond=None) -> Tensor:
         src = self._head_sources[name]
         if src == "decoder":
             inp = dec
         elif src == "encoder":
             inp = feats[self._deepest]
         else:
-            inp = self._decode(self.task_decoders[name], x, feats)
+            inp = self._decode_cond(f"task_{name}", self.task_decoders[name], x, feats, cond)
         y = self.heads[name](inp)
         if name in self._pixel_heads:
             if self.pad_to_stride:
                 y = crop_to(y, h, w)
             else:
                 y = F.interpolate(y, size=(h, w), mode="bilinear", align_corners=False)
-        return y
+        return y if cond is None else self.conditioner.head(name, y, cond)
 
     def _pad(self, x: Tensor) -> Tensor:
         fixed = getattr(self.backbone, "fixed_size", None)
@@ -99,6 +111,9 @@ class DenseModel(nn.Module):
         return F.pad(x, (0, fixed[1] - w, 0, fixed[0] - h))
 
     def forward(self, x: Tensor | dict[str, Tensor]) -> Tensor | dict[str, Tensor]:
+        cond = None
+        if self.conditioner is not None:  # vector inputs -> (raster inputs, embeddings)
+            x, cond = self.conditioner(x)
         primary = getattr(self.backbone, "primary", None)
         if primary is not None:  # multi-input encoder: it pads each input itself
             if not isinstance(x, Mapping):
@@ -111,7 +126,8 @@ class DenseModel(nn.Module):
             h, w = x.shape[-2], x.shape[-1]
             xin = self._pad(x)
             feats = self.backbone(xin)
-        dec = self._decode(self.decoder, xin, feats) if self.decoder is not None else None
+        dec = (self._decode_cond("decoder", self.decoder, xin, feats, cond)
+               if self.decoder is not None else None)
         if self.single_output is not None:
-            return self._run_head(self.single_output, dec, feats, xin, h, w)
-        return {name: self._run_head(name, dec, feats, xin, h, w) for name in self.heads}
+            return self._run_head(self.single_output, dec, feats, xin, h, w, cond)
+        return {name: self._run_head(name, dec, feats, xin, h, w, cond) for name in self.heads}
