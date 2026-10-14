@@ -1,0 +1,91 @@
+"""torch.compile / torch.export / ONNX contracts. Marked slow."""
+
+import pytest
+import torch
+
+from manyseg import create_model
+
+pytestmark = pytest.mark.slow
+
+
+def model_(backbone="resnet18", **kw):
+    return create_model(backbone=backbone, pretrained=False, num_classes=3, **kw).eval()
+
+
+@pytest.mark.parametrize("backbone", ["resnet18", "convnext_atto", "efficientnet_b0"])
+def test_compile_fullgraph_matches_eager(backbone, device):
+    model = model_(backbone).to(device)
+    compiled = torch.compile(model, fullgraph=True, dynamic=True)
+    x = torch.randn(1, 3, 65, 97, device=device)
+    with torch.no_grad():
+        torch.testing.assert_close(compiled(x), model(x), atol=2e-3, rtol=2e-3)
+
+
+SIZES10 = [(64, 96), (96, 128), (65, 97), (160, 33), (200, 129), (257, 301), (123, 77),
+           (320, 320), (64, 64), (511, 129)]
+
+
+def test_dynamic_compile_graph_count(device):
+    """One graph for many sizes on CUDA.
+
+    On CPU PyTorch's fake conv kernel guards on the size-dependent oneDNN/native backend choice
+    (torch._subclasses.fake_impls, `_select_conv_backend`), which adds a bounded number of graphs
+    for small inputs. That is outside ManySeg; we only require it stays bounded.
+    """
+    import torch._dynamo as dynamo
+
+    model = model_().to(device)
+    dynamo.reset()
+    calls = {"n": 0}
+
+    def backend(gm, example_inputs):
+        calls["n"] += 1
+        return gm.forward
+
+    compiled = torch.compile(model, backend=backend, fullgraph=True, dynamic=True)
+    with torch.no_grad():
+        for hw in SIZES10:
+            assert compiled(torch.randn(1, 3, *hw, device=device)).shape[-2:] == hw
+    limit = 1 if device.type == "cuda" else 8
+    assert calls["n"] <= limit, calls["n"]
+
+
+# Dynamic export range starts at 33: at <= 32 px the stride-32 feature map is 1x1 and
+# torch.export specialises size-1 dimensions.
+def test_torch_export_dynamic_hw():
+    model = model_()
+    h = torch.export.Dim("h", min=33, max=2048)
+    w = torch.export.Dim("w", min=33, max=2048)
+    x = torch.randn(1, 3, 64, 96)
+    ep = torch.export.export(model, (x,), dynamic_shapes={"x": {2: h, 3: w}})
+    for hw in [(64, 96), (65, 97), (128, 33)]:
+        xi = torch.randn(1, 3, *hw)
+        torch.testing.assert_close(ep.module()(xi), model(xi), atol=1e-4, rtol=1e-4)
+
+
+def test_torch_export_multihead():
+    model = create_model(
+        backbone="resnet18", pretrained=False,
+        heads={"seg": {"type": "segmentation", "channels": 2},
+               "cls": {"type": "classification", "channels": 4, "scope": "image"}},
+    ).eval()
+    ep = torch.export.export(model, (torch.randn(1, 3, 64, 64),))
+    out = ep.module()(torch.randn(1, 3, 64, 64))
+    assert out["seg"].shape == (1, 2, 64, 64) and out["cls"].shape == (1, 4)
+
+
+def test_onnx_export_dynamic_matches_onnxruntime(tmp_path):
+    ort = pytest.importorskip("onnxruntime")
+    model = model_()
+    path = tmp_path / "m.onnx"
+    h = torch.export.Dim("h", min=33, max=2048)
+    w = torch.export.Dim("w", min=33, max=2048)
+    torch.onnx.export(
+        model, (torch.randn(1, 3, 64, 96),), str(path), dynamo=True,
+        dynamic_shapes={"x": {2: h, 3: w}}, input_names=["x"], output_names=["logits"],
+    )
+    sess = ort.InferenceSession(str(path), providers=["CPUExecutionProvider"])
+    for hw in [(64, 96), (65, 97)]:
+        x = torch.randn(1, 3, *hw)
+        (got,) = sess.run(None, {"x": x.numpy()})
+        torch.testing.assert_close(torch.from_numpy(got), model(x), atol=1e-3, rtol=1e-3)

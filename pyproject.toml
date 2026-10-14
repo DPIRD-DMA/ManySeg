@@ -1,0 +1,30 @@
+[project]
+name = "manyseg-workspace"
+version = "0.0.0"
+requires-python = ">=3.10"
+description = "Development workspace for manyseg and manyseg-bench (not published)."
+dependencies = []
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = ["packages/manyseg", "packages/manyseg-bench"]
+
+[tool.uv.sources]
+manyseg = { workspace = true }
+manyseg-bench = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "manyseg[test]",
+    "manyseg-bench[smp,fastai,test]",
+    "ruff>=0.6",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]

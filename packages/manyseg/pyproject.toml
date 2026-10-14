@@ -1,0 +1,32 @@
+[project]
+name = "manyseg"
+version = "0.1.0.dev0"
+description = "Composable dense-prediction models for PyTorch: any timm backbone, any channel count, multiple inputs and outputs."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+dependencies = [
+    "torch>=2.4",
+    "timm>=1.0.9",
+]
+
+[project.optional-dependencies]
+onnx = ["onnx>=1.16", "onnxscript>=0.1"]
+test = ["pytest>=8", "pytest-xdist>=3", "onnx>=1.16", "onnxscript>=0.1", "onnxruntime>=1.18"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/manyseg"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "slow: slow tests (compile, export, many backbones)",
+    "cuda: requires a CUDA device",
+    "mps: requires an MPS device",
+    "network: downloads pretrained weights",
+]
+addopts = "-m 'not slow and not network' --strict-markers"
