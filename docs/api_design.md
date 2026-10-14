@@ -315,14 +315,27 @@ bias (about 6 px at init) at every stride.
 | `downsample_labels(y, s, ignore_index, mode="mode")` | class ids | majority per block; ignored pixels and padding never vote; all-ignored block → `ignore_index`; ties → lowest id. `mode="nearest"` takes the block-centre pixel. Pass `num_classes` to avoid device syncs. |
 | `downsample_mean(x, s, valid=None)` | continuous targets | mean over each block's in-image (and `valid`) pixels |
 | `downsample_sum(x, s)` | density targets | block sums, so the count is preserved |
+| `downsample_max(x, s)` | heatmaps, thin boundaries | block maximum: keeps peaks; "any" for boolean maps |
 | `upsample_output(y, (H, W), s, mode)` | predictions | bilinear (logits, values) or nearest (labels, any dtype), cropped to `H × W` |
 
 Instance and point post-processing runs on the grid it is given. `find_peaks(hm, scale=s)`
 returns float input-pixel coordinates. `group_by_offsets` and `instances_from_outputs` return
 head-grid labels; map them back with `upsample_output(labels, (H, W), s, mode="nearest")`.
-`manyseg-bench` evaluates scaled heads at input resolution by upsampling the predictions, so
-arms with different scales are comparable. Semantic losses use mode-downsampled labels at
-head scale, and native-scale metrics are optional (`native_metrics=True`).
+`manyseg-bench` computes losses on each head's own grid and compares at input resolution.
+Native targets are built according to what each target means:
+
+* semantic labels and instance extent: majority vote;
+* boundaries: any;
+* distance: mean over instance pixels;
+* heatmaps: max;
+* offsets: mean divided by `f`;
+* density: sum;
+* point validity: the fraction of valid pixels in each block.
+
+For metrics, semantic and instance predictions are upsampled to input resolution, points are
+picked on the native heatmap and returned in input-pixel coordinates, and counts integrate the
+native density. Native-scale semantic metrics are optional (`native_metrics=True`). See the
+`manyseg_bench.tasks` module docstring.
 
 ## Input channel adaptation
 

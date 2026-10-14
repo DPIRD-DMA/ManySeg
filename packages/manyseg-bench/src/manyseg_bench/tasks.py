@@ -5,11 +5,25 @@ The trainer is task-agnostic: it calls ``task.loss(outputs, task.targets(y))`` a
 segmentation, instance ids for instance/point tasks); targets are generated on the device.
 
 Reduced-resolution heads (``manyseg`` head ``scale`` < 1) are detected from the output size:
-an output of ``ceil(H / f) x ceil(W / f)`` for ``H x W`` labels has head factor ``f``.
-Evaluation is always at input resolution (predictions upsampled with
-``manyseg.utils.upsample_output``) so that arms with different scales are comparable.
-Semantic losses are computed at head scale against mode-downsampled labels; instance and
-point tasks upsample the outputs and keep their full-resolution targets.
+an output of ``ceil(H / f) x ceil(W / f)`` for ``H x W`` labels has head factor ``f``. Losses
+are computed on the head's own grid against targets downsampled by meaning
+(``Task.head_targets``):
+
+* semantic labels: block majority (``ignore_index`` respected);
+* instance extent: block majority; boundary: block "any" (``downsample_max``; a 1-2 px band
+  would vanish under a majority vote); distance: mean over the block's instance pixels, with
+  the loss restricted to blocks containing any instance pixel;
+* point heatmap: block max (keeps each centre's peak of 1, which the focal loss keys on);
+  offsets: mean over the block's instance pixels divided by ``f`` (head-pixel offsets to the
+  centroid, exactly); density: block sum (counts preserved);
+* validity (ignore regions) for points: the fraction of valid pixels in each block. Losses
+  weight blocks by it, counting integrates ``density * fraction``, and peaks are suppressed
+  only in blocks without any valid pixel.
+
+Evaluation compares at input resolution so arms with different scales are comparable:
+semantic logits and instance outputs are upsampled (``manyseg.utils.upsample_output``) before
+metrics; points are picked on the native heatmap and mapped to input-pixel coordinates
+(``find_peaks(scale=1/f)``); counts integrate the native density.
 """
 
 from __future__ import annotations
@@ -183,14 +197,29 @@ class InstanceTask(Task):
         t["instances"] = y
         return t
 
+    def head_targets(self, out, t):
+        """Targets on the outputs' grid (see the module docstring)."""
+        from manyseg.utils import downsample_labels, downsample_max, downsample_mean
+
+        f = head_factor(out, t["instances"])
+        if f == 1:
+            return {"extent": t["extent"], "boundary": t["boundary"],
+                    "distance": t["distance"], "distance_mask": t["extent"] > 0}
+        s, fg = 1 / f, (t["instances"] > 0)[:, None]
+        return {"extent": downsample_labels(t["extent"].long(), s).float(),
+                "boundary": downsample_max(t["boundary"], s),
+                "distance": downsample_mean(t["distance"], s, valid=fg),
+                "distance_mask": downsample_max(fg, s)}
+
     def loss(self, out, t):
-        out = to_label_grid(out, t["instances"])
+        nt = self.head_targets(out, t)
         we, wb, wd = self.weights
         if self.mode == "extent_cc":
-            return we * losses.dice_bce(out["extent"], t["extent"])
-        return (we * losses.dice_bce(out["extent"], t["extent"])
-                + wb * losses.dice_bce(out["boundary"], t["boundary"], pos_weight=self.pos_weight)
-                + wd * losses.masked_regression(out["distance"], t["distance"], t["extent"] > 0))
+            return we * losses.dice_bce(out["extent"], nt["extent"])
+        return (we * losses.dice_bce(out["extent"], nt["extent"])
+                + wb * losses.dice_bce(out["boundary"], nt["boundary"], pos_weight=self.pos_weight)
+                + wd * losses.masked_regression(out["distance"], nt["distance"],
+                                                nt["distance_mask"]))
 
     def evaluator(self):
         return _InstanceEval(self)
@@ -204,9 +233,9 @@ class _InstanceEval:
         from manyseg.instances import instances_from_outputs
 
         t = self.t.targets(y)
-        out = to_label_grid(out, y)
-        self.loss += float(self.t.loss(out, t)) * y.shape[0]
+        self.loss += float(self.t.loss(out, t)) * y.shape[0]   # on the head's grid
         self.n += y.shape[0]
+        out = to_label_grid(out, y)                             # metrics at input resolution
         if self.t.mode == "extent_cc":
             from manyseg.instances import connected_components, relabel_sequential
 
@@ -261,21 +290,50 @@ class PointTask(Task):
                 t["offset"] = offset_targets(y)
         return t
 
-    def loss(self, out, t):
-        out = to_label_grid(out, t["instances"])
-        valid = t["valid"]
+    def head_targets(self, out, t):
+        """Targets on the outputs' grid (see the module docstring). ``weight`` is the fraction
+        of valid pixels per output pixel, ``valid`` = weight > 0, ``fg`` = any instance pixel."""
+        from manyseg.utils import downsample_max, downsample_mean, downsample_sum
+
+        f = head_factor(out, t["instances"])
+        fg = (t["instances"] > 0)[:, None]
+        if f == 1:
+            nt = {k: t[k] for k in ("density", "heatmap", "offset") if k in t}
+            return {**nt, "weight": t["valid"].float(), "valid": t["valid"], "fg": fg}
+        s = 1 / f
+        w = downsample_mean(t["valid"].float(), s)
+        nt = {"weight": w, "valid": w > 0, "fg": downsample_max(fg, s)}
+        if "density" in t:
+            nt["density"] = downsample_sum(t["density"], s)
+        if "heatmap" in t:
+            nt["heatmap"] = downsample_max(t["heatmap"], s)
+        if "offset" in t:
+            nt["offset"] = downsample_mean(t["offset"], s, valid=fg) / f
+        return nt
+
+    def loss(self, out, t, nt=None):
+        nt = self.head_targets(out, t) if nt is None else nt
         if self.density:
-            return losses.masked_regression(out["density"], t["density"] * self.density_scale,
-                                            valid, kind="mse")
+            return losses.masked_regression(out["density"], nt["density"] * self.density_scale,
+                                            nt["weight"], kind="mse")
         if self.kind == "segmentation":
-            hm = losses.heatmap_focal(out["heatmap"].masked_fill(~valid, -20.0),
-                                      t["heatmap"])
+            hm = losses.heatmap_focal(out["heatmap"].masked_fill(~nt["valid"], -20.0),
+                                      nt["heatmap"])
         else:
-            hm = losses.masked_regression(out["heatmap"], t["heatmap"], valid, kind="mse")
+            hm = losses.masked_regression(out["heatmap"], nt["heatmap"], nt["weight"], kind="mse")
         if self.offsets:
-            hm = hm + losses.masked_regression(out["offset"], t["offset"],
-                                               (t["instances"] > 0)[:, None], kind="l1")
+            hm = hm + losses.masked_regression(out["offset"], nt["offset"], nt["fg"], kind="l1")
         return hm
+
+    def find_points(self, out, t, nt=None):
+        """Peaks of the native heatmap in input-pixel coordinates, none in invalid blocks."""
+        from manyseg.points import find_peaks
+
+        f = head_factor(out, t["instances"])
+        nt = self.head_targets(out, t) if nt is None else nt
+        hm = out["heatmap"].float()
+        hm = hm.sigmoid() if self.kind == "segmentation" else hm
+        return find_peaks(hm * nt["valid"], self.peak_threshold, scale=1 / f)
 
     def evaluator(self):
         return _PointEval(self)
@@ -287,21 +345,18 @@ class _PointEval:
             CountMetrics(), 0.0, 0
 
     def update(self, out, y) -> None:
-        from manyseg.points import count_from_density, find_peaks
+        from manyseg.points import count_from_density
 
         t = self.t.targets(y)
-        out = to_label_grid(out, y)
-        self.loss += float(self.t.loss(out, t)) * y.shape[0]
+        nt = self.t.head_targets(out, t)
+        self.loss += float(self.t.loss(out, t, nt)) * y.shape[0]
         self.n += y.shape[0]
         gt_counts = torch.tensor([float(len(p)) for p in t["points"]])
-        if self.t.density:
-            self.cm.update(count_from_density(out["density"].float() * t["valid"]).cpu()
+        if self.t.density:  # integrate on the native grid (counts are block sums)
+            self.cm.update(count_from_density(out["density"].float() * nt["weight"]).cpu()
                            / self.t.density_scale, gt_counts)
             return
-        hm = out["heatmap"].float()
-        hm = hm.sigmoid() if self.t.kind == "segmentation" else hm
-        hm = hm * t["valid"]  # no detections inside ignore regions
-        peaks = find_peaks(hm, self.t.peak_threshold)
+        peaks = self.t.find_points(out, t, nt)  # input-pixel coordinates
         for (p, _), g in zip(peaks, t["points"]):
             self.pm.update(p.float(), g)
         self.cm.update(torch.tensor([float(len(p)) for p, _ in peaks]), gt_counts)
