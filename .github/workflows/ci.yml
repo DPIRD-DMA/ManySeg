@@ -3,7 +3,17 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore: ["experiments/**", "docs/**", "scripts/setonix/**", "**.md"]
   pull_request:
+    paths-ignore: ["experiments/**", "docs/**", "scripts/setonix/**", "**.md"]
+  schedule:
+    - cron: "0 18 * * *"  # 02:00 AWST; the only place macOS runs outside PRs
+  workflow_dispatch:
+
+# Back-to-back pushes: only the newest commit gets tested.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   unit:
@@ -12,10 +22,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - {os: ubuntu-latest, python: "3.10"}
-          - {os: ubuntu-latest, python: "3.12"}
-          - {os: macos-14, python: "3.12"}  # arm64: exercises the MPS device tests
+        os: [ubuntu-latest]
+        python: ["3.10", "3.12"]
+        # macos-14 (arm64) exercises the MPS device tests. macOS minutes bill
+        # at 10x, so it runs on PRs, nightly and on demand, not on every push.
+        include: >-
+          ${{ fromJSON(github.event_name == 'push' && '[]' || '[{"os": "macos-14", "python": "3.12"}]') }}
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -37,7 +49,7 @@ jobs:
   slow:
     name: slow (compile / export / ONNX)
     runs-on: ubuntu-latest
-    if: github.event_name == 'push'
+    if: github.event_name != 'pull_request'
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
