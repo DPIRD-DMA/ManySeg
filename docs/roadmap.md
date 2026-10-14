@@ -1,6 +1,6 @@
 # Roadmap
 
-Status as of 2026-10-14 (evening update). ✅ done · 🔄 in progress · ⏳ planned.
+Status as of 2026-10-14 (night update). ✅ done · 🔄 in progress · ⏳ planned.
 
 ## Phase 1: research and architecture ✅
 
@@ -32,8 +32,11 @@ Status as of 2026-10-14 (evening update). ✅ done · 🔄 in progress · ⏳ pl
 * ✅ E004 (stem adapters, 13-band S2; Setonix): `repeat` stays default; scratch matches ImageNet init; `projection` is harmful.
 * ✅ E009 (metadata conditioning, leave-events-out; Setonix): FiLM beats metadata-as-channels (2.9 SE); FiLM vs none +0.9 water IoU, under the 2 SE bar; the lat/lon shortcut criterion was met.
 * ✅ E010 (instance heads, AI4Boundaries; Setonix): positive. Boundary + distance doubles PQ vs extent + CC; per-head decoders add +0.06 PQ.
-* ✅ E011 (tree points, OAM-TCD; Setonix): MSE heatmap stays default; the density head halves count MAE; the fixed peak threshold cost recall. E011b (val-calibrated threshold) is running.
-* 🔄 E006 (decoder Pareto; Setonix): stage 1 done (36 runs, 16 frontier configs); stage 2 (32 runs) and the profiling sweep are running.
+* ✅ E011 (tree points, OAM-TCD; Setonix): MSE heatmap stays default; the density head halves count MAE; the fixed peak threshold cost recall.
+* ✅ E011b (val-calibrated peak threshold): positive. Test F1 0.40 → 0.59; now the bench default (`calibrate=True`). Calibrated peak counting comes close to the density head.
+* ✅ E006 (decoder Pareto; Setonix): unet `out_stride` 2 is free (no mIoU or boundary-F1 loss, 11–18% less memory); fastai_unet's Sen1Floods11 lead comes from its full-resolution stages.
+* ✅ E012 (unet `input_cross`; Setonix): positive. It recovers 81–83% of fastai_unet's Sen1Floods11 gain at +14% FLOPs (fastai: 4×), with no effect on Pet. Opt-in; the default stays SMP-identical.
+* 🔄 CloudSEN12+ (high-quality split; S2 L1C + static S1 backscatter + DEM + metadata): dataset module in progress.
 * ✅ Execution on Pawsey Setonix (MI250X) via Slurm arrays: `scripts/setonix/` (see its README for the container, offline weights, MIOpen and Lustre gotchas).
 * ✅ Datasets prepared: AI4Boundaries ortho (13 GB cache), OAM-TCD (CC-BY, 1024², ~22 GB cache).
 * ⏳ Profiling sweep (eager vs compile; fp32, bf16, fp16; batch sizes), on an idle GPU.

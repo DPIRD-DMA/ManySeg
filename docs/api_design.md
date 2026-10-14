@@ -280,6 +280,17 @@ at `out_stride=2`: it is the step from stride 4 to 2. See the `fastai_unet` modu
 `fpn`, `deeplabv3plus`, `upernet` and `segformer` have a fixed stride (4 for usual encoders).
 They accept `out_stride` only if it equals that stride; anything else is a `ValueError`.
 
+**`input_cross`** (`unet` only: `decoder_kwargs={"input_cross": True}`, default off). It adds
+fastai's full-resolution stage to the SMP-style U-Net: the raw input image is concatenated after
+the last block, followed by fastai's residual block (about +7k parameters). It requires
+`out_stride=1` and a single raster input.
+
+> **Evidence (E012, Sen1Floods11):** it recovered 83% (ResNet-34) and 81% (PVTv2-b2) of
+> fastai_unet's val mIoU gain over `unet`. On test it matched or beat fastai_unet (+2.1 / +1.8
+> mIoU over `unet`), at +14% FLOPs against fastai's 4×. On Oxford Pet it did nothing. Use it
+> when labels depend on per-pixel input values at full resolution (water and multispectral
+> thresholds, thin structures). The default stays SMP-identical.
+
 **Head `scale`** (`{"type": ..., "channels": ..., "scale": s}`, pixel heads only; image heads
 reject it). `s` ∈ {1, 1/2, 1/4, 1/8}, default 1. With `f = 1/s`, a primary input of `H × W`
 gives an output of `ceil(H / f) × ceil(W / f)` (ceil, so every input pixel belongs to exactly
@@ -376,9 +387,11 @@ can be swapped by passing a module instead of a string.
 > **Evidence:** E010 (AI4Boundaries): boundary + distance heads doubled PQ over extent +
 > connected components (0.145 → 0.290), and per-head decoders (`decoders="separate"`) added
 > +0.06 more, so they are the recommended preset for field delineation. E011 (OAM-TCD): MSE
-> regression heatmaps beat focal-loss heatmaps, and the density head roughly halved count MAE
-> versus counting peaks. For counting use `density_head()`; for localisation, calibrate the
-> `find_peaks` threshold on validation data (E011's fixed 0.5 cost most of the recall).
+> regression heatmaps beat focal-loss heatmaps. Calibrate the `find_peaks` threshold on
+> validation data: E011b raised test point F1 from 0.40 (fixed 0.5) to 0.59 (val-chosen 0.15–0.2,
+> since MSE peaks rarely reach 1). With calibrated peaks, counting peaks (MAE 20.6) is close to
+> the density head (19.4). `density_head()` stays slightly better for counting and needs no
+> threshold.
 
 
 Dense instance-style outputs are built from ordinary pixel heads, optionally with per-head
@@ -396,7 +409,7 @@ labels = instances_from_outputs(out["extent"], out["boundary"], out["distance"],
 
 # Counting / locating trees, livestock, dams, sheds
 model = create_model(backbone="resnet34", heads={**point_heads(offsets=True), **density_head()})
-peaks = find_peaks(out["heatmap"], threshold=0.5)        # [(points (K,2), scores)] per image
+peaks = find_peaks(out["heatmap"], threshold=thr)        # thr chosen on val (E011b: ~0.15-0.2)
 count = count_from_density(out["density"])
 ```
 

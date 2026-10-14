@@ -77,7 +77,9 @@ out = model({"optical": optical, "sar": sar_at_half_resolution, "meta": meta})
   `rgb_plus_random` and `projection` adapters for pretrained stems.
 * **Decoders.** `unet` (parameter- and FLOP-identical to SMP's Unet), `unetplusplus`,
   `fastai_unet` (identical to fastai's DynamicUnet), `fpn`, `deeplabv3plus`, `upernet`,
-  `segformer`. One decoder can be shared by all heads, or a head can have its own.
+  `segformer`. One decoder can be shared by all heads, or a head can have its own. `unet`'s
+  optional `input_cross` (fastai's full-resolution input stage) recovers most of fastai's
+  gain on remote sensing at +14% FLOPs (E012).
 * **Output resolution.** The U-Net-family decoders take `out_stride` 1 (default), 2 or 4. The
   stages finer than that are not built: `fastai_unet` at stride 2 drops its full-resolution
   stages, about 40% of its FLOPs. Pixel heads take `"scale"` 1, 1/2, 1/4 or 1/8 and return
