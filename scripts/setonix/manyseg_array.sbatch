@@ -17,6 +17,9 @@ export MIOPEN_CUSTOM_CACHE_DIR=$MIOPEN_USER_DB_PATH
 # The runner sets cudnn.benchmark=True; on ROCm that triggers an exhaustive MIOpen kernel search
 # per conv shape (minutes per run, repeated in every array task). FAST = heuristic selection.
 export MIOPEN_FIND_MODE=FAST
+# Compute nodes have no outbound internet: pretrained weights are pre-fetched on a login node
+# into $ROOT/hf (see scripts/setonix/README.md); offline mode makes a missing file fail fast.
+export HF_HOME=$ROOT/hf HF_HUB_OFFLINE=1
 mkdir -p "$MIOPEN_USER_DB_PATH"
 cd "$ROOT/code/$CODE"
 srun -N 1 -n 1 -c 8 --gres=gpu:1 --gpus-per-task=1 --gpu-bind=closest \
