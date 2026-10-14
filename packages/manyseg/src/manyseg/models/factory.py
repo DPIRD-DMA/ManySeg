@@ -117,28 +117,53 @@ def create_model(
     else:
         bb = backbone
 
-    dec_cls = DECODERS.get_or_raise(decoder) if isinstance(decoder, str) else decoder
-    specs = tuple(bb.feature_specs)
-    dkw = dict(decoder_kwargs or {})
-    if ftype == "late":
-        from ..fusion import LateFusionDecoder
+    def resolve(d):
+        return DECODERS.get_or_raise(d) if isinstance(d, str) else d
 
-        dec = LateFusionDecoder(specs, bb.groups, lambda sp: dec_cls(sp, **dkw), op=fopts["op"])
-        specs = specs[bb.groups[0][0]:bb.groups[0][1]]
-    else:
+    def build_decoder(dec_cls, dkw):
+        specs = tuple(bb.feature_specs)
+        if ftype == "late":
+            from ..fusion import LateFusionDecoder
+
+            return LateFusionDecoder(specs, bb.groups, lambda sp: dec_cls(sp, **dkw),
+                                     op=fopts["op"])
         if getattr(dec_cls, "wants_input", False):
             if inputs is not None:
-                raise ValueError(f"decoder {decoder!r} needs the input image; not supported "
-                                 "with multiple inputs")
+                raise ValueError(f"decoder {dec_cls.__name__} needs the input image; not "
+                                 "supported with multiple inputs")
             specs = (FeatureSpec(bb.in_channels, 1, "input"), *specs)
-        dec = dec_cls(specs, **dkw)
+        return dec_cls(specs, **dkw)
 
     single = None
     if num_classes is not None:
         heads = {"logits": {"type": "segmentation", "channels": num_classes}}
         single = "logits"
-    deepest = max((s for s in specs if s.name != "input"), key=lambda s: s.stride)
+    heads = {n: dict(cfg) for n, cfg in heads.items()}
+    task_cfgs = {n: cfg.pop("decoder") for n, cfg in heads.items() if "decoder" in cfg}
+    for n in task_cfgs:
+        if heads[n].get("scope", "pixel") != "pixel":
+            raise ValueError(f"head {n!r}: task-specific decoders are only for pixel heads")
+    needs_shared = any(n not in task_cfgs and heads[n].get("source", "decoder") == "decoder"
+                       and heads[n].get("scope", "pixel") == "pixel" for n in heads)
+    shared = build_decoder(resolve(decoder), dict(decoder_kwargs or {})) if needs_shared else None
+    task_decoders = {}
+    for n, dcfg in task_cfgs.items():
+        if isinstance(dcfg, Mapping):
+            dcfg = dict(dcfg)
+            task_decoders[n] = build_decoder(resolve(dcfg.pop("type")), dcfg)
+        else:
+            task_decoders[n] = build_decoder(resolve(dcfg), {})
+
+    enc_specs = bb.feature_specs
+    if ftype == "late":
+        enc_specs = enc_specs[bb.groups[0][0]:bb.groups[0][1]]
+    deepest = max(enc_specs, key=lambda s: s.stride)
     built, sources = {}, {}
     for name, cfg in heads.items():
-        built[name], sources[name] = create_head(dec.out_spec, deepest, cfg)
-    return DenseModel(bb, dec, built, sources, single_output=single, pad_to_stride=pad_to_stride)
+        dec_for_head = task_decoders.get(name, shared)
+        dspec = dec_for_head.out_spec if dec_for_head is not None else deepest
+        built[name], sources[name] = create_head(dspec, deepest, cfg)
+        if name in task_decoders:
+            sources[name] = "task"
+    return DenseModel(bb, shared, built, sources, single_output=single,
+                      pad_to_stride=pad_to_stride, task_decoders=task_decoders)

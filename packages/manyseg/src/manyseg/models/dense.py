@@ -11,14 +11,17 @@ from ..utils.spatial import crop_to, pad_to_multiple
 
 
 class DenseModel(nn.Module):
-    """Single-input dense prediction model.
+    """Dense prediction model: encoder -> (shared and/or task-specific) decoders -> named heads.
 
     Args:
-        backbone: Module returning ``list[Tensor]`` with ``feature_specs`` and ``input_divisor``.
-        decoder: Module mapping the feature list to one tensor.
-        heads: Named heads. Each consumes the decoder output or the deepest encoder feature,
-            according to ``head_sources``.
-        head_sources: ``{name: "decoder" | "encoder"}``; default decoder.
+        backbone: Module returning ``list[Tensor]`` with ``feature_specs`` and ``input_divisor``
+            (a single-input backbone, or a multi-input encoder taking a dict).
+        decoder: Shared decoder mapping the feature list to one tensor, or ``None`` if every
+            pixel head has its own decoder.
+        heads: Named heads.
+        head_sources: ``{name: "decoder" | "encoder" | "task"}`` (default ``"decoder"``);
+            ``"task"`` heads read ``task_decoders[name]``.
+        task_decoders: Optional per-head decoders.
         single_output: If set, ``forward`` returns only this head's tensor.
         pad_to_stride: Zero-pad bottom/right to ``backbone.input_divisor`` and crop outputs
             back, which keeps outputs pixel-aligned with inputs. If False, pixel outputs are
@@ -28,18 +31,25 @@ class DenseModel(nn.Module):
     def __init__(
         self,
         backbone: nn.Module,
-        decoder: nn.Module,
+        decoder: nn.Module | None,
         heads: Mapping[str, nn.Module],
         head_sources: Mapping[str, str] | None = None,
         single_output: str | None = None,
         pad_to_stride: bool = True,
+        task_decoders: Mapping[str, nn.Module] | None = None,
     ) -> None:
         super().__init__()
         self.backbone = backbone
         self.decoder = decoder
+        self.task_decoders = nn.ModuleDict(task_decoders or {})
         self.heads = nn.ModuleDict(heads)
         sources = dict(head_sources or {})
         self._head_sources = {n: sources.get(n, "decoder") for n in self.heads}
+        for n, src in self._head_sources.items():
+            if src == "task" and n not in self.task_decoders:
+                raise ValueError(f"head {n!r} uses a task decoder but none was given")
+            if src == "decoder" and decoder is None:
+                raise ValueError(f"head {n!r} uses the shared decoder but decoder is None")
         self._pixel_heads = {
             n for n, h in self.heads.items() if getattr(h, "scope", "pixel") == "pixel"
         }
@@ -47,7 +57,6 @@ class DenseModel(nn.Module):
             raise ValueError(f"single_output {single_output!r} is not a head")
         self.single_output = single_output
         self.pad_to_stride = pad_to_stride
-        self._decoder_wants_input = bool(getattr(decoder, "wants_input", False))
         self.divisor = int(getattr(backbone, "input_divisor", 1)) if pad_to_stride else 1
         self._deepest = max(
             range(len(backbone.feature_specs)), key=lambda i: backbone.feature_specs[i].stride
@@ -57,9 +66,19 @@ class DenseModel(nn.Module):
     def feature_specs(self):
         return self.backbone.feature_specs
 
-    def _run_head(self, name: str, dec: Tensor, feats: list[Tensor], h: int, w: int) -> Tensor:
-        src = dec if self._head_sources[name] == "decoder" else feats[self._deepest]
-        y = self.heads[name](src)
+    @staticmethod
+    def _decode(decoder: nn.Module, x: Tensor | None, feats: list[Tensor]) -> Tensor:
+        return decoder([x, *feats] if getattr(decoder, "wants_input", False) else feats)
+
+    def _run_head(self, name: str, dec, feats: list[Tensor], x, h: int, w: int) -> Tensor:
+        src = self._head_sources[name]
+        if src == "decoder":
+            inp = dec
+        elif src == "encoder":
+            inp = feats[self._deepest]
+        else:
+            inp = self._decode(self.task_decoders[name], x, feats)
+        y = self.heads[name](inp)
         if name in self._pixel_heads:
             if self.pad_to_stride:
                 y = crop_to(y, h, w)
@@ -86,15 +105,13 @@ class DenseModel(nn.Module):
                 raise TypeError(f"this model takes a dict of inputs with keys "
                                 f"{list(self.backbone.names)}")
             h, w = x[primary].shape[-2], x[primary].shape[-1]
+            xin = None
             feats = self.backbone(x)
-            dec = self.decoder(feats)
-            if self.single_output is not None:
-                return self._run_head(self.single_output, dec, feats, h, w)
-            return {name: self._run_head(name, dec, feats, h, w) for name in self.heads}
-        h, w = x.shape[-2], x.shape[-1]
-        x = self._pad(x)
-        feats = self.backbone(x)
-        dec = self.decoder([x, *feats] if self._decoder_wants_input else feats)
+        else:
+            h, w = x.shape[-2], x.shape[-1]
+            xin = self._pad(x)
+            feats = self.backbone(xin)
+        dec = self._decode(self.decoder, xin, feats) if self.decoder is not None else None
         if self.single_output is not None:
-            return self._run_head(self.single_output, dec, feats, h, w)
-        return {name: self._run_head(name, dec, feats, h, w) for name in self.heads}
+            return self._run_head(self.single_output, dec, feats, xin, h, w)
+        return {name: self._run_head(name, dec, feats, xin, h, w) for name in self.heads}

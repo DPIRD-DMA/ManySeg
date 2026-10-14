@@ -24,7 +24,7 @@ Status as of 2026-10-14 (afternoon update). ✅ done · 🔄 in progress · ⏳ 
 * ✅ Oxford Pet preparation with integrity checks; GPU-resident seeded loader and augmentation.
 * ✅ Recipes (`standard`, `fastai_like`), trainer, metrics (mIoU, Dice, boundary F1),
   profiler, provenance with GPU contention, JSON results, report table.
-* 🔄 E002: fair three-way comparison on Pet (2 recipes × 3 seeds).
+* ✅ E002: fair three-way comparison on Pet (2 recipes × 3 seeds). The recipe is worth +0.8 mIoU; fastai's decoder +0.3 on test at 4× FLOPs.
 * ✅ Sen1Floods11 (S1 + S2 + DEM) multi-input dataset; `stack` vs `dict` input modes.
 * 🔄 Queued from a frozen worktree: E003 (decoders), E001b (aligned upsampling), E005 (fusion).
 * ⏳ Profiling sweep (eager vs compile; fp32, bf16, fp16; batch sizes), on an idle GPU.
@@ -41,7 +41,7 @@ Status as of 2026-10-14 (afternoon update). ✅ done · 🔄 in progress · ⏳ 
    Dynamic U-Net (parameter- and FLOP-identical to fastai).
 4. ✅ **Multi-input fusion**: early, intermediate and late; five ops; shared encoders;
    `same_grid` / `same_extent`.
-5. 🔄 **Multi-task**: named heads and uncertainty heads ✅. Per-head task-specific decoders ⏳.
+5. ✅ **Multi-task**: named heads, uncertainty heads, per-head task-specific decoders (`"decoder"` key in a head config).
 6. ✅ **Export helper** `manyseg.export.export_model`. ⏳ Quantisation entry points (torchao / PT2E).
 7. ✅ DDP verified (CPU gloo). ⏳ FSDP2.
 
