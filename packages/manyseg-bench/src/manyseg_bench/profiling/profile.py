@@ -24,6 +24,13 @@ def _autocast(device: torch.device, precision: str):
     return nullcontext() if dt is None else torch.autocast(device.type, dtype=dt)
 
 
+def _scalar(out) -> torch.Tensor:
+    """A loss-like scalar touching every output (single tensor or named heads)."""
+    if isinstance(out, dict):
+        return sum(v.float().mean() for v in out.values())
+    return out.float().mean()
+
+
 def profile_model(
     model: nn.Module,
     *,
@@ -80,7 +87,7 @@ def profile_model(
         def tstep():
             opt.zero_grad(set_to_none=True)
             with _autocast(device, precision):
-                loss = run(x).float().mean()
+                loss = _scalar(run(x))
             loss.backward()
             opt.step()
 

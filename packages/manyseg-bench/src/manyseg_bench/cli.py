@@ -61,6 +61,8 @@ def main(argv=None) -> int:
     pr.add_argument("--precision", default="bf16")
     pr.add_argument("--compile", action="store_true")
     pr.add_argument("--channels-last", action="store_true")
+    pr.add_argument("--train-batch-size", type=int, default=16,
+                    help="training-step batch size (peak training memory); 0 skips it")
 
     rp = sub.add_parser("report")
     rp.add_argument("paths", nargs="+")
@@ -93,6 +95,7 @@ def main(argv=None) -> int:
         import uuid
 
         from .env import environment, gpu_contention
+        from .experiments.runner import resolution_info
         from .profiling import profile_model
         from .providers import ModelSpec, get_provider
 
@@ -106,11 +109,13 @@ def main(argv=None) -> int:
         res = profile_model(built.model, in_channels=a.in_channels, img_size=(h, w),
                             device=a.device, precision=a.precision, compile=a.compile,
                             channels_last=a.channels_last,
-                            batch_sizes=tuple(int(b) for b in a.batch_sizes.split(",")))
+                            batch_sizes=tuple(int(b) for b in a.batch_sizes.split(",")),
+                            train_batch_size=a.train_batch_size)
         rec = {"run_id": f"{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}",
                "kind": "profile", "tag": a.tag, "provider": a.provider,
                "provider_version": prov.version(), "spec": spec.to_dict(),
                "weights_fingerprint": built.weights_fingerprint, "env": env,
+               "resolution": resolution_info(built.model),
                "gpu_contention_at_end": gpu_contention(), **res}
         out = Path(a.out)
         out.mkdir(parents=True, exist_ok=True)

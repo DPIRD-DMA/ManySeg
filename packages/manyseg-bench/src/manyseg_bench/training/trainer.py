@@ -36,6 +36,11 @@ def _channels_last(x):
     return x.contiguous(memory_format=torch.channels_last)
 
 
+def _batch_size(x) -> int:
+    return next(v for v in x.values() if v.ndim == 4).shape[0] if isinstance(x, dict) \
+        else x.shape[0]
+
+
 def _is_no_decay(p: nn.Parameter) -> bool:
     return p.ndim <= 1  # norm weights/biases and conv/linear biases
 
@@ -128,8 +133,9 @@ def train(
             p.requires_grad_(not frozen or _is_no_decay(p))
         model.train()
         t0 = time.perf_counter()
-        loss_sum, nb, nonfinite = 0.0, 0, 0
+        loss_sum, nb, nonfinite, n_img = 0.0, 0, 0, 0
         for x, y in train_loader:
+            n_img += _batch_size(x)
             if recipe.channels_last:
                 x = _channels_last(x)
             f = lr_factor(step, total, warmup, recipe.schedule)
@@ -156,7 +162,7 @@ def train(
             torch.cuda.synchronize(device)
         rec = {"epoch": epoch + 1, "train_loss": loss_sum / max(1, nb),
                "nonfinite_steps": nonfinite, "epoch_time_s": time.perf_counter() - t0,
-               "encoder_frozen": frozen}
+               "train_images": n_img, "encoder_frozen": frozen}
         if (epoch + 1) % recipe.eval_every == 0 or epoch + 1 == recipe.epochs:
             rec["val"] = evaluate(run, val_loader, num_classes, device, recipe.precision,
                                   ignore_index, task=task)
@@ -170,7 +176,14 @@ def train(
     evals = [h for h in history if "val" in h]
     pm, sign = task.primary_metric, (1 if task.higher_is_better else -1)
     best = max(evals, key=lambda h: sign * h["val"][pm])
+    # Training throughput from the timed epochs (data loading + step; excludes evaluation).
+    # "steady" skips the first epoch (compilation, cudnn autotuning, allocator warm-up).
+    steady = history[1:] or history
     return {
+        "train_images_per_s": sum(h["train_images"] for h in history)
+        / max(1e-9, sum(h["epoch_time_s"] for h in history)),
+        "train_images_per_s_steady": sum(h["train_images"] for h in steady)
+        / max(1e-9, sum(h["epoch_time_s"] for h in steady)),
         "history": history,
         "task": task.name,
         "primary_metric": pm,

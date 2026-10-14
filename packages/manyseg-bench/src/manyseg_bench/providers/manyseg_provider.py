@@ -23,6 +23,15 @@ class ManySegProvider(Provider):
             backbone = f"{spec.encoder}.{_TIMM_TAGS.get(spec.weights, spec.weights)}"
         opts = dict(spec.options)
         n_cls = None if "heads" in opts else spec.num_classes
+        # "head": options for the single logits head (e.g. {"scale": 0.5}); the model still
+        # returns one tensor.
+        head = opts.pop("head", None)
+        if head is not None:
+            if n_cls is None:
+                raise ValueError("'head' configures the single logits head; with 'heads', put "
+                                 "the options in each head's config")
+            opts["heads"] = {"logits": {"type": "segmentation", "channels": n_cls, **head}}
+            n_cls = None
         if spec.input_mode == "dict" and spec.inputs:
             inputs = {n: {"channels": c} for n, c in spec.inputs.items()}
             inputs.update({n: {"kind": "vector", **cfg} for n, cfg in (spec.vectors or {}).items()})
@@ -41,6 +50,8 @@ class ManySegProvider(Provider):
                 num_classes=n_cls,
                 **opts,
             )
+        if head is not None:
+            model.single_output = "logits"
         # Pretrained encoders only: fusion ops / necks count as decoder-side parameters.
         encoder = getattr(model.backbone, "encoders", None) or model.backbone
         enc, dec = split_params(model, encoder)

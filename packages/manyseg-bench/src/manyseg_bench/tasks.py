@@ -3,6 +3,13 @@
 The trainer is task-agnostic: it calls ``task.loss(outputs, task.targets(y))`` and feeds
 ``task.evaluator()``. ``y`` is the label array delivered by the loader (class ids for semantic
 segmentation, instance ids for instance/point tasks); targets are generated on the device.
+
+Reduced-resolution heads (``manyseg`` head ``scale`` < 1) are detected from the output size:
+an output of ``ceil(H / f) x ceil(W / f)`` for ``H x W`` labels has head factor ``f``.
+Evaluation is always at input resolution (predictions upsampled with
+``manyseg.utils.upsample_output``) so that arms with different scales are comparable.
+Semantic losses are computed at head scale against mode-downsampled labels; instance and
+point tasks upsample the outputs and keep their full-resolution targets.
 """
 
 from __future__ import annotations
@@ -13,6 +20,37 @@ import torch.nn.functional as F
 from . import losses
 from .evaluation import ConfusionMatrix, boundary_f1
 from .evaluation.objects import CountMetrics, ObjectMetrics, PointMetrics
+
+
+def head_factor(out, y) -> int:
+    """``f`` such that a pixel output ``(..., h, w)`` is the ``ceil(H / f) x ceil(W / f)`` grid of
+    labels ``(..., H, W)``; 1 for full-resolution outputs."""
+    if isinstance(out, dict):
+        fs = {head_factor(v, y) for v in out.values() if v.ndim == 4}
+        if len(fs) > 1:
+            raise ValueError(f"outputs on different grids (head factors {sorted(fs)}); "
+                             "a task needs one grid")
+        return fs.pop() if fs else 1
+    (h, w), (H, W) = out.shape[-2:], y.shape[-2:]
+    for f in (1, 2, 4, 8):
+        if (h, w) == (-(-H // f), -(-W // f)):
+            return f
+    raise ValueError(f"output {(h, w)} is not a head grid of labels {(H, W)} "
+                     "(expected ceil(H / f) x ceil(W / f), f in 1, 2, 4, 8)")
+
+
+def to_label_grid(out, y):
+    """Bilinearly upsample (scaled) pixel outputs to the label grid; full-res outputs pass."""
+    from manyseg.utils import upsample_output
+
+    f = head_factor(out, y)
+    if f == 1:
+        return out
+    size = tuple(y.shape[-2:])
+    if isinstance(out, dict):
+        return {k: upsample_output(v.float(), size, 1 / f) if v.ndim == 4 else v
+                for k, v in out.items()}
+    return upsample_output(out.float(), size, 1 / f)
 
 
 class Task:
@@ -39,13 +77,23 @@ class SemanticTask(Task):
     primary_metric = "miou"
 
     def __init__(self, num_classes: int, ignore_index: int | None = None,
-                 label_smoothing: float = 0.0) -> None:
+                 label_smoothing: float = 0.0, native_metrics: bool = False) -> None:
         self.num_classes, self.ignore_index = num_classes, ignore_index
         self.label_smoothing = label_smoothing
+        self.native_metrics = native_metrics
+
+    def head_targets(self, out, y):
+        """Labels on the output's grid (mode downsampling, ignore_index respected)."""
+        from manyseg.utils import downsample_labels
+
+        f = head_factor(out, y)
+        if f == 1:
+            return y
+        return downsample_labels(y, 1 / f, self.ignore_index, num_classes=self.num_classes)
 
     def loss(self, out, y):
         ignore = self.ignore_index if self.ignore_index is not None else -100
-        return F.cross_entropy(out.float(), y, ignore_index=ignore,
+        return F.cross_entropy(out.float(), self.head_targets(out, y), ignore_index=ignore,
                                label_smoothing=self.label_smoothing)
 
     def evaluator(self):
@@ -53,14 +101,29 @@ class SemanticTask(Task):
 
 
 class _SemanticEval:
+    """Metrics at input resolution (scaled logits are upsampled bilinearly first). With
+    ``native_metrics``, also mIoU / boundary F1 on the head grid against mode-downsampled
+    labels (``"native"``)."""
+
     def __init__(self, task: SemanticTask) -> None:
         self.t = task
-        self.cm = None
-        self.bf1 = self.loss = 0.0
+        self.cm = self.native = None
+        self.bf1 = self.loss = self.native_bf1 = 0.0
         self.n = self.px = 0
+        self.factor = None
 
     def update(self, out, y) -> None:
-        logits = out.float()
+        f = head_factor(out, y)
+        if self.factor is None:
+            self.factor = f
+        if self.t.native_metrics:
+            if self.native is None:
+                self.native = ConfusionMatrix(self.t.num_classes, self.t.ignore_index,
+                                              device=y.device)
+            ys, ps = self.t.head_targets(out, y), out.float().argmax(1)
+            self.native.update(ps, ys)
+            self.native_bf1 += float(boundary_f1(ps, ys, ignore_index=self.t.ignore_index).sum())
+        logits = to_label_grid(out, y).float()
         if self.cm is None:
             self.cm = ConfusionMatrix(self.t.num_classes, self.t.ignore_index, device=y.device)
         ignore = self.t.ignore_index if self.t.ignore_index is not None else -100
@@ -75,6 +138,11 @@ class _SemanticEval:
         out = self.cm.compute()
         out["boundary_f1"] = self.bf1 / max(1, self.n)
         out["loss"] = self.loss / max(1, self.px)
+        out["head_factor"] = self.factor or 1
+        if self.native is not None:
+            nat = self.native.compute()
+            out["native"] = {"miou": nat["miou"], "iou": nat["iou"],
+                             "boundary_f1": self.native_bf1 / max(1, self.n)}
         return out
 
 
@@ -116,6 +184,7 @@ class InstanceTask(Task):
         return t
 
     def loss(self, out, t):
+        out = to_label_grid(out, t["instances"])
         we, wb, wd = self.weights
         if self.mode == "extent_cc":
             return we * losses.dice_bce(out["extent"], t["extent"])
@@ -135,6 +204,7 @@ class _InstanceEval:
         from manyseg.instances import instances_from_outputs
 
         t = self.t.targets(y)
+        out = to_label_grid(out, y)
         self.loss += float(self.t.loss(out, t)) * y.shape[0]
         self.n += y.shape[0]
         if self.t.mode == "extent_cc":
@@ -192,6 +262,7 @@ class PointTask(Task):
         return t
 
     def loss(self, out, t):
+        out = to_label_grid(out, t["instances"])
         valid = t["valid"]
         if self.density:
             return losses.masked_regression(out["density"], t["density"] * self.density_scale,
@@ -219,6 +290,7 @@ class _PointEval:
         from manyseg.points import count_from_density, find_peaks
 
         t = self.t.targets(y)
+        out = to_label_grid(out, y)
         self.loss += float(self.t.loss(out, t)) * y.shape[0]
         self.n += y.shape[0]
         gt_counts = torch.tensor([float(len(p)) for p in t["points"]])

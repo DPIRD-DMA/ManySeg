@@ -12,6 +12,7 @@ import torch
 from ..datasets import GPULoader, data_root, get_dataset, load_split
 from ..datasets.base import channel_stats, load_meta
 from ..env import environment, gpu_contention
+from ..profiling import count_flops
 from ..providers import ModelSpec, get_provider
 from ..tasks import build_task
 from ..training import evaluate, get_recipe, seed_everything, train
@@ -74,6 +75,32 @@ def split_getter(ds, cache: Path, raw: Path, scheme: str = "official", mmap: boo
         return split
 
     return get
+
+
+def resolution_info(model) -> dict | None:
+    """Output-resolution settings of a ManySeg model (None for other providers): the shared
+    decoder's ``out_stride``, per-task-decoder strides and each pixel head's ``scale``."""
+    heads = getattr(model, "heads", None)
+    if not hasattr(model, "_pixel_heads") or heads is None:
+        return None
+    dec = getattr(model, "decoder", None)
+    info = {"decoder_out_stride": dec.out_spec.stride if dec is not None else None,
+            "head_scales": {n: getattr(h, "scale", 1) for n, h in heads.items()
+                            if getattr(h, "scope", "pixel") == "pixel"},
+            "eval_resolution": "input"}
+    if len(model.task_decoders):
+        info["task_decoder_out_strides"] = {n: d.out_spec.stride
+                                            for n, d in model.task_decoders.items()}
+    return info
+
+
+def _flops_per_image(model, loader) -> tuple[int | None, list[int] | None]:
+    """Forward FLOPs for one evaluation sample (its full size; dict and vector inputs work)."""
+    x, _ = next(iter(loader))
+    ex = {k: v[:1] for k, v in x.items()} if isinstance(x, dict) else x[:1]
+    t = next(v for v in ex.values() if v.ndim == 4) if isinstance(ex, dict) else ex
+    model.eval()
+    return count_flops(model, ex), list(t.shape[-2:])
 
 
 def info_loader_kwargs(ds) -> dict:
@@ -162,6 +189,7 @@ def run_training(
     result = train(built.model, built.encoder_params, built.decoder_params, train_loader,
                    val_loader, num_classes=info.num_classes, recipe=rec, device=dev,
                    ignore_index=info.ignore_index, task=task)
+    flops, flops_size = _flops_per_image(built.model, val_loader)
     record = {
         "run_id": f"{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}",
         "kind": "train",
@@ -171,6 +199,9 @@ def run_training(
         "spec": spec.to_dict(),
         "weights_fingerprint": built.weights_fingerprint,
         "params": sum(p.numel() for p in built.model.parameters()),
+        "flops_per_image": flops,
+        "flops_img_size": flops_size,
+        "resolution": resolution_info(built.model),
         "dataset": info.to_dict(),
         "img_size": list(img_size),
         "recipe": rec.to_dict(),
