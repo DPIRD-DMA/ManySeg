@@ -4,11 +4,14 @@
 # For datasets too large to copy once per task (CloudSEN12+: 157-191 GB). Each job has its own
 # /tmp (job_container/tmpfs on /nvmetmp), so array *jobs* cannot share a staged copy; the steps
 # of one job can, and the shared files also share the page cache.
-# Usage: sbatch --array=1-M --gres=gpu:N [--time=HH:MM:SS] manyseg_pack.sbatch <tasks.txt> <code_sha> <N>
+# Usage: sbatch --array=1-M [--gres=gpu:N,tmp:400G --ntasks=N] [--time=HH:MM:SS] manyseg_pack.sbatch <tasks.txt> <code_sha> <N>
+# Node-local NVMe is a GRES on Setonix (tmp:3500G per node) and must be requested explicitly.
 #SBATCH --account=$PROJECT-gpu
 #SBATCH --partition=gpu
 #SBATCH --nodes=1
-#SBATCH --gres=gpu:8
+#SBATCH --gres=gpu:8,tmp:400G
+#SBATCH --ntasks=8
+#SBATCH --cpus-per-task=8
 #SBATCH --time=06:00:00
 #SBATCH --job-name=manyseg-pack
 #SBATCH --output=$MANYSEG_ROOT/logs/%x_%A_%a.out

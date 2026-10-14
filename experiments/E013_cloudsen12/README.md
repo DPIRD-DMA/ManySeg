@@ -29,7 +29,8 @@ locations never seen in training. Dataset details, licence and leakage rules are
 ## Protocol
 * Pawsey Setonix (MI250X), code snapshot recorded per run. U-Net, ResNet-34 `tv_in1k`
   (channel adapter `repeat`, the default), recipe `fastai_like`, **20 epochs**, batch 16, full
-  512² tiles (19,450 train / 1,767 val / 2,335 test), flips only. Seeds 0, 1, 2. Test is
+  512² tiles (19,450 train / 1,767 val / 2,335 test). Augmentation is the dataset's loader
+  default: random resized crop (area 0.5–1) back to 512², plus horizontal and vertical flips. Seeds 0, 1, 2. Test is
   evaluated once per run, after training.
 * Arms (`run.sh`, 8 per seed, 24 runs):
 

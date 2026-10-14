@@ -6,7 +6,9 @@
 #SBATCH --account=$PROJECT-gpu
 #SBATCH --partition=gpu
 #SBATCH --nodes=1
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:1,tmp:250G
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=8
 #SBATCH --time=03:00:00
 #SBATCH --job-name=manyseg-prepare
 #SBATCH --output=$MANYSEG_ROOT/logs/%x_%j.out
@@ -26,6 +28,7 @@ srun -N 1 -n 1 -c 8 singularity exec "$SINGULARITY_CONTAINER" bash -c "
   echo \"prepared in \$(( \$(date +%s) - t0 )) s: \$(du -sh /tmp/d/cache/\$CACHE | cut -f1)\"
   rm -rf $ROOT/data/cache/\$CACHE.part
   cp -r /tmp/d/cache/\$CACHE $ROOT/data/cache/\$CACHE.part
+  rm -rf $ROOT/data/cache/\$CACHE  # replace, never nest into, an existing cache
   mv $ROOT/data/cache/\$CACHE.part $ROOT/data/cache/\$CACHE
   echo \"copied in \$(( \$(date +%s) - t0 )) s total\"
 "
