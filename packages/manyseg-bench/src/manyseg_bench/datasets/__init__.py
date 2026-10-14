@@ -1,8 +1,19 @@
-from . import oxford_pet
+from . import oxford_pet, sen1floods11
 from .base import DatasetInfo, Split, data_root, load_split
 from .gpu_loader import GPULoader
 
-DATASETS = {"oxford_pet": oxford_pet}
+DATASETS = {"oxford_pet": oxford_pet, "sen1floods11": sen1floods11}
+
+
+class _Variant:
+    """A dataset module with a different INFO (e.g. extra inputs) sharing preparation."""
+
+    def __init__(self, base, info, cache_name):
+        self.__dict__.update({k: getattr(base, k) for k in dir(base) if k.isupper()})
+        self.INFO, self.prepare, self.CACHE_NAME = info, base.prepare, cache_name
+
+
+DATASETS["sen1floods11_dem"] = _Variant(sen1floods11, sen1floods11.INFO_DEM, "sen1floods11")
 
 
 def get_dataset(name: str):

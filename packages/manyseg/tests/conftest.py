@@ -2,11 +2,22 @@ import pytest
 import torch
 
 
+def _usable(name: str) -> bool:
+    """A device counts only if it can actually allocate (GitHub's macOS VMs report MPS as
+    available but every allocation fails)."""
+    try:
+        torch.ones(8, device=name).sum().item()
+        return True
+    except RuntimeError:
+        return False
+
+
 def _available_devices() -> list[str]:
     devs = ["cpu"]
-    if torch.cuda.is_available():
+    if torch.cuda.is_available() and _usable("cuda"):
         devs.append("cuda")
-    if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+    if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available() \
+            and _usable("mps"):
         devs.append("mps")
     return devs
 
@@ -19,7 +30,7 @@ def device(request) -> torch.device:
     """Every available device. Unavailable devices are skipped, never silently replaced."""
     name = request.param
     if name not in DEVICES:
-        pytest.skip(f"{name} not available")
+        pytest.skip(f"{name} not available or not usable on this machine")
     return torch.device(name)
 
 

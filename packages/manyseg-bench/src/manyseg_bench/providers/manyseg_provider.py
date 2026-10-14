@@ -8,6 +8,7 @@ _TIMM_TAGS = {"tv_in1k": "tv_in1k"}
 
 class ManySegProvider(Provider):
     name = "manyseg"
+    supports_dict_inputs = True
 
     def version(self) -> str:
         import manyseg
@@ -21,13 +22,24 @@ class ManySegProvider(Provider):
         if spec.weights is not None:
             backbone = f"{spec.encoder}.{_TIMM_TAGS.get(spec.weights, spec.weights)}"
         opts = dict(spec.options)
-        model = create_model(
-            backbone=backbone,
-            pretrained=spec.weights is not None,
-            in_channels=spec.in_channels,
-            decoder=spec.arch,
-            num_classes=spec.num_classes,
-            **opts,
-        )
-        enc, dec = split_params(model, model.backbone)
+        if spec.input_mode == "dict" and spec.inputs:
+            inputs = {n: {"channels": c} for n, c in spec.inputs.items()}
+            for n, extra in opts.pop("input_options", {}).items():
+                inputs[n].update(extra)
+            opts.setdefault("fusion", {"type": "intermediate"})
+            model = create_model(backbone=backbone, pretrained=spec.weights is not None,
+                                 inputs=inputs, decoder=spec.arch,
+                                 num_classes=spec.num_classes, **opts)
+        else:
+            model = create_model(
+                backbone=backbone,
+                pretrained=spec.weights is not None,
+                in_channels=spec.in_channels,
+                decoder=spec.arch,
+                num_classes=spec.num_classes,
+                **opts,
+            )
+        # Pretrained encoders only: fusion ops / necks count as decoder-side parameters.
+        encoder = getattr(model.backbone, "encoders", None) or model.backbone
+        enc, dec = split_params(model, encoder)
         return BuiltModel(model, enc, dec, fingerprint_module(model.backbone))

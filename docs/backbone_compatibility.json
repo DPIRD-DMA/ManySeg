@@ -1,0 +1,1771 @@
+[
+ {
+  "name": "resnet18",
+  "buildable": true,
+  "error": "",
+  "feature_strides": [
+   2,
+   4,
+   8,
+   16,
+   32
+  ],
+  "feature_channels": [
+   64,
+   64,
+   128,
+   256,
+   512
+  ],
+  "native_layout": "NCHW",
+  "plain_vit": false,
+  "size_support": "any",
+  "sizes_ok": [
+   [
+    64,
+    64
+   ],
+   [
+    97,
+    131
+   ],
+   [
+    160,
+    96
+   ]
+  ],
+  "sizes_failed": [],
+  "params_m": 14.33,
+  "export_dynamic": "ok",
+  "probe_seconds": 2.3
+ },
+ {
+  "name": "resnet50",
+  "buildable": true,
+  "error": "",
+  "feature_strides": [
+   2,
+   4,
+   8,
+   16,
+   32
+  ],
+  "feature_channels": [
+   64,
+   256,
+   512,
+   1024,
+   2048
+  ],
+  "native_layout": "NCHW",
+  "plain_vit": false,
+  "size_support": "any",
+  "sizes_ok": [
+   [
+    64,
+    64
+   ],
+   [
+    97,
+    131
+   ],
+   [
+    160,
+    96
+   ]
+  ],
+  "sizes_failed": [],
+  "params_m": 32.52,
+  "export_dynamic": "ok",
+  "probe_seconds": 3.0
+ },
+ {
+  "name": "resnet50d",
+  "buildable": true,
+  "error": "",
+  "feature_strides": [
+   2,
+   4,
+   8,
+   16,
+   32
+  ],
+  "feature_channels": [
+   64,
+   256,
+   512,
+   1024,
+   2048
+  ],
+  "native_layout": "NCHW",
+  "plain_vit": false,
+  "size_support": "any",
+  "sizes_ok": [
+   [
+    64,
+    64
+   ],
+   [
+    97,
+    131
+   ],
+   [
+    160,
+    96
+   ]
+  ],
+  "sizes_failed": [],
+  "params_m": 32.54,
+  "export_dynamic": "ok",
+  "probe_seconds": 3.2
+ },
+ {
+  "name": "resnext50_32x4d",
+  "buildable": true,
+  "error": "",
+  "feature_strides": [
+   2,
+   4,
+   8,
+   16,
+   32
+  ],
+  "feature_channels": [
+   64,
+   256,
+   512,
+   1024,
+   2048
+  ],
+  "native_layout": "NCHW",
+  "plain_vit": false,
+  "size_support": "any",
+  "sizes_ok": [
+   [
+    64,
+    64
+   ],
+   [
+    97,
+    131
+   ],
+   [
+    160,
+    96
+   ]
+  ],
+  "sizes_failed": [],
+  "params_m": 31.99,
+  "export_dynamic": "ok",
+  "probe_seconds": 2.4
+ },
+ {
+  "name": "seresnext26d_32x4d",
+  "buildable": true,
+  "error": "",
+  "feature_strides": [
+   2,
+   4,
+   8,
+   16,
+   32
+  ],
+  "feature_channels": [
+   64,
+   256,
+   512,
+   1024,
+   2048
+  ],
+  "native_layout": "NCHW",
+  "plain_vit": false,
+  "size_support": "any",
+  "sizes_ok": [
+   [
+    64,
+    64
+   ],
+   [
+    97,
+    131
+   ],
+   [
+    160,
+    96
+   ]
+  ],
+  "sizes_failed": [],
+  "params_m": 23.77,
+  "export_dynamic": "ok",
+  "probe_seconds": 3.2
+ },
+ {
+  "name": "efficientnet_b0",
+  "buildable": true,
+  "error": "",
+  "feature_strides": [
+   2,
+   4,
+   8,
+   16,
+   32
+  ],
+  "feature_channels": [
+   16,
+   24,
+   40,
+   112,
+   320
+  ],
+  "native_layout": "NCHW",
+  "plain_vit": false,
+  "size_support": "any",
+  "sizes_ok": [
+   [
+    64,
+    64
+   ],
+   [
+    97,
+    131
+   ],
+   [
+    160,
+    96
+   ]
+  ],
+  "sizes_failed": [],
+  "params_m": 5.83,
+  "export_dynamic": "ok",
+  "probe_seconds": 2.5
+ },
+ {
+  "name": "efficientnet_b3",
+  "buildable": true,
+  "error": "",
+  "feature_strides": [
+   2,
+   4,
+   8,
+   16,
+   32
+  ],
+  "feature_channels": [
+   24,
+   32,
+   48,
+   136,
+   384
+  ],
+  "native_layout": "NCHW",
+  "plain_vit": false,
+  "size_support": "any",
+  "sizes_ok": [
+   [
+    64,
+    64
+   ],
+   [
+    97,
+    131
+   ],
+   [
+    160,
+    96
+   ]
+  ],
+  "sizes_failed": [],
+  "params_m": 12.56,
+  "export_dynamic": "ok",
+  "probe_seconds": 3.7
+ },
+ {
+  "name": "tf_efficientnetv2_s",
+  "buildable": true,
+  "error": "",
+  "feature_strides": [
+   2,
+   4,
+   8,
+   16,
+   32
+  ],
+  "feature_channels": [
+   24,
+   48,
+   64,
+   160,
+   256
+  ],
+  "native_layout": "NCHW",
+  "plain_vit": false,
+  "size_support": "any",
+  "sizes_ok": [
+   [
+    64,
+    64
+   ],
+   [
+    97,
+    131
+   ],
+   [
+    160,
+    96
+   ]
+  ],
+  "sizes_failed": [],
+  "params_m": 22.09,
+  "export_dynamic": "fail: UserError",
+  "probe_seconds": 123.8
+ },
+ {
+  "name": "convnext_tiny",
+  "buildable": true,
+  "error": "",
+  "feature_strides": [
+   4,
+   8,
+   16,
+   32
+  ],
+  "feature_channels": [
+   96,
+   192,
+   384,
+   768
+  ],
+  "native_layout": "NCHW",
+  "plain_vit": false,
+  "size_support": "any",
+  "sizes_ok": [
+   [
+    64,
+    64
+   ],
+   [
+    97,
+    131
+   ],
+   [
+    160,
+    96
+   ]
+  ],
+  "sizes_failed": [],
+  "params_m": 31.93,
+  "export_dynamic": "fail: UserError",
+  "probe_seconds": 3.8
+ },
+ {
+  "name": "convnextv2_tiny",
+  "buildable": true,
+  "error": "",
+  "feature_strides": [
+   4,
+   8,
+   16,
+   32
+  ],
+  "feature_channels": [
+   96,
+   192,
+   384,
+   768
+  ],
+  "native_layout": "NCHW",
+  "plain_vit": false,
+  "size_support": "any",
+  "sizes_ok": [
+   [
+    64,
+    64
+   ],
+   [
+    97,
+    131
+   ],
+   [
+    160,
+    96
+   ]
+  ],
+  "sizes_failed": [],
+  "params_m": 31.98,
+  "export_dynamic": "fail: UserError",
+  "probe_seconds": 5.7
+ },
+ {
+  "name": "edgenext_small",
+  "buildable": true,
+  "error": "",
+  "feature_strides": [
+   4,
+   8,
+   16,
+   32
+  ],
+  "feature_channels": [
+   48,
+   96,
+   160,
+   304
+  ],
+  "native_layout": "NCHW",
+  "plain_vit": false,
+  "size_support": "any",
+  "sizes_ok": [
+   [
+    64,
+    64
+   ],
+   [
+    97,
+    131
+   ],
+   [
+    160,
+    96
+   ]
+  ],
+  "sizes_failed": [],
+  "params_m": 7.67,
+  "export_dynamic": "fail: UserError",
+  "probe_seconds": 6.8
+ },
+ {
+  "name": "mobilenetv3_large_100",
+  "buildable": true,
+  "error": "",
+  "feature_strides": [
+   2,
+   4,
+   8,
+   16,
+   32
+  ],
+  "feature_channels": [
+   16,
+   24,
+   40,
+   112,
+   960
+  ],
+  "native_layout": "NCHW",
+  "plain_vit": false,
+  "size_support": "any",
+  "sizes_ok": [
+   [
+    64,
+    64
+   ],
+   [
+    97,
+    131
+   ],
+   [
+    160,
+    96
+   ]
+  ],
+  "sizes_failed": [],
+  "params_m": 6.69,
+  "export_dynamic": "ok",
+  "probe_seconds": 2.8
+ },
+ {
+  "name": "mobilenetv4_conv_small",
+  "buildable": true,
+  "error": "",
+  "feature_strides": [
+   2,
+   4,
+   8,
+   16,
+   32
+  ],
+  "feature_channels": [
+   32,
+   32,
+   64,
+   96,
+   960
+  ],
+  "native_layout": "NCHW",
+  "plain_vit": false,
+  "size_support": "any",
+  "sizes_ok": [
+   [
+    64,
+    64
+   ],
+   [
+    97,
+    131
+   ],
+   [
+    160,
+    96
+   ]
+  ],
+  "sizes_failed": [],
+  "params_m": 4.98,
+  "export_dynamic": "ok",
+  "probe_seconds": 2.0
+ },
+ {
+  "name": "regnetx_032",
+  "buildable": true,
+  "error": "",
+  "feature_strides": [
+   2,
+   4,
+   8,
+   16,
+   32
+  ],
+  "feature_channels": [
+   32,
+   96,
+   192,
+   432,
+   1008
+  ],
+  "native_layout": "NCHW",
+  "plain_vit": false,
+  "size_support": "any",
+  "sizes_ok": [
+   [
+    64,
+    64
+   ],
+   [
+    97,
+    131
+   ],
+   [
+    160,
+    96
+   ]
+  ],
+  "sizes_failed": [],
+  "params_m": 19.07,
+  "export_dynamic": "ok",
+  "probe_seconds": 3.3
+ },
+ {
+  "name": "regnety_016",
+  "buildable": true,
+  "error": "",
+  "feature_strides": [
+   2,
+   4,
+   8,
+   16,
+   32
+  ],
+  "feature_channels": [
+   32,
+   48,
+   120,
+   336,
+   888
+  ],
+  "native_layout": "NCHW",
+  "plain_vit": false,
+  "size_support": "any",
+  "sizes_ok": [
+   [
+    64,
+    64
+   ],
+   [
+    97,
+    131
+   ],
+   [
+    160,
+    96
+   ]
+  ],
+  "sizes_failed": [],
+  "params_m": 14.49,
+  "export_dynamic": "ok",
+  "probe_seconds": 3.6
+ },
+ {
+  "name": "ghostnetv2_100",
+  "buildable": true,
+  "error": "",
+  "feature_strides": [
+   2,
+   4,
+   8,
+   16,
+   32
+  ],
+  "feature_channels": [
+   16,
+   24,
+   40,
+   80,
+   160
+  ],
+  "native_layout": "NCHW",
+  "plain_vit": false,
+  "size_support": "any",
+  "sizes_ok": [
+   [
+    64,
+    64
+   ],
+   [
+    97,
+    131
+   ],
+   [
+    160,
+    96
+   ]
+  ],
+  "sizes_failed": [],
+  "params_m": 3.04,
+  "export_dynamic": "ok",
+  "probe_seconds": 4.7
+ },
+ {
+  "name": "rexnet_100",
+  "buildable": true,
+  "error": "",
+  "feature_strides": [
+   2,
+   4,
+   8,
+   16,
+   32
+  ],
+  "feature_channels": [
+   16,
+   38,
+   61,
+   128,
+   185
+  ],
+  "native_layout": "NCHW",
+  "plain_vit": false,
+  "size_support": "any",
+  "sizes_ok": [
+   [
+    64,
+    64
+   ],
+   [
+    97,
+    131
+   ],
+   [
+    160,
+    96
+   ]
+  ],
+  "sizes_failed": [],
+  "params_m": 5.27,
+  "export_dynamic": "ok",
+  "probe_seconds": 4.2
+ },
+ {
+  "name": "densenet121",
+  "buildable": true,
+  "error": "",
+  "feature_strides": [
+   2,
+   4,
+   8,
+   16,
+   32
+  ],
+  "feature_channels": [
+   64,
+   256,
+   512,
+   1024,
+   1024
+  ],
+  "native_layout": "NCHW",
+  "plain_vit": false,
+  "size_support": "any",
+  "sizes_ok": [
+   [
+    64,
+    64
+   ],
+   [
+    97,
+    131
+   ],
+   [
+    160,
+    96
+   ]
+  ],
+  "sizes_failed": [],
+  "params_m": 13.61,
+  "export_dynamic": "ok",
+  "probe_seconds": 5.8
+ },
+ {
+  "name": "vgg16_bn",
+  "buildable": true,
+  "error": "",
+  "feature_strides": [
+   1,
+   2,
+   4,
+   8,
+   16,
+   32
+  ],
+  "feature_channels": [
+   64,
+   128,
+   256,
+   512,
+   512,
+   512
+  ],
+  "native_layout": "NCHW",
+  "plain_vit": false,
+  "size_support": "any",
+  "sizes_ok": [
+   [
+    64,
+    64
+   ],
+   [
+    97,
+    131
+   ],
+   [
+    160,
+    96
+   ]
+  ],
+  "sizes_failed": [],
+  "params_m": 19.05,
+  "export_dynamic": "ok",
+  "probe_seconds": 2.8
+ },
+ {
+  "name": "dla34",
+  "buildable": true,
+  "error": "",
+  "feature_strides": [
+   2,
+   4,
+   8,
+   16,
+   32
+  ],
+  "feature_channels": [
+   32,
+   64,
+   128,
+   256,
+   512
+  ],
+  "native_layout": "NCHW",
+  "plain_vit": false,
+  "size_support": "any",
+  "sizes_ok": [
+   [
+    64,
+    64
+   ],
+   [
+    97,
+    131
+   ],
+   [
+    160,
+    96
+   ]
+  ],
+  "sizes_failed": [],
+  "params_m": 18.37,
+  "export_dynamic": "ok",
+  "probe_seconds": 2.4
+ },
+ {
+  "name": "cspdarknet53",
+  "buildable": true,
+  "error": "",
+  "feature_strides": [
+   1,
+   2,
+   4,
+   8,
+   16,
+   32
+  ],
+  "feature_channels": [
+   32,
+   64,
+   128,
+   256,
+   512,
+   1024
+  ],
+  "native_layout": "NCHW",
+  "plain_vit": false,
+  "size_support": "any",
+  "sizes_ok": [
+   [
+    64,
+    64
+   ],
+   [
+    97,
+    131
+   ],
+   [
+    160,
+    96
+   ]
+  ],
+  "sizes_failed": [],
+  "params_m": 31.73,
+  "export_dynamic": "ok",
+  "probe_seconds": 3.4
+ },
+ {
+  "name": "hrnet_w18_small",
+  "buildable": true,
+  "error": "",
+  "feature_strides": [
+   2,
+   4,
+   8,
+   16,
+   32
+  ],
+  "feature_channels": [
+   64,
+   128,
+   256,
+   512,
+   1024
+  ],
+  "native_layout": "NCHW",
+  "plain_vit": false,
+  "size_support": "any",
+  "sizes_ok": [
+   [
+    64,
+    64
+   ],
+   [
+    97,
+    131
+   ],
+   [
+    160,
+    96
+   ]
+  ],
+  "sizes_failed": [],
+  "params_m": 7.94,
+  "export_dynamic": "ok",
+  "probe_seconds": 4.3
+ },
+ {
+  "name": "inception_next_tiny",
+  "buildable": true,
+  "error": "",
+  "feature_strides": [
+   4,
+   8,
+   16,
+   32
+  ],
+  "feature_channels": [
+   96,
+   192,
+   384,
+   768
+  ],
+  "native_layout": "NCHW",
+  "plain_vit": false,
+  "size_support": "any",
+  "sizes_ok": [
+   [
+    64,
+    64
+   ],
+   [
+    97,
+    131
+   ],
+   [
+    160,
+    96
+   ]
+  ],
+  "sizes_failed": [],
+  "params_m": 28.08,
+  "export_dynamic": "ok",
+  "probe_seconds": 5.9
+ },
+ {
+  "name": "repvit_m1",
+  "buildable": true,
+  "error": "",
+  "feature_strides": [
+   4,
+   8,
+   16,
+   32
+  ],
+  "feature_channels": [
+   48,
+   96,
+   192,
+   384
+  ],
+  "native_layout": "NCHW",
+  "plain_vit": false,
+  "size_support": "any",
+  "sizes_ok": [
+   [
+    64,
+    64
+   ],
+   [
+    97,
+    131
+   ],
+   [
+    160,
+    96
+   ]
+  ],
+  "sizes_failed": [],
+  "params_m": 7.36,
+  "export_dynamic": "ok",
+  "probe_seconds": 9.1
+ },
+ {
+  "name": "swin_tiny_patch4_window7_224",
+  "buildable": true,
+  "error": "",
+  "feature_strides": [
+   4,
+   8,
+   16,
+   32
+  ],
+  "feature_channels": [
+   96,
+   192,
+   384,
+   768
+  ],
+  "native_layout": "NHWC",
+  "plain_vit": false,
+  "size_support": "any",
+  "sizes_ok": [
+   [
+    64,
+    64
+   ],
+   [
+    97,
+    131
+   ],
+   [
+    160,
+    96
+   ]
+  ],
+  "sizes_failed": [],
+  "params_m": 31.63,
+  "export_dynamic": "fail: UserError",
+  "probe_seconds": 303.8
+ },
+ {
+  "name": "swinv2_tiny_window8_256",
+  "buildable": true,
+  "error": "",
+  "feature_strides": [
+   4,
+   8,
+   16,
+   32
+  ],
+  "feature_channels": [
+   96,
+   192,
+   384,
+   768
+  ],
+  "native_layout": "NHWC",
+  "plain_vit": false,
+  "size_support": "any",
+  "sizes_ok": [
+   [
+    64,
+    64
+   ],
+   [
+    97,
+    131
+   ],
+   [
+    160,
+    96
+   ]
+  ],
+  "sizes_failed": [],
+  "params_m": 31.69,
+  "export_dynamic": "fail: UserError",
+  "probe_seconds": 69.6
+ },
+ {
+  "name": "pvt_v2_b1",
+  "buildable": true,
+  "error": "",
+  "feature_strides": [
+   4,
+   8,
+   16,
+   32
+  ],
+  "feature_channels": [
+   64,
+   128,
+   320,
+   512
+  ],
+  "native_layout": "NCHW",
+  "plain_vit": false,
+  "size_support": "any",
+  "sizes_ok": [
+   [
+    64,
+    64
+   ],
+   [
+    97,
+    131
+   ],
+   [
+    160,
+    96
+   ]
+  ],
+  "sizes_failed": [],
+  "params_m": 16.78,
+  "export_dynamic": "ok",
+  "probe_seconds": 8.3
+ },
+ {
+  "name": "maxvit_tiny_tf_224",
+  "buildable": true,
+  "error": "AssertionError: height (16) must be divisible by window (7)",
+  "feature_strides": [
+   2,
+   4,
+   8,
+   16,
+   32
+  ],
+  "feature_channels": [
+   64,
+   64,
+   128,
+   256,
+   512
+  ],
+  "native_layout": "NCHW",
+  "plain_vit": false,
+  "size_support": "fixed",
+  "sizes_ok": [],
+  "sizes_failed": [
+   [
+    64,
+    64
+   ],
+   [
+    97,
+    131
+   ],
+   [
+    160,
+    96
+   ]
+  ],
+  "params_m": 33.29,
+  "export_dynamic": "not probed",
+  "probe_seconds": 1.7
+ },
+ {
+  "name": "coatnet_0_rw_224",
+  "buildable": true,
+  "error": "RuntimeError: The size of tensor a (16) must match the size of tensor b (196) at non-singleton dimension 3",
+  "feature_strides": [
+   2,
+   4,
+   8,
+   16,
+   32
+  ],
+  "feature_channels": [
+   64,
+   96,
+   192,
+   384,
+   768
+  ],
+  "native_layout": "NCHW",
+  "plain_vit": false,
+  "size_support": "fixed",
+  "sizes_ok": [],
+  "sizes_failed": [
+   [
+    64,
+    64
+   ],
+   [
+    97,
+    131
+   ],
+   [
+    160,
+    96
+   ]
+  ],
+  "params_m": 30.79,
+  "export_dynamic": "not probed",
+  "probe_seconds": 1.4
+ },
+ {
+  "name": "fastvit_t12",
+  "buildable": true,
+  "error": "",
+  "feature_strides": [
+   4,
+   8,
+   16,
+   32
+  ],
+  "feature_channels": [
+   64,
+   128,
+   256,
+   512
+  ],
+  "native_layout": "NCHW",
+  "plain_vit": false,
+  "size_support": "any",
+  "sizes_ok": [
+   [
+    64,
+    64
+   ],
+   [
+    97,
+    131
+   ],
+   [
+    160,
+    96
+   ]
+  ],
+  "sizes_failed": [],
+  "params_m": 9.52,
+  "export_dynamic": "ok",
+  "probe_seconds": 5.6
+ },
+ {
+  "name": "efficientformerv2_s0",
+  "buildable": true,
+  "error": "RuntimeError: shape '[1, 8, -1, 49]' is invalid for input of size 1024",
+  "feature_strides": [
+   4,
+   8,
+   16,
+   32
+  ],
+  "feature_channels": [
+   32,
+   48,
+   96,
+   176
+  ],
+  "native_layout": "NCHW",
+  "plain_vit": false,
+  "size_support": "fixed",
+  "sizes_ok": [],
+  "sizes_failed": [
+   [
+    64,
+    64
+   ],
+   [
+    97,
+    131
+   ],
+   [
+    160,
+    96
+   ]
+  ],
+  "params_m": 5.13,
+  "export_dynamic": "not probed",
+  "probe_seconds": 0.6
+ },
+ {
+  "name": "levit_128s",
+  "buildable": true,
+  "error": "RuntimeError: The size of tensor a (16) must match the size of tensor b (196) at non-singleton dimension 3",
+  "feature_strides": [
+   16,
+   32,
+   64
+  ],
+  "feature_channels": [
+   128,
+   256,
+   384
+  ],
+  "native_layout": "NCHW",
+  "plain_vit": false,
+  "size_support": "fixed",
+  "sizes_ok": [],
+  "sizes_failed": [
+   [
+    64,
+    64
+   ],
+   [
+    97,
+    131
+   ],
+   [
+    160,
+    96
+   ]
+  ],
+  "params_m": 9.81,
+  "export_dynamic": "not probed",
+  "probe_seconds": 0.4
+ },
+ {
+  "name": "hiera_tiny_224",
+  "buildable": true,
+  "error": "RuntimeError: The size of tensor a (256) must match the size of tensor b (3136) at non-singleton dimension 1",
+  "feature_strides": [
+   4,
+   8,
+   16,
+   32
+  ],
+  "feature_channels": [
+   96,
+   192,
+   384,
+   768
+  ],
+  "native_layout": "NCHW",
+  "plain_vit": false,
+  "size_support": "fixed",
+  "sizes_ok": [],
+  "sizes_failed": [
+   [
+    64,
+    64
+   ],
+   [
+    97,
+    131
+   ],
+   [
+    160,
+    96
+   ]
+  ],
+  "params_m": 31.25,
+  "export_dynamic": "not probed",
+  "probe_seconds": 1.1
+ },
+ {
+  "name": "mambaout_tiny",
+  "buildable": true,
+  "error": "",
+  "feature_strides": [
+   4,
+   8,
+   16,
+   32
+  ],
+  "feature_channels": [
+   96,
+   192,
+   384,
+   576
+  ],
+  "native_layout": "NHWC",
+  "plain_vit": false,
+  "size_support": "any",
+  "sizes_ok": [
+   [
+    64,
+    64
+   ],
+   [
+    97,
+    131
+   ],
+   [
+    160,
+    96
+   ]
+  ],
+  "sizes_failed": [],
+  "params_m": 26.57,
+  "export_dynamic": "fail: UserError",
+  "probe_seconds": 9.0
+ },
+ {
+  "name": "caformer_s18",
+  "buildable": true,
+  "error": "",
+  "feature_strides": [
+   4,
+   8,
+   16,
+   32
+  ],
+  "feature_channels": [
+   64,
+   128,
+   320,
+   512
+  ],
+  "native_layout": "NCHW",
+  "plain_vit": false,
+  "size_support": "any",
+  "sizes_ok": [
+   [
+    64,
+    64
+   ],
+   [
+    97,
+    131
+   ],
+   [
+    160,
+    96
+   ]
+  ],
+  "sizes_failed": [],
+  "params_m": 26.52,
+  "export_dynamic": "fail: UserError",
+  "probe_seconds": 8.8
+ },
+ {
+  "name": "poolformerv2_s12",
+  "buildable": true,
+  "error": "",
+  "feature_strides": [
+   4,
+   8,
+   16,
+   32
+  ],
+  "feature_channels": [
+   64,
+   128,
+   320,
+   512
+  ],
+  "native_layout": "NCHW",
+  "plain_vit": false,
+  "size_support": "any",
+  "sizes_ok": [
+   [
+    64,
+    64
+   ],
+   [
+    97,
+    131
+   ],
+   [
+    160,
+    96
+   ]
+  ],
+  "sizes_failed": [],
+  "params_m": 14.66,
+  "export_dynamic": "fail: UserError",
+  "probe_seconds": 5.5
+ },
+ {
+  "name": "nextvit_small",
+  "buildable": true,
+  "error": "",
+  "feature_strides": [
+   4,
+   8,
+   16,
+   32
+  ],
+  "feature_channels": [
+   96,
+   256,
+   512,
+   1024
+  ],
+  "native_layout": "NCHW",
+  "plain_vit": false,
+  "size_support": "any",
+  "sizes_ok": [
+   [
+    64,
+    64
+   ],
+   [
+    97,
+    131
+   ],
+   [
+    160,
+    96
+   ]
+  ],
+  "sizes_failed": [],
+  "params_m": 35.81,
+  "export_dynamic": "ok",
+  "probe_seconds": 7.4
+ },
+ {
+  "name": "focalnet_tiny_srf",
+  "buildable": true,
+  "error": "",
+  "feature_strides": [
+   4,
+   8,
+   16,
+   32
+  ],
+  "feature_channels": [
+   96,
+   192,
+   384,
+   768
+  ],
+  "native_layout": "NCHW",
+  "plain_vit": false,
+  "size_support": "any",
+  "sizes_ok": [
+   [
+    64,
+    64
+   ],
+   [
+    97,
+    131
+   ],
+   [
+    160,
+    96
+   ]
+  ],
+  "sizes_failed": [],
+  "params_m": 31.77,
+  "export_dynamic": "fail: UserError",
+  "probe_seconds": 9.3
+ },
+ {
+  "name": "davit_tiny",
+  "buildable": true,
+  "error": "",
+  "feature_strides": [
+   4,
+   8,
+   16,
+   32
+  ],
+  "feature_channels": [
+   96,
+   192,
+   384,
+   768
+  ],
+  "native_layout": "NCHW",
+  "plain_vit": false,
+  "size_support": "any",
+  "sizes_ok": [
+   [
+    64,
+    64
+   ],
+   [
+    97,
+    131
+   ],
+   [
+    160,
+    96
+   ]
+  ],
+  "sizes_failed": [],
+  "params_m": 31.7,
+  "export_dynamic": "fail: UserError",
+  "probe_seconds": 61.5
+ },
+ {
+  "name": "efficientvit_b1",
+  "buildable": true,
+  "error": "",
+  "feature_strides": [
+   4,
+   8,
+   16,
+   32
+  ],
+  "feature_channels": [
+   32,
+   64,
+   128,
+   256
+  ],
+  "native_layout": "NCHW",
+  "plain_vit": false,
+  "size_support": "any",
+  "sizes_ok": [
+   [
+    64,
+    64
+   ],
+   [
+    97,
+    131
+   ],
+   [
+    160,
+    96
+   ]
+  ],
+  "sizes_failed": [],
+  "params_m": 6.8,
+  "export_dynamic": "ok",
+  "probe_seconds": 5.8
+ },
+ {
+  "name": "vit_small_patch16_224",
+  "buildable": true,
+  "error": "",
+  "feature_strides": [
+   4,
+   8,
+   16,
+   32
+  ],
+  "feature_channels": [
+   48,
+   96,
+   192,
+   384
+  ],
+  "native_layout": "NCHW",
+  "plain_vit": true,
+  "size_support": "any",
+  "sizes_ok": [
+   [
+    64,
+    64
+   ],
+   [
+    97,
+    131
+   ],
+   [
+    160,
+    96
+   ]
+  ],
+  "sizes_failed": [],
+  "params_m": 26.35,
+  "export_dynamic": "ok",
+  "probe_seconds": 3.4
+ },
+ {
+  "name": "vit_base_patch16_224",
+  "buildable": true,
+  "error": "",
+  "feature_strides": [
+   4,
+   8,
+   16,
+   32
+  ],
+  "feature_channels": [
+   96,
+   192,
+   384,
+   768
+  ],
+  "native_layout": "NCHW",
+  "plain_vit": true,
+  "size_support": "any",
+  "sizes_ok": [
+   [
+    64,
+    64
+   ],
+   [
+    97,
+    131
+   ],
+   [
+    160,
+    96
+   ]
+  ],
+  "sizes_failed": [],
+  "params_m": 98.07,
+  "export_dynamic": "ok",
+  "probe_seconds": 4.2
+ },
+ {
+  "name": "deit3_small_patch16_224",
+  "buildable": true,
+  "error": "",
+  "feature_strides": [
+   4,
+   8,
+   16,
+   32
+  ],
+  "feature_channels": [
+   48,
+   96,
+   192,
+   384
+  ],
+  "native_layout": "NCHW",
+  "plain_vit": true,
+  "size_support": "any",
+  "sizes_ok": [
+   [
+    64,
+    64
+   ],
+   [
+    97,
+    131
+   ],
+   [
+    160,
+    96
+   ]
+  ],
+  "sizes_failed": [],
+  "params_m": 26.36,
+  "export_dynamic": "ok",
+  "probe_seconds": 3.0
+ },
+ {
+  "name": "vit_small_patch14_dinov2",
+  "buildable": true,
+  "error": "",
+  "feature_strides": [
+   4,
+   8,
+   16,
+   32
+  ],
+  "feature_channels": [
+   48,
+   96,
+   192,
+   384
+  ],
+  "native_layout": "NCHW",
+  "plain_vit": true,
+  "size_support": "any",
+  "sizes_ok": [
+   [
+    64,
+    64
+   ],
+   [
+    97,
+    131
+   ],
+   [
+    160,
+    96
+   ]
+  ],
+  "sizes_failed": [],
+  "params_m": 26.74,
+  "export_dynamic": "ok",
+  "probe_seconds": 3.4
+ },
+ {
+  "name": "eva02_small_patch14_224",
+  "buildable": true,
+  "error": "",
+  "feature_strides": [
+   4,
+   8,
+   16,
+   32
+  ],
+  "feature_channels": [
+   48,
+   96,
+   192,
+   384
+  ],
+  "native_layout": "NCHW",
+  "plain_vit": true,
+  "size_support": "any",
+  "sizes_ok": [
+   [
+    64,
+    64
+   ],
+   [
+    97,
+    131
+   ],
+   [
+    160,
+    96
+   ]
+  ],
+  "sizes_failed": [],
+  "params_m": 26.31,
+  "export_dynamic": "ok",
+  "probe_seconds": 5.4
+ },
+ {
+  "name": "vit_small_patch16_siglip_224",
+  "buildable": false,
+  "error": "ValueError: unknown timm backbone 'vit_small_patch16_siglip_224'; did you mean vit_xsmall_patch16_clip_224, vit_base_patch16_siglip_224, vit_small_patch16_224, vit_small_patch16_rope_224, vit_so400m_patch14_sigli",
+  "feature_strides": [],
+  "feature_channels": [],
+  "native_layout": "",
+  "plain_vit": false,
+  "size_support": "",
+  "sizes_ok": [],
+  "sizes_failed": [],
+  "params_m": 0.0,
+  "export_dynamic": "not probed",
+  "probe_seconds": 0.0
+ }
+]

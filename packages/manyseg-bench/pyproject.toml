@@ -16,6 +16,7 @@ dependencies = [
 manyseg = ["manyseg"]
 smp = ["segmentation-models-pytorch>=0.4"]
 fastai = ["fastai>=2.7"]
+geo = ["tifffile>=2024.1"]
 test = ["pytest>=8", "manyseg"]
 
 [project.scripts]

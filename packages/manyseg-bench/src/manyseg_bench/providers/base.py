@@ -30,6 +30,9 @@ class ModelSpec:
         weights: Canonical weight identifier. ``"tv_in1k"`` = torchvision IMAGENET1K_V1,
             which every built-in provider can load for ResNets. ``None`` = random init.
         in_channels / num_classes: I/O channels.
+        inputs: For multi-input datasets, ``{name: channels}``; set by the runner.
+        input_mode: ``"stack"`` (inputs concatenated: one tensor, any provider) or ``"dict"``
+            (named inputs; only providers whose ``supports_dict_inputs`` is True).
         options: Provider-specific options (e.g. decoder widths). Recorded in results.
     """
 
@@ -38,6 +41,8 @@ class ModelSpec:
     weights: str | None = "tv_in1k"
     in_channels: int = 3
     num_classes: int = 2
+    inputs: dict[str, int] | None = None
+    input_mode: str = "stack"
     options: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -55,6 +60,7 @@ class BuiltModel:
 
 class Provider(ABC):
     name: str = ""
+    supports_dict_inputs: bool = False
 
     @abstractmethod
     def version(self) -> str: ...

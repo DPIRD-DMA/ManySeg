@@ -13,6 +13,7 @@ def _spec(a):
 
     return ModelSpec(arch=a.arch, encoder=a.encoder,
                      weights=None if a.weights == "none" else a.weights,
+                     input_mode=getattr(a, "input_mode", "stack"),
                      options=json.loads(a.options))
 
 
@@ -23,7 +24,7 @@ def main(argv=None) -> int:
 
     pp = sub.add_parser("prepare")
     pp.add_argument("dataset")
-    pp.add_argument("--size", type=int, default=256)
+    pp.add_argument("--size", type=int, default=None, help="dataset default if omitted")
 
     for name in ("train", "profile"):
         sp = sub.add_parser(name)
@@ -40,6 +41,8 @@ def main(argv=None) -> int:
     tp.add_argument("--recipe", default="standard")
     tp.add_argument("--seeds", default="0")
     tp.add_argument("--set", default="{}", help="JSON recipe overrides")
+    tp.add_argument("--input-mode", default="stack", choices=["stack", "dict"],
+                    help="multi-input datasets: concatenate inputs or pass a dict")
     tp.add_argument("--evaluate-test", action="store_true",
                     help="also evaluate the test split (final reporting only)")
     pr = sub.choices["profile"]
@@ -60,15 +63,18 @@ def main(argv=None) -> int:
 
         ds = get_dataset(a.dataset)
         root = data_root(a.data)
-        print(json.dumps(ds.prepare(root / "raw" / ds.INFO.name, root / "cache" / ds.INFO.name,
-                                    size=a.size), indent=1))
+        name = getattr(ds, "CACHE_NAME", ds.INFO.name)
+        kw = {} if a.size is None else {"size": a.size}
+        print(json.dumps(ds.prepare(root / "raw" / name, root / "cache" / name, **kw), indent=1))
     elif a.cmd == "train":
         from .experiments import run_training
 
         for seed in [int(s) for s in a.seeds.split(",")]:
             r = run_training(a.provider, _spec(a), a.dataset, a.recipe, seed, a.device, a.out,
                              a.data, a.evaluate_test, json.loads(a.set), a.tag)
-            print(f"{r['path']}: final val mIoU {r['final_val']['miou']:.4f}", flush=True)
+            extra = "".join(f" {s} mIoU {r[s]['miou']:.4f}" for s in r["dataset"]["test_splits"]
+                            if s in r)
+            print(f"{r['path']}: final val mIoU {r['final_val']['miou']:.4f}{extra}", flush=True)
     elif a.cmd == "profile":
         import time
         import uuid

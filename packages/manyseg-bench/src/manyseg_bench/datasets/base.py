@@ -18,6 +18,10 @@ def data_root(path: str | os.PathLike | None = None) -> Path:
 
 @dataclass(frozen=True)
 class DatasetInfo:
+    """Static dataset description. For multi-input datasets ``inputs`` maps input names to
+    channel counts and ``mean``/``std`` are dicts keyed by input name (in stored units, filled
+    from the prepared cache's ``meta.json`` when computed from the training split)."""
+
     name: str
     num_classes: int
     in_channels: int
@@ -28,6 +32,8 @@ class DatasetInfo:
     license: str = ""
     source: str = ""
     splits: tuple[str, ...] = ("train", "val", "test")
+    test_splits: tuple[str, ...] = ("test",)
+    inputs: dict | None = None
     notes: tuple[str, ...] = field(default_factory=tuple)
 
     def to_dict(self) -> dict:
@@ -36,25 +42,37 @@ class DatasetInfo:
 
 @dataclass
 class Split:
-    images: np.ndarray  # (N, H, W, C) uint8
+    images: np.ndarray | dict[str, np.ndarray]  # (N, H, W, C) or {input: (N, H, W, C)}
     masks: np.ndarray   # (N, H, W) uint8
     names: list[str]
 
 
-def save_split(cache: Path, split: str, images: np.ndarray, masks: np.ndarray,
-               names: list[str]) -> None:
+def save_split(cache: Path, split: str, images, masks: np.ndarray, names: list[str]) -> None:
     cache.mkdir(parents=True, exist_ok=True)
-    np.save(cache / f"{split}_images.npy", images)
+    if isinstance(images, dict):
+        for k, v in images.items():
+            np.save(cache / f"{split}_images.{k}.npy", v)
+    else:
+        np.save(cache / f"{split}_images.npy", images)
     np.save(cache / f"{split}_masks.npy", masks)
     (cache / f"{split}_names.json").write_text(json.dumps(names))
 
 
 def load_split(cache: Path, split: str, mmap: bool = True) -> Split:
     mode = "r" if mmap else None
-    files = [cache / f"{split}_{k}" for k in ("images.npy", "masks.npy", "names.json")]
-    missing = [str(f) for f in files if not f.exists()]
-    if missing:
-        raise FileNotFoundError(f"dataset split not prepared; missing {missing}. "
+    masks, names = cache / f"{split}_masks.npy", cache / f"{split}_names.json"
+    single = cache / f"{split}_images.npy"
+    multi = sorted(cache.glob(f"{split}_images.*.npy"))
+    if not masks.exists() or not names.exists() or not (single.exists() or multi):
+        raise FileNotFoundError(f"dataset split {split!r} not prepared in {cache}. "
                                 "Run `manyseg-bench prepare <dataset>`.")
-    return Split(np.load(files[0], mmap_mode=mode), np.load(files[1], mmap_mode=mode),
-                 json.loads(files[2].read_text()))
+    if single.exists():
+        images = np.load(single, mmap_mode=mode)
+    else:
+        images = {f.name[len(split) + 8:-4]: np.load(f, mmap_mode=mode) for f in multi}
+    return Split(images, np.load(masks, mmap_mode=mode), json.loads(names.read_text()))
+
+
+def load_meta(cache: Path) -> dict:
+    p = cache / "meta.json"
+    return json.loads(p.read_text()) if p.exists() else {}

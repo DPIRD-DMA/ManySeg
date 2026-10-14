@@ -18,7 +18,7 @@ manyseg-bench = { workspace = true }
 [dependency-groups]
 dev = [
     "manyseg[test]",
-    "manyseg-bench[smp,fastai,test]",
+    "manyseg-bench[smp,fastai,geo,test]",
     "ruff>=0.6",
 ]
 

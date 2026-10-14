@@ -1,4 +1,9 @@
-# ManySeg
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.svg">
+    <img alt="ManySeg" src="docs/assets/logo-light.svg" width="420">
+  </picture>
+</p>
 
 Composable dense-prediction models for PyTorch: any timm backbone, any channel count, multiple
 inputs and outputs. Compile- and export-friendly, and checked against an independent
