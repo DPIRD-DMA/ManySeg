@@ -53,3 +53,15 @@ def test_export_instance_preset(decoders):
     ref = model(x)
     for k, v in ep.module()(x).items():
         torch.testing.assert_close(v, ref[k], atol=1e-4, rtol=1e-4)
+
+
+def test_export_point_and_density_presets():
+    from manyseg.points import density_head, point_heads
+
+    heads = {**point_heads(offsets=True), **density_head()}
+    model = create_model(backbone="resnet18", pretrained=False, heads=heads).eval()
+    ep = export_model(model, torch.randn(1, 3, 64, 96))
+    x = torch.randn(1, 3, 97, 131)
+    ref = model(x)
+    for k, v in ep.module()(x).items():
+        torch.testing.assert_close(v, ref[k], atol=1e-4, rtol=1e-4)
