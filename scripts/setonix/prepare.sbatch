@@ -8,7 +8,6 @@
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1,tmp:250G
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=8
 #SBATCH --time=03:00:00
 #SBATCH --job-name=manyseg-prepare
 #SBATCH --output=$MANYSEG_ROOT/logs/%x_%j.out
