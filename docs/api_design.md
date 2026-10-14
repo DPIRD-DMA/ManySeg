@@ -210,8 +210,13 @@ Why FiLM wraps decoders instead of editing them: decoders keep their
 `forward(list[Tensor]) -> Tensor` contract, so a FiLM layer can only see what crosses that
 boundary. In practice, "each decoder level" means each encoder level the decoder consumes,
 plus the decoder output. It does not mean the decoder's internal blocks. The levels a decoder
-reads are found once at construction by a gradient probe (for example, DeepLabV3+ reads only
-strides 4 and 32), so every FiLM parameter receives a gradient. All γ/β projections start at
+reads come from its optional `read_levels` attribute. Otherwise they are found once at
+construction by a gradient probe (for example, DeepLabV3+ reads only strides 4 and 32), so
+every FiLM parameter receives a gradient. The probe takes the union over a square and an odd,
+non-square size. It does not touch the global RNG, and it restores every submodule's
+train/eval flag and every buffer. Read sets that depend on the input size in other ways are not
+supported. Encoders are built after the raster model, so the raster weights match the
+unconditioned model's for the same seed. All γ/β projections start at
 zero, so a freshly built conditioned model computes exactly what the unconditioned model with
 the same weights computes (tested with `rtol=atol=0` for every decoder).
 

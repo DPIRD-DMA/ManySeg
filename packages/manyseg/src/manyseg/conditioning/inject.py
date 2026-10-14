@@ -45,25 +45,54 @@ class FiLM(nn.Module):
 
 def used_levels(decoder: nn.Module, specs: Sequence[FeatureSpec],
                 input_channels: int | None = None) -> list[int]:
-    """Indices of the feature levels ``decoder`` actually reads, found once at construction by
-    a gradient probe on small random features (decoders such as DeepLabV3+ or FPN skip some
-    levels; FiLM on an unread level would be a parameter without gradient)."""
-    size = 2 * max(s.stride for s in specs)
+    """Indices of the feature levels ``decoder`` actually reads (decoders such as DeepLabV3+ or
+    FPN skip some levels; FiLM on an unread level would be a parameter without gradient).
+
+    A decoder may declare them as ``read_levels`` (indices into the encoder feature list, not
+    counting the input image of ``wants_input`` decoders); otherwise they are found once at
+    construction by a gradient probe: the union over a square and an odd, non-square input
+    size. Read sets that depend on the input size in other ways are not supported.
+
+    The probe is side-effect free: inputs come from a private generator (the global RNG is
+    untouched), and every submodule's ``training`` flag and every buffer are restored.
+    """
+    declared = getattr(decoder, "read_levels", None)
+    if declared is not None:
+        levels = sorted({int(i) for i in declared})
+        if not all(0 <= i < len(specs) for i in levels):
+            raise ValueError(f"read_levels {list(declared)} out of range for {len(specs)} "
+                             "feature levels")
+        return levels
+    m = max(s.stride for s in specs)
     p = next(iter(decoder.parameters()), None)
     dev = p.device if p is not None else torch.device("cpu")
-    feats = [torch.randn(1, s.channels, -(-size // s.stride), -(-size // s.stride), device=dev,
-                         requires_grad=True) for s in specs]
-    inp = feats
-    if getattr(decoder, "wants_input", False):
-        inp = [torch.randn(1, input_channels, size, size, device=dev), *feats]
-    was_training = decoder.training
+    gen = torch.Generator().manual_seed(0)
+
+    def randn(*shape):
+        return torch.randn(*shape, generator=gen).to(dev)
+
+    modes = [(mod, mod.training) for mod in decoder.modules()]
+    buffers = [(b, b.detach().clone()) for b in decoder.buffers()]
+    read: set[int] = set()
     decoder.eval()
     try:
-        with torch.enable_grad():
-            grads = torch.autograd.grad(decoder(inp).sum(), feats, allow_unused=True)
+        with torch.random.fork_rng(devices=[dev] if dev.type == "cuda" else []), \
+                torch.enable_grad():
+            for h, w in ((2 * m, 2 * m), (2 * m + 1, 3 * m)):
+                feats = [randn(1, s.channels, -(-h // s.stride), -(-w // s.stride))
+                         .requires_grad_() for s in specs]
+                inp = feats
+                if getattr(decoder, "wants_input", False):
+                    inp = [randn(1, input_channels, h, w), *feats]
+                grads = torch.autograd.grad(decoder(inp).sum(), feats, allow_unused=True)
+                read |= {i for i, g in enumerate(grads) if g is not None}
     finally:
-        decoder.train(was_training)
-    return [i for i, g in enumerate(grads) if g is not None]
+        for mod, training in modes:
+            mod.training = training
+        with torch.no_grad():
+            for b, saved in buffers:
+                b.copy_(saved)
+    return sorted(read)
 
 
 class DecoderFiLM(nn.Module):

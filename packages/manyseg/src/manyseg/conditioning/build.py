@@ -3,9 +3,11 @@ the raster model with the ordinary factory, then attach a :class:`Conditioner`."
 
 from __future__ import annotations
 
+import functools
 from collections.abc import Callable, Mapping
 from typing import Any
 
+import torch
 from torch import nn
 
 from .encoder import MetadataEncoder
@@ -34,7 +36,9 @@ def split_inputs(inputs: Mapping[str, Mapping]) -> tuple[dict, dict]:
     return rasters, vectors
 
 
-def parse_vector(name: str, cfg: Mapping) -> tuple[MetadataEncoder, str, dict]:
+def parse_vector(name: str, cfg: Mapping) -> tuple[Callable[[], MetadataEncoder], str, dict]:
+    """``(encoder factory, mode, mode options)``. Encoders are constructed only after the
+    raster model, so the raster weights do not depend on the metadata configuration."""
     unknown = set(cfg) - VECTOR_KEYS
     if unknown:
         raise ValueError(f"vector input {name!r}: unknown keys {sorted(unknown)}")
@@ -54,10 +58,12 @@ def parse_vector(name: str, cfg: Mapping) -> tuple[MetadataEncoder, str, dict]:
     if mode == "channels" and "dim" in cfg:
         raise ValueError(f"vector input {name!r}: 'dim' does not apply to 'channels' mode "
                          "(the field encodings themselves become channels)")
-    enc = MetadataEncoder(cfg.get("fields"), channels=cfg.get("channels"),
-                          dim=None if mode == "channels" else cfg.get("dim", 64),
-                          dropout=cfg.get("dropout", 0.0))
-    return enc, mode, cond
+    make = functools.partial(MetadataEncoder, cfg.get("fields"), channels=cfg.get("channels"),
+                             dim=None if mode == "channels" else cfg.get("dim", 64),
+                             dropout=cfg.get("dropout", 0.0))
+    with torch.random.fork_rng(devices=[]):
+        make()  # validate the config now, without consuming the caller's RNG
+    return make, mode, cond
 
 
 def build_conditioned_model(create_model: Callable[..., nn.Module], *, inputs, fusion, backbone,
@@ -76,9 +82,9 @@ def build_conditioned_model(create_model: Callable[..., nn.Module], *, inputs, f
         if f"{n}_mask" in inputs:
             raise ValueError(f"input name {n}_mask is reserved for the mask of vector input {n!r}")
 
-    encoders, modes, opts, targets = {}, {}, {}, {}
+    makers, modes, opts, targets = {}, {}, {}, {}
     for n, cfg in vectors.items():
-        encoders[n], modes[n], opts[n] = parse_vector(n, cfg)
+        makers[n], modes[n], opts[n] = parse_vector(n, cfg)
         if modes[n] == "channels":
             t = opts[n].get("target", next(iter(rasters)))
             if t not in rasters:
@@ -86,7 +92,9 @@ def build_conditioned_model(create_model: Callable[..., nn.Module], *, inputs, f
                                  f"input; choose from {list(rasters)}")
             if "channels" not in rasters[t]:
                 raise ValueError(f"input {t!r}: 'channels' is required")
-            rasters[t] = {**rasters[t], "channels": rasters[t]["channels"] + encoders[n].width}
+            with torch.random.fork_rng(devices=[]):
+                width = makers[n]().width
+            rasters[t] = {**rasters[t], "channels": rasters[t]["channels"] + width}
             targets[n] = t
 
     single = None
@@ -113,6 +121,7 @@ def build_conditioned_model(create_model: Callable[..., nn.Module], *, inputs, f
         model = create_model(backbone=backbone, inputs=rasters, fusion=fusion,
                              backbone_kwargs=backbone_kwargs, **shared)
 
+    encoders = {n: make() for n, make in makers.items()}
     film_names = [n for n in vectors if modes[n] == "film"]
     head_names = [n for n in vectors if modes[n] == "head"]
     film = {}
