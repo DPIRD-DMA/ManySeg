@@ -59,6 +59,7 @@ def _sample(i, split, roi, size):
     x0 = X0 + 100_000 * i
     elev = np.full((size, size), 100 + i, np.uint16)
     elev[0, 0] = 200 + i
+    elev[2, 2] = 65535 - 9  # -10 m, wrapped in the release's uint16 storage
     vv = np.full((size, size), -140, np.int16)
     vv[1, 1] = 0  # S1GBM no data
     layers = {"elevation": _tif(elev, x0), "lc10": _tif(np.full((size, size), 10, np.uint16), x0),
@@ -222,7 +223,7 @@ def test_prepare_tiles_masks_padding_and_aux(raw, tmp_path):
     assert aux[0, 0, 0] == pytest.approx(-14.0) and aux[0, 0, 1] == pytest.approx(-22.0)
     assert np.isnan(aux[1, 1, 0])
     dem = np.asarray(tr.images["dem"][0], np.float32)
-    assert dem[0, 0, 0] == 100 and dem[5, 5, 0] == 0
+    assert dem[0, 0, 0] == 100 and dem[5, 5, 0] == 0 and dem[2, 2, 0] == -110
     assert np.isnan(np.asarray(tr.images["s1gbm"][-1], np.float32)).all()  # blob missing
     meta = json.loads((cache / "meta.json").read_text())
     assert set(meta["mean"]) == {"s2", "s1gbm", "dem"} and len(meta["mean"]["s2"]) == 13

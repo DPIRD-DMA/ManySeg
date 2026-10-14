@@ -361,7 +361,10 @@ def _read_aux(raw: Path, sample_id: str, ref: tuple, hw: tuple[int, int]):
     for i, name in enumerate(("vv", "vh")):
         v = layers[name].astype(np.float32)
         out[i] = np.where(v == 0, np.nan, v / 10.0)  # S1GBM: dB x 10, 0 = no data
-    out[2] = layers["elevation"].astype(np.float32)
+    elev = layers["elevation"]
+    if elev.dtype == np.uint16:  # stored as uint16 but signed: -71 m arrives as 65465
+        elev = elev.view(np.int16)
+    out[2] = elev.astype(np.float32)
     return out, "ok"
 
 
