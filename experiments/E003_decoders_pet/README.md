@@ -20,3 +20,10 @@ Status: **planned** (registered 2026-10-14 before any E003 runs).
 ## Decision rule
 A decoder is "better" only if its mean exceeds the reference `unet` by more than 2× the pooled
 seed SD. Otherwise we report no detectable difference and prefer the cheaper decoder.
+
+## Amendment (2026-10-14 10:40, before any E003 run)
+E002 showed that the Pet validation split (376 images) cannot resolve differences of about 0.3
+mIoU points, while the test split (3,669 images) can. Each E003 configuration is therefore
+evaluated **once** on test as well (`--evaluate-test`). The decision rule still uses val. Test
+results are reported alongside and are not used to choose anything. The same amendment applies
+to E001b. Recipe chosen by the pre-registered rule: `fastai_like`.
