@@ -6,11 +6,9 @@ MAIN="$WORKSPACE/ManySeg"
 R=$MANYSEG_ROOT
 JOBS=$(IFS=,; echo "$*")
 while true; do
-  for e in E004_channel_adapters E006_decoder_pareto E009_metadata_conditioning E010_instance_heads E011_tree_points E011b_point_threshold_calibration E012_unet_input_cross; do
-    mkdir -p "$MAIN/experiments/$e/runs"
-    rsync -a -e "ssh -o BatchMode=yes" "$HOST:$R/experiments/$e/runs/" \
-      "$MAIN/experiments/$e/runs/" 2>/dev/null
-  done
+  # Every experiment's runs/ (E*/runs/**), so new experiments need no edit here.
+  rsync -a -e "ssh -o BatchMode=yes" --include='E*/' --include='E*/runs/***' --exclude='*' \
+    "$HOST:$R/experiments/" "$MAIN/experiments/" 2>/dev/null
   STATES=$(ssh -o BatchMode=yes $HOST "sacct -X -n -j $JOBS -o JobName,State" 2>/dev/null \
            | grep -v '^ #' | awk 'NF==2 {c[$1" "$2]++} END {for (k in c) print k"="c[k]}' | sort | tr '\n' ' ')
   echo "$(date +%H:%M) $STATES"

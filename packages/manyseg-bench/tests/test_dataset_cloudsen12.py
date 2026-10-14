@@ -288,12 +288,14 @@ def test_load_vectors(raw, monkeypatch):
 
 
 def test_variants_share_cache_and_declare_no_leaky_vectors():
-    names = ("cloudsen12", "cloudsen12_s2_aux", "cloudsen12_meta")
+    names = ("cloudsen12", "cloudsen12_s2_aux", "cloudsen12_meta", "cloudsen12_meta_nogeo")
     dss = [get_dataset(n) for n in names]
     assert {getattr(d, "CACHE_NAME", None) for d in dss} == {cs.CACHE_NAME}
     assert dss[0].INFO.inputs == {"s2": 13} and dss[1].INFO.inputs == cs.ALL_INPUTS
     assert dss[2].INFO.inputs == {"s2": 13}
     assert set(dss[2].INFO.vectors["meta"]["fields"]) == {"latlon", "doy", "sza", "saa"}
+    assert dss[3].INFO.inputs == {"s2": 13}  # E014's location-shortcut control
+    assert set(dss[3].INFO.vectors["meta"]["fields"]) == {"doy", "sza", "saa"}
     for d in dss:
         assert d.INFO.num_classes == 4 and d.INFO.ignore_index == 255 and d.TASK == "semantic"
         assert d.LOADER_KWARGS["device_resident"] is False and d.LOADER_KWARGS["vflip"]
@@ -306,7 +308,8 @@ def test_variants_share_cache_and_declare_no_leaky_vectors():
 
 @pytest.mark.parametrize("dataset,mode", [("cloudsen12", "stack"),
                                           ("cloudsen12_s2_aux", "dict"),
-                                          ("cloudsen12_meta", "dict")])
+                                          ("cloudsen12_meta", "dict"),
+                                          ("cloudsen12_meta_nogeo", "dict")])
 def test_cli_trains_end_to_end(tmp_path, capsys, monkeypatch, dataset, mode):
     from manyseg_bench.cli import main
 
@@ -324,4 +327,4 @@ def test_cli_trains_end_to_end(tmp_path, capsys, monkeypatch, dataset, mode):
     assert set(rec["norm_stats"]["mean"]) == set(get_dataset(dataset).INFO.inputs)
     assert "Copernicus Sentinel" in rec["dataset"]["license"]  # provenance in every record
     assert rec["vectors_dropped"] is False and \
-        bool(rec["spec"]["vectors"]) == (dataset == "cloudsen12_meta")
+        bool(rec["spec"]["vectors"]) == dataset.startswith("cloudsen12_meta")

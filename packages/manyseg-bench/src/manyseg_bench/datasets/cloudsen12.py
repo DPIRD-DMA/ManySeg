@@ -46,8 +46,9 @@ are unseen locations. Label-derived columns of the sample table (``*_percentage`
 ``cloud_frac``) and the extra index's socioeconomic ``rai:*`` columns are never inputs.
 
 Variants (one shared cache, ``cloudsen12plus_high``): ``cloudsen12`` (S2 only),
-``cloudsen12_s2_aux`` (dict inputs ``s2`` + ``s1gbm`` + ``dem``) and ``cloudsen12_meta``
-(S2 + a metadata vector: sample-centre lat/lon, day of year, solar zenith and azimuth).
+``cloudsen12_s2_aux`` (dict inputs ``s2`` + ``s1gbm`` + ``dem``), ``cloudsen12_meta``
+(S2 + a metadata vector: sample-centre lat/lon, day of year, solar zenith and azimuth) and
+``cloudsen12_meta_nogeo`` (the same vector without lat/lon).
 """
 
 from __future__ import annotations
@@ -111,7 +112,11 @@ META_FIELDS = {"latlon": {"type": "coords"}, "doy": {"type": "cyclic", "period":
                "saa": {"type": "cyclic", "period": 360.0}}
 INFO_META = DatasetInfo(**{**INFO.to_dict(), "name": "cloudsen12_meta",
                            "vectors": {"meta": {"fields": META_FIELDS}}})
-VARIANTS = (INFO_AUX, INFO_META)
+# Location-shortcut control (as sen1floods11_meta_nogeo): the same vector without lat/lon.
+INFO_META_NOGEO = DatasetInfo(**{
+    **INFO.to_dict(), "name": "cloudsen12_meta_nogeo",
+    "vectors": {"meta": {"fields": {k: v for k, v in META_FIELDS.items() if k != "latlon"}}}})
+VARIANTS = (INFO_AUX, INFO_META, INFO_META_NOGEO)
 TASK = "semantic"
 CACHE_NAME = "cloudsen12plus_high"  # raw/ and cache/ directory shared by all variants
 LOADER_KWARGS = {"device_resident": False, "vflip": True}
