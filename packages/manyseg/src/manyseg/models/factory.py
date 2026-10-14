@@ -16,7 +16,7 @@ from .dense import DenseModel
 
 FUSION_TYPES = ("early", "intermediate", "late")
 _INPUT_KEYS = {"channels", "backbone", "pretrained", "channel_adapter", "alignment",
-               "backbone_kwargs", "out_indices"}
+               "backbone_kwargs", "out_indices", "rgb_indices"}
 
 
 def _build_inputs(inputs, fusion, *, backbone, pretrained, channel_adapter, out_indices,
@@ -41,6 +41,7 @@ def _build_inputs(inputs, fusion, *, backbone, pretrained, channel_adapter, out_
                             in_channels=channels,
                             channel_adapter=cfg.get("channel_adapter", channel_adapter),
                             out_indices=cfg.get("out_indices", out_indices),
+                            rgb_indices=cfg.get("rgb_indices"),
                             **dict(cfg.get("backbone_kwargs", backbone_kwargs) or {}))
 
     if ftype == "early":

@@ -97,3 +97,43 @@ def test_does_not_mutate_input(rgb_weight):
     before = rgb_weight.clone()
     adapt_conv_weight(rgb_weight, 5, "repeat")
     torch.testing.assert_close(rgb_weight, before)
+
+
+S2_RGB = (3, 2, 1)  # Sentinel-2 band order B1..B12: B4=R, B3=G, B2=B
+
+
+@pytest.mark.parametrize("method", ["rgb_plus_random", "rgb_plus_zero"])
+def test_rgb_indices_place_filters_on_named_bands(rgb_weight, method):
+    w = adapt_conv_weight(rgb_weight, 13, method, rgb_indices=S2_RGB)
+    for c, idx in enumerate(S2_RGB):
+        torch.testing.assert_close(w[:, idx], rgb_weight[:, c])
+
+
+def test_rgb_indices_zero_model_equals_rgb_model_on_those_bands(rgb_weight):
+    w = adapt_conv_weight(rgb_weight, 13, "rgb_plus_zero", rgb_indices=S2_RGB)
+    x = torch.randn(2, 13, 9, 9)
+    torch.testing.assert_close(F.conv2d(x, w), F.conv2d(x[:, list(S2_RGB)], rgb_weight))
+
+
+@pytest.mark.parametrize("bad", [(0, 1), (0, 0, 1), (0, 1, 13)])
+def test_rgb_indices_validated(rgb_weight, bad):
+    with pytest.raises(ValueError, match="rgb_indices"):
+        adapt_conv_weight(rgb_weight, 13, "rgb_plus_zero", rgb_indices=bad)
+
+
+def test_projection_rgb_indices_identity_init():
+    from manyseg.adapters import ProjectionAdapter
+
+    p = ProjectionAdapter(13, 3, rgb_indices=S2_RGB)
+    x = torch.randn(1, 13, 4, 4)
+    torch.testing.assert_close(p(x), x[:, list(S2_RGB)])
+
+
+def test_backbone_passes_rgb_indices():
+    from manyseg.backbones import create_backbone
+
+    bb = create_backbone("resnet18", pretrained=False, in_channels=13,
+                         channel_adapter="rgb_plus_zero", rgb_indices=S2_RGB)
+    w = bb.stem_conv().weight
+    others = [i for i in range(13) if i not in S2_RGB]
+    assert w[:, others].abs().sum() == 0

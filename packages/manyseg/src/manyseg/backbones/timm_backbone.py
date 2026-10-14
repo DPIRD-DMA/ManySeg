@@ -103,6 +103,7 @@ class TimmBackbone(nn.Module):
         channel_adapter: How to adapt the RGB stem when ``in_channels != 3``; see
             :func:`manyseg.adapters.adapt_conv_weight` and :class:`ProjectionAdapter`.
         out_indices: Feature levels to return (timm ``out_indices``). Default: all.
+        rgb_indices: Input channels carrying R, G, B for ``rgb_plus_*`` / ``projection``.
         **timm_kwargs: Forwarded to ``timm.create_model`` (e.g. ``drop_path_rate``).
     """
 
@@ -113,6 +114,7 @@ class TimmBackbone(nn.Module):
         in_channels: int = 3,
         channel_adapter: str = "repeat",
         out_indices: Sequence[int] | None = None,
+        rgb_indices: Sequence[int] | None = None,
         **timm_kwargs,
     ) -> None:
         super().__init__()
@@ -150,12 +152,14 @@ class TimmBackbone(nn.Module):
         self.input_adapter: nn.Module = nn.Identity()
         if in_channels != stems[0][1].in_channels:
             if channel_adapter == "projection":
-                self.input_adapter = ProjectionAdapter(in_channels, stems[0][1].in_channels)
+                self.input_adapter = ProjectionAdapter(in_channels, stems[0][1].in_channels,
+                                                       rgb_indices=rgb_indices)
             else:
                 for _, stem in stems:
                     if stem.groups != 1:
                         raise ValueError("cannot adapt a grouped stem convolution")
-                    new_w = adapt_conv_weight(stem.weight, in_channels, channel_adapter)
+                    new_w = adapt_conv_weight(stem.weight, in_channels, channel_adapter,
+                                              rgb_indices=rgb_indices)
                     stem.weight = nn.Parameter(new_w.contiguous())
                     stem.in_channels = in_channels
 
