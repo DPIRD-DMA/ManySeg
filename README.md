@@ -78,6 +78,12 @@ out = model({"optical": optical, "sar": sar_at_half_resolution, "meta": meta})
 * **Decoders.** `unet` (parameter- and FLOP-identical to SMP's Unet), `unetplusplus`,
   `fastai_unet` (identical to fastai's DynamicUnet), `fpn`, `deeplabv3plus`, `upernet`,
   `segformer`. One decoder can be shared by all heads, or a head can have its own.
+* **Output resolution.** The U-Net-family decoders take `out_stride` 1 (default), 2 or 4. The
+  stages finer than that are not built: `fastai_unet` at stride 2 drops its full-resolution
+  stages, about 40% of its FLOPs. Pixel heads take `"scale"` 1, 1/2, 1/4 or 1/8 and return
+  `ceil(H·s) × ceil(W·s)`. They skip upsampling when the decoder stride already matches.
+  `manyseg.utils` has helpers for targets at head scale (label mode with `ignore_index`, area
+  mean, count-preserving sum), for upsampling predictions and for mapping coordinates.
 * **Fusion.** Early, intermediate (`concat`, `add`, `gated`, `attention`, `cross_attention`)
   and late, with shared or independent encoders and explicit `same_grid` / `same_extent`
   alignment.

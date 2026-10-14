@@ -244,6 +244,86 @@ line up exactly. ManySeg handles this explicitly:
   position embeddings) raise a clear error at construction or call time. They never silently
   resize.
 
+### Reduced output resolution
+
+Output resolution can be traded for speed and memory in two independent places.
+
+**Decoder `out_stride`** (`decoder_kwargs={"out_stride": s}` or a task decoder's config). The
+U-Net family (`unet`, `unetplusplus`, `fastai_unet`) accepts 1 (default), 2, 4, ... (a power of
+two below the deepest stride). Stages finer than `s` are not built, so they cost no parameters
+or FLOPs, and `out_spec.stride == s`. The reduced decoder is a strict prefix of the default:
+every kept module has the same name, shape and computation (state_dict keys are a subset).
+`out_stride=1` is the default, so `unet` stays identical to SMP's Unet and `fastai_unet` to
+fastai's DynamicUnet (bench parity tests). What is dropped:
+
+| decoder | `out_stride=2` drops | `out_stride=4` also drops |
+| --- | --- | --- |
+| `unet` | the last block (stride 2 → 1) | the block fusing the stride-2 skip |
+| `unetplusplus` | the tail block to stride 1 | the stride-2 row of nested nodes `X[0][*]` (10 → 6 nodes) |
+| `fastai_unet` | the final pixel shuffle, the input-image cross and the input-resolution residual block (`last_cross`) | the up-block fusing the stride-2 skip |
+
+Measured cost (ResNet-34, 512², 2 classes, `FlopCounterMode`; total model and change vs
+`out_stride=1`). FLOPs understate the saving: the dropped stages are the memory- and
+bandwidth-heaviest, so measure latency and memory too (E006).
+
+| decoder | `out_stride=1` | `out_stride=2` | `out_stride=4` |
+| --- | --- | --- | --- |
+| `unet` | 24.44 M, 62.6 GFLOPs | 24.43 M, 58.9 (−5.9%) | 24.38 M, 52.8 (−15.6%) |
+| `unetplusplus` | 25.77 M, 107.3 | 25.77 M, 103.6 (−3.4%) | 25.53 M, 72.1 (−32.8%) |
+| `fastai_unet` | 41.22 M, 252.1 | 41.01 M, 154.1 (−38.9%) | 40.63 M, 117.1 (−53.6%) |
+
+For reference, the stride-4 decoders cost 48.0 (`segformer`), 54.9 (`fpn`), 41.6
+(`deeplabv3plus`) and 143.9 (`upernet`) GFLOPs.
+
+(For encoders whose shallowest feature is stride 4, `fastai_unet` keeps the final pixel shuffle
+at `out_stride=2`: it is the step from stride 4 to 2. See the `fastai_unet` module docstring.)
+`fpn`, `deeplabv3plus`, `upernet` and `segformer` have a fixed stride (4 for usual encoders).
+They accept `out_stride` only if it equals that stride; anything else is a `ValueError`.
+
+**Head `scale`** (`{"type": ..., "channels": ..., "scale": s}`, pixel heads only; image heads
+reject it). `s` ∈ {1, 1/2, 1/4, 1/8}, default 1. With `f = 1/s`, a primary input of `H × W`
+gives an output of `ceil(H / f) × ceil(W / f)` (ceil, so every input pixel belongs to exactly
+one output pixel; floor would drop the last partial row and column). The head reads a decoder
+feature of stride `d`:
+
+* `d == f`: only the head conv runs. Nothing is resampled. This is the saving: a decoder with
+  `out_stride=4` feeding a `scale=1/4` head never touches full resolution.
+* `d > f`: conv, then bilinear upsampling by `d / f` (as for `scale=1`).
+* `d < f`: block-average by `f / d`, then the conv on the coarse grid.
+
+The model crops the head output to the scaled size of the *unpadded* primary input, so
+`pad_to_stride` keeps working (with `pad_to_stride=False` it resizes to that size instead).
+Multi-input models use the primary input's grid. Sizes are computed by floor division and
+crops are negative padding, so `torch.compile(dynamic=True)`, `torch.export` and ONNX keep
+dynamic H/W (tested).
+
+**Alignment.** Output pixel `(i, j)` of a head with `scale = 1/f` covers input pixels
+`[i·f, (i+1)·f) × [j·f, (j+1)·f)`. With pixel centres at integer coordinates, its centre is
+the input coordinate `(i + 0.5)·f − 0.5` (`manyseg.utils.to_input_coords`; the inverse is
+`to_output_coords`). A known-answer test (an area-averaging backbone with an identity head)
+checks that the output equals the input's block means, and gradient-centroid tests check
+every `out_stride` × `scale`. With `upsample="aligned"` the centroid is within
+`1.5 + (out_stride − 1)/2` px of the documented centre. The extra `(out_stride − 1)/2` is the
+encoder's own geometry: a "same"-padded strided conv centres feature `k` on input pixel
+`k·d`, not on its block centre (E001). Default nearest upsampling keeps its known up-left
+bias (about 6 px at init) at every stride.
+
+**Targets and predictions at head scale** (`manyseg.utils`, outside the model graph):
+
+| helper | for | rule |
+| --- | --- | --- |
+| `downsample_labels(y, s, ignore_index, mode="mode")` | class ids | majority per block; ignored pixels and padding never vote; all-ignored block → `ignore_index`; ties → lowest id. `mode="nearest"` takes the block-centre pixel. Pass `num_classes` to avoid device syncs. |
+| `downsample_mean(x, s, valid=None)` | continuous targets | mean over each block's in-image (and `valid`) pixels |
+| `downsample_sum(x, s)` | density targets | block sums, so the count is preserved |
+| `upsample_output(y, (H, W), s, mode)` | predictions | bilinear (logits, values) or nearest (labels, any dtype), cropped to `H × W` |
+
+Instance and point post-processing runs on the grid it is given. `find_peaks(hm, scale=s)`
+returns float input-pixel coordinates. `group_by_offsets` and `instances_from_outputs` return
+head-grid labels; map them back with `upsample_output(labels, (H, W), s, mode="nearest")`.
+`manyseg-bench` evaluates scaled heads at input resolution by upsampling the predictions, so
+arms with different scales are comparable. Semantic losses use mode-downsampled labels at
+head scale, and native-scale metrics are optional (`native_metrics=True`).
+
 ## Input channel adaptation
 
 ```python
