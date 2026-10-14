@@ -28,7 +28,7 @@ Status as of 2026-10-14 (afternoon update). ✅ done · 🔄 in progress · ⏳ 
 * ✅ Sen1Floods11 (S1 + S2 + DEM) multi-input dataset; `stack` vs `dict` input modes.
 * ✅ E003 (decoders on Pet): unet stays default; fastai_unet +0.4 test mIoU at 4× FLOPs; stride-4 decoders −0.4 to −1.1.
 * ✅ E001b (aligned upsampling, trained): no effect, a negative result; nearest stays default.
-* 🔄 GPU queue chain: E005 (fusion, running) → E004 (channel adapters) → E010 (instance heads, AI4Boundaries) → E011 (tree points, OAM-TCD) → E009 (metadata conditioning) → E006 (decoder Pareto, pre-registered; `queue6_pareto.sh` not launched).
+* 🔄 GPU queue chain: E005 (fusion, running) → E004 (channel adapters) → E010 (instance heads, AI4Boundaries) → E011 (tree points, OAM-TCD) → E009 (metadata conditioning). E006 (decoder Pareto, pre-registered) will run on Pawsey Setonix.
 * ✅ Datasets prepared: AI4Boundaries ortho (13 GB cache), OAM-TCD (CC-BY, 1024², ~22 GB cache).
 * ⏳ Profiling sweep (eager vs compile; fp32, bf16, fp16; batch sizes), on an idle GPU.
 * ⏳ CI workflow (CPU unit tests; slow tier nightly).
@@ -75,7 +75,7 @@ Candidate experiments. A budget is set before each one starts.
 | E001b | Does `aligned` upsampling improve trained mIoU or boundary F1? | 3 seeds × 3 modes, Pet + WHU |
 | E004 | Channel adapters on multispectral data (MADOS, Sen1Floods11 S2) | 5 adapters × 3 seeds |
 | E005 | Early vs intermediate vs late fusion on Sen1Floods11 (S1+S2) | 3 × 5 seeds |
-| E006 | Decoder Pareto front (accuracy vs FLOPs and latency): U-Net family at out_stride 1/2/4 vs stride-4 decoders, ResNet-34 + PVTv2-b1, Pet + Sen1Floods11. Pre-registered (`experiments/E006_decoder_pareto`, `queue6_pareto.sh`; not launched) | 36 runs at 1 seed, then 2 more seeds for ≤ 16 frontier configs (≤ 68 runs, about 9 GPU-h) |
+| E006 | Decoder Pareto front (accuracy vs FLOPs and latency): U-Net family at out_stride 1/2/4 vs stride-4 decoders, ResNet-34 + PVTv2-b2, Pet + Sen1Floods11. Pre-registered (`experiments/E006_decoder_pareto`); runs on Pawsey Setonix as Slurm arrays (`EMIT_TASKS`) | 36 runs at 1 seed, then 2 more seeds for ≤ 16 frontier configs (≤ 68 runs, about 9 GPU-h) |
 | E007 | Normalisation in the decoder (BN / GN / none + skip BN) at small batch sizes | 3 seeds |
 | E008 | bf16 / fp16 / int8 (torchao) accuracy loss vs speed | post-training, no training cost |
 | E009 | Does metadata conditioning (FiLM / channels) help flood mapping on held-out events, or does it only memorise events? Pre-registered; `queue3_metadata.sh` | 4 configs × 5 event folds × 3 seeds, plus 6 official-split runs |

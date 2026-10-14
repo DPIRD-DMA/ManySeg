@@ -31,7 +31,7 @@ uv run manyseg-bench train --provider manyseg --recipe smoke --set '{"epochs": 1
   --options '{"decoder_kwargs": {"out_stride": 2}}' --arch fastai_unet \
   --out "$MAIN/runs/preflight" --tag preflight-e006 || { echo "PREFLIGHT FAILED"; exit 1; }
 uv run manyseg-bench train --provider manyseg --recipe smoke --set '{"epochs": 1}' \
-  --dataset sen1floods11 --encoder pvt_v2_b1 --weights in1k --arch unet \
+  --dataset sen1floods11 --encoder pvt_v2_b2 --weights in1k --arch unet \
   --options '{"decoder_kwargs": {"out_stride": 4}}' \
   --out "$MAIN/runs/preflight" --tag preflight-e006-pvt || { echo "PREFLIGHT (PVT) FAILED"; exit 1; }
 echo "##### $E/run.sh STAGE=1 (code $SHA)"

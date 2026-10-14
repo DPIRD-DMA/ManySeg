@@ -16,12 +16,12 @@ mb() {
   else uv run manyseg-bench "$@"; fi
 }
 DATASETS="oxford_pet sen1floods11"
-ENCODERS="resnet34 pvt_v2_b1"
+ENCODERS="resnet34 pvt_v2_b2"
 # config = <arch>:<out_stride>; "native" = the decoder's own stride (4), no out_stride option
 CONFIGS="unet:1 unet:2 unet:4 fastai_unet:1 fastai_unet:2 fastai_unet:4 segformer:native
 fpn:native deeplabv3plus:native"
 
-weights() { case $1 in resnet34) echo tv_in1k ;; pvt_v2_b1) echo in1k ;; esac; }
+weights() { case $1 in resnet34) echo tv_in1k ;; pvt_v2_b2) echo in1k ;; esac; }
 set_for() { case $1 in
   oxford_pet) echo '{"epochs": 20}' ;;                        # as E003
   sen1floods11) echo '{"epochs": 60, "batch_size": 16}' ;;     # as E005 (stacked S1+S2)

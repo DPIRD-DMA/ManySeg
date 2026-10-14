@@ -1,9 +1,14 @@
 # E006: Decoder Pareto front, accuracy vs cost at reduced output resolution (pre-registered)
 
-Status: **planned** (registered 2026-10-14 before any run; not launched). Queue:
-`experiments/queue6_pareto.sh`, which runs after `queue3` (E009), the last queue in the local
-chain. The same arms can go to Pawsey as a Slurm array with `EMIT_TASKS=<file> STAGE=1 bash
-run.sh`.
+Status: **planned** (registered 2026-10-14 before any run; not launched). It will run on
+Pawsey Setonix as Slurm arrays (`scripts/setonix/`). Stage 1 is emitted with
+`EMIT_TASKS=<file> STAGE=1 bash run.sh`. Stage 2 is emitted with `EMIT_TASKS=<file> STAGE=2
+FRONTIER=<frontier.txt> bash run.sh` after `analyse.py --write-frontier` has applied the
+selection rule below to the stage-1 results. `experiments/queue6_pareto.sh` is a local
+alternative and will not be launched.
+
+Amendment (2026-10-14, before any run): the transformer encoder is `pvt_v2_b2` instead of
+`pvt_v2_b1`. Its size (about 25 M encoder parameters) is closer to ResNet-34's.
 
 ## Questions
 1. How much accuracy does each U-Net-family decoder lose when it stops at stride 2 or 4
@@ -23,9 +28,11 @@ mIoU is dominated by object interiors. The hypothesis is checked separately in e
 4 cells (dataset × encoder) by `analyse.py`.
 
 ## Protocol
-* Code: the `feature/reduced-resolution` merge, run from a frozen worktree (queue6).
-* Encoders: `resnet34` (`tv_in1k`) and `pvt_v2_b1` (`in1k`; hierarchical transformer, strides
-  4–32, dynamic sizes and export OK in `docs/backbone_compatibility.md`).
+* Code: the `feature/reduced-resolution` merge, at one recorded commit for every run.
+* Encoders: `resnet34` (`tv_in1k`) and `pvt_v2_b2` (timm `pvt_v2_b2.in1k`; hierarchical
+  transformer, strides 4–32). Its family (`pvt_v2_b1`) builds at any size and exports
+  dynamically per `docs/backbone_compatibility.md`, and every E006 arm builds with `b2` at 3
+  and 15 channels.
 * Datasets and recipes (unchanged from earlier experiments, `fastai_like`):
   * Oxford Pet 256², 20 epochs (as E003).
   * Sen1Floods11 stacked S1+S2 (15 channels, `--dataset sen1floods11`), 60 epochs, batch 16,
@@ -59,12 +66,13 @@ mIoU is dominated by object interiors. The hypothesis is checked separately in e
 ## Budget
 * Stage 1: 36 runs. Stage 2: at most 16 configs × 2 seeds = 32 runs. Profile: 36 calls.
 * Estimate from E003/E005 throughput: about 4 h + 3.5 h + 1 h, so about 9 GPU-hours on the
-  shared 4090 (PVT and `fastai_unet` arms are the slow ones). Hard cap: 68 training runs and
+  shared 4090, less on Setonix (PVT and `fastai_unet` arms are the slow ones). Hard cap: 68 training runs and
   10 GPU-hours. No additional arms, epochs or hyper-parameter tuning.
 
 ## Stopping rule
-* The preflight in `queue6_pareto.sh` fails (reduced `fastai_unet`, PVT weights,
-  Sen1Floods11): stop and fix. No partial grid is started.
+* A smoke run of each new ingredient fails (reduced `fastai_unet`, PVT weights,
+  Sen1Floods11; see the preflight in `queue6_pareto.sh`): stop and fix. No partial grid is
+  started.
 * A run that fails is retried once. If it fails again it is reported as failed and its
   config is excluded from the frontier for that cell (no substitution).
 * Stage 2 runs only the configs listed by the pre-registered selection. The experiment ends
