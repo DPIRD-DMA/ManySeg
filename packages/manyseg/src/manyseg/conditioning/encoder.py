@@ -21,6 +21,7 @@ from collections.abc import Mapping
 import torch
 from torch import Tensor, nn
 
+from ..registry import check_module_names
 from .fields import ContinuousField, build_field
 
 
@@ -45,6 +46,7 @@ class MetadataEncoder(nn.Module):
         if fields is not None:
             if not fields:
                 raise ValueError("'fields' must not be empty")
+            check_module_names("field", fields)
             built = {n: build_field(cfg) for n, cfg in fields.items()}
         else:
             if channels < 1:

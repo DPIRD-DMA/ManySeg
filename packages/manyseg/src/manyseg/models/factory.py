@@ -12,6 +12,7 @@ from ..backbones import TimmBackbone
 from ..decoders import DECODERS
 from ..features import FeatureSpec
 from ..heads import create_head
+from ..registry import check_module_names
 from .dense import DenseModel
 
 FUSION_TYPES = ("early", "intermediate", "late")
@@ -96,6 +97,10 @@ def create_model(
     """
     if (num_classes is None) == (heads is None):
         raise ValueError("pass exactly one of num_classes= or heads=")
+    if heads is not None:
+        check_module_names("head", heads)
+    if inputs is not None:
+        check_module_names("input", inputs)
     if inputs is not None:
         from ..conditioning.build import build_conditioned_model, has_kinds
 
