@@ -17,7 +17,8 @@ Layout on Setonix (`$MANYSEG_ROOT`): `code/<sha>/` (frozen snapshots via
 5. Submit: `sbatch --array=1-N%K manyseg_array.sbatch $ROOT/tasks.txt <sha>` (1 GCD per task).
 6. Copy results back: `rsync $HOST:$ROOT/experiments/<E>/runs/ experiments/<E>/runs/`.
 
-Gotchas found on 2026-10-14: the module's `pytorch-shell` wrapper is an interactive shell and
+Gotchas found on 2026-10-14: memory-mapped reads on Lustre page-fault at ~0.4 MB/s, so each task stages its
+dataset cache onto node-local NVMe (`/tmp`, 3.5 TB per node) before training; the module's `pytorch-shell` wrapper is an interactive shell and
 silently ignores scripts (exit 0, no output), so use `singularity exec`. `cudnn.benchmark` triggers an
 exhaustive MIOpen search per conv shape, hence `MIOPEN_FIND_MODE=FAST`. Results are on MI250X
 with torch 2.7.1/ROCm 6.3; compare arms only within one machine (each experiment runs entirely
