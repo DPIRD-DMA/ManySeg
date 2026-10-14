@@ -5,7 +5,13 @@ RECIPE=${RECIPE:-fastai_like}
 OUT=${OUT_ROOT:-.}/experiments/E009_metadata_conditioning/runs
 SET='{"epochs": 60, "batch_size": 16}'
 FUSION='"fusion": {"type": "intermediate", "op": "concat"}'
-run() { echo "=== $*"; uv run manyseg-bench train --provider manyseg --input-mode dict \
+# EMIT_TASKS=<file>: append each run's manyseg-bench arguments (shell-quoted, one run per line)
+# instead of running it; used to submit the same arms as Slurm arrays (scripts/setonix/).
+mb() {
+  if [ -n "${EMIT_TASKS:-}" ]; then printf '%q ' "$@" >> "$EMIT_TASKS"; echo >> "$EMIT_TASKS"
+  else uv run manyseg-bench "$@"; fi
+}
+run() { echo "=== $*"; mb train --provider manyseg --input-mode dict \
           --recipe "$RECIPE" --set "$SET" --out "$OUT" --evaluate-test "$@" || echo "FAILED $*"; }
 for fold in 0 1 2 3 4; do
   for seed in 0 1 2; do

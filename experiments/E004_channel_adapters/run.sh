@@ -4,7 +4,13 @@ export MANYSEG_BENCH_DATA="$MANYSEG_BENCH_DATA"
 RECIPE=${RECIPE:?set RECIPE}
 OUT=${OUT_ROOT:-.}/experiments/E004_channel_adapters/runs
 SET='{"epochs": 60, "batch_size": 16, "eval_every": 10}'
-run() { echo "=== $*"; uv run manyseg-bench train --provider manyseg --dataset sen1floods11_s2 \
+# EMIT_TASKS=<file>: append each run's manyseg-bench arguments (shell-quoted, one run per line)
+# instead of running it; used to submit the same arms as Slurm arrays (scripts/setonix/).
+mb() {
+  if [ -n "${EMIT_TASKS:-}" ]; then printf '%q ' "$@" >> "$EMIT_TASKS"; echo >> "$EMIT_TASKS"
+  else uv run manyseg-bench "$@"; fi
+}
+run() { echo "=== $*"; mb train --provider manyseg --dataset sen1floods11_s2 \
           --recipe "$RECIPE" --set "$SET" --out "$OUT" --evaluate-test "$@" || echo "FAILED $*"; }
 RGB='"backbone_kwargs": {"rgb_indices": [3, 2, 1]}'
 for seed in 0 1 2; do
