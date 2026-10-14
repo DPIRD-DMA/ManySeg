@@ -135,3 +135,26 @@ def test_runner_passes_label_smoothing_to_semantic_task(tmp_path, monkeypatch):
                  device="cpu", out_dir=tmp_path / "runs", data=tmp_path,
                  recipe_overrides={"precision": "fp32", "label_smoothing": 0.1})
     assert seen["ls"] == 0.1
+
+
+def test_cpu_storage_yields_identical_batches():
+    """device_resident=False (memmap-friendly) must give exactly the same batches."""
+    imgs, masks = synthetic(n=10)
+    kw = dict(batch_size=4, mean=(0.5,) * 3, std=(0.25,) * 3, device=torch.device("cpu"),
+              seed=5)
+    for is_train in (True, False):
+        a = list(GPULoader(imgs, masks, train=is_train, **kw))
+        b = list(GPULoader(imgs, masks, train=is_train, device_resident=False, **kw))
+        assert len(a) == len(b)
+        for (xa, ya), (xb, yb) in zip(a, b):
+            assert torch.equal(xa, xb) and torch.equal(ya, yb)
+
+
+def test_instance_id_masks_survive_augmentation():
+    """Large integer ids (int32 masks) pass through nearest resampling exactly."""
+    imgs, _ = synthetic(n=4)
+    ids = np.zeros((4, 64, 64), np.int32)
+    ids[:, 10:30, 10:30] = 70000
+    ids[:, 40:60, 5:25] = 123
+    for _, y in GPULoader(imgs, ids, 2, (0.5,) * 3, (0.25,) * 3, torch.device("cpu"), True):
+        assert set(y.unique().tolist()) <= {0, 123, 70000}

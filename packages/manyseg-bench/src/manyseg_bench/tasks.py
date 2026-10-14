@@ -179,8 +179,10 @@ class PointTask(Task):
             offset_targets,
         )
 
+        ignore = y < 0  # e.g. OAM-TCD canopy groups: no individual-tree labels
+        y = y.clamp(min=0)
         pts = [torch.floor(c + 0.5) for c, _ in centers_from_instances(y)]
-        t = {"points": pts, "instances": y}
+        t = {"points": pts, "instances": y, "valid": ~ignore[:, None]}
         if self.density:
             t["density"] = density_map(pts, tuple(y.shape[-2:]), self.sigma)
         else:
@@ -190,11 +192,15 @@ class PointTask(Task):
         return t
 
     def loss(self, out, t):
+        valid = t["valid"]
         if self.density:
-            return losses.masked_regression(out["density"] * 1.0,
-                                            t["density"] * self.density_scale, kind="mse")
-        hm = (losses.heatmap_focal(out["heatmap"], t["heatmap"]) if self.kind == "segmentation"
-              else losses.masked_regression(out["heatmap"], t["heatmap"], kind="mse"))
+            return losses.masked_regression(out["density"], t["density"] * self.density_scale,
+                                            valid, kind="mse")
+        if self.kind == "segmentation":
+            hm = losses.heatmap_focal(out["heatmap"].masked_fill(~valid, -20.0),
+                                      t["heatmap"])
+        else:
+            hm = losses.masked_regression(out["heatmap"], t["heatmap"], valid, kind="mse")
         if self.offsets:
             hm = hm + losses.masked_regression(out["offset"], t["offset"],
                                                (t["instances"] > 0)[:, None], kind="l1")
@@ -217,11 +223,12 @@ class _PointEval:
         self.n += y.shape[0]
         gt_counts = torch.tensor([float(len(p)) for p in t["points"]])
         if self.t.density:
-            self.cm.update(count_from_density(out["density"].float()).cpu()
+            self.cm.update(count_from_density(out["density"].float() * t["valid"]).cpu()
                            / self.t.density_scale, gt_counts)
             return
         hm = out["heatmap"].float()
         hm = hm.sigmoid() if self.t.kind == "segmentation" else hm
+        hm = hm * t["valid"]  # no detections inside ignore regions
         peaks = find_peaks(hm, self.t.peak_threshold)
         for (p, _), g in zip(peaks, t["points"]):
             self.pm.update(p.float(), g)

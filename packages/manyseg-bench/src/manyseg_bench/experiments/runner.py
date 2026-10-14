@@ -72,7 +72,9 @@ def run_training(
     if spec.input_mode == "dict" and not prov.supports_dict_inputs:
         raise ValueError(f"provider {provider!r} does not support dict inputs; "
                          "use input_mode='stack'")
-    train_split = _select(load_split(cache, "train", mmap=False), info)
+    # Datasets too large for the (shared) GPU stay memory-mapped on the host.
+    mmap = not info_loader_kwargs(ds).get("device_resident", True)
+    train_split = _select(load_split(cache, "train", mmap=mmap), info)
     img_size = tuple(train_split.masks.shape[1:3])
     built = prov.build(spec, img_size=img_size)
 
@@ -80,7 +82,7 @@ def run_training(
     common = dict(mean=mean, std=std, device=dev, stack=stack, **info_loader_kwargs(ds))
     train_loader = GPULoader(train_split.images, train_split.masks, rec.batch_size, train=True,
                              seed=seed, **common)
-    val = _select(load_split(cache, "val", mmap=False), info)
+    val = _select(load_split(cache, "val", mmap=mmap), info)
     eval_bs = getattr(ds, "EVAL_BATCH_SIZE", 32)
     val_loader = GPULoader(val.images, val.masks, eval_bs, train=False, **common)
 
@@ -110,7 +112,7 @@ def run_training(
     }
     if evaluate_test:
         for split in info.test_splits:
-            test = _select(load_split(cache, split, mmap=False), info)
+            test = _select(load_split(cache, split, mmap=mmap), info)
             test_loader = GPULoader(test.images, test.masks, eval_bs, train=False, **common)
             record[split] = evaluate(built.model, test_loader, info.num_classes, dev,
                                      rec.precision, info.ignore_index, task=task)

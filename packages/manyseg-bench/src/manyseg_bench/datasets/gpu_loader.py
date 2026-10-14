@@ -41,20 +41,25 @@ class GPULoader:
         vflip: bool = False,
         drop_last: bool | None = None,
         stack: bool = True,
+        device_resident: bool = True,
     ) -> None:
         self.multi = isinstance(images, Mapping)
         imgs = dict(images) if self.multi else {"image": images}
         means = dict(mean) if self.multi else {"image": mean}
         stds = dict(std) if self.multi else {"image": std}
         self.names = list(imgs)
-        self.images = {k: _to_device(v, device) for k, v in imgs.items()}  # N,H,W,C
+        self.device_resident = device_resident
+        if device_resident:
+            self.images = {k: _to_device(v, device) for k, v in imgs.items()}  # N,H,W,C
+        else:  # keep (possibly memory-mapped) arrays on the host; move batches on demand
+            self.images = dict(imgs)
         self.channels = {k: v.shape[-1] for k, v in self.images.items()}
         self.mean, self.std = {}, {}
         for k, v in self.images.items():
-            unit = 255.0 if v.dtype == torch.uint8 else 1.0
+            unit = 255.0 if v.dtype in (torch.uint8, np.uint8) else 1.0
             self.mean[k] = torch.tensor(means[k], device=device).view(1, -1, 1, 1) * unit
             self.std[k] = torch.tensor(stds[k], device=device).view(1, -1, 1, 1) * unit
-        self.masks = _to_device(masks, device)
+        self.masks = _to_device(masks, device) if device_resident else masks
         self.n = self.masks.shape[0]
         self.bs = batch_size
         self.train = train
@@ -64,6 +69,18 @@ class GPULoader:
         self.scale, self.ratio, self.hflip, self.vflip = scale, ratio, hflip, vflip
         self.drop_last = train if drop_last is None else drop_last
         self.stack = stack
+
+    def _fetch(self, idx: Tensor):
+        if self.device_resident:
+            idx = idx.to(self.device)
+            return {k: self.images[k][idx] for k in self.names}, self.masks[idx].long()
+        # Sorted reads are faster on memory-mapped files; restore the requested order after.
+        sidx, inv = torch.sort(idx)
+        npi = sidx.numpy()
+        imgs = {k: _to_device(np.asarray(self.images[k][npi]), self.device)[inv]
+                for k in self.names}
+        y = _to_device(np.asarray(self.masks[npi]), self.device)[inv].long()
+        return imgs, y
 
     def __len__(self) -> int:
         return self.n // self.bs if self.drop_last else math.ceil(self.n / self.bs)
@@ -97,13 +114,13 @@ class GPULoader:
     def __iter__(self):
         order = torch.randperm(self.n, generator=self.gen) if self.train else torch.arange(self.n)
         for b in range(len(self)):
-            idx = order[b * self.bs:(b + 1) * self.bs].to(self.device)
+            idx = order[b * self.bs:(b + 1) * self.bs]
+            imgs, y = self._fetch(idx)
             parts = [
-                (self.images[k][idx].permute(0, 3, 1, 2).float() - self.mean[k]) / self.std[k]
+                (imgs[k].permute(0, 3, 1, 2).float() - self.mean[k]) / self.std[k]
                 for k in self.names
             ]
             x = torch.nan_to_num(torch.cat(parts, dim=1))
-            y = self.masks[idx].long()
             if self.train:
                 x, y = self._augment(x, y)
             if self.multi and not self.stack:

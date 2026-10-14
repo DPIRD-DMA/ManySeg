@@ -71,3 +71,20 @@ def test_extent_only_instance_task_uses_connected_components():
     res = train(b.model, b.encoder_params, b.decoder_params, tr, va, num_classes=1, recipe=rec,
                 device=torch.device("cpu"), task=task, log=lambda *_: None)
     assert "pq" in res["final_val"]
+
+
+def test_point_task_ignores_negative_label_regions():
+    """Pixels with y < 0 (e.g. OAM-TCD canopy groups) carry no loss and drop predicted peaks."""
+    task = PointTask()
+    y = torch.zeros(1, 32, 32, dtype=torch.long)
+    y[0, 4:10, 4:10] = 1
+    y[0, 16:30, 16:30] = -1
+    t = task.targets(y)
+    assert len(t["points"][0]) == 1
+    out = {"heatmap": t["heatmap"].clone()}
+    out["heatmap"][0, 0, 20:26, 20:26] = 5.0  # garbage inside the ignore region
+    assert task.loss(out, t) == pytest.approx(0.0, abs=1e-6)
+    ev = task.evaluator()
+    ev.update(out, y)
+    r = ev.compute()
+    assert r["fp"] == 0 and r["tp"] == 1

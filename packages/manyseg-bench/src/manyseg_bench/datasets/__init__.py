@@ -1,8 +1,9 @@
-from . import oxford_pet, sen1floods11
+from . import ai4boundaries, oam_tcd, oxford_pet, sen1floods11
 from .base import DatasetInfo, Split, data_root, load_split
 from .gpu_loader import GPULoader
 
-DATASETS = {"oxford_pet": oxford_pet, "sen1floods11": sen1floods11}
+DATASETS = {"oxford_pet": oxford_pet, "sen1floods11": sen1floods11, "oam_tcd": oam_tcd,
+            "ai4boundaries": ai4boundaries}
 
 
 class _Variant:
