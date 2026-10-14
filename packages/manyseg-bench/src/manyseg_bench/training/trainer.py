@@ -10,10 +10,8 @@ from contextlib import nullcontext
 
 import numpy as np
 import torch
-import torch.nn.functional as F
 from torch import nn
 
-from ..evaluation import ConfusionMatrix, boundary_f1
 from .recipe import Recipe
 
 _DTYPES = {"fp32": None, "bf16": torch.bfloat16, "fp16": torch.float16}
@@ -78,24 +76,17 @@ def lr_factor(step: int, total: int, warmup: int, schedule: str) -> float:
 
 @torch.no_grad()
 def evaluate(model: nn.Module, loader, num_classes: int, device: torch.device,
-             precision: str = "bf16", ignore_index: int | None = None) -> dict:
+             precision: str = "bf16", ignore_index: int | None = None, task=None) -> dict:
+    from ..tasks import SemanticTask
+
+    task = task or SemanticTask(num_classes, ignore_index)
     model.eval()
-    cm = ConfusionMatrix(num_classes, ignore_index, device=device)
-    bf1_sum, n_img, loss_sum = 0.0, 0, 0.0
+    ev = task.evaluator()
     for x, y in loader:
         with autocast(device, precision):
-            logits = model(x)
-        logits = logits.float()
-        loss_sum += float(F.cross_entropy(logits, y, ignore_index=ignore_index
-                                          if ignore_index is not None else -100, reduction="sum"))
-        pred = logits.argmax(1)
-        cm.update(pred, y)
-        bf1_sum += float(boundary_f1(pred, y, ignore_index=ignore_index).sum())
-        n_img += y.shape[0]
-    out = cm.compute()
-    out["boundary_f1"] = bf1_sum / max(1, n_img)
-    out["loss"] = loss_sum / max(1, n_img * y.shape[-1] * y.shape[-2])
-    return out
+            out = model(x)
+        ev.update(out, y)
+    return ev.compute()
 
 
 def train(
@@ -110,10 +101,14 @@ def train(
     device: torch.device,
     ignore_index: int | None = None,
     log=None,
+    task=None,
 ) -> dict:
     """Train ``model`` and return history. Selection metric: last epoch (no early stopping,
     so every provider gets the same budget); best-epoch val is reported for information."""
+    from ..tasks import SemanticTask
+
     log = log or functools.partial(print, flush=True)
+    task = task or SemanticTask(num_classes, ignore_index, recipe.label_smoothing)
     model = model.to(device)
     if recipe.channels_last:
         model = model.to(memory_format=torch.channels_last)
@@ -123,7 +118,6 @@ def train(
     total = steps_per_epoch * recipe.epochs
     warmup = int(recipe.warmup_epochs * steps_per_epoch)
     scaler = torch.amp.GradScaler(enabled=recipe.precision == "fp16")
-    ce_ignore = ignore_index if ignore_index is not None else -100
 
     history, step = [], 0
     t_start = time.perf_counter()
@@ -142,9 +136,8 @@ def train(
                 g["lr"] = g["base_lr"] * f
             opt.zero_grad(set_to_none=True)
             with autocast(device, recipe.precision):
-                logits = run(x)
-            loss = F.cross_entropy(logits.float(), y, ignore_index=ce_ignore,
-                                   label_smoothing=recipe.label_smoothing)
+                out = run(x)
+            loss = task.loss(out, task.targets(y))
             if not torch.isfinite(loss):
                 nonfinite += 1
                 step += 1
@@ -165,18 +158,23 @@ def train(
                "encoder_frozen": frozen}
         if (epoch + 1) % recipe.eval_every == 0 or epoch + 1 == recipe.epochs:
             rec["val"] = evaluate(run, val_loader, num_classes, device, recipe.precision,
-                                  ignore_index)
+                                  ignore_index, task=task)
+            pm = task.primary_metric
+            name = "mIoU" if pm == "miou" else pm
             log(f"epoch {epoch + 1}/{recipe.epochs} loss {rec['train_loss']:.4f} "
-                f"val mIoU {rec['val']['miou']:.4f} ({rec['epoch_time_s']:.1f}s)")
+                f"val {name} {rec['val'][pm]:.4f} ({rec['epoch_time_s']:.1f}s)")
         history.append(rec)
     for p in enc_params:
         p.requires_grad_(True)
     evals = [h for h in history if "val" in h]
-    best = max(evals, key=lambda h: h["val"]["miou"])
+    pm, sign = task.primary_metric, (1 if task.higher_is_better else -1)
+    best = max(evals, key=lambda h: sign * h["val"][pm])
     return {
         "history": history,
+        "task": task.name,
+        "primary_metric": pm,
         "final_val": evals[-1]["val"],
-        "best_val_miou": best["val"]["miou"],
+        f"best_val_{pm}": best["val"][pm],
         "best_epoch": best["epoch"],
         "train_time_s": time.perf_counter() - t_start,
         "peak_train_mem_mib": (torch.cuda.max_memory_allocated(device) / 2**20

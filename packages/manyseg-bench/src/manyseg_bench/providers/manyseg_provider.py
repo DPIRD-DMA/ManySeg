@@ -22,6 +22,7 @@ class ManySegProvider(Provider):
         if spec.weights is not None:
             backbone = f"{spec.encoder}.{_TIMM_TAGS.get(spec.weights, spec.weights)}"
         opts = dict(spec.options)
+        n_cls = None if "heads" in opts else spec.num_classes
         if spec.input_mode == "dict" and spec.inputs:
             inputs = {n: {"channels": c} for n, c in spec.inputs.items()}
             for n, extra in opts.pop("input_options", {}).items():
@@ -29,14 +30,14 @@ class ManySegProvider(Provider):
             opts.setdefault("fusion", {"type": "intermediate"})
             model = create_model(backbone=backbone, pretrained=spec.weights is not None,
                                  inputs=inputs, decoder=spec.arch,
-                                 num_classes=spec.num_classes, **opts)
+                                 num_classes=n_cls, **opts)
         else:
             model = create_model(
                 backbone=backbone,
                 pretrained=spec.weights is not None,
                 in_channels=spec.in_channels,
                 decoder=spec.arch,
-                num_classes=spec.num_classes,
+                num_classes=n_cls,
                 **opts,
             )
         # Pretrained encoders only: fusion ops / necks count as decoder-side parameters.

@@ -77,7 +77,11 @@ def main(argv=None) -> int:
                              save_model=a.save_model)
             extra = "".join(f" {s} mIoU {r[s]['miou']:.4f}" for s in r["dataset"]["test_splits"]
                             if s in r)
-            print(f"{r['path']}: final val mIoU {r['final_val']['miou']:.4f}{extra}", flush=True)
+            pm = r.get("primary_metric", "miou")
+            extra = "".join(f" {s} {pm} {r[s][pm]:.4f}" for s in r["dataset"]["test_splits"]
+                            if s in r) if pm != "miou" else extra
+            name = "mIoU" if pm == "miou" else pm
+            print(f"{r['path']}: final val {name} {r['final_val'][pm]:.4f}{extra}", flush=True)
     elif a.cmd == "profile":
         import time
         import uuid

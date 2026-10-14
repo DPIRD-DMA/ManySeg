@@ -13,6 +13,7 @@ from ..datasets import GPULoader, data_root, get_dataset, load_split
 from ..datasets.base import load_meta
 from ..env import environment, gpu_contention
 from ..providers import ModelSpec, get_provider
+from ..tasks import build_task
 from ..training import evaluate, get_recipe, seed_everything, train
 
 
@@ -56,6 +57,13 @@ def run_training(
 
     seed_everything(seed)
     torch.backends.cudnn.benchmark = True
+    task = build_task(getattr(ds, "TASK", "semantic"), info.num_classes, info.ignore_index,
+                      **getattr(ds, "TASK_KWARGS", {}))
+    if task.heads() is not None:
+        if provider != "manyseg":
+            raise ValueError(f"task {task.name!r} needs named heads; provider {provider!r} "
+                             "only produces a single logits tensor")
+        spec = ModelSpec(**{**spec.to_dict(), "options": {**spec.options, "heads": task.heads()}})
     prov = get_provider(provider)
     if spec.input_mode == "dict" and not prov.supports_dict_inputs:
         raise ValueError(f"provider {provider!r} does not support dict inputs; "
@@ -77,7 +85,7 @@ def run_training(
         torch.cuda.reset_peak_memory_stats(dev)
     result = train(built.model, built.encoder_params, built.decoder_params, train_loader,
                    val_loader, num_classes=info.num_classes, recipe=rec, device=dev,
-                   ignore_index=info.ignore_index)
+                   ignore_index=info.ignore_index, task=task)
     record = {
         "run_id": f"{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}",
         "kind": "train",
@@ -100,7 +108,7 @@ def run_training(
             test = _select(load_split(cache, split, mmap=False), info)
             test_loader = GPULoader(test.images, test.masks, eval_bs, train=False, **common)
             record[split] = evaluate(built.model, test_loader, info.num_classes, dev,
-                                     rec.precision, info.ignore_index)
+                                     rec.precision, info.ignore_index, task=task)
             del test, test_loader
     if save_model:
         import hashlib

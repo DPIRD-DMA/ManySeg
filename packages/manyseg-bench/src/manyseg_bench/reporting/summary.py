@@ -42,15 +42,18 @@ def training_table(runs: list[dict]) -> str:
         if r.get("kind") == "train":
             groups[group_key(r)].append(r)
     lines = ["| dataset | recipe | provider | arch | encoder | options | tag | n | params (M) | "
-             "val mIoU (final) | val boundary F1 | test mIoU | train time (s) | fingerprint |",
+             "val primary (final) | val boundary F1 | test primary | train time (s) | "
+             "fingerprint |",
              "|" + "---|" * 14]
     for k, rs in sorted(groups.items()):
         fps = sorted({r["weights_fingerprint"] for r in rs})
-        tests = [r["test"]["miou"] for r in rs if "test" in r]
+        pm = rs[0].get("primary_metric", "miou")
+        tests = [r["test"][pm] for r in rs if "test" in r]
         lines.append(
             f"| {k[0]} | {k[1]} | {k[2]} | {k[3]} | {k[4]} | {k[5]} | {k[6]} | {len(rs)} | "
-            f"{rs[0]['params'] / 1e6:.2f} | {_ms([r['final_val']['miou'] for r in rs])} | "
-            f"{_ms([r['final_val']['boundary_f1'] for r in rs])} | {_ms(tests)} | "
+            f"{rs[0]['params'] / 1e6:.2f} | {pm}: {_ms([r['final_val'][pm] for r in rs])} | "
+            f"{_ms([r['final_val'].get('boundary_f1', float('nan')) for r in rs])} | "
+            f"{_ms(tests)} | "
             f"{statistics.mean(r['train_time_s'] for r in rs):.0f} | {','.join(fps)} |")
     return "\n".join(lines)
 
