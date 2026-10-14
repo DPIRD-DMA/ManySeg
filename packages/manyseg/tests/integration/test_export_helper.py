@@ -39,3 +39,17 @@ def test_export_rejects_too_small_example():
     model = create_model(backbone="resnet18", pretrained=False, num_classes=2).eval()
     with pytest.raises(ValueError, match="at least"):
         export_model(model, torch.randn(1, 3, 32, 32))
+
+
+@pytest.mark.parametrize("decoders", [None, "separate"])
+def test_export_instance_preset(decoders):
+    """Instance heads export; post-processing stays outside the graph (documented)."""
+    from manyseg.instances import instance_heads
+
+    model = create_model(backbone="resnet18", pretrained=False,
+                         heads=instance_heads(decoders=decoders)).eval()
+    ep = export_model(model, torch.randn(1, 3, 64, 96))
+    x = torch.randn(1, 3, 97, 131)
+    ref = model(x)
+    for k, v in ep.module()(x).items():
+        torch.testing.assert_close(v, ref[k], atol=1e-4, rtol=1e-4)

@@ -12,7 +12,9 @@ dependencies = [
 
 [project.optional-dependencies]
 onnx = ["onnx>=1.16", "onnxscript>=0.1"]
-test = ["pytest>=8", "pytest-xdist>=3", "onnx>=1.16", "onnxscript>=0.1", "onnxruntime>=1.18"]
+instances = ["scipy>=1.10", "scikit-image>=0.22"]
+test = ["pytest>=8", "pytest-xdist>=3", "onnx>=1.16", "onnxscript>=0.1", "onnxruntime>=1.18",
+        "scipy>=1.10", "scikit-image>=0.22"]
 
 [build-system]
 requires = ["hatchling"]
