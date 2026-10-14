@@ -273,11 +273,17 @@ class PointTask(Task):
 
     def __init__(self, offsets: bool = False, density: bool = False, sigma: float = 2.0,
                  heatmap: str = "regression", radius: float = 3.0, peak_threshold: float = 0.5,
+                 calibrate: bool = False,
+                 thresholds: tuple[float, ...] = (0.05, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5, 0.6,
+                                                  0.7),
                  density_scale: float = 100.0, head_scale: float = 1, decoders=None) -> None:
         self.offsets, self.density, self.sigma, self.kind = offsets, density, sigma, heatmap
         self.head_scale, self.decoders = head_scale, decoders
         _with_scale({}, head_scale)  # validate early
         self.radius, self.peak_threshold, self.density_scale = radius, peak_threshold, density_scale
+        # calibrate=True: evaluation also scores a grid of peak thresholds; the runner picks
+        # the best on *val* and evaluates test at that single threshold (E011 follow-up).
+        self.calibrate, self.thresholds = calibrate, tuple(sorted(thresholds))
         self.primary_metric = "mae" if density else "f1"
         self.higher_is_better = not density
 
@@ -355,7 +361,9 @@ class PointTask(Task):
         nt = self.head_targets(out, t) if nt is None else nt
         hm = out["heatmap"].float()
         hm = hm.sigmoid() if self.kind == "segmentation" else hm
-        return find_peaks(hm * nt["valid"], self.peak_threshold, scale=1 / f)
+        thr = min(self.peak_threshold, *self.thresholds) if self.calibrate else \
+            self.peak_threshold
+        return find_peaks(hm * nt["valid"], thr, scale=1 / f)
 
     def evaluator(self):
         return _PointEval(self)
@@ -365,6 +373,8 @@ class _PointEval:
     def __init__(self, task: PointTask) -> None:
         self.t, self.pm, self.cm, self.loss, self.n = task, PointMetrics(task.radius), \
             CountMetrics(), 0.0, 0
+        self.grid = {thr: PointMetrics(task.radius) for thr in task.thresholds} \
+            if task.calibrate else {}
 
     def update(self, out, y) -> None:
         from manyseg.points import count_from_density
@@ -378,13 +388,22 @@ class _PointEval:
             self.cm.update(count_from_density(out["density"].float() * nt["weight"]).cpu()
                            / self.t.density_scale, gt_counts)
             return
-        peaks = self.t.find_points(out, t, nt)  # input-pixel coordinates
-        for (p, _), g in zip(peaks, t["points"]):
-            self.pm.update(p.float(), g)
-        self.cm.update(torch.tensor([float(len(p)) for p, _ in peaks]), gt_counts)
+        peaks = self.t.find_points(out, t, nt)  # input-pixel coordinates (lowest grid threshold)
+        thr = self.t.peak_threshold
+        for (p, s), g in zip(peaks, t["points"]):
+            self.pm.update(p[s >= thr].float(), g)
+            for gthr, pm in self.grid.items():
+                pm.update(p[s >= gthr].float(), g)
+        self.cm.update(torch.tensor([float((s >= thr).sum()) for _, s in peaks]), gt_counts)
 
     def compute(self) -> dict:
-        return {**self.pm.compute(), **self.cm.compute(), "loss": self.loss / max(1, self.n)}
+        out = {**self.pm.compute(), **self.cm.compute(), "loss": self.loss / max(1, self.n),
+               "threshold": self.t.peak_threshold}
+        if self.grid:
+            f1 = {thr: pm.compute()["f1"] for thr, pm in self.grid.items()}
+            out["f1_by_threshold"] = f1
+            out["best_threshold"] = max(f1, key=lambda k: (f1[k], -k))
+        return out
 
 
 def build_task(name: str, num_classes: int, ignore_index: int | None = None, **kwargs) -> Task:

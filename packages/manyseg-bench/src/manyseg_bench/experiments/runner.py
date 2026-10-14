@@ -222,6 +222,9 @@ def run_training(
         "gpu_contention_at_end": gpu_contention() if dev.type == "cuda" else None,
         **result,
     }
+    if getattr(task, "calibrate", False) and "best_threshold" in record["final_val"]:
+        # Threshold chosen on validation only; test is evaluated once at that threshold.
+        task.peak_threshold = record["calibrated_threshold"] = record["final_val"]["best_threshold"]
     if evaluate_test:
         for test_split in info.test_splits:
             test = get_split(test_split)

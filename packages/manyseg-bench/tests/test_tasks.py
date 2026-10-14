@@ -88,3 +88,38 @@ def test_point_task_ignores_negative_label_regions():
     ev.update(out, y)
     r = ev.compute()
     assert r["fp"] == 0 and r["tp"] == 1
+
+
+def test_point_threshold_calibration_grid():
+    """calibrate=True scores a grid of peak thresholds; low peaks are missed at 0.5 only."""
+    task = PointTask(calibrate=True)
+    y = torch.zeros(1, 48, 48, dtype=torch.long)
+    y[0, 4:10, 4:10] = 1
+    y[0, 30:36, 30:36] = 2
+    t = task.targets(y)
+    out = {"heatmap": t["heatmap"].clone() * 0.3}  # under-confident peaks (MSE-like)
+    ev = task.evaluator()
+    ev.update(out, y)
+    r = ev.compute()
+    assert r["tp"] == 0  # default threshold 0.5 misses both
+    assert r["f1_by_threshold"][0.2] == 1.0 and r["f1_by_threshold"][0.5] == 0.0
+    assert r["best_threshold"] <= 0.3
+
+
+def test_runner_applies_val_calibrated_threshold_to_test(tmp_path):
+    """The threshold is chosen on val only and then used for the test evaluation."""
+    from manyseg_bench.datasets.base import save_split
+    from manyseg_bench.experiments import run_training
+
+    imgs, masks = instance_data(n=6, h=48, w=48)
+    cache = tmp_path / "cache" / "oam_tcd"
+    for split in ("train", "val", "test"):
+        save_split(cache, split, imgs, masks.astype("int16"), [str(i) for i in range(6)])
+    rec = run_training("manyseg", ModelSpec("unet", "resnet18", weights=None), "oam_tcd",
+                       "smoke", device="cpu", out_dir=tmp_path / "runs", data=tmp_path,
+                       evaluate_test=True,
+                       recipe_overrides={"precision": "fp32", "batch_size": 2},
+                       task_overrides={"calibrate": True})
+    thr = rec["calibrated_threshold"]
+    assert thr == rec["final_val"]["best_threshold"]
+    assert rec["test"]["threshold"] == thr

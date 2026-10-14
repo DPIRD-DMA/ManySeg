@@ -373,6 +373,14 @@ can be swapped by passing a module instead of a string.
 
 ### Instance and point outputs
 
+> **Evidence:** E010 (AI4Boundaries): boundary + distance heads doubled PQ over extent +
+> connected components (0.145 → 0.290), and per-head decoders (`decoders="separate"`) added
+> +0.06 more, so they are the recommended preset for field delineation. E011 (OAM-TCD): MSE
+> regression heatmaps beat focal-loss heatmaps, and the density head roughly halved count MAE
+> versus counting peaks. For counting use `density_head()`; for localisation, calibrate the
+> `find_peaks` threshold on validation data (E011's fixed 0.5 cost most of the recall).
+
+
 Dense instance-style outputs are built from ordinary pixel heads, optionally with per-head
 task decoders. There are no proposal- or query-based methods. Presets return head configs:
 
