@@ -155,7 +155,10 @@ Licenses and access details are in `datasets/*.py` docstrings and in
   Sentinel-1 acquisition coincident with the S2 image and cannot see the clouds; it can
   only describe the surface (e.g. help separate bright soil or snow from cloud, or water
   from shadow). `dem` is Copernicus GLO-30, relative to the tile median. Both come from the
-  `cloudsen12-extra` TACO v1 blobs on the same 10 m grid (checked per sample).
+  `cloudsen12-extra` TACO v1 blobs on the same 10 m grid (checked per sample; all 10,847
+  matched). S1GBM has no data (stored 0, kept NaN, i.e. 0 after normalisation) on ~4% of
+  valid pixels, and 3% of tiles have none at all. The release stores the signed DEM as
+  uint16 (below-sea-level values wrap to ~65,000); it is reinterpreted as int16.
 * **Leakage rules.** The extra blobs also contain `cloudmask_*` layers (QA60, Sen2Cor,
   s2cloudless, Cloud Score+, UNetMobV2 v1/v2, SEnSeI v2). They are never read: they are other
   cloud detectors' outputs, and UNetMobV2 was trained on CloudSEN12. The label-derived
@@ -163,5 +166,8 @@ Licenses and access details are in `datasets/*.py` docstrings and in
   index are never inputs; `load_vectors` refuses label-derived fields.
 * **Metadata (`cloudsen12_meta`).** Tile-centre lat/lon (from the GeoTIFF georeferencing,
   UTM → WGS 84), day of year, solar zenith and azimuth angles.
-* **Storage.** The float16 cache (23,552 tiles, 16 channels, ~200 GB) stays memory-mapped on
+* **Prepared.** Tiles train / val / test = 19,450 / 1,767 / 2,335 (685 / 77 / 85 parent
+  2048² samples; 2,383 / 184 / 280 ROIs). Labelled-pixel class fractions (train): clear
+  0.59, thick 0.23, thin 0.10, shadow 0.08; 4.9-8.5% of pixels are padding (ignored).
+* **Storage.** The float16 cache (23,552 tiles, 16 channels, 190 GB) stays memory-mapped on
   the host (`device_resident: False`); batches are moved to the GPU on demand.
