@@ -17,4 +17,7 @@ export MIOPEN_CUSTOM_CACHE_DIR=$MIOPEN_USER_DB_PATH
 mkdir -p "$MIOPEN_USER_DB_PATH"
 cd "$ROOT/code/$CODE"
 srun -N 1 -n 1 -c 8 --gres=gpu:1 --gpus-per-task=1 --gpu-bind=closest \
-  pytorch-shell "$ROOT/code/$CODE/scripts/setonix/run_task.sh" "$TASKS" "$SLURM_ARRAY_TASK_ID"
+  singularity exec "$SINGULARITY_CONTAINER" \
+  bash "$ROOT/code/$CODE/scripts/setonix/run_task.sh" "$TASKS" "$SLURM_ARRAY_TASK_ID"
+# Note: the module's `pytorch-shell` wrapper starts an interactive shell and silently ignores
+# a script/-c argument (exit 0, no output), so we call singularity exec directly.
