@@ -68,7 +68,7 @@ def main(argv=None) -> int:
         for seed in [int(s) for s in a.seeds.split(",")]:
             r = run_training(a.provider, _spec(a), a.dataset, a.recipe, seed, a.device, a.out,
                              a.data, a.evaluate_test, json.loads(a.set), a.tag)
-            print(f"{r['path']}: final val mIoU {r['final_val']['miou']:.4f}")
+            print(f"{r['path']}: final val mIoU {r['final_val']['miou']:.4f}", flush=True)
     elif a.cmd == "profile":
         import time
         import uuid

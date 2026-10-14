@@ -89,3 +89,46 @@ def test_onnx_export_dynamic_matches_onnxruntime(tmp_path):
         x = torch.randn(1, 3, *hw)
         (got,) = sess.run(None, {"x": x.numpy()})
         torch.testing.assert_close(torch.from_numpy(got), model(x), atol=1e-3, rtol=1e-3)
+
+
+@pytest.mark.parametrize("backbone", ["vit_tiny_patch16_224", "eva02_tiny_patch14_224",
+                                      "swin_tiny_patch4_window7_224", "pvt_v2_b0"])
+def test_transformer_compile_fullgraph_dynamic(backbone):
+    model = model_(backbone)
+    compiled = torch.compile(model, fullgraph=True, dynamic=True, backend="aot_eager")
+    with torch.no_grad():
+        for hw in [(64, 96), (97, 131)]:
+            x = torch.randn(1, 3, *hw)
+            torch.testing.assert_close(compiled(x), model(x), atol=1e-3, rtol=1e-3)
+
+
+@pytest.mark.parametrize("backbone", ["vit_tiny_patch16_224", "eva02_tiny_patch14_224",
+                                      "pvt_v2_b0"])
+def test_transformer_export_dynamic(backbone):
+    model = model_(backbone)
+    h = torch.export.Dim("h", min=33, max=1024)
+    w = torch.export.Dim("w", min=33, max=1024)
+    ep = torch.export.export(model, (torch.randn(1, 3, 64, 96),),
+                             dynamic_shapes={"x": {2: h, 3: w}})
+    for hw in [(64, 96), (97, 131)]:
+        x = torch.randn(1, 3, *hw)
+        torch.testing.assert_close(ep.module()(x), model(x), atol=1e-4, rtol=1e-4)
+
+
+def test_swin_dynamic_export_known_limitation():
+    """timm Swin with dynamic H/W hangs in torch.export (see architecture_review §2.4).
+    Probe in a subprocess with a timeout; if it starts working, this test tells us."""
+    import subprocess
+    import sys
+
+    code = ("import torch; from manyseg import create_model; "
+            "m=create_model(backbone='swin_tiny_patch4_window7_224',pretrained=False,"
+            "num_classes=2).eval(); h=torch.export.Dim('h',min=33,max=1024); "
+            "w=torch.export.Dim('w',min=33,max=1024); "
+            "torch.export.export(m,(torch.randn(1,3,64,96),),dynamic_shapes={'x':{2:h,3:w}})")
+    try:
+        r = subprocess.run([sys.executable, "-c", code], timeout=120, capture_output=True)
+    except subprocess.TimeoutExpired:
+        pytest.xfail("swin dynamic export still hangs (known timm/torch.export limitation)")
+    if r.returncode != 0:
+        pytest.xfail("swin dynamic export fails: " + r.stderr.decode()[-300:])

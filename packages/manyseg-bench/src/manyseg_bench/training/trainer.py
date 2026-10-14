@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import random
+import functools
 import time
 from contextlib import nullcontext
 
@@ -102,7 +103,7 @@ def train(
     recipe: Recipe,
     device: torch.device,
     ignore_index: int | None = None,
-    log=print,
+    log=functools.partial(print, flush=True),
 ) -> dict:
     """Train ``model`` and return history. Selection metric: last epoch (no early stopping,
     so every provider gets the same budget); best-epoch val is reported for information."""

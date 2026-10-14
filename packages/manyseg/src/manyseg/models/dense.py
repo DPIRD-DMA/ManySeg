@@ -64,9 +64,21 @@ class DenseModel(nn.Module):
                 y = F.interpolate(y, size=(h, w), mode="bilinear", align_corners=False)
         return y
 
+    def _pad(self, x: Tensor) -> Tensor:
+        fixed = getattr(self.backbone, "fixed_size", None)
+        if fixed is None:
+            return pad_to_multiple(x, self.divisor)
+        h, w = x.shape[-2], x.shape[-1]
+        if h > fixed[0] or w > fixed[1]:
+            raise ValueError(
+                f"backbone has a fixed input size {fixed}; input {(h, w)} is larger. "
+                "Use tiled inference or rebuild with a larger img_size."
+            )
+        return F.pad(x, (0, fixed[1] - w, 0, fixed[0] - h))
+
     def forward(self, x: Tensor) -> Tensor | dict[str, Tensor]:
         h, w = x.shape[-2], x.shape[-1]
-        x = pad_to_multiple(x, self.divisor)
+        x = self._pad(x)
         feats = self.backbone(x)
         dec = self.decoder(feats)
         if self.single_output is not None:
