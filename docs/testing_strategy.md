@@ -53,6 +53,7 @@ Shape assertions alone are not enough. Each contract has a numerical or behaviou
 | ONNX | Dynamo exporter with dynamic H/W; onnxruntime output matches eager within 1e-3. |
 | DDP | Two CPU ranks (gloo): replicas stay identical after a step with different data per rank. |
 | Export helper | `export_model` round-trips at unseen sizes and batch sizes, with dict inputs and with families whose guards the solver cannot prove. |
+| Metadata conditioning | Field encoders: cyclic continuity across the period, coords across the dateline and poles, exact normalisation, out-of-range categories become unknown. FiLM and head modes at init equal the unconditioned model with the same weights (`atol=rtol=0`, every decoder). A metadata-only synthetic task is fitted by the conditioned model and not by the plain one. Missing values: all-missing, NaN, partial mask, field dropout. Every decoder × {film, head, channels} at odd sizes with dict outputs and task decoders. Slow tier: export (dynamic H/W, dynamic batch, mask), ONNX parity, compile fullgraph. |
 | Library independence | `manyseg` source never references `manyseg_bench`. Bench providers import model libraries lazily. |
 | Bench metrics | Hand-computed confusion-matrix cases, ignore index, absent classes, accumulation invariance, boundary F1 with shifts. |
 | Bench loader | Seeded determinism; eval loader is the identity and keeps order; augmented images and masks stay aligned. |

@@ -50,7 +50,11 @@ Status as of 2026-10-14 (afternoon update). ✅ done · 🔄 in progress · ⏳ 
    targets, NMS peaks, counting, offset grouping and panoptic labels, with round-trip tests.
 10. ✅ **Bench tasks**: losses, object/point/count metrics, and task-aware training for
     multi-head outputs. ⏳ Instance and counting datasets (awaiting dataset choice).
-11. 🔄 **Metadata conditioning** (non-raster inputs; FiLM / head / channels), on a feature branch.
+11. ✅ **Metadata conditioning** (`manyseg.conditioning`; branch `feature/metadata-conditioning`):
+    `"kind": "vector"` inputs with cyclic / continuous / coords / categorical fields, missing
+    values (mask, NaN, learned unknowns, field dropout), and `film` / `head` / `channels`
+    injection with exact identity init, export and ONNX. Bench: vectors in dict mode,
+    Sen1Floods11 metadata, leave-events-out splits. ⏳ `token` mode for ViTs; E009.
 
 ## Phase 5: research and optimisation ⏳
 
@@ -65,6 +69,7 @@ Candidate experiments. A budget is set before each one starts.
 | E006 | Decoder Pareto front (accuracy vs FLOPs and latency) across decoders and backbones | core tier, 1 seed, then 3 seeds on the frontier |
 | E007 | Normalisation in the decoder (BN / GN / none + skip BN) at small batch sizes | 3 seeds |
 | E008 | bf16 / fp16 / int8 (torchao) accuracy loss vs speed | post-training, no training cost |
+| E009 | Does metadata conditioning (FiLM / channels) help flood mapping on held-out events, or does it only memorise events? Pre-registered; `queue3_metadata.sh` | 4 configs × 5 event folds × 3 seeds, plus 6 official-split runs |
 
 Stopping rule: an idea is kept only if it beats its baseline by more than 2 seed standard
 deviations on at least two datasets, at no more than a small, stated cost in latency or memory.

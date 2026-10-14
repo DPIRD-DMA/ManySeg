@@ -136,6 +136,94 @@ input declares an alignment policy:
 Inputs that are co-registered only partially must be cropped or resampled by the user's data
 pipeline. Reprojecting or georeferencing data is outside the scope of a model library.
 
+### Conditioning inputs (metadata vectors)
+
+Non-raster inputs such as acquisition date, sun or view angles, lat/lon, sensor id, GSD or
+tabular features are declared as `"kind": "vector"` inputs next to the rasters. They condition
+the raster model. They never replace it: a model with only vector inputs is an error.
+Pretrained encoders are not modified.
+
+```python
+model = create_model(
+    backbone="resnet34",
+    inputs={
+        "s2":   {"channels": 13},
+        "meta": {"kind": "vector", "fields": {
+            "doy":      {"type": "cyclic", "period": 365.25},
+            "sun_elev": {"type": "continuous", "mean": 45.0, "std": 15.0},
+            "latlon":   {"type": "coords"},                  # (lat, lon) in degrees
+            "sensor":   {"type": "categorical", "num": 3},
+        }, "dim": 64, "dropout": 0.1, "conditioning": "film"},
+    },
+    num_classes=2,
+)
+meta = model.conditioner.encoders["meta"].pack(
+    {"doy": doy, "sun_elev": elev, "latlon": latlon, "sensor": sensor})   # (B, 5)
+out = model({"s2": s2, "meta": meta})                   # optional: "meta_mask": (B, 4)
+```
+
+`{"kind": "vector", "channels": N}` declares `N` pre-normalised floats instead of `fields`.
+
+**Input convention.** A vector input is **one packed float tensor `(B, N)`**. Its columns are
+the fields in declaration order: `coords` takes two columns (lat, then lon), `categorical`
+takes one column holding the id, and every other type takes one column. A dict of per-field
+tensors is rejected with a `TypeError` that points to `MetadataEncoder.pack`. One tensor per
+vector input keeps the model input a flat `dict[str, Tensor]`: a single ONNX input whose only
+dynamic dimension is the batch, and a single array per sample in a data loader.
+
+**Field encodings** (`manyseg.conditioning.FIELD_TYPES`):
+
+| type | options | encoding | width |
+| --- | --- | --- | --- |
+| `continuous` | `mean`, `std` | `(v - mean) / std` | 1 |
+| `cyclic` | `period` | `[sin, cos](2πv / period)`, continuous across the period boundary | 2 |
+| `coords` | `frequencies=1` | point on the unit sphere (continuous at the dateline and the poles) plus `frequencies-1` octaves of lat/lon Fourier features | 3 + 4(f-1) |
+| `categorical` | `num`, `dim=8` | learned embedding; ids are rounded, and an out-of-range id counts as missing | `dim` |
+
+The encodings are concatenated and mixed by a 2-layer MLP (`Linear-GELU-Linear`) into a
+`(B, dim)` embedding.
+
+**Missing values.** A field is missing where the optional `x["<name>_mask"]` `(B, F)` (one
+column per field, 1 = present) is 0, or where any of its columns is NaN, or where a category
+is out of range. A missing field's encoding is replaced by a learned per-field "unknown"
+vector, so a model runs with every field missing (for example, all-NaN metadata). With
+`"dropout": p`, training drops each field of each sample with probability `p`, so the model
+learns the unknown path. All of this is masking with `torch.where`, with no data-dependent
+branching, so it compiles and exports.
+
+**Injection modes** (`"conditioning": mode` or `{"mode": mode, **options}` on the vector
+input):
+
+| mode | what it does | init |
+| --- | --- | --- |
+| `film` (default) | FiLM `x·(1+γ(e)) + β(e)` per channel on every encoder feature level the decoder reads (just before it enters the decoder) and on the decoder output. Applied around every decoder: the shared one, per-head task decoders and the late-fusion decoder. `{"on": ["output"]}` limits it to the output. | exact identity |
+| `head` | Image heads: `Linear([pool(f), e])`, implemented as `Linear(pool(f)) + Linear_e(e)`. With `{"pixel": True}`, pixel heads also get the same per-sample term broadcast over space (a 1×1 kernel on the broadcast embedding). | exact identity |
+| `channels` | The field encodings (no MLP) are broadcast as extra input channels of one raster input (`{"target": name}`, default the first raster) and go through that input's channel adapter. This is an early-fusion baseline. | depends on the adapter |
+| `token` | Metadata as extra ViT tokens. Raises `NotImplementedError`. | n/a |
+
+Why the option sits on the vector input rather than in `fusion=`: `fusion=` describes how
+rasters combine. Conditioning is orthogonal to that. It works with a single raster and with
+early, intermediate or late fusion, and several vector inputs can use different modes (for
+example, `film` for acquisition metadata and `head` for tabular features).
+
+Why FiLM wraps decoders instead of editing them: decoders keep their
+`forward(list[Tensor]) -> Tensor` contract, so a FiLM layer can only see what crosses that
+boundary. In practice, "each decoder level" means each encoder level the decoder consumes,
+plus the decoder output. It does not mean the decoder's internal blocks. The levels a decoder
+reads are found once at construction by a gradient probe (for example, DeepLabV3+ reads only
+strides 4 and 32), so every FiLM parameter receives a gradient. All γ/β projections start at
+zero, so a freshly built conditioned model computes exactly what the unconditioned model with
+the same weights computes (tested with `rtol=atol=0` for every decoder).
+
+With a single raster input and no `fusion=`, the raster model is the ordinary single-input
+model (any decoder works, including `fastai_unet`). With several rasters it is the multi-input
+model. `export_model` gives vector inputs and masks no spatial dimensions (only the batch, with
+`dynamic_batch=True`).
+
+**Leakage.** In remote sensing, metadata often identifies the scene, event or region (lat/lon
+above all). Evaluate conditioned models on splits that hold out whole events or regions. See
+`experiments/E009_metadata_conditioning`.
+
 ## Spatial policy
 
 Most CNN encoders need inputs divisible by their total stride (32) so that skip connections
@@ -226,6 +314,7 @@ from manyseg.export import export_model
 ep = export_model(model, example)            # dynamic H/W in [max_stride + 1, 4096]
 ep = export_model(model, example, dynamic_batch=True)
 ep = export_model(multi_input_model, {"optical": o, "sar": s})
+ep = export_model(conditioned_model, {"s2": s2, "meta": meta})   # meta: (B, N), no H/W dims
 ```
 
 `export_model` builds the `dynamic_shapes` spec itself and uses deferred runtime asserts. Some
@@ -235,7 +324,7 @@ Window-attention backbones (Swin, DaViT) cannot be exported with dynamic sizes. 
 
 ## Registries
 
-Decoders, heads, fusion ops and channel adapters register by name in a plain `dict`-backed
+Decoders, heads, fusion ops, metadata field types and channel adapters register by name in a plain `dict`-backed
 registry. Backbones do not need one, because timm's model registry is used as is.
 Compatibility with a given timm model is discovered by probing (see
 `architecture_review.md`), not from hand-maintained allow-lists.
