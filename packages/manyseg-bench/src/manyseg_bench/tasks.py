@@ -273,7 +273,7 @@ class PointTask(Task):
 
     def __init__(self, offsets: bool = False, density: bool = False, sigma: float = 2.0,
                  heatmap: str = "regression", radius: float = 3.0, peak_threshold: float = 0.5,
-                 calibrate: bool = False,
+                 calibrate: bool = True,
                  thresholds: tuple[float, ...] = (0.05, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5, 0.6,
                                                   0.7),
                  density_scale: float = 100.0, head_scale: float = 1, decoders=None) -> None:
@@ -282,7 +282,8 @@ class PointTask(Task):
         _with_scale({}, head_scale)  # validate early
         self.radius, self.peak_threshold, self.density_scale = radius, peak_threshold, density_scale
         # calibrate=True: evaluation also scores a grid of peak thresholds; the runner picks
-        # the best on *val* and evaluates test at that single threshold (E011 follow-up).
+        # the best on *val* and evaluates test at that single threshold. Default since E011b
+        # (test F1 0.40 -> 0.59 vs a fixed 0.5); calibrate=False keeps peak_threshold.
         self.calibrate, self.thresholds = calibrate, tuple(sorted(thresholds))
         self.primary_metric = "mae" if density else "f1"
         self.higher_is_better = not density
@@ -374,7 +375,7 @@ class _PointEval:
         self.t, self.pm, self.cm, self.loss, self.n = task, PointMetrics(task.radius), \
             CountMetrics(), 0.0, 0
         self.grid = {thr: PointMetrics(task.radius) for thr in task.thresholds} \
-            if task.calibrate else {}
+            if task.calibrate and not task.density else {}  # density has no peaks
 
     def update(self, out, y) -> None:
         from manyseg.points import count_from_density

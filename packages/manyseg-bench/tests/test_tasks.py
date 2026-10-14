@@ -123,3 +123,18 @@ def test_runner_applies_val_calibrated_threshold_to_test(tmp_path):
     thr = rec["calibrated_threshold"]
     assert thr == rec["final_val"]["best_threshold"]
     assert rec["test"]["threshold"] == thr
+
+
+def test_point_task_calibrates_by_default():
+    """E011b: val-calibrated peak thresholds are the default; calibrate=False opts out."""
+    assert PointTask().calibrate
+    y = torch.zeros(1, 32, 32, dtype=torch.long)
+    y[0, 4:10, 4:10] = 1
+    task = PointTask(calibrate=False)
+    ev = task.evaluator()
+    ev.update({"heatmap": task.targets(y)["heatmap"]}, y)
+    assert "best_threshold" not in ev.compute()
+    task = PointTask(density=True)
+    ev = task.evaluator()
+    ev.update({"density": task.targets(y)["density"]}, y)
+    assert "best_threshold" not in ev.compute()
