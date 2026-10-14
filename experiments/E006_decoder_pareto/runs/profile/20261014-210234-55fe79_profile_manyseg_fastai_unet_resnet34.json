@@ -1,0 +1,97 @@
+{
+ "run_id": "20261014-210234-55fe79",
+ "kind": "profile",
+ "tag": "e006-fastai_unet-s1",
+ "provider": "manyseg",
+ "provider_version": "0.1.0.dev0",
+ "spec": {
+  "arch": "fastai_unet",
+  "encoder": "resnet34",
+  "weights": null,
+  "in_channels": 3,
+  "num_classes": 3,
+  "inputs": null,
+  "vectors": null,
+  "input_mode": "stack",
+  "options": {
+   "decoder_kwargs": {
+    "out_stride": 1
+   }
+  }
+ },
+ "weights_fingerprint": "f55ecfbfc7b122de",
+ "env": {
+  "python": "3.12.3",
+  "platform": "Linux-6.4.0-150700.53.81-default-x86_64-with-glibc2.39",
+  "cpu": "x86_64",
+  "cpu_count": 128,
+  "torch": "2.7.1a0+gite2d141d",
+  "cuda_runtime": null,
+  "cudnn": 3003000,
+  "packages": {
+   "manyseg": "0.1.0.dev0",
+   "manyseg-bench": "0.1.0.dev0",
+   "timm": "1.0.30",
+   "segmentation-models-pytorch": "0.5.0",
+   "fastai": null,
+   "torchvision": "0.22.1+59a3e1f",
+   "numpy": "1.26.4"
+  },
+  "device": "cuda",
+  "code_version": "5d6b2f4",
+  "hip": "6.3.42134-a9a80e791",
+  "gpu": "AMD Instinct MI250X",
+  "gpu_mem_gib": 64.0,
+  "gpu_contention_at_start": null
+ },
+ "resolution": {
+  "decoder_out_stride": 1,
+  "head_scales": {
+   "logits": 1
+  },
+  "eval_resolution": "input"
+ },
+ "gpu_contention_at_end": null,
+ "params": 41223644,
+ "serialized_bytes": 165072213,
+ "flops_per_image": 63141445632,
+ "precision": "bf16",
+ "compiled": false,
+ "channels_last": false,
+ "img_size": [
+  256,
+  256
+ ],
+ "device": "cuda",
+ "inference": [
+  {
+   "batch_size": 1,
+   "median_ms": 9.919474483467638,
+   "p10_ms": 9.904314996674657,
+   "p90_ms": 9.936867980286479,
+   "iters": 30,
+   "images_per_s": 100.81179216365312,
+   "megapixels_per_s": 6.606801611237171,
+   "peak_mem_mib": 357.8544921875
+  },
+  {
+   "batch_size": 8,
+   "median_ms": 31.35770303197205,
+   "p10_ms": 31.30949498154223,
+   "p90_ms": 31.398787978105247,
+   "iters": 30,
+   "images_per_s": 255.1207271732648,
+   "megapixels_per_s": 16.719591976027083,
+   "peak_mem_mib": 1167.67919921875
+  }
+ ],
+ "train": {
+  "batch_size": 8,
+  "median_ms": 84.1249650111422,
+  "p10_ms": 83.98749900516123,
+  "p90_ms": 84.22910806257278,
+  "iters": 15,
+  "images_per_s": 95.09662201868869,
+  "peak_mem_mib": 1732.13134765625
+ }
+}

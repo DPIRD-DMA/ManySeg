@@ -1,6 +1,6 @@
 # E006: Decoder Pareto front, accuracy vs cost at reduced output resolution (pre-registered)
 
-Status: **planned** (registered 2026-10-14 before any run; not launched). It will run on
+Status: **complete** (2026-10-14; stage 1: 36 runs, stage 2: 32 runs, profiling: 36 configs; Pawsey Setonix, AMD MI250X, code `5d6b2f4`).
 Pawsey Setonix as Slurm arrays (`scripts/setonix/`). Stage 1 is emitted with
 `EMIT_TASKS=<file> STAGE=1 bash run.sh`. Stage 2 is emitted with `EMIT_TASKS=<file> STAGE=2
 FRONTIER=<frontier.txt> bash run.sh` after `analyse.py --write-frontier` has applied the
@@ -91,3 +91,56 @@ mIoU is dominated by object interiors. The hypothesis is checked separately in e
 
 ## Results
 Pending.
+
+## Results
+
+Full tables: `results.md` (val mIoU, boundary F1, GFLOPs, params, latency per batch of 8 in
+bf16, peak training memory, test mIoU). Plot: `pareto.png`. Latency and memory are from the
+`STAGE=profile` sweep on a dedicated MI250X GCD, not contended. Compare them only within this
+experiment, never against 4090 numbers.
+
+Key configurations (mean of 3 seeds where n = 3; test evaluated once per run):
+
+| dataset / encoder | config | val mIoU | val boundary F1 | test mIoU | ms / batch 8 | train MiB |
+|---|---|---|---|---|---|---|
+| Pet / resnet34 | unet:1 | 0.8219 ± 0.0007 | 0.7890 ± 0.0030 | 0.8222 | 9.2 | 652 |
+| Pet / resnet34 | unet:2 | 0.8229 ± 0.0015 | 0.7887 ± 0.0025 | 0.8227 | 8.0 | 550 |
+| Pet / pvt_v2_b2 | unet:1 | 0.8396 ± 0.0012 | 0.8212 ± 0.0015 | 0.8385 | 19.4 | 1417 |
+| Pet / pvt_v2_b2 | unet:2 | 0.8391 ± 0.0005 | 0.8210 ± 0.0007 | 0.8381 | 18.2 | 1264 |
+| S1F11 / resnet34 | unet:1 | 0.8911 ± 0.0031 | 0.5614 ± 0.0100 | 0.8873 | 24.6 | 2520 |
+| S1F11 / resnet34 | unet:2 | 0.8889 ± 0.0049 | 0.5598 ± 0.0080 | 0.8867 | 19.8 | 2072 |
+| S1F11 / resnet34 | fastai_unet:1 | **0.9153 ± 0.0020** | **0.6056 ± 0.0036** | **0.9047** | 121.2 | 6972 |
+| S1F11 / resnet34 | fastai_unet:2 | 0.8949 ± 0.0031 | 0.5580 ± 0.0041 | 0.8857 | 36.6 | 2853 |
+| S1F11 / pvt_v2_b2 | unet:1 | 0.9023 ± 0.0024 | 0.5738 ± 0.0018 | 0.8915 | 64.6 | 5506 |
+| S1F11 / pvt_v2_b2 | unet:2 | 0.9039 ± 0.0015 | 0.5824 ± 0.0058 | 0.8957 | 59.8 | 4898 |
+| S1F11 / pvt_v2_b2 | fastai_unet:1 | **0.9137 ± 0.0007** | **0.6171 ± 0.0027** | **0.9038** | 258.1 | 11579 |
+
+## Hypothesis (pre-registered): not supported, in a useful direction
+"U-Net at out_stride 2 loses < 1 seed SD of mIoU but measurably more boundary F1."
+In all four dataset/encoder combinations, `unet:2` differs from `unet:1` by less than 1 seed SD
+in mIoU **and** in boundary F1 (BF1 change −0.009 to +0.0003 val; test mIoU within ±0.004). It
+saves 11–18% training memory and 6–20% latency. The predicted boundary cost did not
+appear. Convolutions at stride 2 plus bilinear head upsampling preserve boundaries as well as
+the full-resolution stage does on these datasets. `out_stride=4` *does* cost on Sen1Floods11
+(−1 mIoU, −5 to −7 BF1; 1 seed).
+
+## Other findings
+* **fastai_unet at full resolution is the accuracy leader on Sen1Floods11**: +2.4 val / +1.7
+  test mIoU over `unet` with ResNet-34, +1.1 / +1.2 with PVTv2-b2, and about +4 points boundary
+  F1. It costs 4.9×/4.0× latency and 2.8×/2.1× training memory. **The gain disappears at
+  out_stride 2** (fastai_unet:2 ≈ unet). So it comes from the full-resolution stages that
+  stride 2 removes (concatenation of the raw input image + residual block at stride 1), not
+  from decoder width. On Pet the same stages are worth only about +0.3 (E002/E003).
+* **PVTv2-b2 beats ResNet-34** at similar parameters on both datasets (+1.7 Pet, +0.4–1.1
+  S1F11 test) at about 2–2.6× latency on the MI250X.
+* **Pareto front:** `unet:2`/`unet:4` dominate `unet:1` on cost at equal accuracy everywhere.
+  `segformer` and `deeplabv3plus` are the cheapest but lose 0.5–1 mIoU. `fastai_unet:1` is the
+  sole high-accuracy point on Sen1Floods11.
+
+## Decisions
+* Document `decoder_kwargs={"out_stride": 2}` for `unet` as the recommended speed/memory
+  setting. It is not made the default, which stays SMP-equivalent.
+* New candidate experiment (not yet registered): add fastai's full-resolution input-cross +
+  residual stage to `unet` as an option, and test whether it captures fastai_unet's
+  Sen1Floods11 gain at a fraction of the cost (most of fastai_unet's cost is the wide
+  decoder, which this result suggests is not the source of the gain).

@@ -1,0 +1,93 @@
+{
+ "run_id": "20261014-210322-be0a3f",
+ "kind": "profile",
+ "tag": "e006-segformer-snative",
+ "provider": "manyseg",
+ "provider_version": "0.1.0.dev0",
+ "spec": {
+  "arch": "segformer",
+  "encoder": "resnet34",
+  "weights": null,
+  "in_channels": 3,
+  "num_classes": 3,
+  "inputs": null,
+  "vectors": null,
+  "input_mode": "stack",
+  "options": {}
+ },
+ "weights_fingerprint": "3fbed2d49cbd4bf9",
+ "env": {
+  "python": "3.12.3",
+  "platform": "Linux-6.4.0-150700.53.81-default-x86_64-with-glibc2.39",
+  "cpu": "x86_64",
+  "cpu_count": 128,
+  "torch": "2.7.1a0+gite2d141d",
+  "cuda_runtime": null,
+  "cudnn": 3003000,
+  "packages": {
+   "manyseg": "0.1.0.dev0",
+   "manyseg-bench": "0.1.0.dev0",
+   "timm": "1.0.30",
+   "segmentation-models-pytorch": "0.5.0",
+   "fastai": null,
+   "torchvision": "0.22.1+59a3e1f",
+   "numpy": "1.26.4"
+  },
+  "device": "cuda",
+  "code_version": "5d6b2f4",
+  "hip": "6.3.42134-a9a80e791",
+  "gpu": "AMD Instinct MI250X",
+  "gpu_mem_gib": 64.0,
+  "gpu_contention_at_start": null
+ },
+ "resolution": {
+  "decoder_out_stride": 4,
+  "head_scales": {
+   "logits": 1
+  },
+  "eval_resolution": "input"
+ },
+ "gpu_contention_at_end": null,
+ "params": 21801027,
+ "serialized_bytes": 87358703,
+ "flops_per_image": 12025069568,
+ "precision": "bf16",
+ "compiled": false,
+ "channels_last": false,
+ "img_size": [
+  256,
+  256
+ ],
+ "device": "cuda",
+ "inference": [
+  {
+   "batch_size": 1,
+   "median_ms": 6.295341008808464,
+   "p10_ms": 6.2586350832134485,
+   "p90_ms": 6.336535909213126,
+   "iters": 30,
+   "images_per_s": 158.84763011261762,
+   "megapixels_per_s": 10.410238287060508,
+   "peak_mem_mib": 173.22998046875
+  },
+  {
+   "batch_size": 8,
+   "median_ms": 9.713991486933082,
+   "p10_ms": 9.67595202382654,
+   "p90_ms": 9.753803024068475,
+   "iters": 30,
+   "images_per_s": 823.5543556694812,
+   "megapixels_per_s": 53.97245825315512,
+   "peak_mem_mib": 484.16748046875
+  }
+ ],
+ "train": {
+  "batch_size": 8,
+  "median_ms": 24.050759966485202,
+  "p10_ms": 23.99298793170601,
+  "p90_ms": 24.086309014819562,
+  "iters": 15,
+  "images_per_s": 332.6298217248861,
+  "peak_mem_mib": 660.888671875
+ }
+}
