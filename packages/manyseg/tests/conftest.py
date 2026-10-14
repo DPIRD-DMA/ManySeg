@@ -1,3 +1,5 @@
+import os
+
 import pytest
 import torch
 
@@ -52,3 +54,8 @@ def _reset_dynamo():
 
     if "torch._dynamo" in sys.modules:
         sys.modules["torch._dynamo"].reset()
+
+
+# Cap intra-op threads per test process: pytest-xdist workers each default to one thread per
+# core, which oversubscribes the (shared) machine badly.
+torch.set_num_threads(int(os.environ.get("MANYSEG_TEST_THREADS", "4")))

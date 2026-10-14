@@ -185,6 +185,40 @@ model = DenseModel({"image": bb}, dec, {"mask": SegmentationHead(dec.out_spec, 3
 `create_model` is a thin layer of argument parsing over this composition. Every component
 can be swapped by passing a module instead of a string.
 
+### Instance and point outputs
+
+Dense instance-style outputs are built from ordinary pixel heads, optionally with per-head
+task decoders. There are no proposal- or query-based methods. Presets return head configs:
+
+```python
+from manyseg.instances import instance_heads, instance_targets, instances_from_outputs
+from manyseg.points import point_heads, density_head, find_peaks, count_from_density
+
+# Field / paddock / crown / footprint delineation (ResUNet-a / FracTAL style)
+model = create_model(backbone="convnext_tiny", in_channels=4,
+                     heads=instance_heads(decoders={"boundary": "unet"}))
+t = instance_targets(instance_ids, boundary_width=2)     # torch, runs on the GPU
+labels = instances_from_outputs(out["extent"], out["boundary"], out["distance"], logits=True)
+
+# Counting / locating trees, livestock, dams, sheds
+model = create_model(backbone="resnet34", heads={**point_heads(offsets=True), **density_head()})
+peaks = find_peaks(out["heatmap"], threshold=0.5)        # [(points (K,2), scores)] per image
+count = count_from_density(out["density"])
+```
+
+| Preset | Heads | Targets (`manyseg.*.targets`) | Post-processing |
+| --- | --- | --- | --- |
+| `instance_heads(num_classes=1, distance="normalized", decoders=None)` | `extent` (1 ch, or C+1 with background), `boundary` (1), `distance` (1, regression) | `instance_targets(ids, boundary_width, boundary_mode="inner"/"outer"/"both")`: exact EDT; distance is 1 + distance to the instance's edge, normalised per instance; tile borders are not boundaries | seeds = extent ∧ ¬boundary ∧ distance > t; every component gets at least one seed; growth in torch (default) or skimage watershed (`manyseg[instances]`) |
+| `point_heads(heatmap="regression"/"segmentation", offsets=False)` | `heatmap` (1), `offset` (2: dy, dx) | `gaussian_heatmap(points, sigma)`, `heatmap_from_instances` (centroids rounded to pixels; fixed or size-scaled σ), `offset_targets` (to exact centroids) | `find_peaks` (max-pool NMS), `group_by_offsets` → instance ids, `panoptic_labels` |
+| `density_head()` | `density` (1) | `density_map(points, sigma)`: each point's Gaussian sums to exactly 1 inside the image | `count_from_density` |
+
+`decoders=None` shares the model decoder. `"separate"` gives each head its own `unet`. A name or
+`{head: decoder}` mapping chooses decoders per head. Post-processing (peak picking, seeded
+growth or watershed, grouping) is **not part of the exported graph**: export the model, then
+run the post-processing functions on its outputs. Losses and object metrics (PQ, object F1,
+over-/under-segmentation, point F1, count MAE) live in `manyseg-bench`
+(`manyseg_bench.losses`, `manyseg_bench.evaluation.objects`, `manyseg_bench.tasks`).
+
 ## Export
 
 ```python

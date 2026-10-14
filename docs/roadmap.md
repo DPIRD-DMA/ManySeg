@@ -44,6 +44,13 @@ Status as of 2026-10-14 (afternoon update). ✅ done · 🔄 in progress · ⏳ 
 5. ✅ **Multi-task**: named heads, uncertainty heads, per-head task-specific decoders (`"decoder"` key in a head config).
 6. ✅ **Export helper** `manyseg.export.export_model`. ⏳ Quantisation entry points (torchao / PT2E).
 7. ✅ DDP verified (CPU gloo). ⏳ FSDP2.
+8. ✅ **Instance heads** (`manyseg.instances`): boundary + distance presets, torch targets
+   (exact EDT), seeded growth or watershed post-processing, with round-trip tests.
+9. ✅ **Point and density heads** (`manyseg.points`): heatmap + offset and density presets,
+   targets, NMS peaks, counting, offset grouping and panoptic labels, with round-trip tests.
+10. ✅ **Bench tasks**: losses, object/point/count metrics, and task-aware training for
+    multi-head outputs. ⏳ Instance and counting datasets (awaiting dataset choice).
+11. 🔄 **Metadata conditioning** (non-raster inputs; FiLM / head / channels), on a feature branch.
 
 ## Phase 5: research and optimisation ⏳
 
