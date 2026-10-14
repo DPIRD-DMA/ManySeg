@@ -79,7 +79,11 @@ class _SemanticEval:
 
 
 class InstanceTask(Task):
-    """Boundary + distance instances (``manyseg.instances``). Primary metric: PQ."""
+    """Boundary + distance instances (``manyseg.instances``). Primary metric: PQ.
+
+    ``mode="extent_cc"`` is the simple baseline: an extent head only, instances = connected
+    components of the thresholded extent (touching objects merge).
+    """
 
     name = "instances"
     primary_metric = "pq"
@@ -87,7 +91,11 @@ class InstanceTask(Task):
     def __init__(self, num_classes: int = 1, boundary_width: float = 1.0,
                  distance: str = "normalized", boundary_pos_weight: float | None = None,
                  weights: tuple[float, float, float] = (1.0, 1.0, 1.0),
-                 iou_threshold: float = 0.5) -> None:
+                 iou_threshold: float = 0.5, decoders=None, mode: str = "boundary_distance",
+                 ) -> None:
+        if mode not in ("boundary_distance", "extent_cc"):
+            raise ValueError(f"mode must be boundary_distance|extent_cc, got {mode!r}")
+        self.mode, self.decoders = mode, decoders
         if num_classes != 1:
             raise NotImplementedError("multi-class instance training: use semantic + instances")
         self.num_classes, self.boundary_width, self.distance = num_classes, boundary_width, distance
@@ -97,7 +105,8 @@ class InstanceTask(Task):
     def heads(self):
         from manyseg.instances import instance_heads
 
-        return instance_heads(self.num_classes, distance=self.distance)
+        heads = instance_heads(self.num_classes, distance=self.distance, decoders=self.decoders)
+        return {"extent": heads["extent"]} if self.mode == "extent_cc" else heads
 
     def targets(self, y):
         from manyseg.instances import instance_targets
@@ -108,6 +117,8 @@ class InstanceTask(Task):
 
     def loss(self, out, t):
         we, wb, wd = self.weights
+        if self.mode == "extent_cc":
+            return we * losses.dice_bce(out["extent"], t["extent"])
         return (we * losses.dice_bce(out["extent"], t["extent"])
                 + wb * losses.dice_bce(out["boundary"], t["boundary"], pos_weight=self.pos_weight)
                 + wd * losses.masked_regression(out["distance"], t["distance"], t["extent"] > 0))
@@ -126,8 +137,13 @@ class _InstanceEval:
         t = self.t.targets(y)
         self.loss += float(self.t.loss(out, t)) * y.shape[0]
         self.n += y.shape[0]
-        labels = instances_from_outputs(out["extent"].float(), out["boundary"].float(),
-                                        out["distance"].float(), logits=True)
+        if self.t.mode == "extent_cc":
+            from manyseg.instances import connected_components, relabel_sequential
+
+            labels = relabel_sequential(connected_components(out["extent"][:, 0].float() > 0))
+        else:
+            labels = instances_from_outputs(out["extent"].float(), out["boundary"].float(),
+                                            out["distance"].float(), logits=True)
         self.om.update(labels, y)
 
     def compute(self) -> dict:

@@ -229,3 +229,4 @@ experiments/**/run.log
 experiments/**/run.log.exit
 experiments/queue.log*
 experiments/queue2.log*
+experiments/queue4*.log*

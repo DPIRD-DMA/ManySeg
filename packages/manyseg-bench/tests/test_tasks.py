@@ -56,3 +56,18 @@ def test_build_task():
     assert isinstance(build_task("instances", num_classes=1), InstanceTask)
     with pytest.raises(ValueError):
         build_task("nope", num_classes=1)
+
+
+def test_extent_only_instance_task_uses_connected_components():
+    task = InstanceTask(mode="extent_cc")
+    assert set(task.heads()) == {"extent"}
+    torch.manual_seed(0)
+    spec = ModelSpec("unet", "resnet18", weights=None, num_classes=1,
+                     options={"heads": task.heads()})
+    b = get_provider("manyseg").build(spec)
+    rec = get_recipe("standard", epochs=2, batch_size=4, lr=1e-3, precision="fp32",
+                     warmup_epochs=0)
+    tr, va = loaders()
+    res = train(b.model, b.encoder_params, b.decoder_params, tr, va, num_classes=1, recipe=rec,
+                device=torch.device("cpu"), task=task, log=lambda *_: None)
+    assert "pq" in res["final_val"]
