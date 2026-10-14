@@ -46,3 +46,17 @@ def test_prepare_instance_ids_and_splits(raw, tmp_path):
 def test_integrity_rejects_wrong_counts(raw, tmp_path):
     with pytest.raises(RuntimeError, match="integrity"):
         ai4boundaries.prepare(raw, tmp_path / "cache", size=32, expected={"train": 5319})
+
+
+def test_cli_trains_instance_dataset_end_to_end(raw, tmp_path, capsys):
+    """Regression: the CLI summary assumed 'miou' and crashed for instance tasks."""
+    from manyseg_bench.cli import main
+
+    ai4boundaries.prepare(raw, tmp_path / "cache" / "ai4boundaries", size=32, expected=None)
+    rc = main(["--data", str(tmp_path), "train", "--provider", "manyseg", "--encoder",
+               "resnet18", "--weights", "none", "--dataset", "ai4boundaries", "--recipe", "smoke",
+               "--set", '{"precision": "fp32", "batch_size": 2}', "--device", "cpu",
+               "--out", str(tmp_path / "runs"), "--evaluate-test"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "final val pq" in out and "test pq" in out

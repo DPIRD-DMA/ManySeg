@@ -45,6 +45,8 @@ def main(argv=None) -> int:
                     help="multi-input datasets: concatenate inputs or pass a dict")
     tp.add_argument("--task-kwargs", default="{}",
                     help="JSON overrides for the dataset's task (e.g. instance decoders)")
+    tp.add_argument("--subset", type=int, default=None,
+                    help="debug: use only the first N samples of each split (recorded)")
     tp.add_argument("--save-model", action="store_true",
                     help="save the trained state_dict under <data root>/checkpoints")
     tp.add_argument("--evaluate-test", action="store_true",
@@ -77,13 +79,11 @@ def main(argv=None) -> int:
             r = run_training(a.provider, _spec(a), a.dataset, a.recipe, seed, a.device, a.out,
                              a.data, a.evaluate_test, json.loads(a.set), a.tag,
                              save_model=a.save_model,
-                             task_overrides=json.loads(a.task_kwargs))
-            extra = "".join(f" {s} mIoU {r[s]['miou']:.4f}" for s in r["dataset"]["test_splits"]
-                            if s in r)
+                             task_overrides=json.loads(a.task_kwargs), subset=a.subset)
             pm = r.get("primary_metric", "miou")
-            extra = "".join(f" {s} {pm} {r[s][pm]:.4f}" for s in r["dataset"]["test_splits"]
-                            if s in r) if pm != "miou" else extra
             name = "mIoU" if pm == "miou" else pm
+            extra = "".join(f" {sp} {name} {r[sp][pm]:.4f}"
+                            for sp in r["dataset"]["test_splits"] if sp in r)
             print(f"{r['path']}: final val {name} {r['final_val'][pm]:.4f}{extra}", flush=True)
     elif a.cmd == "profile":
         import time

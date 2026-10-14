@@ -17,10 +17,16 @@ from ..tasks import build_task
 from ..training import evaluate, get_recipe, seed_everything, train
 
 
-def _select(split, info):
-    """Keep only the inputs this dataset variant uses (cache may hold more)."""
+def _select(split, info, subset: int | None = None):
+    """Keep only the inputs this dataset variant uses (cache may hold more); optionally the
+    first ``subset`` samples (debug/smoke runs only; recorded in the result)."""
     if isinstance(split.images, dict) and info.inputs:
         split.images = {k: split.images[k] for k in info.inputs}
+    if subset:
+        sl = slice(0, subset)
+        split.images = ({k: v[sl] for k, v in split.images.items()}
+                        if isinstance(split.images, dict) else split.images[sl])
+        split.masks, split.names = split.masks[sl], split.names[:subset]
     return split
 
 
@@ -43,6 +49,7 @@ def run_training(
     tag: str = "",
     save_model: bool = False,
     task_overrides: dict | None = None,
+    subset: int | None = None,
 ) -> dict:
     dev = torch.device(device)
     ds = get_dataset(dataset)
@@ -74,7 +81,7 @@ def run_training(
                          "use input_mode='stack'")
     # Datasets too large for the (shared) GPU stay memory-mapped on the host.
     mmap = not info_loader_kwargs(ds).get("device_resident", True)
-    train_split = _select(load_split(cache, "train", mmap=mmap), info)
+    train_split = _select(load_split(cache, "train", mmap=mmap), info, subset)
     img_size = tuple(train_split.masks.shape[1:3])
     built = prov.build(spec, img_size=img_size)
 
@@ -82,7 +89,7 @@ def run_training(
     common = dict(mean=mean, std=std, device=dev, stack=stack, **info_loader_kwargs(ds))
     train_loader = GPULoader(train_split.images, train_split.masks, rec.batch_size, train=True,
                              seed=seed, **common)
-    val = _select(load_split(cache, "val", mmap=mmap), info)
+    val = _select(load_split(cache, "val", mmap=mmap), info, subset)
     eval_bs = getattr(ds, "EVAL_BATCH_SIZE", 32)
     val_loader = GPULoader(val.images, val.masks, eval_bs, train=False, **common)
 
@@ -105,6 +112,7 @@ def run_training(
         "img_size": list(img_size),
         "recipe": rec.to_dict(),
         "task_kwargs": task_kwargs,
+        "subset": subset,
         "seed": seed,
         "env": env,
         "gpu_contention_at_end": gpu_contention() if dev.type == "cuda" else None,
@@ -112,7 +120,7 @@ def run_training(
     }
     if evaluate_test:
         for split in info.test_splits:
-            test = _select(load_split(cache, split, mmap=mmap), info)
+            test = _select(load_split(cache, split, mmap=mmap), info, subset)
             test_loader = GPULoader(test.images, test.masks, eval_bs, train=False, **common)
             record[split] = evaluate(built.model, test_loader, info.num_classes, dev,
                                      rec.precision, info.ignore_index, task=task)
