@@ -141,7 +141,9 @@ def create_model(
 
             return LateFusionDecoder(specs, bb.groups, lambda sp: dec_cls(sp, **dkw),
                                      op=fopts["op"])
-        if getattr(dec_cls, "wants_input", False):
+        wants = (dec_cls.wants_input_for(dkw) if hasattr(dec_cls, "wants_input_for")
+                 else getattr(dec_cls, "wants_input", False))
+        if wants:
             if inputs is not None:
                 raise ValueError(f"decoder {dec_cls.__name__} needs the input image; not "
                                  "supported with multiple inputs")

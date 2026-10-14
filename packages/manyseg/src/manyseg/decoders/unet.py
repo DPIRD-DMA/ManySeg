@@ -80,8 +80,22 @@ class UNetDecoder(nn.Module):
         out_stride: int = 1,
         norm: str | None = "batch",
         upsample: str = "nearest",
+        input_cross: bool = False,
     ) -> None:
         super().__init__()
+        # input_cross: fastai DynamicUnet's full-resolution stage (concatenate the raw input
+        # image to the stride-1 output, then a residual block). E006 found this stage, not
+        # decoder width, behind fastai_unet's lead on Sen1Floods11. The model then passes
+        # [input, *features] (``wants_input``) with in_specs[0] a stride-1 input spec.
+        self.wants_input = bool(input_cross)
+        self._input_channels = 0
+        if input_cross:
+            if out_stride != 1:
+                raise ValueError("input_cross needs out_stride=1 (it acts at input resolution)")
+            if in_specs[0].stride != 1:
+                raise ValueError("input_cross expects in_specs[0] to be the stride-1 input")
+            self._input_channels = in_specs[0].channels
+            in_specs = list(in_specs[1:])
         if upsample not in UPSAMPLE_MODES:
             raise ValueError(f"unknown upsample mode {upsample!r}; choose from {UPSAMPLE_MODES}")
         specs = sorted(in_specs, key=lambda s: s.stride)
@@ -112,11 +126,26 @@ class UNetDecoder(nn.Module):
             cin = cout
         self.blocks = nn.ModuleList(blocks)
         self.channels = channels
-        self.out_spec = FeatureSpec(channels[-1], out_stride, "unet")
+        out_ch = channels[-1]
+        if input_cross:
+            from .fastai_unet import _ResBlock
+
+            out_ch = channels[-1] + self._input_channels
+            self.cross = _ResBlock(out_ch)
+        self.out_spec = FeatureSpec(out_ch, out_stride, "unet")
         init_decoder_(self)
 
+    @staticmethod
+    def wants_input_for(kwargs) -> bool:
+        """Whether a decoder built with ``kwargs`` needs the input image (factory hook)."""
+        return bool(kwargs.get("input_cross", False))
+
     def forward(self, features: list[Tensor]) -> Tensor:
+        if self.wants_input:
+            image, features = features[0], features[1:]
         x = features[self._deepest_index]
         for block, idx in zip(self.blocks, self._skip_index):
             x = block(x, features[idx] if idx >= 0 else None)
+        if self.wants_input:
+            x = self.cross(torch.cat([x, image], dim=1))
         return x
