@@ -15,6 +15,8 @@ def test_profile_cpu_smoke():
     assert [i["batch_size"] for i in r["inference"]] == [1, 2]
     assert r["inference"][0]["images_per_s"] > 0
     assert r["train"]["images_per_s"] > 0
+    # First call timed separately (includes torch.compile's compilation when compiled).
+    assert all(i["first_call_ms"] > 0 for i in r["inference"]) and r["train"]["first_call_ms"] > 0
 
 
 def test_environment_records_code_version(monkeypatch):

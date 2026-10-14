@@ -20,8 +20,14 @@ def synchronize(device: torch.device) -> None:
 
 def time_fn(fn: Callable[[], object], device: torch.device, warmup: int = 10,
             iters: int = 30, min_time_s: float = 0.0) -> dict:
-    """Wall-clock per call with synchronisation around each call. Returns ms statistics."""
-    for _ in range(warmup):
+    """Wall-clock per call with synchronisation around each call. Returns ms statistics;
+    ``first_call_ms`` is the first warmup call alone (compilation, cache and allocator warmup)."""
+    synchronize(device)
+    t0 = time.perf_counter()
+    fn()
+    synchronize(device)
+    first = (time.perf_counter() - t0) * 1e3
+    for _ in range(warmup - 1):
         fn()
     synchronize(device)
     times = []
@@ -37,6 +43,7 @@ def time_fn(fn: Callable[[], object], device: torch.device, warmup: int = 10,
         "p10_ms": times[int(0.1 * (len(times) - 1))],
         "p90_ms": times[int(0.9 * (len(times) - 1))],
         "iters": len(times),
+        "first_call_ms": first,
     }
 
 
