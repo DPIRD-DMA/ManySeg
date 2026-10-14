@@ -13,9 +13,10 @@ def offsets(model, H=256, pts=None, reps=2):
         res.append(((g*ys).sum()/g.sum()-i, (g*xs).sum()/g.sum()-j))
     t=torch.tensor(res); return t.mean(0).tolist(), t.std(0).tolist()
 
-torch.manual_seed(0)
-for seed in range(2):
-    torch.manual_seed(seed)
-    print('manyseg', offsets(create_model(backbone='resnet18',pretrained=False,num_classes=3)))
-    torch.manual_seed(seed)
-    print('smp    ', offsets(smp.Unet('resnet18',encoder_weights=None,classes=3)))
+if __name__ == "__main__":
+    torch.manual_seed(0)
+    for seed in range(2):
+        torch.manual_seed(seed)
+        print('manyseg', offsets(create_model(backbone='resnet18',pretrained=False,num_classes=3)))
+        torch.manual_seed(seed)
+        print('smp    ', offsets(smp.Unet('resnet18',encoder_weights=None,classes=3)))
