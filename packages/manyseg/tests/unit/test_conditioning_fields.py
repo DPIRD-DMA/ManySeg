@@ -45,16 +45,19 @@ def test_cyclic_is_continuous_across_the_period_boundary():
     assert (e[0] - e[4]).norm() > 1.9   # half a period apart is maximally far
 
 
-def test_coords_are_continuous_across_the_dateline_and_at_the_poles():
-    f = build_field({"type": "coords"})
-    e, _ = f(torch.tensor([[10.0, 179.999], [10.0, -179.999], [90.0, 0.0], [90.0, 120.0]]))
-    assert (e[0] - e[1]).norm() < 1e-3
-    assert (e[2] - e[3]).norm() < 1e-5  # every longitude is the same point at the pole
-    torch.testing.assert_close(e[:, :3].norm(dim=1), torch.ones(4))  # unit-sphere part
+@pytest.mark.parametrize("frequencies", [1, 2, 4])
+def test_coords_are_continuous_across_the_dateline_and_at_the_poles(frequencies):
+    f = build_field({"type": "coords", "frequencies": frequencies})
+    e, _ = f(torch.tensor([[10.0, 179.999], [10.0, -179.999], [90.0, 0.0], [90.0, 120.0],
+                           [-90.0, -45.0], [-90.0, 170.0]]))
+    assert (e[0] - e[1]).norm() < 1e-2
+    # every longitude is the same point at a pole, at every frequency
+    assert (e[2] - e[3]).norm() < 1e-5 and (e[4] - e[5]).norm() < 1e-5
+    torch.testing.assert_close(e[:, :3].norm(dim=1), torch.ones(6))  # unit-sphere part
 
 
 def test_coords_extra_frequencies_widen_the_encoding():
-    assert build_field({"type": "coords", "frequencies": 3}).width == 3 + 4 * 2
+    assert build_field({"type": "coords", "frequencies": 3}).width == 3 + 6 * 2
 
 
 def test_continuous_normalisation():
@@ -65,11 +68,19 @@ def test_continuous_normalisation():
 
 def test_categorical_in_range_and_out_of_range():
     f = build_field({"type": "categorical", "num": 3, "dim": 4})
-    e, valid = f(torch.tensor([[0.0], [1.0], [2.0], [3.0], [-1.0], [1.4]]))
-    assert e.shape == (6, 4)
-    assert valid.tolist() == [True, True, True, False, False, True]
+    e, valid = f(torch.tensor([[0.0], [1.0], [2.0], [3.0], [-1.0]]))
+    assert e.shape == (5, 4)
+    assert valid.tolist() == [True, True, True, False, False]
     assert not torch.allclose(e[0], e[1]) and not torch.allclose(e[1], e[2])
-    torch.testing.assert_close(e[5], e[1])  # 1.4 rounds to category 1
+
+
+def test_categorical_validates_the_raw_value_on_both_boundaries():
+    """Range and integrality are checked before rounding: -0.4 must not become id 0 and 2.6
+    must not be rejected as id 3 for the wrong reason (it is not an integer at all)."""
+    f = build_field({"type": "categorical", "num": 3})
+    v = torch.tensor([[-0.4], [-1e-3], [0.0], [1.4], [2.0], [2.6], [2.0 + 1e-3], [3.0]])
+    _, valid = f(v)
+    assert valid.tolist() == [False, False, True, False, True, False, False, False]
 
 
 def test_encoder_widths_and_output_shape():

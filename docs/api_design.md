@@ -177,8 +177,8 @@ dynamic dimension is the batch, and a single array per sample in a data loader.
 | --- | --- | --- | --- |
 | `continuous` | `mean`, `std` | `(v - mean) / std` | 1 |
 | `cyclic` | `period` | `[sin, cos](2πv / period)`, continuous across the period boundary | 2 |
-| `coords` | `frequencies=1` | point on the unit sphere (continuous at the dateline and the poles) plus `frequencies-1` octaves of lat/lon Fourier features | 3 + 4(f-1) |
-| `categorical` | `num`, `dim=8` | learned embedding; ids are rounded, and an out-of-range id counts as missing | `dim` |
+| `coords` | `frequencies=1` | point `u` on the unit sphere (continuous at the dateline and the poles) plus `frequencies-1` octaves `[sin, cos](2^k π u)`, which keep both properties | 3 + 6(f-1) |
+| `categorical` | `num`, `dim=8` | learned embedding; a value that is not an integer or lies outside `[0, num)` counts as missing | `dim` |
 
 The encodings are concatenated and mixed by a 2-layer MLP (`Linear-GELU-Linear`) into a
 `(B, dim)` embedding.

@@ -59,10 +59,11 @@ class CyclicField(nn.Module):
 class CoordsField(nn.Module):
     """Latitude/longitude in degrees (two columns, in that order).
 
-    Encoded as the point on the unit sphere ``(cos lat cos lon, cos lat sin lon, sin lat)``,
-    which is continuous across the dateline and at the poles, plus ``frequencies - 1`` octaves
-    of Fourier features ``[sin, cos](2^k lat), [sin, cos](2^k lon)`` (k = 1, ...) for finer
-    spatial detail. Width ``3 + 4 (frequencies - 1)``.
+    Encoded as the point ``u`` on the unit sphere ``(cos lat cos lon, cos lat sin lon,
+    sin lat)``, which is continuous across the dateline and at the poles, plus
+    ``frequencies - 1`` octaves of Fourier features ``[sin, cos](2^k pi u)`` (k = 1, ...) for
+    finer spatial detail. The octaves are functions of ``u``, not of raw lat/lon, so they keep
+    the dateline continuity and pole invariance. Width ``3 + 6 (frequencies - 1)``.
     """
 
     columns = 2
@@ -72,22 +73,24 @@ class CoordsField(nn.Module):
         if frequencies < 1:
             raise ValueError(f"frequencies must be >= 1, got {frequencies}")
         self.frequencies = int(frequencies)
-        self.width = 3 + 4 * (self.frequencies - 1)
+        self.width = 3 + 6 * (self.frequencies - 1)
 
     def forward(self, v: Tensor) -> tuple[Tensor, Tensor]:
         lat, lon = torch.deg2rad(v[:, 0:1]), torch.deg2rad(v[:, 1:2])
-        parts = [torch.cos(lat) * torch.cos(lon), torch.cos(lat) * torch.sin(lon), torch.sin(lat)]
+        u = torch.cat([torch.cos(lat) * torch.cos(lon), torch.cos(lat) * torch.sin(lon),
+                       torch.sin(lat)], dim=1)
+        parts = [u]
         for k in range(1, self.frequencies):
-            f = float(2 ** k)
-            parts += [torch.sin(f * lat), torch.cos(f * lat), torch.sin(f * lon),
-                      torch.cos(f * lon)]
+            a = u * (math.pi * 2 ** k)
+            parts += [torch.sin(a), torch.cos(a)]
         return torch.cat(parts, dim=1), torch.ones_like(v[:, 0], dtype=torch.bool)
 
 
 @FIELD_TYPES.register("categorical")
 class CategoricalField(nn.Module):
-    """Integer id in ``[0, num)`` (stored as a float column; rounded) -> learned embedding of
-    size ``dim``. Out-of-range ids are invalid, i.e. treated as missing."""
+    """Integer id in ``[0, num)`` (stored as a float column) -> learned embedding of size
+    ``dim``. The raw value is validated before rounding: a value that is not integer-valued
+    (``|v - round(v)| > 1e-6``) or lies outside ``[0, num)`` is invalid, i.e. missing."""
 
     columns = 1
 
@@ -100,8 +103,9 @@ class CategoricalField(nn.Module):
         nn.init.normal_(self.embedding.weight, std=1.0)
 
     def forward(self, v: Tensor) -> tuple[Tensor, Tensor]:
-        idx = torch.round(v[:, 0]).long()
-        valid = (idx >= 0) & (idx < self.num)
+        r = torch.round(v[:, 0])
+        valid = ((v[:, 0] - r).abs() <= 1e-6) & (v[:, 0] >= 0) & (v[:, 0] < self.num)
+        idx = r.long()
         return self.embedding(torch.where(valid, idx, torch.zeros_like(idx))), valid
 
 
