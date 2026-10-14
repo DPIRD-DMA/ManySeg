@@ -16,6 +16,8 @@ The downsampling helpers make targets for a loss at head scale:
 * :func:`downsample_mean`: continuous targets, the mean over the in-image (and optionally
   valid) pixels of each block.
 * :func:`downsample_sum`: density targets, the block sum, so the integral (count) is kept.
+* :func:`downsample_max`: the block maximum: peak-preserving for heatmaps, "any" for boolean
+  maps such as thin boundaries.
 
 :func:`upsample_output` maps head outputs back to the input grid (e.g. to evaluate at full
 resolution). These run outside the model graph (targets, metrics, post-processing).
@@ -47,11 +49,11 @@ def scaled_size(h, w, scale) -> tuple:
     return (h + f - 1) // f, (w + f - 1) // f
 
 
-def _blocks(x: Tensor, f: int) -> Tensor:
-    """``(..., H, W) -> (..., Hs, Ws, f*f)`` after padding to multiples of ``f`` (value 0)."""
+def _blocks(x: Tensor, f: int, value: float = 0.0) -> Tensor:
+    """``(..., H, W) -> (..., Hs, Ws, f*f)`` after padding to multiples of ``f`` (``value``)."""
     *lead, h, w = x.shape
     hs, ws = (h + f - 1) // f, (w + f - 1) // f
-    x = F.pad(x, (0, ws * f - w, 0, hs * f - h))
+    x = F.pad(x, (0, ws * f - w, 0, hs * f - h), value=value)
     x = x.reshape(*lead, hs, f, ws, f).movedim(-3, -2)
     return x.reshape(*lead, hs, ws, f * f)
 
@@ -116,6 +118,19 @@ def downsample_mean(x: Tensor, scale, valid: Tensor | None = None) -> Tensor:
 
 
 @torch.no_grad()
+def downsample_max(x: Tensor, scale) -> Tensor:
+    """Block maximum ``(..., H, W)`` over each block's in-image pixels. Keeps peaks (e.g. a
+    centre heatmap's 1.0) and, for boolean maps, means "any" (e.g. thin boundaries)."""
+    f = scale_factor(scale)
+    if f == 1:
+        return x
+    if x.dtype == torch.bool:
+        return _blocks(x.to(torch.uint8), f).amax(-1).bool()
+    low = torch.finfo(x.dtype).min if x.is_floating_point() else torch.iinfo(x.dtype).min
+    return _blocks(x, f, value=low).amax(-1)
+
+
+@torch.no_grad()
 def downsample_sum(x: Tensor, scale) -> Tensor:
     """Block sums ``(..., H, W)``: the total (e.g. a density map's count) is preserved."""
     f = scale_factor(scale)
@@ -153,5 +168,6 @@ def to_output_coords(points: Tensor, scale) -> Tensor:
     return points if f == 1 else (points.float() + 0.5) / f - 0.5
 
 
-__all__ = ["SCALES", "downsample_labels", "downsample_mean", "downsample_sum", "scale_factor",
+__all__ = ["SCALES", "downsample_labels", "downsample_max", "downsample_mean", "downsample_sum",
+           "scale_factor",
            "scaled_size", "to_input_coords", "to_output_coords", "upsample_output"]

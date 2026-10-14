@@ -124,6 +124,20 @@ def test_sum_preserving_density():
         torch.testing.assert_close(out.sum(dim=(1, 2, 3)), d.sum(dim=(1, 2, 3)))
 
 
+def test_block_max_ignores_padding_and_keeps_peaks():
+    from manyseg.utils import downsample_max
+
+    x = -torch.ones(1, 1, 5, 7)
+    x[0, 0, 4, 6] = -0.5           # alone in a partial corner block: must not become 0
+    x[0, 0, 1, 2] = 1.0
+    out = downsample_max(x, 0.25)
+    assert out.shape == (1, 1, 2, 2)
+    assert out.tolist() == [[[[1.0, -1.0], [-1.0, -0.5]]]]
+    b = torch.zeros(1, 1, 6, 6, dtype=torch.bool)
+    b[0, 0, 5, 0] = True           # "any" for a thin boolean boundary
+    assert downsample_max(b, 0.5).tolist() == [[[[False] * 3, [False] * 3, [True, False, False]]]]
+
+
 def test_downsampling_on_device(device):
     y = torch.randint(0, 4, (2, 33, 47), device=device)
     assert downsample_labels(y, 0.25).device.type == device.type
