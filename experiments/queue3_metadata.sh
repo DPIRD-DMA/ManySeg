@@ -11,7 +11,9 @@ MAIN="$WORKSPACE/ManySeg"
 DATA="$MANYSEG_BENCH_DATA"
 cd "$MAIN"
 until [ -f experiments/queue5.log.exit ]; do sleep 60; done
-while pgrep -f "queue[0-9].*\.sh|manyseg-bench train" > /dev/null; do sleep 60; done
+# Name the other queues explicitly: a generic "queue*.sh" pattern would match this script.
+while pgrep -f "queue_after_e002|queue2\.sh|queue4_instances|queue5_points|manyseg-bench train" \
+    > /dev/null; do sleep 60; done
 SHA=$(git rev-parse --short HEAD)
 WT="$WORKSPACE/ManySeg-runs/$SHA"
 [ -d "$WT" ] || git worktree add --detach "$WT" "$SHA"
