@@ -1,0 +1,17 @@
+# dataset encoder arch out_stride (E006 pre-registered selection)
+oxford_pet pvt_v2_b2 unet 1
+oxford_pet pvt_v2_b2 unet 2
+oxford_pet pvt_v2_b2 unet 4
+oxford_pet pvt_v2_b2 segformer native
+oxford_pet resnet34 unet 1
+oxford_pet resnet34 unet 2
+oxford_pet resnet34 fastai_unet 2
+oxford_pet resnet34 unet 4
+sen1floods11 pvt_v2_b2 unet 1
+sen1floods11 pvt_v2_b2 unet 2
+sen1floods11 pvt_v2_b2 fastai_unet 1
+sen1floods11 pvt_v2_b2 fastai_unet 2
+sen1floods11 resnet34 unet 1
+sen1floods11 resnet34 unet 2
+sen1floods11 resnet34 fastai_unet 1
+sen1floods11 resnet34 fastai_unet 2
