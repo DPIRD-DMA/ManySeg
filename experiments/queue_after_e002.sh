@@ -20,7 +20,7 @@ SHA=$(git rev-parse --short HEAD)
 WT="$WORKSPACE/ManySeg-runs/$SHA"
 [ -d "$WT" ] || git worktree add --detach "$WT" "$SHA"
 cd "$WT" && uv sync --all-packages -q
-export OUT_ROOT="$MAIN" RECIPE
+export OUT_ROOT="$MAIN" RECIPE MANYSEG_BENCH_DATA="$MANYSEG_BENCH_DATA"
 # Fail fast: one tiny real run through the same CLI path before committing hours of GPU time.
 if ! uv run manyseg-bench train --provider manyseg --recipe smoke --set '{"epochs": 1}' \
      --out "$MAIN/runs/preflight" --tag preflight; then
