@@ -14,6 +14,9 @@ ROOT=$MANYSEG_ROOT
 module load pytorch/2.7.1-rocm6.3.3
 export MANYSEG_BENCH_DATA=$ROOT/data OMP_NUM_THREADS=8 MIOPEN_USER_DB_PATH=/tmp/miopen-$SLURM_JOB_ID-$SLURM_ARRAY_TASK_ID
 export MIOPEN_CUSTOM_CACHE_DIR=$MIOPEN_USER_DB_PATH
+# The runner sets cudnn.benchmark=True; on ROCm that triggers an exhaustive MIOpen kernel search
+# per conv shape (minutes per run, repeated in every array task). FAST = heuristic selection.
+export MIOPEN_FIND_MODE=FAST
 mkdir -p "$MIOPEN_USER_DB_PATH"
 cd "$ROOT/code/$CODE"
 srun -N 1 -n 1 -c 8 --gres=gpu:1 --gpus-per-task=1 --gpu-bind=closest \
