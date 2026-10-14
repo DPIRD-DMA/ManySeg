@@ -132,3 +132,20 @@ def test_swin_dynamic_export_known_limitation():
         pytest.xfail("swin dynamic export still hangs (known timm/torch.export limitation)")
     if r.returncode != 0:
         pytest.xfail("swin dynamic export fails: " + r.stderr.decode()[-300:])
+
+
+@pytest.mark.parametrize("decoder", ["fpn", "deeplabv3plus", "upernet", "segformer",
+                                     "fastai_unet"])
+def test_decoder_export_and_compile_dynamic(decoder):
+    model = model_(decoder=decoder)
+    h = torch.export.Dim("h", min=33, max=1024)
+    w = torch.export.Dim("w", min=33, max=1024)
+    ep = torch.export.export(model, (torch.randn(1, 3, 64, 96),),
+                             dynamic_shapes={"x": {2: h, 3: w}})
+    compiled = torch.compile(model, fullgraph=True, dynamic=True, backend="aot_eager")
+    with torch.no_grad():
+        for hw in [(64, 96), (97, 131)]:
+            x = torch.randn(1, 3, *hw)
+            ref = model(x)
+            torch.testing.assert_close(ep.module()(x), ref, atol=1e-4, rtol=1e-4)
+            torch.testing.assert_close(compiled(x), ref, atol=1e-4, rtol=1e-4)

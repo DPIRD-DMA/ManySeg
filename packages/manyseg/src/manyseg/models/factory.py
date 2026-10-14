@@ -9,6 +9,7 @@ from torch import nn
 
 from ..backbones import TimmBackbone
 from ..decoders import DECODERS
+from ..features import FeatureSpec
 from ..heads import create_head
 from .dense import DenseModel
 
@@ -48,7 +49,10 @@ def create_model(
         bb = backbone
 
     dec_cls = DECODERS.get_or_raise(decoder) if isinstance(decoder, str) else decoder
-    dec = dec_cls(bb.feature_specs, **dict(decoder_kwargs or {}))
+    specs = tuple(bb.feature_specs)
+    if getattr(dec_cls, "wants_input", False):
+        specs = (FeatureSpec(bb.in_channels, 1, "input"), *specs)
+    dec = dec_cls(specs, **dict(decoder_kwargs or {}))
 
     single = None
     if num_classes is not None:

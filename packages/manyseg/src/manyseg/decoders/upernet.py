@@ -1,0 +1,59 @@
+"""UPerNet decoder (Xiao et al. 2018): PPM on the deepest level + FPN, fused at stride 4."""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+
+import torch
+import torch.nn.functional as F
+from torch import Tensor, nn
+
+from ..features import FeatureSpec
+from ..layers import ConvNormAct, init_decoder_
+from .base import DECODERS, pyramid_levels
+
+
+class PPM(nn.Module):
+    """Pyramid pooling. GroupNorm (not BN) so 1x1 pooled maps work at batch size 1."""
+
+    def __init__(self, cin: int, cout: int, scales: Sequence[int] = (1, 2, 3, 6)) -> None:
+        super().__init__()
+        self.scales = tuple(scales)
+        self.convs = nn.ModuleList(ConvNormAct(cin, cout, 1, norm="group") for _ in scales)
+
+    def forward(self, x: Tensor) -> list[Tensor]:
+        size = x.shape[-2:]
+        return [
+            F.interpolate(conv(F.adaptive_avg_pool2d(x, s)), size=size, mode="bilinear",
+                          align_corners=False)
+            for s, conv in zip(self.scales, self.convs)
+        ]
+
+
+@DECODERS.register("upernet")
+class UPerNetDecoder(nn.Module):
+    def __init__(self, in_specs: Sequence[FeatureSpec], channels: int = 256,
+                 pool_scales: Sequence[int] = (1, 2, 3, 6)) -> None:
+        super().__init__()
+        self.levels = pyramid_levels(in_specs)
+        specs = [in_specs[i] for i in self.levels]
+        self.ppm = PPM(specs[-1].channels, channels, pool_scales)
+        self.bottleneck = ConvNormAct(specs[-1].channels + len(pool_scales) * channels, channels)
+        self.lateral = nn.ModuleList(ConvNormAct(s.channels, channels, 1) for s in specs[:-1])
+        self.fpn = nn.ModuleList(ConvNormAct(channels, channels) for _ in specs[:-1])
+        self.fuse = ConvNormAct(len(specs) * channels, channels)
+        self.out_spec = FeatureSpec(channels, specs[0].stride, "upernet")
+        init_decoder_(self)
+
+    def forward(self, features: list[Tensor]) -> Tensor:
+        cs = [features[i] for i in self.levels]
+        top = self.bottleneck(torch.cat([cs[-1], *self.ppm(cs[-1])], dim=1))
+        lats = [lat(c) for lat, c in zip(self.lateral, cs[:-1])] + [top]
+        for i in range(len(lats) - 2, -1, -1):
+            lats[i] = lats[i] + F.interpolate(lats[i + 1], size=lats[i].shape[-2:],
+                                              mode="bilinear", align_corners=False)
+        outs = [conv(lat) for conv, lat in zip(self.fpn, lats[:-1])] + [lats[-1]]
+        size = outs[0].shape[-2:]
+        outs = [outs[0]] + [F.interpolate(o, size=size, mode="bilinear", align_corners=False)
+                            for o in outs[1:]]
+        return self.fuse(torch.cat(outs, dim=1))

@@ -45,6 +45,7 @@ class DenseModel(nn.Module):
             raise ValueError(f"single_output {single_output!r} is not a head")
         self.single_output = single_output
         self.pad_to_stride = pad_to_stride
+        self._decoder_wants_input = bool(getattr(decoder, "wants_input", False))
         self.divisor = int(getattr(backbone, "input_divisor", 1)) if pad_to_stride else 1
         self._deepest = max(
             range(len(backbone.feature_specs)), key=lambda i: backbone.feature_specs[i].stride
@@ -80,7 +81,7 @@ class DenseModel(nn.Module):
         h, w = x.shape[-2], x.shape[-1]
         x = self._pad(x)
         feats = self.backbone(x)
-        dec = self.decoder(feats)
+        dec = self.decoder([x, *feats] if self._decoder_wants_input else feats)
         if self.single_output is not None:
             return self._run_head(self.single_output, dec, feats, h, w)
         return {name: self._run_head(name, dec, feats, h, w) for name in self.heads}
