@@ -30,12 +30,13 @@ class MetadataEncoder(nn.Module):
     Args:
         fields: ``{name: {"type": ..., **options}}`` (see ``FIELD_TYPES``), or
         channels: ``N`` pre-normalised floats (``N`` continuous fields named ``"0"``...).
-        dim: Output embedding size ``D``.
+        dim: Output embedding size ``D``; ``None`` skips the MLP and returns the field
+            encodings (``D = width``), as used by the ``channels`` injection mode.
         dropout: Training-time probability of dropping each field (per sample) to unknown.
     """
 
     def __init__(self, fields: Mapping[str, Mapping] | None = None, *,
-                 channels: int | None = None, dim: int = 64, dropout: float = 0.0) -> None:
+                 channels: int | None = None, dim: int | None = 64, dropout: float = 0.0) -> None:
         super().__init__()
         if (fields is None) == (channels is None):
             raise ValueError("a vector input takes exactly one of 'fields' or 'channels'")
@@ -59,10 +60,13 @@ class MetadataEncoder(nn.Module):
             c += f.columns
         self.columns = c
         self.width = sum(f.width for f in built.values())
-        self.dim = int(dim)
         self.dropout = float(dropout)
-        self.mlp = nn.Sequential(nn.Linear(self.width, self.dim), nn.GELU(),
-                                 nn.Linear(self.dim, self.dim))
+        if dim is None:
+            self.dim, self.mlp = self.width, nn.Identity()
+        else:
+            self.dim = int(dim)
+            self.mlp = nn.Sequential(nn.Linear(self.width, self.dim), nn.GELU(),
+                                     nn.Linear(self.dim, self.dim))
 
     def pack(self, values: Mapping[str, Tensor]) -> Tensor:
         """Per-field values ``{name: (B,) or (B, columns)}`` -> the packed ``(B, N)`` tensor

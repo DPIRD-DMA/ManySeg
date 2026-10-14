@@ -1,0 +1,154 @@
+"""``create_model`` support for vector inputs: parse ``{"kind": "vector", ...}`` inputs, build
+the raster model with the ordinary factory, then attach a :class:`Conditioner`."""
+
+from __future__ import annotations
+
+from collections.abc import Callable, Mapping
+from typing import Any
+
+from torch import nn
+
+from .encoder import MetadataEncoder
+from .inject import Conditioner, DecoderFiLM, used_levels
+
+VECTOR_KEYS = {"kind", "fields", "channels", "dim", "dropout", "conditioning"}
+MODES = ("film", "head", "channels", "token")
+_MODE_OPTIONS = {"film": {"on"}, "head": {"pixel"}, "channels": {"target"}, "token": set()}
+
+
+def has_kinds(inputs: Mapping[str, Mapping]) -> bool:
+    return any("kind" in cfg for cfg in inputs.values())
+
+
+def split_inputs(inputs: Mapping[str, Mapping]) -> tuple[dict, dict]:
+    """``(rasters, vectors)``; ``"kind": "raster"`` is stripped from raster configs."""
+    rasters, vectors = {}, {}
+    for n, cfg in inputs.items():
+        kind = cfg.get("kind", "raster")
+        if kind == "vector":
+            vectors[n] = dict(cfg)
+        elif kind == "raster":
+            rasters[n] = {k: v for k, v in cfg.items() if k != "kind"}
+        else:
+            raise ValueError(f"input {n!r}: kind must be 'raster' or 'vector', got {kind!r}")
+    return rasters, vectors
+
+
+def parse_vector(name: str, cfg: Mapping) -> tuple[MetadataEncoder, str, dict]:
+    unknown = set(cfg) - VECTOR_KEYS
+    if unknown:
+        raise ValueError(f"vector input {name!r}: unknown keys {sorted(unknown)}")
+    cond = cfg.get("conditioning", "film")
+    cond = {"mode": cond} if isinstance(cond, str) else dict(cond)
+    mode = cond.pop("mode", "film")
+    if mode not in MODES:
+        raise ValueError(f"vector input {name!r}: conditioning mode must be one of {MODES}, "
+                         f"got {mode!r}")
+    if mode == "token":
+        raise NotImplementedError(
+            "'token' conditioning (metadata as extra ViT tokens) is not implemented yet; "
+            "use 'film', 'head' or 'channels'")
+    bad = set(cond) - _MODE_OPTIONS[mode]
+    if bad:
+        raise ValueError(f"vector input {name!r}: unknown {mode!r} options {sorted(bad)}")
+    if mode == "channels" and "dim" in cfg:
+        raise ValueError(f"vector input {name!r}: 'dim' does not apply to 'channels' mode "
+                         "(the field encodings themselves become channels)")
+    enc = MetadataEncoder(cfg.get("fields"), channels=cfg.get("channels"),
+                          dim=None if mode == "channels" else cfg.get("dim", 64),
+                          dropout=cfg.get("dropout", 0.0))
+    return enc, mode, cond
+
+
+def build_conditioned_model(create_model: Callable[..., nn.Module], *, inputs, fusion, backbone,
+                            pretrained, channel_adapter, out_indices, backbone_kwargs,
+                            heads, num_classes, **common: Any) -> nn.Module:
+    rasters, vectors = split_inputs(inputs)
+    shared = dict(pretrained=pretrained, channel_adapter=channel_adapter,
+                  out_indices=out_indices, heads=heads, num_classes=num_classes, **common)
+    if not vectors:
+        return create_model(backbone=backbone, inputs=rasters, fusion=fusion,
+                            backbone_kwargs=backbone_kwargs, **shared)
+    if not rasters:
+        raise ValueError(f"vector inputs {sorted(vectors)} only condition a model; at least one "
+                         "raster input is required")
+    for n in vectors:
+        if f"{n}_mask" in inputs:
+            raise ValueError(f"input name {n}_mask is reserved for the mask of vector input {n!r}")
+
+    encoders, modes, opts, targets = {}, {}, {}, {}
+    for n, cfg in vectors.items():
+        encoders[n], modes[n], opts[n] = parse_vector(n, cfg)
+        if modes[n] == "channels":
+            t = opts[n].get("target", next(iter(rasters)))
+            if t not in rasters:
+                raise ValueError(f"vector input {n!r}: channels target {t!r} is not a raster "
+                                 f"input; choose from {list(rasters)}")
+            if "channels" not in rasters[t]:
+                raise ValueError(f"input {t!r}: 'channels' is required")
+            rasters[t] = {**rasters[t], "channels": rasters[t]["channels"] + encoders[n].width}
+            targets[n] = t
+
+    single = None
+    if len(rasters) == 1 and fusion is None:
+        # One raster: build the ordinary single-input model (plain-tensor backbone), so every
+        # decoder (including those that need the input image) and adapter works unchanged.
+        from ..models.factory import _INPUT_KEYS
+
+        (single, cfg), = rasters.items()
+        unknown = set(cfg) - _INPUT_KEYS
+        if unknown:
+            raise ValueError(f"input {single!r}: unknown keys {sorted(unknown)}")
+        if "channels" not in cfg:
+            raise ValueError(f"input {single!r}: 'channels' is required")
+        bkw = dict(cfg.get("backbone_kwargs", backbone_kwargs) or {})
+        if cfg.get("rgb_indices") is not None:
+            bkw["rgb_indices"] = cfg["rgb_indices"]
+        model = create_model(
+            backbone=cfg.get("backbone", backbone), in_channels=cfg["channels"],
+            backbone_kwargs=bkw,
+            **{**shared, **{k: cfg[k] for k in ("pretrained", "channel_adapter", "out_indices")
+                            if k in cfg}})
+    else:
+        model = create_model(backbone=backbone, inputs=rasters, fusion=fusion,
+                             backbone_kwargs=backbone_kwargs, **shared)
+
+    film_names = [n for n in vectors if modes[n] == "film"]
+    head_names = [n for n in vectors if modes[n] == "head"]
+    film = {}
+    if film_names:
+        ons = {tuple(opts[n].get("on", ("features", "output"))) for n in film_names}
+        if len(ons) > 1:
+            raise ValueError("all 'film' vector inputs must use the same 'on' option")
+        on = ons.pop()
+        dim = sum(encoders[n].dim for n in film_names)
+        specs = tuple(model.backbone.feature_specs)
+        in_ch = getattr(model.backbone, "in_channels", None)
+        decoders = {"decoder": model.decoder} if model.decoder is not None else {}
+        decoders.update({f"task_{h}": d for h, d in model.task_decoders.items()})
+        if not decoders:
+            raise ValueError("'film' conditioning modulates decoders, but this model has none "
+                             "(only image heads on encoder features); use 'head'")
+        for k, d in decoders.items():
+            film[k] = DecoderFiLM(dim, specs, used_levels(d, specs, in_ch), d.out_spec, on)
+
+    head_bias = {}
+    if head_names:
+        dim = sum(encoders[n].dim for n in head_names)
+        pixel = any(opts[n].get("pixel", False) for n in head_names)
+        cfgs = heads if heads is not None else {"logits": {"channels": num_classes}}
+        for name, head in model.heads.items():
+            scope = getattr(head, "scope", "pixel")
+            if scope == "image" or (scope == "pixel" and pixel):
+                cfg = cfgs[name]
+                out = cfg["channels"] * (2 if cfg.get("uncertainty", False) else 1)
+                head_bias[name] = nn.Linear(dim, out)
+                nn.init.zeros_(head_bias[name].weight)
+                nn.init.zeros_(head_bias[name].bias)
+        if not head_bias:
+            raise ValueError("'head' conditioning: the model has no image-scope heads; use "
+                             "{'mode': 'head', 'pixel': True} to condition pixel heads")
+
+    model.conditioner = Conditioner(encoders, modes, list(rasters), single=single,
+                                    channel_targets=targets, film=film, head_bias=head_bias)
+    return model
