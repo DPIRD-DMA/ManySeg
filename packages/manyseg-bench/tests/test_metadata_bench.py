@@ -95,10 +95,10 @@ CHIPS = ["Ghana_1", "Ghana_2", "India_1", "Mekong_1", "Mekong_2", "Spain_1", "US
          "Peru_1"]  # Mekong is the catalogue's Cambodia; Peru is not in the catalogue
 
 
-def fake_raw(tmp_path, size=8, scale=0.001):
+def fake_raw(raw, size=8, scale=0.001):
     import tifffile
 
-    root = tmp_path / "raw" / "sen1floods11_v1.1"
+    root = raw / "sen1floods11_v1.1"
     (root / "data" / "S2L1CHand").mkdir(parents=True)
     feats = [{"type": "Feature", "geometry": None, "properties": {
         "location": e, "s2_date": d, "s1_date": d, "orbit": o}} for e, (d, o, _) in EVENTS.items()]
@@ -113,7 +113,7 @@ def fake_raw(tmp_path, size=8, scale=0.001):
                          np.zeros((13, size, size), np.int16), extratags=[
                              (33550, "d", 3, (scale, scale, 0.0)), (33922, "d", 6, tie)])
         centres[n] = (lat, lon)
-    return tmp_path / "raw", centres
+    return raw, centres
 
 
 def test_event_of_and_aliases():
@@ -122,7 +122,7 @@ def test_event_of_and_aliases():
 
 
 def test_load_vectors_from_georeferencing_and_catalogue(tmp_path):
-    raw, centres = fake_raw(tmp_path)
+    raw, centres = fake_raw(tmp_path / "raw")
     fields = {"latlon": {"type": "coords"}, **FIELDS}
     v = sen1floods11.load_vectors(raw, CHIPS, {"meta": {"fields": fields}})["meta"]
     assert v.shape == (len(CHIPS), 4) and v.dtype == np.float32
@@ -152,7 +152,7 @@ def test_event_folds_never_share_events():
 def test_split_getter_events_scheme_with_vectors(tmp_path):
     from manyseg_bench.experiments.runner import split_getter
 
-    raw, _ = fake_raw(tmp_path)
+    raw, _ = fake_raw(tmp_path / "raw")
     cache = tmp_path / "cache"
     groups = {"train": CHIPS[:4], "val": CHIPS[4:6], "test": CHIPS[6:], "bolivia": CHIPS[:1]}
     for split, names in groups.items():
@@ -175,3 +175,31 @@ def test_split_getter_events_scheme_with_vectors(tmp_path):
         {"doy", "orbit"}
     with pytest.raises(ValueError, match="scheme"):
         split_getter(ds, cache, raw, "random")
+
+
+@pytest.mark.parametrize("mode", ["dict", "stack"])
+def test_run_training_end_to_end_with_metadata(tmp_path, mode):
+    """CLI-equivalent run on a synthetic Sen1Floods11 cache + raw catalogue (CPU)."""
+    from manyseg_bench.experiments import run_training
+
+    fake_raw(tmp_path / "data" / "raw" / "sen1floods11")
+    cache = tmp_path / "data" / "cache" / "sen1floods11"
+    groups = {"train": CHIPS[:4], "val": CHIPS[4:6], "test": CHIPS[6:], "bolivia": CHIPS[:2]}
+    rng = np.random.default_rng(0)
+    for split, names in groups.items():
+        n = len(names)
+        save_split(cache, split, {"s1": rng.normal(size=(n, 32, 32, 2)).astype(np.float16),
+                                  "s2": rng.normal(size=(n, 32, 32, 13)).astype(np.float16),
+                                  "dem": np.zeros((n, 32, 32, 1), np.float16)},
+                   rng.integers(0, 2, (n, 32, 32)).astype(np.uint8), names)
+    (cache / "meta.json").write_text(json.dumps({
+        "mean": {"s1": [0] * 2, "s2": [0] * 13, "dem": [0]},
+        "std": {"s1": [1] * 2, "s2": [1] * 13, "dem": [1]}}))
+    spec = ModelSpec("unet", "resnet18", weights=None, input_mode=mode)
+    rec = run_training("manyseg", spec, "sen1floods11_meta", "smoke", device="cpu",
+                       out_dir=tmp_path / "runs", data=tmp_path / "data", evaluate_test=True,
+                       recipe_overrides={"batch_size": 2, "precision": "fp32"},
+                       split="events:3:0")
+    assert rec["split_scheme"] == "events:3:0" and rec["vectors_dropped"] == (mode == "stack")
+    assert {"test", "bolivia"} <= set(rec)
+    assert rec["spec"]["vectors"] == {"meta": {"fields": sen1floods11.META_FIELDS}}
