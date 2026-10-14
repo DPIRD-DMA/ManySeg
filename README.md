@@ -12,7 +12,7 @@ benchmark.
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/architecture-dark.svg">
-    <img alt="ManySeg architecture: per-input encoders feed a fusion block, a decoder and named heads; every stage is swappable" src="docs/assets/architecture-light.svg" width="860">
+    <img alt="ManySeg architecture: per-input encoders feed a fusion block, metadata conditions the decoder through FiLM, shared or per-head decoders feed named heads including instance outputs; every stage is swappable" src="docs/assets/architecture-light.svg" width="860">
   </picture>
 </p>
 
@@ -43,19 +43,28 @@ model(torch.randn(2, 4, 257, 301)).shape   # (2, 3, 257, 301): odd and non-squar
 Multiple inputs and outputs:
 
 ```python
+from manyseg.instances import instance_heads
+
 model = create_model(
     inputs={
         "optical": {"channels": 4, "backbone": "convnext_tiny"},
         "sar": {"channels": 2, "backbone": "resnet18", "alignment": "same_extent"},
+        "meta": {"kind": "vector", "fields": {                   # non-raster conditioning
+            "doy": {"type": "cyclic", "period": 365.25},
+            "sun_elev": {"type": "continuous", "mean": 45.0, "std": 15.0},
+            "latlon": {"type": "coords"},
+        }},
     },
     fusion={"type": "intermediate", "op": "gated"},
     decoder="unet",
     heads={
-        "water": {"type": "segmentation", "channels": 2},
+        **instance_heads(decoders={"boundary": "fpn"}),  # extent, boundary, distance
         "water_area": {"type": "regression", "channels": 1, "scope": "image"},
     },
 )
-out = model({"optical": optical, "sar": sar_at_half_resolution})
+meta = model.conditioner.encoders["meta"].pack({"doy": doy, "sun_elev": sun_elev, "latlon": latlon})
+out = model({"optical": optical, "sar": sar_at_half_resolution, "meta": meta})
+# out["extent"], out["boundary"], out["distance"]: (B, 1, H, W); out["water_area"]: (B, 1)
 ```
 
 ## What works today
@@ -66,12 +75,21 @@ out = model({"optical": optical, "sar": sar_at_half_resolution})
   configured by introspection, without allow-lists.
 * **Input channels.** Any channel count, with `repeat` (timm), `mean`, `rgb_plus_zero`,
   `rgb_plus_random` and `projection` adapters for pretrained stems.
-* **Decoders.** `unet` (parameter- and FLOP-identical to SMP's Unet), `fastai_unet`
-  (identical to fastai's DynamicUnet), `fpn`, `deeplabv3plus`, `upernet`, `segformer`.
+* **Decoders.** `unet` (parameter- and FLOP-identical to SMP's Unet), `unetplusplus`,
+  `fastai_unet` (identical to fastai's DynamicUnet), `fpn`, `deeplabv3plus`, `upernet`,
+  `segformer`. One decoder can be shared by all heads, or a head can have its own.
 * **Fusion.** Early, intermediate (`concat`, `add`, `gated`, `attention`, `cross_attention`)
   and late, with shared or independent encoders and explicit `same_grid` / `same_extent`
   alignment.
-* **Heads.** Named heads for pixel or image segmentation, regression and classification.
+* **Metadata.** Non-raster inputs (date, angles, lat/lon, sensor id, tabular floats) as
+  `"kind": "vector"` inputs, encoded by field type, with missing-value handling. They
+  condition the model by FiLM on the features entering each decoder (default), through image
+  heads, or as extra input channels. Pretrained encoders are not modified.
+* **Heads.** Named heads for pixel or image segmentation, regression and classification,
+  with optional uncertainty (mean + log-variance) for regression.
+* **Instances and points.** Boundary + distance instance heads (`manyseg.instances`) and
+  centre-heatmap, offset and density heads (`manyseg.points`), with target generation and
+  post-processing to instance labels, points, counts and panoptic labels.
 * **Spatial.** Dynamic, odd and non-square sizes with an explicit pad-and-crop policy.
   Spatial alignment is tested numerically.
 * **Deployment.** `torch.compile(fullgraph=True, dynamic=True)` (one graph across 10 sizes
