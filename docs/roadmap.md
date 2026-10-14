@@ -1,6 +1,6 @@
 # Roadmap
 
-Status as of 2026-10-14 (afternoon update). ✅ done · 🔄 in progress · ⏳ planned.
+Status as of 2026-10-14 (evening update). ✅ done · 🔄 in progress · ⏳ planned.
 
 ## Phase 1: research and architecture ✅
 
@@ -28,7 +28,13 @@ Status as of 2026-10-14 (afternoon update). ✅ done · 🔄 in progress · ⏳ 
 * ✅ Sen1Floods11 (S1 + S2 + DEM) multi-input dataset; `stack` vs `dict` input modes.
 * ✅ E003 (decoders on Pet): unet stays default; fastai_unet +0.4 test mIoU at 4× FLOPs; stride-4 decoders −0.4 to −1.1.
 * ✅ E001b (aligned upsampling, trained): no effect, a negative result; nearest stays default.
-* 🔄 GPU queue chain: E005 (fusion, running) → E004 (channel adapters) → E010 (instance heads, AI4Boundaries) → E011 (tree points, OAM-TCD) → E009 (metadata conditioning). E006 (decoder Pareto, pre-registered) will run on Pawsey Setonix.
+* ✅ E005 (fusion, Sen1Floods11): negative. No fusion arm beats S2-only or early stacking; SMP early fusion equals ManySeg early fusion.
+* ✅ E004 (stem adapters, 13-band S2; Setonix): `repeat` stays default; scratch matches ImageNet init; `projection` is harmful.
+* ✅ E009 (metadata conditioning, leave-events-out; Setonix): FiLM beats metadata-as-channels (2.9 SE); FiLM vs none +0.9 water IoU, under the 2 SE bar; the lat/lon shortcut criterion was met.
+* ✅ E010 (instance heads, AI4Boundaries; Setonix): positive. Boundary + distance doubles PQ vs extent + CC; per-head decoders add +0.06 PQ.
+* ✅ E011 (tree points, OAM-TCD; Setonix): MSE heatmap stays default; the density head halves count MAE; the fixed peak threshold cost recall. E011b (val-calibrated threshold) is running.
+* 🔄 E006 (decoder Pareto; Setonix): stage 1 done (36 runs, 16 frontier configs); stage 2 (32 runs) and the profiling sweep are running.
+* ✅ Execution on Pawsey Setonix (MI250X) via Slurm arrays: `scripts/setonix/` (see its README for the container, offline weights, MIOpen and Lustre gotchas).
 * ✅ Datasets prepared: AI4Boundaries ortho (13 GB cache), OAM-TCD (CC-BY, 1024², ~22 GB cache).
 * ⏳ Profiling sweep (eager vs compile; fp32, bf16, fp16; batch sizes), on an idle GPU.
 * ⏳ CI workflow (CPU unit tests; slow tier nightly).
