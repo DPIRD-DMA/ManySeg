@@ -6,7 +6,7 @@ MAIN="$WORKSPACE/ManySeg"
 R=$MANYSEG_ROOT
 JOBS=$(IFS=,; echo "$*")
 while true; do
-  for e in E004_channel_adapters E009_metadata_conditioning E010_instance_heads E011_tree_points; do
+  for e in E004_channel_adapters E006_decoder_pareto E009_metadata_conditioning E010_instance_heads E011_tree_points; do
     mkdir -p "$MAIN/experiments/$e/runs"
     rsync -a -e "ssh -o BatchMode=yes" "$HOST:$R/experiments/$e/runs/" \
       "$MAIN/experiments/$e/runs/" 2>/dev/null
