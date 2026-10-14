@@ -9,7 +9,7 @@ for seed in 0 1 2; do
     echo "=== upsample=$up seed=$seed recipe=$RECIPE"
     uv run manyseg-bench train --provider manyseg --arch unet --recipe $RECIPE --seeds $seed \
       --options "{\"decoder_kwargs\": {\"upsample\": \"$up\"}}" --set '{"epochs": 20}' \
-      --out $OUT --evaluate-test --tag "e001b-$up" || echo "FAILED $up $seed"
+      --out "$OUT" --evaluate-test --tag "e001b-$up" || echo "FAILED $up $seed"
   done
 done
 echo "ALL DONE"
