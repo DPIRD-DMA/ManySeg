@@ -233,3 +233,4 @@ experiments/queue4*.log*
 .claude/
 experiments/queue5*.log*
 experiments/queue3*.log*
+experiments/setonix_watch.log*
