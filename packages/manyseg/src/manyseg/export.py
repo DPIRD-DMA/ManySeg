@@ -19,7 +19,10 @@ def _min_size(model: nn.Module) -> int:
 def dynamic_shapes(model: nn.Module, example, max_size: int = 4096,
                    dynamic_batch: bool = False):
     """``dynamic_shapes`` for ``torch.export``: H and W dynamic in [min, max_size] (all inputs
-    of a multi-input model share the H/W symbols only if they are on the same grid)."""
+    of a multi-input model share the H/W symbols only if they are on the same grid).
+
+    Vector (metadata) inputs and their masks, ``(B, N)``, have no spatial dimensions: only the
+    batch dimension is dynamic (with ``dynamic_batch``); ``N`` is fixed by the model."""
     lo = _min_size(model)
     batch = torch.export.Dim("batch", min=1, max=1024) if dynamic_batch else None
 
@@ -36,6 +39,9 @@ def dynamic_shapes(model: nn.Module, example, max_size: int = 4096,
     if isinstance(example, Mapping):
         shapes, seen = {}, {}
         for k, t in example.items():
+            if t.ndim == 2:  # vector input or mask: (B, N)
+                shapes[k] = {0: batch} if batch is not None else None
+                continue
             key = tuple(t.shape[-2:])
             if key not in seen:
                 seen[key] = spec(t, f"{k}_")
