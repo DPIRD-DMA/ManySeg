@@ -7,31 +7,50 @@ from torch import Tensor, nn
 
 from ..features import FeatureSpec
 from ..registry import Registry
+from ..utils.resolution import scale_factor
+from ..utils.spatial import pad_to_multiple
 
 HEADS = Registry("head type")
 
 
 class PixelHead(nn.Module):
-    """Per-pixel prediction: ``k x k`` conv then upsample by the feature stride.
+    """Per-pixel prediction on a grid of ``scale`` x the input resolution.
 
-    Output covers ``stride * feature_size`` pixels (>= padded input); the model crops it.
+    ``f = 1 / scale`` is the output stride (1, 2, 4 or 8). From a feature of stride ``d``:
+
+    * ``d == f``: just the ``k x k`` conv; nothing is resampled (a decoder built with
+      ``out_stride=f`` feeding a head with ``scale=1/f`` pays for no upsampling at all);
+    * ``d > f``: conv, then bilinear upsampling by ``d / f`` (``align_corners=False``);
+    * ``d < f``: area-average by ``f / d`` (block means), then the conv on the coarse grid.
+
+    The output covers ``feature_size * d / f`` pixels (>= the scaled padded input); the model
+    crops it to ``ceil(H / f) x ceil(W / f)``.
     """
 
     def __init__(self, spec: FeatureSpec, channels: int, kernel_size: int = 3,
-                 bias_init: float = 0.0) -> None:
+                 bias_init: float = 0.0, scale: float = 1) -> None:
         super().__init__()
         self.stride = spec.stride
+        self.scale = scale
+        self.factor = scale_factor(scale)
+        self.up = max(1, self.stride // self.factor)
+        self.down = max(1, self.factor // self.stride)
+        if self.up * self.factor != max(self.stride, self.factor) or \
+                self.down * self.stride != max(self.stride, self.factor):
+            raise ValueError(f"feature stride {self.stride} and head scale {scale} are not "
+                             "related by a power of two")
         self.conv = nn.Conv2d(spec.channels, channels, kernel_size, padding=kernel_size // 2)
         nn.init.xavier_uniform_(self.conv.weight)
         nn.init.constant_(self.conv.bias, bias_init)  # e.g. logit(prior) for focal-loss heads
 
     def forward(self, x: Tensor) -> Tensor:
+        if self.down > 1:
+            x = F.avg_pool2d(pad_to_multiple(x, self.down), self.down)
         x = self.conv(x)
-        if self.stride > 1:
+        if self.up > 1:
             h, w = x.shape[-2:]
-            x = F.interpolate(
-                x, size=(h * self.stride, w * self.stride), mode="bilinear", align_corners=False
-            )
+            x = F.interpolate(x, size=(h * self.up, w * self.up), mode="bilinear",
+                              align_corners=False)
         return x
 
 
@@ -66,6 +85,8 @@ def create_head(spec_decoder: FeatureSpec, spec_encoder: FeatureSpec, cfg: dict)
             raise ValueError("uncertainty=True is only supported for regression heads")
         channels = 2 * channels
     scope = cfg.pop("scope", "pixel")
+    if scope != "pixel" and "scale" in cfg:
+        raise ValueError("'scale' applies to pixel heads only; image-scope heads have no grid")
     if scope == "pixel":
         source = cfg.pop("source", "decoder")
         spec = spec_decoder if source == "decoder" else spec_encoder

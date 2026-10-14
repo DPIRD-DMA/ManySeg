@@ -5,6 +5,11 @@ markers = connected components of the seeds; then markers grow back over the for
 ``backend="skimage"`` uses seeded watershed on ``-distance`` (``pip install manyseg[instances]``);
 ``backend="torch"`` (no extra dependencies, GPU-capable) grows all markers at equal speed through
 4-connected foreground (ties -> larger label), which splits a symmetric boundary band exactly.
+
+Scaled heads (head ``scale`` < 1): the label map comes back on the head grid
+(``ceil(H * scale) x ceil(W * scale)``); map it to the input grid with
+``manyseg.utils.upsample_output(labels, (H, W), scale, mode="nearest")``. ``min_size`` is in
+head pixels.
 """
 
 from __future__ import annotations

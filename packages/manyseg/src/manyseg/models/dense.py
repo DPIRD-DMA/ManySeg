@@ -29,6 +29,10 @@ class DenseModel(nn.Module):
         pad_to_stride: Zero-pad bottom/right to ``backbone.input_divisor`` and crop outputs
             back, which keeps outputs pixel-aligned with inputs. If False, pixel outputs are
             resized to the input size instead.
+
+    Pixel heads return the primary input's ``H x W``, or ``ceil(H / f) x ceil(W / f)`` for a head
+    with ``scale = 1/f`` (output pixel ``(i, j)`` covers input pixels ``[i*f, (i+1)*f) x
+    [j*f, (j+1)*f)``; see :mod:`manyseg.utils.resolution`).
     """
 
     def __init__(
@@ -90,12 +94,15 @@ class DenseModel(nn.Module):
             inp = feats[self._deepest]
         else:
             inp = self._decode_cond(f"task_{name}", self.task_decoders[name], x, feats, cond)
-        y = self.heads[name](inp)
+        head = self.heads[name]
+        y = head(inp)
         if name in self._pixel_heads:
+            f = getattr(head, "factor", 1)  # 1 / scale; floor division keeps sizes symbolic
+            hs, ws = (h + f - 1) // f, (w + f - 1) // f
             if self.pad_to_stride:
-                y = crop_to(y, h, w)
+                y = crop_to(y, hs, ws)
             else:
-                y = F.interpolate(y, size=(h, w), mode="bilinear", align_corners=False)
+                y = F.interpolate(y, size=(hs, ws), mode="bilinear", align_corners=False)
         return y if cond is None else self.conditioner.head(name, y, cond)
 
     def _pad(self, x: Tensor) -> Tensor:

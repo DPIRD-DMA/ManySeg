@@ -117,6 +117,51 @@ def test_full_chain_heatmap_peaks_offsets_to_instances():
     assert same_partition(labels[0], m)
 
 
+@pytest.mark.parametrize("scale", [0.5, 0.25])
+def test_find_peaks_scale_returns_input_pixel_coordinates(scale):
+    """Targets rendered on a scaled head's grid; ``scale=`` maps peaks back to input pixels:
+    exact for points on output-pixel centres, within half an output pixel otherwise."""
+    from manyseg.utils import scaled_size, to_output_coords
+
+    f = round(1 / scale)
+    size = scaled_size(40, 48, scale)
+    centred = (torch.tensor([[1.0, 3.0], [5.0, 8.0], [7.0, 2.0]]) + 0.5) * f - 0.5
+    hm = gaussian_heatmap([to_output_coords(centred, scale)], size, 1.0)
+    (pts, _), = find_peaks(hm, 0.5, scale=scale)
+    assert pts.dtype == torch.float32
+    torch.testing.assert_close(pts[pts[:, 0].argsort()], centred[centred[:, 0].argsort()])
+
+    hm = gaussian_heatmap([torch.floor(to_output_coords(PTS, scale) + 0.5)], size, 1.0)
+    (pts, _), = find_peaks(hm, 0.5, scale=scale)
+    d = torch.cdist(PTS, pts).min(1).values
+    assert len(pts) == len(PTS) and (d <= f / 2 * 2**0.5 + 1e-6).all(), d
+
+
+def test_find_peaks_scale_one_unchanged():
+    hm = gaussian_heatmap([PTS], (40, 48), sigma=2.0)
+    (a, _), = find_peaks(hm, 0.5)
+    (b, _), = find_peaks(hm, 0.5, scale=1)
+    assert torch.equal(a, b) and a.dtype == torch.long
+
+
+def test_scaled_heads_full_chain_back_to_input_resolution():
+    """Instance ids -> mode-downsampled ids -> head-grid heatmap / offset targets -> peaks and
+    grouping on the head grid -> labels upsampled (nearest) to the input grid."""
+    from manyseg.utils import downsample_labels, upsample_output
+
+    m = blocks()
+    small = downsample_labels(m[None], 0.5)
+    peaks = find_peaks(heatmap_from_instances(small, sigma=1.0), 0.5)
+    lab = group_by_offsets([p for p, _ in peaks], offset_targets(small), small > 0)
+    full = upsample_output(lab, (40, 48), 0.5, mode="nearest")
+    assert full.shape == (1, 40, 48)
+    # exact up to the target quantisation itself ...
+    assert same_partition(full[0], upsample_output(small, (40, 48), 0.5, mode="nearest")[0])
+    # ... which only loses odd-aligned edges (ties go to background)
+    iou = ((full[0] > 0) & (m > 0)).sum() / ((full[0] > 0) | (m > 0)).sum()
+    assert iou > 0.85 and len(torch.unique(full[full > 0])) == 4
+
+
 def test_panoptic_labels():
     sem = torch.tensor([[[0, 1, 1, 2]]])
     inst = torch.tensor([[[0, 1, 2, 0]]])
