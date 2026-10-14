@@ -67,6 +67,15 @@ def to_label_grid(out, y):
     return upsample_output(out.float(), size, 1 / f)
 
 
+def _with_scale(heads: dict, scale) -> dict:
+    """Task head configs with a head ``scale`` (validated; 1 leaves the configs unchanged)."""
+    from manyseg.utils import scale_factor
+
+    if scale_factor(scale) == 1:
+        return heads
+    return {k: {**v, "scale": scale} for k, v in heads.items()}
+
+
 class Task:
     name = "task"
     primary_metric = ""
@@ -174,10 +183,12 @@ class InstanceTask(Task):
                  distance: str = "normalized", boundary_pos_weight: float | None = None,
                  weights: tuple[float, float, float] = (1.0, 1.0, 1.0),
                  iou_threshold: float = 0.5, decoders=None, mode: str = "boundary_distance",
-                 ) -> None:
+                 head_scale: float = 1) -> None:
         if mode not in ("boundary_distance", "extent_cc"):
             raise ValueError(f"mode must be boundary_distance|extent_cc, got {mode!r}")
         self.mode, self.decoders = mode, decoders
+        self.head_scale = head_scale
+        _with_scale({}, head_scale)  # validate early
         if num_classes != 1:
             raise NotImplementedError("multi-class instance training: use semantic + instances")
         self.num_classes, self.boundary_width, self.distance = num_classes, boundary_width, distance
@@ -188,7 +199,8 @@ class InstanceTask(Task):
         from manyseg.instances import instance_heads
 
         heads = instance_heads(self.num_classes, distance=self.distance, decoders=self.decoders)
-        return {"extent": heads["extent"]} if self.mode == "extent_cc" else heads
+        heads = {"extent": heads["extent"]} if self.mode == "extent_cc" else heads
+        return _with_scale(heads, self.head_scale)
 
     def targets(self, y):
         from manyseg.instances import instance_targets
@@ -253,14 +265,18 @@ class PointTask(Task):
     """Centre heatmap (+ offsets) or density from instance-id labels (centroids = points).
 
     Primary metric: point F1 within ``radius`` (heatmap) or count MAE (density, lower=better).
+    ``head_scale`` sets every head's output scale; ``decoders`` as in
+    :func:`manyseg.points.point_heads` (for density: a decoder name/config, or "separate").
     """
 
     name = "points"
 
     def __init__(self, offsets: bool = False, density: bool = False, sigma: float = 2.0,
                  heatmap: str = "regression", radius: float = 3.0, peak_threshold: float = 0.5,
-                 density_scale: float = 100.0) -> None:
+                 density_scale: float = 100.0, head_scale: float = 1, decoders=None) -> None:
         self.offsets, self.density, self.sigma, self.kind = offsets, density, sigma, heatmap
+        self.head_scale, self.decoders = head_scale, decoders
+        _with_scale({}, head_scale)  # validate early
         self.radius, self.peak_threshold, self.density_scale = radius, peak_threshold, density_scale
         self.primary_metric = "mae" if density else "f1"
         self.higher_is_better = not density
@@ -268,7 +284,13 @@ class PointTask(Task):
     def heads(self):
         from manyseg.points import density_head, point_heads
 
-        return density_head() if self.density else point_heads(self.kind, offsets=self.offsets)
+        if self.density:
+            d = self.decoders
+            d = d.get("density") if isinstance(d, dict) else ("unet" if d == "separate" else d)
+            heads = density_head(d)
+        else:
+            heads = point_heads(self.kind, offsets=self.offsets, decoders=self.decoders)
+        return _with_scale(heads, self.head_scale)
 
     def targets(self, y):
         from manyseg.points import (

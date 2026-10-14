@@ -155,6 +155,11 @@ def run_training(
         if provider != "manyseg":
             raise ValueError(f"task {task.name!r} needs named heads; provider {provider!r} "
                              "only produces a single logits tensor")
+        if "heads" in spec.options:
+            raise ValueError(
+                f"task {task.name!r} defines its own heads; configure them through the task "
+                "(--task-kwargs), e.g. {\"head_scale\": 0.5, \"decoders\": {\"boundary\": "
+                "\"unet\"}}, not options['heads']")
         spec = ModelSpec(**{**spec.to_dict(), "options": {**spec.options, "heads": task.heads()}})
     prov = get_provider(provider)
     if spec.input_mode == "dict" and not prov.supports_dict_inputs:
