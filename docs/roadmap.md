@@ -1,6 +1,6 @@
 # Roadmap
 
-Status as of 2026-10-14. ✅ done · 🔄 in progress · ⏳ planned.
+Status as of 2026-10-14 (afternoon update). ✅ done · 🔄 in progress · ⏳ planned.
 
 ## Phase 1: research and architecture ✅
 
@@ -25,28 +25,25 @@ Status as of 2026-10-14. ✅ done · 🔄 in progress · ⏳ planned.
 * ✅ Recipes (`standard`, `fastai_like`), trainer, metrics (mIoU, Dice, boundary F1),
   profiler, provenance with GPU contention, JSON results, report table.
 * 🔄 E002: fair three-way comparison on Pet (2 recipes × 3 seeds).
+* ✅ Sen1Floods11 (S1 + S2 + DEM) multi-input dataset; `stack` vs `dict` input modes.
+* 🔄 Queued from a frozen worktree: E003 (decoders), E001b (aligned upsampling), E005 (fusion).
 * ⏳ Profiling sweep (eager vs compile; fp32, bf16, fp16; batch sizes), on an idle GPU.
 * ⏳ CI workflow (CPU unit tests; slow tier nightly).
 
-## Phase 4: expanded architecture support ⏳
+## Phase 4: expanded architecture support 🔄
 
-Priority order. Each item comes with tests first.
-
-1. **Capability probe and registry** for timm models (feature API, layout, size class,
-   rounding, divisor, compile/export in a subprocess with a timeout). Generated table in docs.
-2. **Transformer backbones**: hierarchical models (Swin with `strict_img_size=False`, NHWC→NCHW;
-   PVTv2; Hiera at a fixed size) and plain ViT/EVA (`dynamic_img_size` + `dynamic_img_pad`,
-   with the token grid computed from the input) plus a **ViT pyramid neck**
-   (ViTDet/DPT-style, configurable scales).
-3. **Decoders**: FPN, DeepLabV3+, UPerNet, SegFormer-MLP (lightweight), U-Net++, and a
-   fastai-style Dynamic U-Net (ICNR shuffle, skip BN, input-image cross, middle block),
-   all against the common decoder interface.
-4. **Multi-input fusion**: per-input backbones (independent or shared), early, intermediate
-   and late fusion; concat, add, gated, attention and cross-attention ops; explicit
-   alignment policies (`same_grid`, `same_extent`).
-5. **Multi-task**: per-head task-specific decoders; uncertainty head (mean + log-variance).
-6. **Export helpers**: `manyseg.export.dynamic_shapes(model)` returning valid `Dim` ranges.
-   Quantisation entry points (torchao) kept separate from model construction.
+1. ✅ **Capability probe** (`manyseg.backbones.capabilities`) and generated
+   `docs/backbone_compatibility.md` (46 timm models; 41 any-size; 38 export dynamically).
+2. ✅ **Transformer backbones** via meta-device introspection: hierarchical models (NHWC
+   normalised), plain ViT/DeiT/EVA/DINOv2 through `ViTPyramidNeck` (any patch size, incl. 14),
+   and fixed-size models with `img_size` plus clear errors.
+3. ✅ **Decoders**: U-Net, U-Net++, FPN, DeepLabV3+, UPerNet, SegFormer-MLP, fastai-style
+   Dynamic U-Net (parameter- and FLOP-identical to fastai).
+4. ✅ **Multi-input fusion**: early, intermediate and late; five ops; shared encoders;
+   `same_grid` / `same_extent`.
+5. 🔄 **Multi-task**: named heads and uncertainty heads ✅. Per-head task-specific decoders ⏳.
+6. ✅ **Export helper** `manyseg.export.export_model`. ⏳ Quantisation entry points (torchao / PT2E).
+7. ✅ DDP verified (CPU gloo). ⏳ FSDP2.
 
 ## Phase 5: research and optimisation ⏳
 

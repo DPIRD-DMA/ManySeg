@@ -22,9 +22,14 @@ uv run pytest packages/manyseg -m "slow or network or not slow" -n 8
 
 ## Device policy
 
-The `device` fixture parametrises over `cpu`, `cuda` and `mps`. An unavailable device is
-**skipped and reported**, never replaced by another device. The CI matrix runs CPU on Linux
-and MPS on macOS-arm64. CUDA runs on the self-hosted GPU runner.
+The `device` fixture parametrises over `cpu`, `cuda` and `mps`. A device counts only if it
+can actually allocate. An unavailable or unusable device is **skipped and reported**, never
+replaced by another device.
+
+* CI runs CPU on Linux (Python 3.10 and 3.12) and on macOS-arm64.
+* GitHub's macOS VMs report MPS as available, but every allocation fails, so **MPS tests need
+  a physical Apple Silicon machine** (`uv run pytest packages/manyseg -k mps`).
+* CUDA tests run on the development workstation (RTX 4090).
 
 ## What is tested (and how)
 
@@ -46,6 +51,8 @@ Shape assertions alone are not enough. Each contract has a numerical or behaviou
 | `torch.compile` | `fullgraph=True, dynamic=True` matches eager. Graph count: 1 on CUDA for 10 sizes; bounded on CPU (PyTorch's oneDNN backend-selection guards). |
 | `torch.export` | Dynamic H/W (`Dim`, min 33) with outputs matching eager at unseen sizes. Multi-head dict outputs. |
 | ONNX | Dynamo exporter with dynamic H/W; onnxruntime output matches eager within 1e-3. |
+| DDP | Two CPU ranks (gloo): replicas stay identical after a step with different data per rank. |
+| Export helper | `export_model` round-trips at unseen sizes and batch sizes, with dict inputs and with families whose guards the solver cannot prove. |
 | Library independence | `manyseg` source never references `manyseg_bench`. Bench providers import model libraries lazily. |
 | Bench metrics | Hand-computed confusion-matrix cases, ignore index, absent classes, accumulation invariance, boundary F1 with shifts. |
 | Bench loader | Seeded determinism; eval loader is the identity and keeps order; augmented images and masks stay aligned. |
@@ -60,6 +67,10 @@ Every bug fix gets a test that fails before the fix. Examples so far:
   division (covered by the compile tests).
 * torch.export could not prove `h <= 32·ceil(h/32)` for slice-cropping, so cropping now uses
   negative padding (covered by `test_torch_export_dynamic_hw`).
+
+Test isolation: an autouse fixture resets Dynamo after each test. Many tests compile
+different models through the same `DenseModel.forward` code object, and without the reset
+the per-code-object cache hits Dynamo's recompile limit.
 
 ## Parametrisation
 

@@ -1,6 +1,6 @@
 # ManySeg public API design
 
-Status: draft v0.1 (Phase 1). Interfaces marked *(phase 4)* are designed but not yet implemented.
+Status: v0.2 (2026-10-14). Everything below is implemented and tested unless marked *(planned)*.
 
 ## Goals
 
@@ -89,18 +89,21 @@ out["segmentation"]  # (N, 3, H, W)
 out["water_area"]    # (N, 1)
 ```
 
-The head `type` sets the default activation (none: losses expect logits) and the
-initialisation. `scope` is `"pixel"` (default) or `"image"`.
+Heads return raw logits or values: activations and losses live outside the model. `scope` is
+`"pixel"` (default) or `"image"`. Image heads pool the deepest encoder feature by default
+(`"source": "decoder"` selects the decoder output). `{"type": "regression", "uncertainty": True}`
+returns `2·C` channels, `[mean, log_variance]`, for heteroscedastic losses such as Gaussian NLL.
 
-### Multiple inputs *(phase 4)*
+### Multiple inputs
 
 ```python
 model = create_model(
     inputs={
         "optical": {"channels": 4, "backbone": "convnext_tiny", "pretrained": True},
-        "sar":     {"channels": 2, "backbone": "resnet18",      "pretrained": True},
+        "sar":     {"channels": 2, "backbone": "resnet18",      "pretrained": True,
+                    "alignment": "same_extent"},       # may be at a different resolution
     },
-    fusion={"type": "gated", "levels": [2, 3, 4]},   # pyramid levels to fuse (1 = stride 2)
+    fusion={"type": "intermediate", "op": "gated", "strides": [8, 16, 32]},
     decoder="unet",
     heads={...},
 )
@@ -109,11 +112,14 @@ out = model({"optical": o, "sar": s})
 
 * **Early fusion**: `fusion={"type": "early"}`. Inputs are concatenated on the channel axis
   in front of one shared backbone. Inputs must share spatial size.
-* **Intermediate fusion**: each input has its own backbone. The selected pyramid levels are
-  fused by a `Fusion` op (`concat`, `add`, `gated`, `attention`, `cross_attention`). Levels that
-  are not selected use the `primary` input only.
-* **Late fusion**: `fusion={"type": "late", "op": ...}`. Each input has its own
-  backbone and decoder, and the decoder outputs are fused before the heads.
+* **Intermediate fusion**: each input has its own backbone. Features with the same stride
+  are fused by an op (`concat`, `add`, `gated`, `attention`, `cross_attention`) whose output
+  has the primary input's channels. Strides that are not selected, or that exist only in the
+  primary, pass the primary feature through unchanged. The first input in `inputs` is the
+  primary.
+* **Late fusion**: `fusion={"type": "late", "op": ...}`. Each input has its own backbone and
+  decoder (same type and options). The decoder outputs are fused before the heads.
+* Inputs without a `backbone` key use the top-level `backbone=` argument.
 * **Shared encoder**: `{"backbone": "shared:optical"}` reuses another input's backbone weights.
   Each input keeps its own input adapter.
 
@@ -125,7 +131,7 @@ input declares an alignment policy:
 | Policy | Meaning |
 | --- | --- |
 | `"same_grid"` (default) | Inputs must have identical `(H, W)`. A mismatch raises an error. |
-| `"same_extent"` | The input covers the same extent as the reference input at a different resolution. Features are resampled (bilinear, `align_corners=False`) onto the reference grid at each fused level. |
+| `"same_extent"` | The input covers the same ground extent as the primary input at a different resolution. At each fused stride, the *valid* (unpadded) region of its features is resampled (bilinear) onto the primary's valid region, so different amounts of padding cannot shift the alignment. Verified by a gradient-centroid test. |
 
 Inputs that are co-registered only partially must be cropped or resampled by the user's data
 pipeline. Reprojecting or georeferencing data is outside the scope of a model library.
@@ -178,6 +184,20 @@ model = DenseModel({"image": bb}, dec, {"mask": SegmentationHead(dec.out_spec, 3
 
 `create_model` is a thin layer of argument parsing over this composition. Every component
 can be swapped by passing a module instead of a string.
+
+## Export
+
+```python
+from manyseg.export import export_model
+ep = export_model(model, example)            # dynamic H/W in [max_stride + 1, 4096]
+ep = export_model(model, example, dynamic_batch=True)
+ep = export_model(multi_input_model, {"optical": o, "sar": s})
+```
+
+`export_model` builds the `dynamic_shapes` spec itself and uses deferred runtime asserts. Some
+timm blocks produce guards that are always true but that the export solver cannot prove.
+Window-attention backbones (Swin, DaViT) cannot be exported with dynamic sizes. See
+`backbone_compatibility.md`.
 
 ## Registries
 
