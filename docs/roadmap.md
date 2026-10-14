@@ -26,7 +26,10 @@ Status as of 2026-10-14 (afternoon update). ✅ done · 🔄 in progress · ⏳ 
   profiler, provenance with GPU contention, JSON results, report table.
 * ✅ E002: fair three-way comparison on Pet (2 recipes × 3 seeds). The recipe is worth +0.8 mIoU; fastai's decoder +0.3 on test at 4× FLOPs.
 * ✅ Sen1Floods11 (S1 + S2 + DEM) multi-input dataset; `stack` vs `dict` input modes.
-* 🔄 Queued from a frozen worktree: E003 (decoders), E001b (aligned upsampling), E005 (fusion).
+* ✅ E003 (decoders on Pet): unet stays default; fastai_unet +0.4 test mIoU at 4× FLOPs; stride-4 decoders −0.4 to −1.1.
+* ✅ E001b (aligned upsampling, trained): no effect, a negative result; nearest stays default.
+* 🔄 GPU queue chain: E005 (fusion, running) → E004 (channel adapters) → E010 (instance heads, AI4Boundaries) → E011 (tree points, OAM-TCD) → E009 (metadata conditioning).
+* ✅ Datasets prepared: AI4Boundaries ortho (13 GB cache), OAM-TCD (CC-BY, 1024², ~22 GB cache).
 * ⏳ Profiling sweep (eager vs compile; fp32, bf16, fp16; batch sizes), on an idle GPU.
 * ⏳ CI workflow (CPU unit tests; slow tier nightly).
 
@@ -49,7 +52,7 @@ Status as of 2026-10-14 (afternoon update). ✅ done · 🔄 in progress · ⏳ 
 9. ✅ **Point and density heads** (`manyseg.points`): heatmap + offset and density presets,
    targets, NMS peaks, counting, offset grouping and panoptic labels, with round-trip tests.
 10. ✅ **Bench tasks**: losses, object/point/count metrics, and task-aware training for
-    multi-head outputs. ⏳ Instance and counting datasets (awaiting dataset choice).
+    multi-head outputs. ✅ AI4Boundaries and OAM-TCD datasets.
 11. ✅ **Metadata conditioning** (`manyseg.conditioning`; branch `feature/metadata-conditioning`):
     `"kind": "vector"` inputs with cyclic / continuous / coords / categorical fields, missing
     values (mask, NaN, learned unknowns, field dropout), and `film` / `head` / `channels`
