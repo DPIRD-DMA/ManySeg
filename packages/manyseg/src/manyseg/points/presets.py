@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from typing import Any
 
@@ -30,6 +31,9 @@ def point_heads(heatmap: str = "regression", offsets: bool = False,
     if heatmap not in ("regression", "segmentation"):
         raise ValueError(f"heatmap must be 'regression' or 'segmentation', got {heatmap!r}")
     heads = {"heatmap": {"type": heatmap, "channels": 1}}
+    if heatmap == "segmentation":
+        # CenterNet: start at prior p=0.1 so the focal loss is not swamped by negatives.
+        heads["heatmap"]["bias_init"] = math.log(0.1 / 0.9)
     if offsets:
         heads["offset"] = {"type": "regression", "channels": 2}
     return _attach(heads, decoders)

@@ -163,3 +163,15 @@ def test_centers_many_instances_without_k_h_w_tensors():
 def test_find_peaks_rejects_even_kernel():
     with pytest.raises(ValueError, match="odd"):
         find_peaks(torch.zeros(1, 1, 8, 8), kernel=4)
+
+
+def test_focal_heatmap_preset_starts_at_centernet_prior():
+    """heatmap='segmentation' (focal loss) initialises the head bias to logit(0.1), as in
+    CenterNet; a zero bias (p=0.5 everywhere) makes the focal loss explode at the start."""
+    import math
+
+    model = create_model(backbone="resnet18", pretrained=False,
+                         heads=point_heads(heatmap="segmentation")).eval()
+    torch.testing.assert_close(model.heads["heatmap"].conv.bias,
+                               torch.full((1,), math.log(0.1 / 0.9)))
+    assert point_heads()["heatmap"].get("bias_init") is None  # MSE regression keeps zero bias

@@ -17,12 +17,13 @@ class PixelHead(nn.Module):
     Output covers ``stride * feature_size`` pixels (>= padded input); the model crops it.
     """
 
-    def __init__(self, spec: FeatureSpec, channels: int, kernel_size: int = 3) -> None:
+    def __init__(self, spec: FeatureSpec, channels: int, kernel_size: int = 3,
+                 bias_init: float = 0.0) -> None:
         super().__init__()
         self.stride = spec.stride
         self.conv = nn.Conv2d(spec.channels, channels, kernel_size, padding=kernel_size // 2)
         nn.init.xavier_uniform_(self.conv.weight)
-        nn.init.zeros_(self.conv.bias)
+        nn.init.constant_(self.conv.bias, bias_init)  # e.g. logit(prior) for focal-loss heads
 
     def forward(self, x: Tensor) -> Tensor:
         x = self.conv(x)
