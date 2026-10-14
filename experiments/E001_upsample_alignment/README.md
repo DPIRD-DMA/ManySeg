@@ -1,7 +1,7 @@
 # E001: Upsampling alignment in U-Net decoders
 
-Status: **exploratory**. The geometric effect is confirmed at initialisation. Its effect on
-trained accuracy has not been measured yet.
+Status: **complete, negative result** (E001b, 2026-10-14). The geometric offset is real at
+initialisation, but removing it does not change trained accuracy.
 
 ## Hypothesis
 
@@ -52,3 +52,21 @@ accuracy and thin structures, is unknown.
 * Open question: ViT patch embeddings (k=16, s=16, no pad) **do** centre at `s·j + (s−1)/2`.
   The correct upsampling therefore depends on the backbone. A `FeatureSpec.offset` field,
   found by probing, may be the general solution.
+
+## E001b: trained effect (Pet, fastai_like recipe, 20 epochs, 3 seeds; nearest = E003 unet runs)
+
+| upsample | val mIoU | val boundary F1 | test mIoU | test boundary F1 | t vs nearest (val / test / test BF1) |
+|---|---|---|---|---|---|
+| nearest (default) | 0.8224 ± 0.0010 | 0.7877 ± 0.0032 | 0.8220 ± 0.0001 | 0.7858 ± 0.0019 | |
+| aligned | 0.8213 ± 0.0006 | 0.7859 ± 0.0014 | 0.8220 ± 0.0005 | 0.7865 ± 0.0012 | −1.8 / +0.1 / +0.5 |
+| bilinear | 0.8208 ± 0.0009 | 0.7863 ± 0.0024 | 0.8224 ± 0.0001 | 0.7860 ± 0.0009 | −2.2 / +3.7 / +0.1 |
+
+**Interpretation.** Removing the ~6 px init-time offset (`aligned`) leaves mIoU and boundary F1
+unchanged after training. The convolutions after each upsampling step learn to compensate
+using the unshifted skips. The +0.0004 test edge for `bilinear` contradicts its val
+direction and fails the pre-registered rule.
+
+**Decision.** `nearest` stays the default (SMP-equivalent and the cheapest). `aligned` stays
+available and tested, because it is the geometrically correct choice for analyses that use
+untrained or frozen decoders, e.g. feature probing. Not yet tested: remote-sensing tasks with
+thin structures (planned with AI4Boundaries boundary heads, E010).
