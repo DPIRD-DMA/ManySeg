@@ -32,7 +32,8 @@ class FastaiProvider(Provider):
             raise ValueError("fastai DynamicUnet needs img_size at construction")
         weights = None if spec.weights is None else _TV_WEIGHTS[spec.weights]
         arch = getattr(torchvision.models, spec.encoder)
-        body = create_body(arch(weights=weights), n_in=spec.in_channels, pretrained=weights is not None)
+        body = create_body(arch(weights=weights), n_in=spec.in_channels,
+                           pretrained=weights is not None)
         model = DynamicUnet(body, spec.num_classes, img_size, **spec.options)
         encoder = model[0]
         enc, dec = split_params(model, encoder)

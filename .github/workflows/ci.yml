@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  unit:
+    name: unit (${{ matrix.os }}, py${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: ubuntu-latest, python: "3.10"}
+          - {os: ubuntu-latest, python: "3.12"}
+          - {os: macos-14, python: "3.12"}  # arm64: exercises the MPS device tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Install (CPU torch wheels on Linux)
+        run: |
+          uv venv --python ${{ matrix.python }}
+          uv pip install --torch-backend auto \
+            -e "packages/manyseg[test]" -e "packages/manyseg-bench[smp,fastai,test]"
+      - name: Library must install and import without the benchmark
+        run: |
+          uv venv --python ${{ matrix.python }} /tmp/libonly
+          VIRTUAL_ENV=/tmp/libonly uv pip install --torch-backend auto -e packages/manyseg
+          /tmp/libonly/bin/python -c "import manyseg, sys; assert 'manyseg_bench' not in sys.modules"
+      - name: manyseg unit tests
+        run: uv run --no-sync pytest packages/manyseg -n 2 -q
+      - name: manyseg-bench tests
+        run: uv run --no-sync pytest packages/manyseg-bench -n 2 -q
+
+  slow:
+    name: slow (compile / export / ONNX)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: |
+          uv venv --python 3.12
+          uv pip install --torch-backend cpu -e "packages/manyseg[test]"
+      - run: uv run --no-sync pytest packages/manyseg -m slow -n 2 -q
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uvx ruff check packages

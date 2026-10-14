@@ -5,7 +5,6 @@ import math
 import pytest
 import timm
 import torch
-
 from manyseg import FeatureSpec
 from manyseg.backbones import create_backbone
 

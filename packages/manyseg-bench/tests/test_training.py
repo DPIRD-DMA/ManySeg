@@ -1,7 +1,6 @@
 import numpy as np
 import pytest
 import torch
-
 from manyseg_bench.datasets import GPULoader
 from manyseg_bench.providers import ModelSpec, get_provider
 from manyseg_bench.training import build_optimizer, get_recipe, lr_factor, train

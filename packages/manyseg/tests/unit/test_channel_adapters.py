@@ -3,7 +3,6 @@
 import pytest
 import torch
 import torch.nn.functional as F
-
 from manyseg.adapters import CHANNEL_ADAPTERS, adapt_conv_weight
 
 WEIGHT_ADAPTERS = ["repeat", "mean", "rgb_plus_random", "rgb_plus_zero"]

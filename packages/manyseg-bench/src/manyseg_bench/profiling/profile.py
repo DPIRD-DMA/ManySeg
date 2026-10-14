@@ -7,8 +7,14 @@ from contextlib import nullcontext
 import torch
 from torch import nn
 
-from .timing import (count_flops, count_params, peak_memory_mib, reset_peak,
-                     serialized_size_bytes, time_fn)
+from .timing import (
+    count_flops,
+    count_params,
+    peak_memory_mib,
+    reset_peak,
+    serialized_size_bytes,
+    time_fn,
+)
 
 _DTYPES = {"fp32": None, "bf16": torch.bfloat16, "fp16": torch.float16}
 

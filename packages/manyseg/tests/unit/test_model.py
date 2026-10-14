@@ -5,7 +5,6 @@ import io
 import pytest
 import torch
 import torch.nn.functional as F
-
 from manyseg import create_model
 
 SIZES = [(64, 64), (65, 97), (33, 200), (127, 31), (32, 32)]

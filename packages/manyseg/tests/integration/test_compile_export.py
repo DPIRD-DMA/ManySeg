@@ -2,7 +2,6 @@
 
 import pytest
 import torch
-
 from manyseg import create_model
 
 pytestmark = pytest.mark.slow
@@ -149,3 +148,18 @@ def test_decoder_export_and_compile_dynamic(decoder):
             ref = model(x)
             torch.testing.assert_close(ep.module()(x), ref, atol=1e-4, rtol=1e-4)
             torch.testing.assert_close(compiled(x), ref, atol=1e-4, rtol=1e-4)
+
+
+@pytest.mark.parametrize("ftype", ["early", "intermediate", "late"])
+def test_multi_input_export_dynamic(ftype):
+    inputs = {"optical": {"channels": 4, "backbone": "resnet18"},
+              "sar": {"channels": 2, "backbone": "resnet18"}}
+    model = create_model(inputs=inputs, fusion={"type": ftype}, backbone="resnet18",
+                         pretrained=False, num_classes=2).eval()
+    h = torch.export.Dim("h", min=33, max=1024)
+    w = torch.export.Dim("w", min=33, max=1024)
+    x = {"optical": torch.randn(1, 4, 64, 96), "sar": torch.randn(1, 2, 64, 96)}
+    ep = torch.export.export(model, (x,), dynamic_shapes={
+        "x": {"optical": {2: h, 3: w}, "sar": {2: h, 3: w}}})
+    xi = {"optical": torch.randn(1, 4, 97, 131), "sar": torch.randn(1, 2, 97, 131)}
+    torch.testing.assert_close(ep.module()(xi), model(xi), atol=1e-4, rtol=1e-4)

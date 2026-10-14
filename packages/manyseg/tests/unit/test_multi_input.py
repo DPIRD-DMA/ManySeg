@@ -1,0 +1,164 @@
+"""Multi-input models: early / intermediate / late fusion, alignment policies, sharing."""
+
+import pytest
+import torch
+from manyseg import create_model
+from manyseg.fusion import FUSION_OPS
+
+TWO = {
+    "optical": {"channels": 4, "backbone": "resnet18"},
+    "sar": {"channels": 2, "backbone": "convnext_atto"},
+}
+
+
+def make(inputs=TWO, fusion=None, **kw):
+    kw.setdefault("num_classes", 3)
+    return create_model(inputs=inputs, fusion=fusion or {"type": "intermediate"},
+                        pretrained=False, **kw)
+
+
+def batch(h=64, w=96, n=2, sar_hw=None):
+    return {"optical": torch.randn(n, 4, h, w), "sar": torch.randn(n, 2, *(sar_hw or (h, w)))}
+
+
+def test_intermediate_default_concat():
+    model = make().eval()
+    assert model(batch()).shape == (2, 3, 64, 96)
+
+
+@pytest.mark.parametrize("op", sorted(FUSION_OPS))
+def test_every_fusion_op(op):
+    levels = [16, 32] if op == "cross_attention" else None
+    model = make(fusion={"type": "intermediate", "op": op, "strides": levels}).eval()
+    assert model(batch(65, 97)).shape == (2, 3, 65, 97)
+
+
+def test_fusion_strides_subset():
+    model = make(fusion={"type": "intermediate", "op": "add", "strides": [16, 32]})
+    assert sorted(model.backbone.fused_strides) == [16, 32]
+
+
+def test_primary_only_levels_when_secondary_lacks_stride():
+    """resnet18 has a stride-2 level, convnext_atto does not: stride 2 uses primary only."""
+    model = make()
+    assert 2 not in model.backbone.fused_strides
+    assert {4, 8, 16, 32} <= set(model.backbone.fused_strides)
+
+
+def test_early_fusion_single_backbone():
+    model = make(fusion={"type": "early"}, inputs={
+        "optical": {"channels": 4}, "sar": {"channels": 2}}, backbone="resnet18").eval()
+    assert model.backbone.backbone.in_channels == 6
+    assert model(batch()).shape == (2, 3, 64, 96)
+
+
+def test_early_fusion_rejects_mismatched_sizes():
+    model = make(fusion={"type": "early"}, inputs={
+        "optical": {"channels": 4}, "sar": {"channels": 2}}, backbone="resnet18").eval()
+    with pytest.raises(ValueError, match="same_grid"):
+        model(batch(sar_hw=(32, 48)))
+
+
+@pytest.mark.parametrize("op", ["concat", "add", "gated"])
+def test_late_fusion(op):
+    model = make(fusion={"type": "late", "op": op}).eval()
+    assert model(batch(65, 97)).shape == (2, 3, 65, 97)
+    assert len(model.decoder.decoders) == 2
+
+
+def test_same_grid_default_rejects_mismatch():
+    model = make().eval()
+    with pytest.raises(ValueError, match="same_grid"):
+        model(batch(sar_hw=(32, 48)))
+
+
+def test_same_extent_lower_resolution_input():
+    inputs = {"optical": {"channels": 4, "backbone": "resnet18"},
+              "sar": {"channels": 2, "backbone": "resnet18", "alignment": "same_extent"}}
+    model = make(inputs=inputs).eval()
+    assert model(batch(64, 96, sar_hw=(32, 48))).shape == (2, 3, 64, 96)
+    assert model(batch(65, 97, sar_hw=(33, 49))).shape == (2, 3, 65, 97)
+
+
+def _centroid(grad):
+    g = grad.abs().sum(dim=(0, 1))
+    ys = torch.arange(g.shape[0], dtype=g.dtype)[:, None]
+    xs = torch.arange(g.shape[1], dtype=g.dtype)[None, :]
+    return float((g * ys).sum() / g.sum()), float((g * xs).sum() / g.sum())
+
+
+def test_same_extent_is_spatially_aligned():
+    """Output pixel (i, j) depends on the half-resolution input around (i/2, j/2)."""
+    torch.manual_seed(0)
+    inputs = {"optical": {"channels": 1, "backbone": "resnet18"},
+              "sar": {"channels": 1, "backbone": "resnet18", "alignment": "same_extent"}}
+    model = make(inputs=inputs, fusion={"type": "intermediate", "op": "add"},
+                 decoder_kwargs={"upsample": "aligned"}).eval()
+    errs = []
+    for i, j in [(70, 70), (100, 60), (60, 110)]:
+        x = {"optical": torch.randn(1, 1, 160, 160),
+             "sar": torch.randn(1, 1, 80, 80, requires_grad=True)}
+        model(x)[0, :, i, j].sum().backward()
+        cy, cx = _centroid(x["sar"].grad)
+        errs.append(max(abs(cy - i / 2), abs(cx - j / 2)))
+    assert max(errs) < 3, errs
+
+
+def test_shared_encoder_reuses_weights():
+    inputs = {"t0": {"channels": 3, "backbone": "resnet18"},
+              "t1": {"channels": 3, "backbone": "shared:t0"}}
+    model = make(inputs=inputs, fusion={"type": "intermediate", "op": "add"})
+    enc = model.backbone.encoders
+    assert enc["t0"] is enc["t1"]
+    n_shared = sum(p.numel() for p in model.parameters())
+    single = create_model(backbone="resnet18", pretrained=False, num_classes=3)
+    assert n_shared < 1.5 * sum(p.numel() for p in single.parameters())
+    out = model({"t0": torch.randn(1, 3, 64, 64), "t1": torch.randn(1, 3, 64, 64)})
+    assert out.shape == (1, 3, 64, 64)
+
+
+def test_shared_encoder_different_channels_uses_projection():
+    inputs = {"a": {"channels": 3, "backbone": "resnet18"},
+              "b": {"channels": 5, "backbone": "shared:a"}}
+    model = make(inputs=inputs).eval()
+    assert model({"a": torch.randn(1, 3, 64, 64), "b": torch.randn(1, 5, 64, 64)}).shape == \
+        (1, 3, 64, 64)
+
+
+def test_gradients_reach_both_encoders():
+    model = make()
+    model(batch()).mean().backward()
+    for name in ("optical", "sar"):
+        grads = [p.grad for p in model.backbone.encoders[name].parameters()]
+        assert all(g is not None and torch.isfinite(g).all() for g in grads), name
+
+
+def test_missing_input_is_clear():
+    model = make().eval()
+    with pytest.raises(KeyError, match="sar"):
+        model({"optical": torch.randn(1, 4, 64, 64)})
+
+
+def test_tensor_input_rejected_for_multi_input_model():
+    with pytest.raises(TypeError, match="dict"):
+        make().eval()(torch.randn(1, 4, 64, 64))
+
+
+def test_multi_input_multi_head():
+    model = make(num_classes=None, heads={
+        "seg": {"type": "segmentation", "channels": 2},
+        "area": {"type": "regression", "channels": 1, "scope": "image"}}).eval()
+    out = model(batch())
+    assert out["seg"].shape == (2, 2, 64, 96) and out["area"].shape == (2, 1)
+
+
+def test_unknown_fusion_type():
+    with pytest.raises(ValueError, match="intermediate"):
+        make(fusion={"type": "nope"})
+
+
+def test_top_level_backbone_is_default_for_inputs():
+    model = make(inputs={"a": {"channels": 3}, "b": {"channels": 1}}, backbone="resnet18")
+    enc = model.backbone.encoders
+    assert enc["a"] is not enc["b"]
+    assert enc["a"].name == enc["b"].name == "resnet18"

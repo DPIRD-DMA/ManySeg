@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import functools
 import math
 import random
-import functools
 import time
 from contextlib import nullcontext
 
@@ -103,10 +103,11 @@ def train(
     recipe: Recipe,
     device: torch.device,
     ignore_index: int | None = None,
-    log=functools.partial(print, flush=True),
+    log=None,
 ) -> dict:
     """Train ``model`` and return history. Selection metric: last epoch (no early stopping,
     so every provider gets the same budget); best-epoch val is reported for information."""
+    log = log or functools.partial(print, flush=True)
     model = model.to(device)
     if recipe.channels_last:
         model = model.to(memory_format=torch.channels_last)

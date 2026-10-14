@@ -4,7 +4,6 @@ import math
 
 import pytest
 import torch
-
 from manyseg import FeatureSpec, create_model
 from manyseg.decoders import DECODERS
 

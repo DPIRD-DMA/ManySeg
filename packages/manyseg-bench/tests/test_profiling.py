@@ -1,5 +1,4 @@
 import torch
-
 from manyseg_bench.profiling import count_flops, profile_model
 
 

@@ -13,7 +13,6 @@ from ..features import FeatureSpec
 from ..layers import ConvNormAct, init_decoder_
 from .base import DECODERS
 
-
 UPSAMPLE_MODES = ("nearest", "bilinear", "aligned")
 
 

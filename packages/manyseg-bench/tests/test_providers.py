@@ -2,7 +2,6 @@
 
 import pytest
 import torch
-
 from manyseg_bench.providers import PROVIDERS, ModelSpec, get_provider
 
 

@@ -1,7 +1,6 @@
 import math
 
 import torch
-
 from manyseg_bench.evaluation import ConfusionMatrix, boundary_f1
 from manyseg_bench.reporting import pareto_front
 

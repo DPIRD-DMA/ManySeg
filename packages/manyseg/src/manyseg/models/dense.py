@@ -40,7 +40,9 @@ class DenseModel(nn.Module):
         self.heads = nn.ModuleDict(heads)
         sources = dict(head_sources or {})
         self._head_sources = {n: sources.get(n, "decoder") for n in self.heads}
-        self._pixel_heads = {n for n, h in self.heads.items() if getattr(h, "scope", "pixel") == "pixel"}
+        self._pixel_heads = {
+            n for n, h in self.heads.items() if getattr(h, "scope", "pixel") == "pixel"
+        }
         if single_output is not None and single_output not in self.heads:
             raise ValueError(f"single_output {single_output!r} is not a head")
         self.single_output = single_output
@@ -77,7 +79,18 @@ class DenseModel(nn.Module):
             )
         return F.pad(x, (0, fixed[1] - w, 0, fixed[0] - h))
 
-    def forward(self, x: Tensor) -> Tensor | dict[str, Tensor]:
+    def forward(self, x: Tensor | dict[str, Tensor]) -> Tensor | dict[str, Tensor]:
+        primary = getattr(self.backbone, "primary", None)
+        if primary is not None:  # multi-input encoder: it pads each input itself
+            if not isinstance(x, Mapping):
+                raise TypeError(f"this model takes a dict of inputs with keys "
+                                f"{list(self.backbone.names)}")
+            h, w = x[primary].shape[-2], x[primary].shape[-1]
+            feats = self.backbone(x)
+            dec = self.decoder(feats)
+            if self.single_output is not None:
+                return self._run_head(self.single_output, dec, feats, h, w)
+            return {name: self._run_head(name, dec, feats, h, w) for name in self.heads}
         h, w = x.shape[-2], x.shape[-1]
         x = self._pad(x)
         feats = self.backbone(x)

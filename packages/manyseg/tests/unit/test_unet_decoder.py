@@ -1,6 +1,5 @@
 import pytest
 import torch
-
 from manyseg import FeatureSpec
 from manyseg.decoders import DECODERS, UNetDecoder
 

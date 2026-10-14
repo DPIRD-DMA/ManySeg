@@ -3,7 +3,6 @@
 import pytest
 import timm
 import torch
-
 from manyseg.backbones import create_backbone
 
 pytestmark = pytest.mark.network

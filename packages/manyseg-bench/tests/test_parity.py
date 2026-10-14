@@ -6,10 +6,9 @@ implementation details rather than capacity.
 """
 
 import torch
-from torch.utils.flop_counter import FlopCounterMode
-
 from manyseg import create_model
 from manyseg_bench.providers import ModelSpec, get_provider
+from torch.utils.flop_counter import FlopCounterMode
 
 
 def n(m):

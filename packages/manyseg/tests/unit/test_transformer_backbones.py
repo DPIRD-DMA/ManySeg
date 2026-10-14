@@ -4,7 +4,6 @@ import math
 
 import pytest
 import torch
-
 from manyseg import create_model
 from manyseg.backbones import create_backbone
 

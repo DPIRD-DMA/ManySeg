@@ -58,7 +58,7 @@ def training_table(runs: list[dict]) -> str:
 def pareto_front(points: list[tuple[float, float, str]]) -> list[str]:
     """points: (cost, quality, label). Lower cost and higher quality are better."""
     front, best = [], float("-inf")
-    for cost, q, label in sorted(points, key=lambda t: (t[0], -t[1])):
+    for _cost, q, label in sorted(points, key=lambda t: (t[0], -t[1])):
         if q > best:
             front.append(label)
             best = q
