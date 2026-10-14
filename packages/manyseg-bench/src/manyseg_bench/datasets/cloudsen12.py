@@ -1,4 +1,11 @@
-"""CloudSEN12+ expert-labelled ("high") subset (Aybar et al. 2024). Licence: CC0-1.0.
+"""CloudSEN12+ expert-labelled ("high") subset (Aybar et al. 2024).
+
+Licence: CC0-1.0 for the labels and curation; the imagery is subject to the Copernicus
+Sentinel data notice, so derived data must state "Contains modified Copernicus Sentinel data
+2017-2022" (``SENTINEL_NOTICE``, recorded in every run's dataset licence). The auxiliary
+layers add S1GBM (CC BY 4.0, Bauer-Marschallinger et al. 2021, doi:10.1038/s41597-021-01059-7)
+and the Copernicus DEM GLO-30 (© DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH
+2014-2018, provided under COPERNICUS by the European Union and ESA).
 
 Cloud and cloud-shadow segmentation on Sentinel-2 L1C top-of-atmosphere reflectance, 13 bands
 at 10 m, four classes: 0 clear, 1 thick cloud, 2 thin cloud, 3 cloud shadow. Please cite
@@ -72,6 +79,13 @@ LABEL_DERIVED = ("ml:thick_percentage", "ml:thin_percentage", "ml:cloud_shadow_p
                  "ml:clear_percentage", "ml:cloud_frac", "ml:labelled_frac", "thick_percentage",
                  "thin_percentage", "cloud_shadow_percentage", "clear_percentage")
 
+SENTINEL_NOTICE = "Contains modified Copernicus Sentinel data 2017-2022"
+LICENSE = (f"CC0-1.0 labels/curation (cite Aybar et al. 2024, doi:10.1016/j.dib.2024.110852); "
+           f"imagery: {SENTINEL_NOTICE}")
+LICENSE_AUX = (f"{LICENSE}; S1GBM: CC BY 4.0 (Bauer-Marschallinger et al. 2021); Copernicus "
+               "DEM GLO-30: (c) DLR e.V. 2010-2014 and (c) Airbus Defence and Space GmbH "
+               "2014-2018, provided under COPERNICUS by the European Union and ESA")
+
 INFO = DatasetInfo(
     name="cloudsen12",
     num_classes=4,
@@ -79,7 +93,7 @@ INFO = DatasetInfo(
     class_names=("clear", "thick_cloud", "thin_cloud", "cloud_shadow"),
     mean={}, std={},  # filled from meta.json
     ignore_index=IGNORE,
-    license="CC0-1.0 (cite Aybar et al. 2024, doi:10.1016/j.dib.2024.110852)",
+    license=LICENSE,
     source="https://huggingface.co/datasets/isp-uv-es/cloudsen12plus-l1c-high-taco",
     splits=("train", "val", "test"),
     test_splits=("test",),
@@ -90,7 +104,7 @@ INFO = DatasetInfo(
 )
 INFO_AUX = DatasetInfo(**{
     **INFO.to_dict(), "name": "cloudsen12_s2_aux", "inputs": ALL_INPUTS,
-    "in_channels": sum(ALL_INPUTS.values()),
+    "in_channels": sum(ALL_INPUTS.values()), "license": LICENSE_AUX,
     "notes": INFO.notes + ("s1gbm = static S1 Global Backscatter Model, not coincident S1",)})
 META_FIELDS = {"latlon": {"type": "coords"}, "doy": {"type": "cyclic", "period": 365.25},
                "sza": {"type": "continuous", "mean": 45.0, "std": 15.0},

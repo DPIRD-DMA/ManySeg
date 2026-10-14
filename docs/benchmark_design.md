@@ -136,10 +136,13 @@ Licenses and access details are in `datasets/*.py` docstrings and in
 ### CloudSEN12+ high (`cloudsen12`, `cloudsen12_s2_aux`, `cloudsen12_meta`)
 
 * **Source and licence.** CloudSEN12+ expert-labelled subset (Aybar et al. 2024,
-  doi:10.1016/j.dib.2024.110852), CC0-1.0, from the TACO v3 repackaging
+  doi:10.1016/j.dib.2024.110852), from the TACO v3 repackaging
   `isp-uv-es/cloudsen12plus-l1c-high-taco`. Sentinel-2 L1C, 13 bands at 10 m, DN = 10000 ×
   TOA reflectance (stored as reflectance, float16). Classes: clear, thick cloud, thin cloud,
-  cloud shadow.
+  cloud shadow. Licence: CC0-1.0 for labels and curation; the imagery carries the
+  Copernicus Sentinel data notice ("Contains modified Copernicus Sentinel data 2017-2022"),
+  which the dataset's licence string (recorded in every run) and any redistribution must
+  state. `cloudsen12_s2_aux` adds S1GBM (CC BY 4.0) and Copernicus DEM GLO-30 attributions.
 * **Splits.** The official train / validation / test (9,175 / 612 / 1,060 samples). They are
   ROI-disjoint (2,847 ROIs; `prepare` re-checks), so they are geographic and conditioning on
   latitude/longitude can be evaluated honestly: every test location is unseen.

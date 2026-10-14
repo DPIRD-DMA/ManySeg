@@ -296,6 +296,9 @@ def test_variants_share_cache_and_declare_no_leaky_vectors():
     for d in dss:
         assert d.INFO.num_classes == 4 and d.INFO.ignore_index == 255 and d.TASK == "semantic"
         assert d.LOADER_KWARGS["device_resident"] is False and d.LOADER_KWARGS["vflip"]
+        assert "CC0-1.0" in d.INFO.license
+        assert "Contains modified Copernicus Sentinel data" in d.INFO.license
+    assert "S1GBM" in dss[1].INFO.license and "DEM" in dss[1].INFO.license
 
 
 # --- end to end ----------------------------------------------------------------------------------
@@ -318,5 +321,6 @@ def test_cli_trains_end_to_end(tmp_path, capsys, monkeypatch, dataset, mode):
     rec = json.loads(next((tmp_path / "runs").glob("*.json")).read_text())
     assert rec["dataset"]["name"] == dataset and rec["split_sizes"]["train"] == 19
     assert set(rec["norm_stats"]["mean"]) == set(get_dataset(dataset).INFO.inputs)
+    assert "Copernicus Sentinel" in rec["dataset"]["license"]  # provenance in every record
     assert rec["vectors_dropped"] is False and \
         bool(rec["spec"]["vectors"]) == (dataset == "cloudsen12_meta")
