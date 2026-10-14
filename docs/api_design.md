@@ -312,6 +312,11 @@ run the post-processing functions on its outputs. Losses and object metrics (PQ,
 over-/under-segmentation, point F1, count MAE) live in `manyseg-bench`
 (`manyseg_bench.losses`, `manyseg_bench.evaluation.objects`, `manyseg_bench.tasks`).
 
+> **Evidence (E009, Sen1Floods11, leave-events-out):** FiLM beat metadata-as-channels (+1.3
+> water IoU, 2.9 SE, all folds); FiLM vs no metadata was +0.9 but under the 2 SE bar. Lat/lon added
+> nothing on held-out events. Only use `coords` fields with geographic or event-level splits;
+> otherwise the model can memorise locations and the evaluation will not show it.
+
 ## Export
 
 ```python

@@ -1,6 +1,6 @@
 # E009: Metadata conditioning on Sen1Floods11 (pre-registered)
 
-Status: **planned** (registered 2026-10-14 before any E009 run). The roadmap reserved E006
+Status: **complete** (2026-10-14; 66 runs on Pawsey Setonix, AMD MI250X, code `537848a`; fold-specific normalisation verified in every run). The roadmap reserved E006
 (decoder Pareto study), E007 and E008 and E010 is taken, so this is E009. Queue:
 `experiments/queue3_metadata.sh`.
 
@@ -80,3 +80,45 @@ patch ships metadata: acquisition date and time, camera, flight altitude and pat
 coordinates. The official test set consists of held-out départements (a geographic split), and
 the FLAIR baseline already conditions a U-Net on that metadata. A small toy subset exists for a
 pipeline check. Needs user approval for the download size.
+
+## Results (water IoU on held-out events; 15 runs = 5 folds × 3 seeds per arm)
+
+| arm | test (held-out events) | Bolivia | val |
+|---|---|---|---|
+| none | 0.7523 ± 0.1156 | 0.7683 ± 0.0185 | 0.7483 ± 0.1082 |
+| film | 0.7617 ± 0.1072 | 0.7615 ± 0.0248 | 0.7532 ± 0.1079 |
+| channels | 0.7490 ± 0.1093 | 0.7495 ± 0.0323 | 0.7553 ± 0.0971 |
+| film_nogeo | 0.7571 ± 0.1106 | 0.7577 ± 0.0352 | 0.7550 ± 0.1064 |
+
+(Large SDs are between folds: events differ a lot in difficulty. The decision rule therefore
+pairs runs by fold and seed.)
+
+| paired comparison (fold × seed, n = 15) | test mean diff | SE | diff / SE | folds > 0 | Bolivia diff / SE |
+|---|---|---|---|---|---|
+| film − none | +0.0093 | 0.0051 | +1.8 | 4/5 | −1.1 |
+| film − channels | **+0.0127** | 0.0044 | **+2.9** | **5/5** | +1.9 |
+| film_nogeo − film | −0.0046 | 0.0048 | −1.0 | 3/5 | −0.4 |
+| channels − none | −0.0034 | 0.0072 | −0.5 | 2/5 | −1.9 |
+
+Official (event-sharing) split, 3 seeds: film 0.7926 ± 0.0023 vs none 0.7956 ± 0.0115 (−0.003).
+
+## Interpretation (against the pre-registered rule)
+* **Q1, FiLM on unseen events: not established.** The +0.9-point paired gain is positive in 4 of 5
+  folds but at 1.8 SE, below the 2 SE bar. Bolivia points the other way (−1.1 SE, within its
+  own 2 SE). Sen1Floods11 has too little metadata variety (8 training events) to show a gain.
+* **Q2, FiLM vs metadata-as-channels: yes.** +1.3 points, 2.9 SE, positive in every fold,
+  Bolivia agrees. If metadata is used, inject it with FiLM rather than as broadcast input
+  channels. Channels mode is no better than no metadata at all.
+* **Q3, shortcut: criterion met.** FiLM without lat/lon is within 1 SE of FiLM with it, so
+  lat/lon contributes nothing measurable on held-out events. Following the pre-registered
+  decision, the docs recommend against lat/lon conditioning without geographic splits.
+* **The stated expectation was partly wrong.** We predicted a gain on the official
+  (event-sharing) split, where metadata identifies the event, but there is none (−0.003).
+  At this dataset size the network does not exploit the event identity that metadata provides.
+
+## Decision
+* `film` stays the default conditioning mode. `channels` is documented as inferior.
+* `docs/api_design.md` now warns that coordinate fields need geographic or event-level splits,
+  and that on small datasets metadata conditioning may not help.
+* Follow-up: a metadata-rich dataset with a geographic test split (FLAIR #1 proposed) needs the
+  user's approval for download.
