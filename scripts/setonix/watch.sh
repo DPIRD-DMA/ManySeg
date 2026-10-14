@@ -14,7 +14,7 @@ while true; do
   STATES=$(ssh -o BatchMode=yes $HOST "sacct -X -n -j $JOBS -o JobName,State" 2>/dev/null \
            | grep -v '^ #' | awk 'NF==2 {c[$1" "$2]++} END {for (k in c) print k"="c[k]}' | sort | tr '\n' ' ')
   echo "$(date +%H:%M) $STATES"
-  if echo "$STATES" | grep -qE "FAILED|TIMEOUT|OUT_OF_ME|CANCELLED|NODE_FAIL"; then
+  if echo "$STATES" | grep -qE "FAILED|TIMEOUT|OUT_OF_ME|NODE_FAIL"; then
     echo "ALERT: failures present: $STATES"
   fi
   LEFT=$(ssh -o BatchMode=yes $HOST "squeue -h -j $JOBS -o %i" 2>/dev/null | grep -v '^ #' | grep -c .)
