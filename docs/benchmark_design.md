@@ -123,6 +123,7 @@ The development workstation is shared, so a result with `contended: true` is lab
 | --- | --- | --- |
 | Smoke / core | Oxford-IIIT Pet (3-class trimap, 256²) | Cheap natural images; boundary class. |
 | Smoke / core | Sen1Floods11 hand-labelled (S1 + S2) | Multi-input SAR + optical; binary; has an event-level holdout (Bolivia). |
+| Core | CloudSEN12+ high (S2 L1C, 4 classes) | Clouds, thin cloud and shadows; 13 bands; ROI-disjoint (geographic) splits; static auxiliary layers and acquisition metadata for fusion and conditioning. |
 | Core | CamVid (11 classes, 480×360) | Small and thin objects; video sequences split. |
 | Core | WHU Building aerial (binary, 512², 0.3 m) | Sharp boundaries, small buildings; official geographic split. |
 | Core | MADOS (Sentinel-2, 15 classes) | Multispectral (11 bands), rare and small objects; sparse labels. |
@@ -131,3 +132,33 @@ The development workstation is shared, so a result with `contended: true` is lab
 
 Licenses and access details are in `datasets/*.py` docstrings and in
 `docs/architecture_review.md` §6.
+
+### CloudSEN12+ high (`cloudsen12`, `cloudsen12_s2_aux`, `cloudsen12_meta`)
+
+* **Source and licence.** CloudSEN12+ expert-labelled subset (Aybar et al. 2024,
+  doi:10.1016/j.dib.2024.110852), CC0-1.0, from the TACO v3 repackaging
+  `isp-uv-es/cloudsen12plus-l1c-high-taco`. Sentinel-2 L1C, 13 bands at 10 m, DN = 10000 ×
+  TOA reflectance (stored as reflectance, float16). Classes: clear, thick cloud, thin cloud,
+  cloud shadow.
+* **Splits.** The official train / validation / test (9,175 / 612 / 1,060 samples). They are
+  ROI-disjoint (2,847 ROIs; `prepare` re-checks), so they are geographic and conditioning on
+  latitude/longitude can be evaluated honestly: every test location is unseen.
+* **Tiling and padding.** The 847 2048×2048 samples are cut into 16 non-overlapping 512×512
+  tiles (`<sample_id>__t<row>_<col>`) that inherit the parent's split. Valid data is 509×509
+  (or 2000×2000); the release labels the padding "clear", so padding is set to the ignore
+  index (255) and NaN in the inputs.
+* **Auxiliary layers (`cloudsen12_s2_aux`).** `s1gbm` (VV, VH in dB) is the **Sentinel-1
+  Global Backscatter Model**, a static multi-year land-backscatter mosaic. It is *not* a
+  Sentinel-1 acquisition coincident with the S2 image and cannot see the clouds; it can
+  only describe the surface (e.g. help separate bright soil or snow from cloud, or water
+  from shadow). `dem` is Copernicus GLO-30, relative to the tile median. Both come from the
+  `cloudsen12-extra` TACO v1 blobs on the same 10 m grid (checked per sample).
+* **Leakage rules.** The extra blobs also contain `cloudmask_*` layers (QA60, Sen2Cor,
+  s2cloudless, Cloud Score+, UNetMobV2 v1/v2, SEnSeI v2). They are never read: they are other
+  cloud detectors' outputs, and UNetMobV2 was trained on CloudSEN12. The label-derived
+  cloud percentages in the sample table and the socioeconomic `rai:*` columns of the extra
+  index are never inputs; `load_vectors` refuses label-derived fields.
+* **Metadata (`cloudsen12_meta`).** Tile-centre lat/lon (from the GeoTIFF georeferencing,
+  UTM → WGS 84), day of year, solar zenith and azimuth angles.
+* **Storage.** The float16 cache (23,552 tiles, 16 channels, ~200 GB) stays memory-mapped on
+  the host (`device_resident: False`); batches are moved to the GPU on demand.
