@@ -9,7 +9,7 @@ from torch import Tensor, nn
 
 from ..features import FeatureSpec
 from ..layers import ConvNormAct, init_decoder_
-from .base import DECODERS, pyramid_levels
+from .base import DECODERS, check_out_stride, pyramid_levels
 
 
 class _SegBlock(nn.Module):
@@ -33,12 +33,15 @@ class _SegBlock(nn.Module):
 @DECODERS.register("fpn")
 class FPNDecoder(nn.Module):
     """Laterals + top-down pathway on strides >= 4, per-level segmentation branches upsampled to
-    stride 4 and summed. Output: ``segmentation_channels`` at stride 4."""
+    stride 4 and summed. Output: ``segmentation_channels`` at stride 4 (``out_stride`` may only
+    restate it)."""
 
     def __init__(self, in_specs: Sequence[FeatureSpec], pyramid_channels: int = 256,
-                 segmentation_channels: int = 128, dropout: float = 0.2) -> None:
+                 segmentation_channels: int = 128, dropout: float = 0.2,
+                 out_stride: int | None = None) -> None:
         super().__init__()
         self.levels = pyramid_levels(in_specs)
+        check_out_stride("fpn", in_specs[self.levels[0]].stride, out_stride)
         specs = [in_specs[i] for i in self.levels]
         self.lateral = nn.ModuleList(nn.Conv2d(s.channels, pyramid_channels, 1) for s in specs)
         self.seg = nn.ModuleList(

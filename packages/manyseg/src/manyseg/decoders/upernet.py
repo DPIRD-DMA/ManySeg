@@ -10,7 +10,7 @@ from torch import Tensor, nn
 
 from ..features import FeatureSpec
 from ..layers import ConvNormAct, init_decoder_
-from .base import DECODERS, pyramid_levels
+from .base import DECODERS, check_out_stride, pyramid_levels
 
 
 class PPM(nn.Module):
@@ -33,9 +33,10 @@ class PPM(nn.Module):
 @DECODERS.register("upernet")
 class UPerNetDecoder(nn.Module):
     def __init__(self, in_specs: Sequence[FeatureSpec], channels: int = 256,
-                 pool_scales: Sequence[int] = (1, 2, 3, 6)) -> None:
+                 pool_scales: Sequence[int] = (1, 2, 3, 6), out_stride: int | None = None) -> None:
         super().__init__()
         self.levels = pyramid_levels(in_specs)
+        check_out_stride("upernet", in_specs[self.levels[0]].stride, out_stride)
         specs = [in_specs[i] for i in self.levels]
         self.ppm = PPM(specs[-1].channels, channels, pool_scales)
         self.bottleneck = ConvNormAct(specs[-1].channels + len(pool_scales) * channels, channels)

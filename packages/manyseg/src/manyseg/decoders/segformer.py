@@ -10,18 +10,19 @@ from torch import Tensor, nn
 
 from ..features import FeatureSpec
 from ..layers import ConvNormAct, init_decoder_
-from .base import DECODERS, pyramid_levels
+from .base import DECODERS, check_out_stride, pyramid_levels
 
 
 @DECODERS.register("segformer")
 class SegFormerDecoder(nn.Module):
     """Per-level linear (1x1) to ``channels``, upsample to the shallowest level, concat, fuse.
-    Output: ``channels`` at stride 4."""
+    Output: ``channels`` at stride 4 (``out_stride`` may only restate it)."""
 
     def __init__(self, in_specs: Sequence[FeatureSpec], channels: int = 256,
-                 dropout: float = 0.1) -> None:
+                 dropout: float = 0.1, out_stride: int | None = None) -> None:
         super().__init__()
         self.levels = pyramid_levels(in_specs)
+        check_out_stride("segformer", in_specs[self.levels[0]].stride, out_stride)
         self.linear = nn.ModuleList(nn.Conv2d(in_specs[i].channels, channels, 1)
                                     for i in self.levels)
         self.fuse = ConvNormAct(len(self.levels) * channels, channels, 1)

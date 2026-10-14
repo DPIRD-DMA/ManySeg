@@ -11,7 +11,7 @@ from torch import Tensor, nn
 
 from ..features import FeatureSpec
 from ..layers import ConvNormAct, init_decoder_
-from .base import DECODERS
+from .base import DECODERS, check_power_of_two_stride
 
 UPSAMPLE_MODES = ("nearest", "bilinear", "aligned")
 
@@ -59,13 +59,16 @@ class UNetDecoder(nn.Module):
     """U-Net decoder: from the deepest feature, repeatedly upsample x2 and fuse a skip.
 
     One block per factor of two between the deepest stride and ``out_stride``. A block fuses
-    the encoder feature with matching stride if there is one.
+    the encoder feature with matching stride if there is one. ``out_stride > 1`` builds only
+    the blocks down to that stride (the finest blocks are not built, so they cost no
+    parameters or FLOPs); the kept blocks are identical to the default decoder's, and the head
+    upsamples the coarser output (see ``docs/api_design.md``, "Spatial policy").
 
     Args:
         in_specs: Encoder feature specs (strides must be powers of two).
         channels: Output channels of each block, deepest first. Default: SMP's
             ``(256, 128, 64, 32, 16)`` truncated/extended to the number of blocks.
-        out_stride: Stride of the decoder output (1 = input resolution).
+        out_stride: Stride of the decoder output: 1 (input resolution, default), 2, 4, ...
         norm: ``"batch"``, ``"group"`` or ``None``.
         upsample: ``"nearest"`` (SMP-equivalent default), ``"bilinear"`` or ``"aligned"``.
     """
@@ -86,8 +89,7 @@ class UNetDecoder(nn.Module):
             if s.stride & (s.stride - 1):
                 raise ValueError(f"UNetDecoder needs power-of-two strides, got {s.stride}")
         deepest = specs[-1]
-        if out_stride > deepest.stride or out_stride & (out_stride - 1):
-            raise ValueError(f"invalid out_stride {out_stride}")
+        check_power_of_two_stride("UNetDecoder", out_stride, deepest.stride)
         n_blocks = int(math.log2(deepest.stride // out_stride))
         if channels is None:
             channels = tuple(max(16, 256 >> i) for i in range(n_blocks))

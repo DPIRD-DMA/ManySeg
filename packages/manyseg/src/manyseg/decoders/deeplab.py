@@ -10,7 +10,7 @@ from torch import Tensor, nn
 
 from ..features import FeatureSpec
 from ..layers import init_decoder_
-from .base import DECODERS, pyramid_levels
+from .base import DECODERS, check_out_stride, pyramid_levels
 
 
 class SeparableConvBNReLU(nn.Sequential):
@@ -55,9 +55,11 @@ class DeepLabV3PlusDecoder(nn.Module):
     """
 
     def __init__(self, in_specs: Sequence[FeatureSpec], channels: int = 256,
-                 low_level_channels: int = 48, atrous_rates: Sequence[int] | None = None) -> None:
+                 low_level_channels: int = 48, atrous_rates: Sequence[int] | None = None,
+                 out_stride: int | None = None) -> None:
         super().__init__()
         levels = pyramid_levels(in_specs)
+        check_out_stride("deeplabv3plus", in_specs[levels[0]].stride, out_stride)
         self.low, self.high = levels[0], max(range(len(in_specs)),
                                             key=lambda i: in_specs[i].stride)
         deep = in_specs[self.high]

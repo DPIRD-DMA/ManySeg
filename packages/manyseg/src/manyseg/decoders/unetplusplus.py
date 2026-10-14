@@ -5,6 +5,11 @@ previous nodes at its level with the upsampled node ``X[i+1][j-1]``. The final n
 ``X[0][L-1]`` is then upsampled without skips to ``out_stride``. Widths follow the U-Net
 default at each stride, so ``unetplusplus`` and ``unet`` are directly comparable.
 
+``out_stride > 1`` drops every encoder level finer than ``out_stride`` (with all of its nested
+nodes) and the tail blocks below it, so the reduced decoder is the default one minus those
+modules: e.g. with a stride-2..32 encoder, ``out_stride=2`` drops the tail block to stride 1
+and ``out_stride=4`` also drops the stride-2 row ``X[0][*]`` (10 -> 6 nodes).
+
 Not parameter-identical to SMP's ``UnetPlusPlus``, which sizes nested nodes from skip widths
 (resnet34 @256²: ManySeg 25.8 M params / 26.8 GFLOPs vs SMP 26.1 M / 36.8 GFLOPs).
 """
@@ -19,7 +24,7 @@ from torch import Tensor, nn
 
 from ..features import FeatureSpec
 from ..layers import init_decoder_
-from .base import DECODERS
+from .base import DECODERS, check_power_of_two_stride
 from .unet import UNetBlock, upsample2x
 
 
@@ -41,13 +46,18 @@ class UNetPlusPlusDecoder(nn.Module):
     def __init__(self, in_specs: Sequence[FeatureSpec], out_stride: int = 1,
                  norm: str | None = "batch", upsample: str = "nearest") -> None:
         super().__init__()
-        order = sorted(range(len(in_specs)), key=lambda i: in_specs[i].stride)
-        specs = [in_specs[i] for i in order]
-        for s in specs:
+        for s in in_specs:
             if s.stride & (s.stride - 1):
                 raise ValueError(f"UNetPlusPlusDecoder needs power-of-two strides, got {s.stride}")
+        deepest = max(s.stride for s in in_specs)
+        check_power_of_two_stride("UNetPlusPlusDecoder", out_stride, deepest)
+        order = sorted((i for i, s in enumerate(in_specs) if s.stride >= out_stride),
+                       key=lambda i: in_specs[i].stride)
+        specs = [in_specs[i] for i in order]
         self._order = order
-        deepest = specs[-1].stride
+        # Nodes keep the level numbers of the full decoder, so a reduced decoder's state_dict is
+        # a subset of the default one's.
+        self._first = len(in_specs) - len(order)
         n_blocks = int(math.log2(deepest // out_stride))
         default = [max(16, 256 >> i) for i in range(n_blocks)]
         width = {deepest >> (k + 1): c for k, c in enumerate(default)}  # stride -> channels
@@ -59,7 +69,7 @@ class UNetPlusPlusDecoder(nn.Module):
             for i in range(0, L - j):
                 cout = width[specs[i].stride]
                 cin = ch[(i + 1, j - 1)] + sum(ch[(i, k)] for k in range(j))
-                nodes[f"{i}_{j}"] = _Node(cin, cout, norm, upsample)
+                nodes[f"{i + self._first}_{j}"] = _Node(cin, cout, norm, upsample)
                 ch[(i, j)] = cout
         self.nodes = nn.ModuleDict(nodes)
         tail, c, s = [], ch[(0, L - 1)], specs[0].stride
@@ -76,8 +86,8 @@ class UNetPlusPlusDecoder(nn.Module):
         X = {(i, 0): e[i] for i in range(self.L)}
         for j in range(1, self.L):
             for i in range(0, self.L - j):
-                X[(i, j)] = self.nodes[f"{i}_{j}"](X[(i + 1, j - 1)],
-                                                   [X[(i, k)] for k in range(j)])
+                X[(i, j)] = self.nodes[f"{i + self._first}_{j}"](
+                    X[(i + 1, j - 1)], [X[(i, k)] for k in range(j)])
         x = X[(0, self.L - 1)]
         for blk in self.tail:
             x = blk(x, None)
