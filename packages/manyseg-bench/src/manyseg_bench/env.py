@@ -42,6 +42,23 @@ def gpu_contention() -> dict | None:
     }
 
 
+def code_version() -> str | None:
+    """Code snapshot that produced a result: $MANYSEG_CODE_SHA (set by batch scripts) or the
+    git commit of the source tree (with ``-dirty`` if it has uncommitted changes)."""
+    sha = os.environ.get("MANYSEG_CODE_SHA")
+    if sha:
+        return sha
+    here = os.path.dirname(os.path.abspath(__file__))
+    try:
+        rev = subprocess.run(["git", "-C", here, "rev-parse", "--short", "HEAD"],
+                             capture_output=True, text=True, timeout=10).stdout.strip()
+        dirty = subprocess.run(["git", "-C", here, "status", "--porcelain", "--", "."],
+                               capture_output=True, text=True, timeout=10).stdout.strip()
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    return (rev + ("-dirty" if dirty else "")) or None
+
+
 def environment(device: str | torch.device = "cpu") -> dict:
     device = torch.device(device)
     env = {
@@ -56,6 +73,8 @@ def environment(device: str | torch.device = "cpu") -> dict:
                      ("manyseg", "manyseg-bench", "timm", "segmentation-models-pytorch",
                       "fastai", "torchvision", "numpy")},
         "device": str(device),
+        "code_version": code_version(),
+        "hip": torch.version.hip,
     }
     if device.type == "cuda":
         props = torch.cuda.get_device_properties(device)
