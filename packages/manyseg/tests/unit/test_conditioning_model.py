@@ -89,6 +89,53 @@ def test_film_identity_with_task_decoders_and_fusion():
         torch.testing.assert_close(out[k], ref[k], rtol=0, atol=0)
 
 
+IMAGE_HEADS = {"cls": {"type": "classification", "channels": 5, "scope": "image"},
+               "harvest": {"type": "regression", "channels": 1, "scope": "image",
+                         "uncertainty": True}}
+
+
+def test_film_image_only_model():
+    """No decoder: FiLM modulates the encoder feature the image heads pool."""
+    cond = build("film", heads=IMAGE_HEADS).eval()
+    assert cond.decoder is None and set(cond.conditioner.film) == {"image"}
+    plain = plain_like(cond, heads=IMAGE_HEADS)
+    x = torch.randn(2, 3, 64, 64)
+    out, ref = cond({"img": x, "meta": meta()}), plain(x)
+    for k in IMAGE_HEADS:
+        torch.testing.assert_close(out[k], ref[k], rtol=0, atol=0)  # identity at init
+    perturb(cond)
+    a, b = cond({"img": x, "meta": meta(seed=0)}), cond({"img": x, "meta": meta(seed=1)})
+    for k in IMAGE_HEADS:
+        assert not torch.allclose(a[k], b[k]), k
+
+
+def test_film_mixed_model_conditions_encoder_image_heads():
+    cond = build("film", heads=HEADS).eval()
+    assert set(cond.conditioner.film) == {"decoder", "image"}
+    plain = plain_like(cond, heads=HEADS)
+    x = torch.randn(2, 3, 33, 47)
+    out, ref = cond({"img": x, "meta": meta()}), plain(x)
+    for k in HEADS:
+        torch.testing.assert_close(out[k], ref[k], rtol=0, atol=0)
+
+
+def test_film_image_head_on_decoder_has_no_image_film():
+    heads = {"seg": {"type": "segmentation", "channels": 2},
+             "area": {"type": "regression", "channels": 1, "scope": "image",
+                      "source": "decoder"}}
+    assert set(build("film", heads=heads).conditioner.film) == {"decoder"}
+
+
+def test_image_only_model_with_fusion_and_film():
+    rasters = {"a": {"channels": 4}, "b": {"channels": 2, "alignment": "same_extent"}}
+    model = perturb(build("film", rasters=rasters, heads=IMAGE_HEADS,
+                          fusion={"type": "intermediate", "op": "concat"})).eval()
+    x = {"a": torch.randn(2, 4, 64, 64), "b": torch.randn(2, 2, 32, 32)}
+    a, b = model({**x, "meta": meta(seed=0)}), model({**x, "meta": meta(seed=1)})
+    assert a["cls"].shape == (2, 5) and a["harvest"].shape == (2, 2)
+    assert not torch.allclose(a["cls"], b["cls"])
+
+
 MODES = {"film": "film", "head": {"mode": "head", "pixel": True}, "channels": "channels"}
 
 
@@ -103,8 +150,7 @@ def test_every_decoder_and_mode(decoder, mode):
     assert out["seg"].shape == (2, 2, 33, 47) and out["edges"].shape == (2, 1, 33, 47)
     assert out["area"].shape == (2, 1)
     other = model({"img": x, "meta": meta(seed=1)})
-    # film modulates decoders: an image head pooling the encoder is (by design) unaffected
-    for k in (("seg", "edges") if mode == "film" else out):
+    for k in out:
         assert not torch.allclose(out[k], other[k]), f"metadata has no effect on {k}"
 
 

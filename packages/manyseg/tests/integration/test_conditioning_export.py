@@ -28,9 +28,9 @@ def meta(n=1, seed=0, missing=False):
     return m
 
 
-def build(mode, rasters=None, **kw):
+def build(mode, rasters=None, heads=None, **kw):
     rasters = rasters or {"img": {"channels": 3}}
-    model = create_model(backbone="resnet18", pretrained=False, heads=HEADS,
+    model = create_model(backbone="resnet18", pretrained=False, heads=heads or HEADS,
                          inputs={**rasters, "meta": {"kind": "vector", "fields": FIELDS,
                                                      "conditioning": MODES[mode]}}, **kw)
     with torch.no_grad():  # non-identity injection so the export must carry the metadata path
@@ -54,6 +54,17 @@ def test_dynamic_shapes_give_vectors_no_spatial_dims():
     assert spec["meta"] is None and spec["meta_mask"] is None and set(spec["img"]) == {2, 3}
     spec = dynamic_shapes(model, ex, dynamic_batch=True)["x"]
     assert spec["meta"] == {0: spec["img"][0]}
+
+
+@pytest.mark.parametrize("mode", ["film", "head"])
+def test_export_image_only_model_with_vector_input(mode):
+    """Classification / regression models (no decoder) with metadata export like the rest."""
+    heads = {"cls": {"type": "classification", "channels": 5, "scope": "image"},
+             "harvest": {"type": "regression", "channels": 1, "scope": "image"}}
+    model = build(mode, heads=heads)
+    ep = export_model(model, {"img": torch.randn(1, 3, 64, 96), "meta": meta()})
+    check(ep.module(), model, [{"img": torch.randn(1, 3, *hw), "meta": meta(seed=s)}
+                               for s, hw in enumerate([(97, 131), (200, 65)])])
 
 
 @pytest.mark.parametrize("mode", sorted(MODES))

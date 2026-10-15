@@ -11,7 +11,7 @@ import torch
 from torch import nn
 
 from .encoder import MetadataEncoder
-from .inject import Conditioner, DecoderFiLM, used_levels
+from .inject import Conditioner, DecoderFiLM, FiLM, used_levels
 
 VECTOR_KEYS = {"kind", "fields", "channels", "dim", "dropout", "conditioning"}
 MODES = ("film", "head", "channels", "token")
@@ -135,11 +135,13 @@ def build_conditioned_model(create_model: Callable[..., nn.Module], *, inputs, f
         in_ch = getattr(model.backbone, "in_channels", None)
         decoders = {"decoder": model.decoder} if model.decoder is not None else {}
         decoders.update({f"task_{h}": d for h, d in model.task_decoders.items()})
-        if not decoders:
-            raise ValueError("'film' conditioning modulates decoders, but this model has none "
-                             "(only image heads on encoder features); use 'head'")
         for k, d in decoders.items():
             film[k] = DecoderFiLM(dim, specs, used_levels(d, specs, in_ch), d.out_spec, on)
+        # Image heads that pool the encoder: FiLM on the deepest feature (per-channel affine
+        # before the mean pool, i.e. on the pooled vector).
+        if any(getattr(h, "scope", "pixel") == "image" and model._head_sources[n] == "encoder"
+               for n, h in model.heads.items()):
+            film["image"] = FiLM(dim, specs[model._deepest].channels)
 
     head_bias = {}
     if head_names:

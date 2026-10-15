@@ -106,6 +106,8 @@ class DenseModel(nn.Module):
             inp = dec
         elif src == "encoder":
             inp = feats[self._deepest]
+            if cond is not None and name not in self._pixel_heads:
+                inp = self.conditioner.image(inp, cond)
         else:
             inp = self._decode_cond(f"task_{name}", self.task_decoders[name], x, feats, cond,
                                     valid)

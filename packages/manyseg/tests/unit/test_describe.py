@@ -140,7 +140,7 @@ def test_metadata_targets(mode):
     meta = g.find("input", "meta")
     targets = {n.name for n in g.targets(meta.id, kind="condition")}
     if mode == "film":
-        assert targets == {"decoder", "decoder[seg]"}
+        assert targets == {"decoder", "decoder[seg]", "scene"}  # scene pools the encoder
         assert g.find("decoder", "decoder").attr("FiLM").endswith("output yes")
     elif mode == "head":
         assert targets == {"seg", "dist", "scene"}

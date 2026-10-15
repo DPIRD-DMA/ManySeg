@@ -35,3 +35,14 @@ def test_ordinary_names_still_work():
     model = create_model(backbone="resnet18", pretrained=False,
                          heads={"seg": HEAD, "x2": HEAD, "logits": HEAD, "height": HEAD})
     assert set(model.heads) == {"seg", "x2", "logits", "height"}
+
+
+@pytest.mark.parametrize("name", ["yield", "class", "lambda", "in"])
+def test_python_keywords_rejected(name):
+    """torch.export's generated code reads submodules as attributes (``self.heads.yield``),
+    which is a SyntaxError for keywords; non-identifiers such as 'water-area' are fine."""
+    with pytest.raises(ValueError, match="keyword"):
+        create_model(backbone="resnet18", pretrained=False, heads={name: HEAD})
+    with pytest.raises(ValueError, match="keyword"):
+        create_model(backbone="resnet18", pretrained=False, num_classes=2,
+                     inputs={name: {"channels": 3}})

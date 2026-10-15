@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import keyword
 from collections.abc import Callable, Iterable
 from functools import cache
 from typing import Any
@@ -40,6 +41,9 @@ def check_module_names(kind: str, names: Iterable[str]) -> None:
     """Reject user-chosen names (heads, inputs, metadata fields) that would become
     ``ModuleDict`` keys but collide with ``nn.Module`` attributes, contain ``.`` or are empty."""
     for name in names:
+        if isinstance(name, str) and keyword.iskeyword(name):
+            raise ValueError(f"{kind} name {name!r} is a Python keyword; torch.export cannot "
+                             f"generate code for it (use e.g. {name + '_'!r})")
         if (not isinstance(name, str) or not name or "." in name or name.startswith("_")
                 or name in reserved_names()):
             public = sorted(n for n in reserved_names() if not n.startswith("_"))

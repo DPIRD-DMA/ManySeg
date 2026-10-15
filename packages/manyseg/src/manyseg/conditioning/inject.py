@@ -138,7 +138,8 @@ class Conditioner(nn.Module):
         rasters: Raster input names; ``single`` names the raster if the raster model takes a
             plain tensor.
         channel_targets: ``{vector input (channels mode): raster input}``.
-        film: ``{decoder key: DecoderFiLM}``.
+        film: ``{decoder key: DecoderFiLM}``, plus ``"image"``: a :class:`FiLM` on the deepest
+            encoder feature when image-scope heads pool it.
         head_bias: ``{head name: Linear(head_dim, out_channels)}`` (zero-initialised).
     """
 
@@ -192,6 +193,12 @@ class Conditioner(nn.Module):
         if cond[0] is None or key not in self.film:
             return y
         return self.film[key].apply_output(y, cond[0])
+
+    def image(self, feat: Tensor, cond) -> Tensor:
+        """FiLM on the encoder feature that image-scope heads pool."""
+        if cond[0] is None or "image" not in self.film:
+            return feat
+        return self.film["image"](feat, cond[0])
 
     def head(self, name: str, y: Tensor, cond) -> Tensor:
         if cond[1] is None or name not in self.head_bias:
