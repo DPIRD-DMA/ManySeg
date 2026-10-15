@@ -76,12 +76,12 @@ Status as of 2026-10-15, 08:35 AWST. ✅ done · 🔄 in progress · ⏳ planned
     alignment, export and ONNX tests. Bench: scaled heads are evaluated at input resolution, and
     runs record FLOPs, throughput and peak memory (E006 done).
 13. ✅ **`input_cross`** for `unet` (fastai's full-resolution input stage, opt-in; E012).
+14. ✅ **Presets** (`manyseg.presets`): `fast` / `compact` / `balanced` / `accurate`, the E018
+    accuracy/latency front, opt-in with their measured numbers.
 15. ✅ **Image classification and regression**: models with only image heads build no
     decoder; FiLM metadata on the pooled feature; bench tasks (classification, multi-label,
     regression, segmentation + multi-label), a plain-timm provider, EuroSAT, Pet breeds and
     BigEarthNet v2 datasets (E019 parity with timm; E020 running).
-14. ✅ **Presets** (`manyseg.presets`): `fast` / `compact` / `balanced` / `accurate`, the E018
-    accuracy/latency front, opt-in with their measured numbers.
 
 ## Phase 5: research and optimisation 🔄
 
