@@ -12,6 +12,7 @@ script shows where to switch pretrained weights on). They use a GPU if one is av
 | [`05_instances_points.py`](05_instances_points.py) | Boundary + distance instance heads and centre-heatmap + density heads: targets, labels, peaks, counts |
 | [`06_export.py`](06_export.py) | `torch.export` with dynamic H/W, ONNX checked with onnxruntime, a `torch.compile` note |
 | [`07_quantise.py`](07_quantise.py) | `manyseg.quantize`: PT2E static int8 and int8 weight-only, `model_size`, `compare_outputs` |
+| [`08_classification_regression.py`](08_classification_regression.py) | Image-level models with no decoder: a multi-label classifier; then two S2 resolutions + S1 + day of year, a yield head with uncertainty and a pixel head together |
 
 Longer walkthroughs:
 
@@ -30,7 +31,7 @@ uv sync --all-packages --all-extras
 uv run python examples/01_single_input.py
 ```
 
-With pip, `pip install manyseg` is enough for 01-05. Optional parts skip with a message when
+With pip, `pip install manyseg` is enough for 01-05 and 08. Optional parts skip with a message when
 their dependency is missing: ONNX in 06 needs `manyseg[onnx]` and `onnxruntime`, 07 needs
 `manyseg[quant]` (torchao), and the PNG in 03 needs the Graphviz `dot` binary.
 

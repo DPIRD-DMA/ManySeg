@@ -98,10 +98,15 @@ CPU in a few seconds.
   alignment.
 * **Metadata.** Non-raster inputs (date, angles, lat/lon, sensor id, tabular floats) as
   `"kind": "vector"` inputs, encoded by field type, with missing-value handling. They
-  condition the model by FiLM on the features entering each decoder (default), through image
-  heads, or as extra input channels. Pretrained encoders are not modified.
+  condition the model by FiLM on the features entering each decoder and on the feature image
+  heads pool (default), through image heads, or as extra input channels. Pretrained encoders are not modified.
 * **Heads.** Named heads for pixel or image segmentation, regression and classification,
   with optional uncertainty (mean + log-variance) for regression.
+* **Image classification and regression.** When every head is an image head, no decoder is
+  built: the model is a timm-style classifier or regressor that still takes multiple inputs at
+  different resolutions, metadata (FiLM on the pooled feature) and extra heads. Pixel and
+  image heads can be mixed. Comparison with plain timm classifiers: E019; BigEarthNet v2
+  study: E020.
 * **Instances and points.** Boundary + distance instance heads (`manyseg.instances`) and
   centre-heatmap, offset and density heads (`manyseg.points`), with target generation and
   post-processing to instance labels, points, counts and panoptic labels.
