@@ -8,7 +8,7 @@ SHARED='"band_group_inputs": {"s2_20m": {"backbone": "shared:s2_10m"}, "s2_60m":
 for seed in 0 1 2; do
   uv run manyseg-bench train --provider manyseg --dataset sen1floods11_s2 --encoder resnet34 \
     --weights tv_in1k --arch unet --recipe fastai_like --seeds "$seed" --out "$OUT" --evaluate-test \
-    --set '{"epochs": 60, "batch_size": 16, }' \
+    --set '{"epochs": 60, "batch_size": 16}' \
     --options "{$G, $SHARED}" --tag e015-groups-shared-perbn || echo "FAILED $seed"
 done
 echo "ALL DONE"
