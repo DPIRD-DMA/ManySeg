@@ -69,6 +69,10 @@ out = model({"optical": optical, "sar": sar_at_half_resolution, "meta": meta})
 # out["extent"], out["boundary"], out["distance"]: (B, 1, H, W); out["water_area"]: (B, 1)
 ```
 
+Runnable versions of these, and examples for multispectral input, multi-task training,
+instances and points, export and quantisation, are in [`examples/`](examples/). Each runs on
+CPU in a few seconds.
+
 ## What works today
 
 * **Backbones.** timm CNNs (ResNet, EfficientNet, ConvNeXt, MobileNetV3/V4, RegNet,

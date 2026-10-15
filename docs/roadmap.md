@@ -92,15 +92,15 @@ Stopping rule: an idea is kept only if it beats its baseline by more than 2 seed
 deviations on at least two datasets, at no more than a small, stated cost in latency or memory.
 Negative results are written up in `experiments/` like positive ones.
 
-## Phase 6: release preparation ⏳
+## Phase 6: release preparation 🔄
 
-* Runnable examples: single input, multispectral, multi-modal, multi-task, instances/points,
-  export, quantisation.
-* Docs site.
-* README status line (currently "pre-alpha").
-* PyPI packaging for `manyseg` and `manyseg-bench` independently. Supported torch/timm range
+* ✅ Runnable examples (`examples/`): single input, multispectral, multi-modal, multi-task,
+  instances/points, export, quantisation. Each runs on CPU in seconds; the slow tier runs them all.
+* ⏳ Docs site.
+* ⏳ README status line (currently "pre-alpha").
+* ⏳ PyPI packaging for `manyseg` and `manyseg-bench` independently. Supported torch/timm range
   tested in CI.
-* Clear error messages for unsupported backbone/size combinations, using the capability table.
+* ⏳ Clear error messages for unsupported backbone/size combinations, using the capability table.
 
 ## Known risks
 

@@ -9,6 +9,7 @@ claims (accuracy, speed) are established by `manyseg-bench` experiments, not by 
 | --- | --- | --- | --- |
 | Unit | `packages/*/tests/unit`, `packages/manyseg-bench/tests` | every commit, CPU | < 2 min with `-n 8` |
 | Slow integration | `-m slow` (`tests/integration`) | pre-merge, nightly | < 5 min |
+| Examples | `-m slow` (`tests/examples`): every `examples/*.py` as a CPU subprocess | pre-merge, nightly | ~30 s with `-n 4` |
 | Network | `-m network` | nightly (needs weight cache) | small downloads |
 | Hardware | `device` fixture: `cpu`, `cuda`, `mps` | wherever the device exists | n/a |
 | Benchmark | `manyseg-bench` CLI, never in pytest | on demand, logged under `experiments/` | per experiment budget |
