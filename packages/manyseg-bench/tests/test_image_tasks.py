@@ -4,6 +4,7 @@ image-level labels, the timm provider and an end-to-end run."""
 import json
 import math
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -195,7 +196,8 @@ def test_pet_breed_labels_follow_the_official_list(tmp_path):
     (tmp_path / "annotations").mkdir()
     (tmp_path / "annotations" / "list.txt").write_text(
         "#Image CLASS-ID SPECIES BREED ID\nAbyssinian_1 1 1 1\nyorkshire_terrier_9 37 2 25\n")
-    assert ds.split_labels(tmp_path, ["yorkshire_terrier_9", "Abyssinian_1"]).tolist() == [36, 0]
+    names = SimpleNamespace(names=["yorkshire_terrier_9", "Abyssinian_1"])
+    assert ds.split_labels(tmp_path, names).tolist() == [36, 0]
     assert ds.CACHE_NAME == "oxford_pet" and ds.INFO.num_classes == 37
     with pytest.raises(RuntimeError, match="no class id"):
-        ds.split_labels(tmp_path, ["pug_3"])
+        ds.split_labels(tmp_path, SimpleNamespace(names=["pug_3"]))

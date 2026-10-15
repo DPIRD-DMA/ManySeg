@@ -546,6 +546,59 @@ class _RegressionEval:
                 "r2_mean": sum(r2) / len(r2), "loss": float(self.t.loss(p.float(), y.float()))}
 
 
+class SegMultilabelTask(Task):
+    """Segmentation + multi-label classification from one class mask: the image labels are
+    the classes present (``ignore_index`` excluded), so pixel supervision is an auxiliary task
+    for the image classifier. Heads: ``seg`` (pixel, via the decoder) and ``logits`` (image,
+    pooling the encoder). Loss: CE(seg) + ``cls_weight`` * BCE(logits). Primary: macro AP of
+    the image head; mIoU of the pixel head is reported under ``"seg"``."""
+
+    name = "seg_multilabel"
+    primary_metric = "map_macro"
+
+    def __init__(self, num_classes: int, ignore_index: int | None = None,
+                 cls_weight: float = 1.0, label_smoothing: float = 0.0) -> None:
+        self.num_classes, self.ignore_index, self.cls_weight = num_classes, ignore_index, \
+            cls_weight
+        self.seg = SemanticTask(num_classes, ignore_index, label_smoothing)
+        self.cls = ClassificationTask(num_classes, multilabel=True)
+
+    def heads(self):
+        k = self.num_classes
+        return {"seg": {"type": "segmentation", "channels": k},
+                "logits": {"type": "classification", "channels": k, "scope": "image"}}
+
+    def targets(self, y):
+        k = self.num_classes
+        valid = (y != self.ignore_index if self.ignore_index is not None
+                 else torch.ones_like(y, dtype=torch.bool))
+        hot = torch.zeros(y.shape[0], k, dtype=torch.long, device=y.device)
+        idx = torch.where(valid, y, torch.zeros_like(y)).flatten(1)
+        hot.scatter_add_(1, idx, valid.flatten(1).long())  # count valid pixels per class
+        return {"mask": y, "labels": hot.clamp(max=1)}
+
+    def loss(self, out, t):
+        return self.seg.loss(out["seg"], t["mask"]) + self.cls_weight * self.cls.loss(
+            out["logits"], t["labels"])
+
+    def evaluator(self):
+        return _SegMultilabelEval(self)
+
+
+class _SegMultilabelEval:
+    def __init__(self, task: SegMultilabelTask) -> None:
+        self.t, self.seg, self.cls = task, task.seg.evaluator(), task.cls.evaluator()
+
+    def update(self, out, y) -> None:
+        t = self.t.targets(y)
+        self.seg.update(out["seg"], t["mask"])
+        self.cls.update(out["logits"], t["labels"])
+
+    def compute(self) -> dict:
+        seg = self.seg.compute()
+        return {**self.cls.compute(), "seg": {k: seg[k] for k in ("miou", "iou", "loss")}}
+
+
 def build_task(name: str, num_classes: int, ignore_index: int | None = None, **kwargs) -> Task:
     if name == "semantic":
         return SemanticTask(num_classes, ignore_index, **kwargs)
@@ -559,5 +612,7 @@ def build_task(name: str, num_classes: int, ignore_index: int | None = None, **k
         return ClassificationTask(num_classes, multilabel=True, **kwargs)
     if name == "regression":
         return RegressionTask(num_classes, **kwargs)
+    if name == "seg_multilabel":
+        return SegMultilabelTask(num_classes, ignore_index, **kwargs)
     raise ValueError(f"unknown task {name!r}; choose from semantic, instances, points, "
-                     "classification, multilabel, regression")
+                     "classification, multilabel, regression, seg_multilabel")

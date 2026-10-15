@@ -72,8 +72,9 @@ def split_getter(ds, cache: Path, raw: Path, scheme: str = "official", mmap: boo
             split = _select(load_split(cache, name, mmap=mmap), info, subset)
         if info.vectors:
             split.vectors = ds.load_vectors(raw, split.names, info.vectors)
-        if hasattr(ds, "split_labels"):  # image-level labels for a shared (pixel) cache
-            split.masks = ds.split_labels(raw, split.names)
+        labels = getattr(ds, "split_labels", None)
+        if labels is not None:  # image-level labels for a shared (pixel) cache
+            split.masks = labels(raw, split)
         return split
 
     return get
@@ -150,7 +151,7 @@ def run_training(
     torch.backends.cudnn.benchmark = torch.version.hip is None
     task_name = getattr(ds, "TASK", "semantic")
     task_kwargs = {**getattr(ds, "TASK_KWARGS", {}), **(task_overrides or {})}
-    if task_name in ("semantic", "classification"):
+    if task_name in ("semantic", "classification", "seg_multilabel"):
         task_kwargs.setdefault("label_smoothing", rec.label_smoothing)
     task = build_task(task_name, info.num_classes, info.ignore_index, **task_kwargs)
     if task.image_level:

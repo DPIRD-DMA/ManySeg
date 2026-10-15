@@ -46,7 +46,8 @@ INFO = DatasetInfo(**{**oxford_pet.INFO.to_dict(), "name": "oxford_pet_breeds",
                                 *oxford_pet.INFO.notes)})
 
 
-def split_labels(raw: Path, names: list[str]) -> np.ndarray:
+def split_labels(raw: Path, split) -> np.ndarray:
+    names = split.names
     ids = _class_ids(raw)
     missing = [n for n in names if n not in ids]
     if missing:

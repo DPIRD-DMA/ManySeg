@@ -118,6 +118,36 @@ Heads return raw logits or values: activations and losses live outside the model
 (`"source": "decoder"` selects the decoder output). `{"type": "regression", "uncertainty": True}`
 returns `2·C` channels, `[mean, log_variance]`, for heteroscedastic losses such as Gaussian NLL.
 
+### Image classification and regression
+
+A model whose heads are all `"scope": "image"` builds **no decoder**: it is an encoder, a
+global average pool of the deepest feature and a linear layer per head, i.e. a classifier or
+regressor. Everything else composes as for dense models: multiple inputs at different
+resolutions, fusion, metadata conditioning (`film` modulates the pooled feature; `head` and
+`channels` as usual), uncertainty heads, export and quantisation.
+
+```python
+model = create_model(
+    inputs={
+        "s2_10m": {"channels": 4, "backbone": "resnet50"},
+        "s2_20m": {"channels": 6, "backbone": "resnet50", "alignment": "same_extent"},
+        "meta":   {"kind": "vector", "fields": {"doy": {"type": "cyclic", "period": 365.25}}},
+    },
+    fusion={"type": "intermediate", "op": "concat"},
+    heads={
+        "crop":    {"type": "classification", "channels": 10, "scope": "image"},
+        "harvest": {"type": "regression", "channels": 1, "scope": "image", "uncertainty": True},
+    },
+)
+out = model({"s2_10m": a, "s2_20m": b, "meta": doy})   # crop (N, 10), harvest (N, 2)
+```
+
+For a single RGB/multispectral tensor and one output this is the same network as
+`timm.create_model(backbone, num_classes=K, in_chans=C)` (same pretrained stem adaptation;
+E019 compares the two). Mix image and pixel heads freely: the decoder is built only when a pixel
+head needs it. Head and input names must not be Python keywords (`yield`, `class`, ...):
+`torch.export` reads modules as attributes.
+
 ### Multiple inputs
 
 ```python
