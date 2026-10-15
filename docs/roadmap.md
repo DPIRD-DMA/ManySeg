@@ -100,8 +100,7 @@ Negative results are written up in `experiments/` like positive ones.
 * ✅ PyPI packaging for `manyseg` and `manyseg-bench` independently: metadata, licence and
   `py.typed` in each wheel, PyPI READMEs, `twine check` clean, and the `manyseg` wheel installs and
   runs alone (CI `package` job on PRs and nightly). Both names are free on PyPI. **Not
-  published**: that needs a decision on version and timing. ⏳ A tested torch/timm version range
-  (minimum-versions CI leg). Locally: the unit tier passes on torch 2.4.1 + timm 1.0.12 (the declared floor was raised from timm 1.0.9, where `mambaout` fails).
+  published**: that needs a decision on version and timing. ✅ Tested version range: nightly CI leg on the declared floor (torch 2.4.1 + timm 1.0.12, unit tier); the floor was raised from timm 1.0.9, where `mambaout` fails.
 * ✅ Unsupported backbone/size combinations: fixed-size architectures are detected at construction (meta-device probe), smaller inputs are padded, and larger ones get a clear `ValueError` naming the `img_size` fix, instead of timm shape errors.
 
 ## Known risks
