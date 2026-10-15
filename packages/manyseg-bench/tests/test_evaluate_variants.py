@@ -106,3 +106,26 @@ def test_int8_pt2e_handles_a_smaller_final_batch(saved_run, monkeypatch):
     ev = evaluate_run(rec["path"], variants=("int8_pt2e",), device="cpu", data=root,
                       out_dir=root / "eval", calib_batches=2)
     assert 0.5 < ev["variants"]["int8_pt2e"]["test"]["agreement"] <= 1.0
+
+
+def test_compiled_int8_with_uneven_batches_and_failures_are_recorded(saved_run, monkeypatch):
+    """Regression: torch.compile + inductor freezing on a dynamic-batch PT2E program crashed in
+    dynamo, and one failing variant discarded every other variant's results."""
+    pytest.importorskip("torchao")
+    from manyseg_bench.datasets import oxford_pet
+    from manyseg_bench.experiments import evaluate, evaluate_run
+
+    rec, root = saved_run
+    monkeypatch.setattr(oxford_pet, "EVAL_BATCH_SIZE", 3, raising=False)
+    ev = evaluate_run(rec["path"], variants=("int8_pt2e_compiled",), device="cpu", data=root,
+                      out_dir=root / "eval", calib_batches=2)
+    assert 0.5 < ev["variants"]["int8_pt2e_compiled"]["test"]["agreement"] <= 1.0
+
+    def boom(*a, **k):
+        raise RuntimeError("quantiser exploded")
+
+    monkeypatch.setattr(evaluate, "_quantised", boom)
+    ev = evaluate_run(rec["path"], variants=("int8_weight_only", "fp32"), device="cpu",
+                      data=root, out_dir=root / "eval")
+    assert "quantiser exploded" in ev["variants"]["int8_weight_only"]["error"]
+    assert ev["variants"]["fp32"]["test"]["agreement"] == 1.0

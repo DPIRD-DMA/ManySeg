@@ -42,11 +42,25 @@ def _quantised(name: str, model, calib, example):
     if name == "int8_weight_only":
         q = quantize_weights(model, inplace=False)
         return q, model_size(q)
-    ep = quantize_pt2e(model, example, calib, dynamic_batch=True)  # last eval batch is smaller
     if name == "int8_pt2e":
+        ep = quantize_pt2e(model, example, calib, dynamic_batch=True)  # last batch is smaller
         return ep.module(), model_size(ep)
+    # Deployed form. Inductor freezing on a program with symbolic sizes crashes in dynamo
+    # (torch 2.14: IndexError in _maybe_preserve_original_meta), so export at the fixed eval
+    # shape and pad a smaller final batch up to it (extra outputs are dropped).
+    bs = example.shape[0]
+    ep = quantize_pt2e(model, example, [c for c in calib if c.shape[0] == bs], dynamic=False)
     torch._inductor.config.freezing = True  # constant-folds the int8 weights (oneDNN kernels)
-    return torch.compile(ep.module()), model_size(ep)
+    compiled = torch.compile(ep.module())
+
+    def run(x):
+        n = x.shape[0]
+        if n < bs:
+            x = torch.cat([x, x[-1:].expand(bs - n, *x.shape[1:])])
+        out = compiled(x)
+        return out[:n] if torch.is_tensor(out) else {k: v[:n] for k, v in out.items()}
+
+    return run, model_size(ep)
 
 
 def _size_bytes(model) -> int:
@@ -104,28 +118,11 @@ def evaluate_run(run: str | Path, variants=("fp32", "bf16", "fp16"), device: str
                              mean=norm["mean"], std=norm["std"], device=dev,
                              stack=spec.input_mode != "dict", **info_loader_kwargs(ds))
 
-        model, size = ref, None
-        if v.startswith("int8"):
-            calib = [x for _, (x, _) in zip(range(calib_batches), loader("train"))]
-            model, size = _quantised(v, ref, calib, calib[0])
-        res = {"device": dev.type, "precision": precision, "size_bytes": size or _size_bytes(ref)}
-        for split in splits:
-            ev, agree, total, t0 = task.evaluator(), 0, 0, time.perf_counter()
-            for x, y in loader(split):
-                with torch.no_grad():
-                    ref_out = ref(x)
-                    with autocast(dev, precision):
-                        o = model(x)
-                ev.update(o, y)
-                r = ref_out if torch.is_tensor(ref_out) else next(iter(ref_out.values()))
-                p = o if torch.is_tensor(o) else next(iter(o.values()))
-                valid = y != info.ignore_index if info.ignore_index is not None else \
-                    torch.ones_like(y, dtype=torch.bool)
-                agree += int(((r.argmax(1) == p.argmax(1)) & valid).sum())
-                total += int(valid.sum())
-            res[split] = {**ev.compute(), "agreement": agree / max(1, total),
-                          "seconds": time.perf_counter() - t0}
-        out["variants"][v] = res
+        try:
+            out["variants"][v] = _score(v, ref, loader, splits, task, info, dev, precision,
+                                        calib_batches)
+        except Exception as e:  # one failing variant must not discard the others
+            out["variants"][v] = {"device": dev.type, "error": f"{type(e).__name__}: {e}"}
     out["env"] = envs
     d = Path(out_dir)
     d.mkdir(parents=True, exist_ok=True)
@@ -133,3 +130,28 @@ def evaluate_run(run: str | Path, variants=("fp32", "bf16", "fp16"), device: str
     path.write_text(json.dumps(out, indent=1))
     out["path"] = str(path)
     return out
+
+
+def _score(v, ref, loader, splits, task, info, dev, precision, calib_batches) -> dict:
+    model, size = ref, None
+    if v.startswith("int8"):
+        calib = [x for _, (x, _) in zip(range(calib_batches), loader("train"))]
+        model, size = _quantised(v, ref, calib, calib[0])
+    res = {"device": dev.type, "precision": precision, "size_bytes": size or _size_bytes(ref)}
+    for split in splits:
+        ev, agree, total, t0 = task.evaluator(), 0, 0, time.perf_counter()
+        for x, y in loader(split):
+            with torch.no_grad():
+                ref_out = ref(x)
+                with autocast(dev, precision):
+                    o = model(x)
+            ev.update(o, y)
+            r = ref_out if torch.is_tensor(ref_out) else next(iter(ref_out.values()))
+            p = o if torch.is_tensor(o) else next(iter(o.values()))
+            valid = y != info.ignore_index if info.ignore_index is not None else \
+                torch.ones_like(y, dtype=torch.bool)
+            agree += int(((r.argmax(1) == p.argmax(1)) & valid).sum())
+            total += int(valid.sum())
+        res[split] = {**ev.compute(), "agreement": agree / max(1, total),
+                      "seconds": time.perf_counter() - t0}
+    return res
