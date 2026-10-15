@@ -1,6 +1,6 @@
 # E016: Acquisition date and S2 band groups for single-date crop types (PASTIS)
 
-Status: **planned, draft — to be reviewed before running.** Nothing has been run.
+Status: **planned** (drafted and reviewed 2026-10-15, registered before any run). Review decisions: the date rule stays as written (no cloud-aware choice); the per-month analysis is dropped (see Protocol).
 
 E009 (Sen1Floods11) and E013 (CloudSEN12+) found no benefit from metadata conditioning. On
 both, the metadata was largely redundant with the image: a flood or a cloud looks the same in
@@ -52,6 +52,8 @@ Points the reviewer should know:
   date, not a label leak. A cloud-aware date choice (lowest patch-level blue reflectance within
   each eighth of the season; input-derived, deterministic) is a possible change **for the
   reviewer to decide before running**; it would also break the tile-wide shared dates.
+  **Review decision: keep the fixed rule.** Cloud cover is realistic and identical for every
+  arm, and a cloud-aware choice would break the shared per-tile calendars that Q1c relies on.
 * 35 S2 series in the release have no metadata entry and no annotation; they are skipped.
 
 ## Questions and hypotheses
@@ -119,9 +121,9 @@ Hypothesis: a gain of similar size to E015's.
   epoch count is amended here before any further run or any result is read.
 * Reported per arm: val and test mIoU (19 classes, void ignored), per-class IoU, boundary F1,
   params, FLOPs, throughput; for Q1, test per-class IoU deltas for the winter-cereal and
-  summer-crop groups named in Q1a. An analysis script (to be written before running, like
-  E013's `analyse.py`) also reports val mIoU per acquisition month, from the sample names, to
-  show when the date helps.
+  summer-crop groups named in Q1a. (The draft's per-month val mIoU analysis is dropped at review: run records hold only
+  aggregate metrics, and it would need per-sample evaluation. The per-class deltas cover the
+  question.)
 
 ## Decision rules
 Pooled SD = sqrt((SD_a² + SD_b²)/2) over the 3 seeds. "Test agrees" means test mIoU moves in
