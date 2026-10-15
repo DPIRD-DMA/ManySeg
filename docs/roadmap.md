@@ -95,7 +95,7 @@ Negative results are written up in `experiments/` like positive ones.
 
 * ✅ Runnable examples (`examples/`): single input, multispectral, multi-modal, multi-task,
   instances/points, export, quantisation. Each runs on CPU in seconds; the slow tier runs them all.
-* ⏳ Docs site.
+* ✅ Docs site (MkDocs Material, `scripts/build_docs.py` → `build/site`): home, design docs, examples and every experiment write-up. Built locally; **not published** (the repo is private; GitHub Pages or other hosting is a separate decision).
 * ⏳ README status line (currently "pre-alpha").
 * ✅ PyPI packaging for `manyseg` and `manyseg-bench` independently: metadata, licence and
   `py.typed` in each wheel, PyPI READMEs, `twine check` clean, and the `manyseg` wheel installs and
