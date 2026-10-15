@@ -7,6 +7,7 @@ from manyseg.export import export_model
 from manyseg.quantize import compare_outputs, model_size, quantize_pt2e
 
 pytestmark = pytest.mark.slow
+pytest.importorskip("torchao")  # the PT2E path needs the manyseg[quant] extra
 
 
 def _batches(n, hw=(64, 96), c=3):
