@@ -21,13 +21,14 @@ float16, all bands on the 10 m grid (20 m / 60 m bands repeated 2x / 6x, so a bl
 by the same factor recovers the native pixels exactly: ``band_groups``); per-band mean/std
 from the training subset. Masks: the 19 classes (``CLC_TO_CLASS``), 255 for CORINE codes
 outside the nomenclature (roads, ports, airports, mines, dumps, construction, urban green,
-sport, bare rock, burnt areas; 999 = no data). Training augmentation: h/v flips only, so
-image-level labels stay valid.
+sport, bare rock, burnt areas, intertidal flats; 999 = no data). Training augmentation: h/v
+flips only, so image-level labels stay valid.
 
-Labels: the official labels equal the classes present in the mapped reference map (checked
-at preparation and recorded as ``label_agreement`` in ``meta.json``). ``bigearthnet*``
-classification variants use the official labels; ``bigearthnet_seg`` (segmentation +
-classification) derives them from the mask; ``bigearthnet_frac`` regresses class fractions.
+Labels: every classification variant (and ``bigearthnet_seg``, segmentation +
+classification) uses the classes present in the mapped reference map, so all arms of E020
+train on identical image targets. They reproduce the official labels (the fraction of patches
+with identical label sets is ``label_agreement`` in ``meta.json``). ``bigearthnet_frac``
+regresses the class fractions of the same maps.
 """
 
 from __future__ import annotations
@@ -50,11 +51,12 @@ CLASSES = (
     "Beaches, dunes, sands", "Inland wetlands", "Coastal wetlands", "Inland waters",
     "Marine waters",
 )
-# CORINE level-3 code -> class (BigEarthNet 19-class nomenclature; 241 -> permanent crops and
-# 423 intertidal flats -> marine waters, verified against the official labels).
+# CORINE level-3 code -> class (BigEarthNet 19-class nomenclature). 241 -> permanent crops;
+# 423 (intertidal flats) is unlabelled. Both checked against the official labels: 423 as
+# unlabelled matched 151 / 151 patches containing it, as marine waters 90 / 151.
 _CLC = ((111, 112), (121,), (211, 212, 213), (221, 222, 223, 241), (231,), (242,), (243,),
         (244,), (311,), (312,), (313,), (321, 333), (322, 323), (324,), (331,), (411, 412),
-        (421, 422), (511, 512), (423, 521, 522, 523))
+        (421, 422), (511, 512), (521, 522, 523))
 CLC_TO_CLASS = {code: i for i, codes in enumerate(_CLC) for code in codes}
 S2_BANDS = ("B01", "B02", "B03", "B04", "B05", "B06", "B07", "B08", "B8A", "B09", "B11", "B12")
 S2_NATIVE = {"B01": 60, "B09": 60, "B02": 10, "B03": 10, "B04": 10, "B08": 10, "B05": 20,
@@ -132,9 +134,9 @@ def map_codes(codes: np.ndarray) -> np.ndarray:
 def presence(masks: np.ndarray, k: int = 19) -> np.ndarray:
     """``(N, H, W)`` class masks -> ``(N, k)`` multi-hot of the classes present."""
     out = np.zeros((len(masks), k), np.uint8)
-    for i, m in enumerate(masks):
-        u = np.unique(m)
-        out[i, u[u < k]] = 1
+    for s in range(0, len(masks), 512):
+        m = np.asarray(masks[s:s + 512]).reshape(-1, masks.shape[1] * masks.shape[2])
+        out[s:s + 512] = np.stack([(m == c).any(1) for c in range(k)], 1)
     return out
 
 
@@ -200,12 +202,13 @@ def prepare(raw: Path, cache: Path, size: int = SIZE) -> dict:
         (cache / f"{split}_names.json").write_text(json.dumps(ids))
         official = multi_hot(meta.loc[ids, "labels"])
         agree = float((presence(masks) == official).all(1).mean())
+        ignored = sum(int((masks[s:s + 1024] == 255).sum()) for s in range(0, n, 1024))
         if split == "train":
             for k, a in (("s2", s2), ("s1", s1)):
                 stats["mean"][k], stats["std"][k] = channel_stats(a, chunk=256)
         summary[split] = {"n": n, "label_agreement": agree,
                           "label_freq": official.mean(0).round(4).tolist(),
-                          "ignored_frac": float((masks == 255).mean()),
+                          "ignored_frac": ignored / masks.size,
                           "s1_nonfinite_frac": float((~np.isfinite(s1[:256].astype(np.float32))
                                                       ).mean())}
         del s2, s1, masks
@@ -213,10 +216,9 @@ def prepare(raw: Path, cache: Path, size: int = SIZE) -> dict:
     return summary
 
 
-def split_labels(raw: Path, split) -> np.ndarray | None:
-    """Official multi-hot labels for classification variants (``None``: keep the masks)."""
-    meta = _read_meta(raw).set_index("patch_id")
-    return multi_hot(meta.loc[split.names, "labels"])
+def split_labels(raw: Path, split) -> np.ndarray:
+    """Multi-hot labels of the classification variants: the classes present in the mask."""
+    return presence(split.masks)
 
 
 def load_vectors(raw: Path, names: list[str], vectors: dict) -> dict[str, np.ndarray]:

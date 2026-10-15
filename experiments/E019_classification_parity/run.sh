@@ -6,10 +6,12 @@ OUT=${OUT_ROOT:-.}/experiments/E019_classification_parity/runs
 ENCODERS="resnet50:tv_in1k convnext_tiny:fb_in1k pvt_v2_b0:in1k"
 set_for() { case $1 in eurosat) echo '{"epochs": 30, "batch_size": 64}' ;;
   oxford_pet_breeds) echo '{"epochs": 20, "batch_size": 32}' ;; esac; }
+fails=0
 for ds in eurosat oxford_pet_breeds; do for e in $ENCODERS; do for p in manyseg timm; do
   enc=${e%%:*} w=${e##*:}
   uv run manyseg-bench train --provider "$p" --dataset "$ds" --encoder "$enc" --weights "$w" \
     --arch none --recipe fastai_like --set "$(set_for "$ds")" --seeds 0,1,2 --out "$OUT" \
-    --evaluate-test --tag "e019-$p-$enc" || echo "FAILED $ds $p $enc"
+    --evaluate-test --tag "e019-$p-$enc" || { echo "FAILED $ds $p $enc"; fails=$((fails + 1)); }
 done; done; done
+[ "$fails" -eq 0 ] || { echo "$fails arm(s) FAILED"; exit 1; }
 echo "ALL DONE"

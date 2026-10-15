@@ -74,8 +74,8 @@ def test_prepare_arrays_and_label_agreement(prepared):
 
 
 def test_clc_mapping_quirks():
-    assert ben.map_codes(np.array([241, 423, 421, 999, 122, 112])).tolist() == \
-        [3, 18, 16, 255, 255, 0]
+    assert ben.map_codes(np.array([241, 423, 421, 999, 122, 112, 523])).tolist() == \
+        [3, 255, 16, 255, 255, 0, 18]
 
 
 def test_variant_labels(prepared):
