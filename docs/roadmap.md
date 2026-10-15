@@ -80,12 +80,11 @@ Status as of 2026-10-15, 08:35 AWST. ✅ done · 🔄 in progress · ⏳ planned
 ## Phase 5: research and optimisation 🔄
 
 Done (see Phase 3 for results and `experiments/` for write-ups): E001b, E002–E006, E009–E012,
-E011b, E014. Running: E013. Remaining candidates; a budget is set before each one starts:
+E011b, E014, E007 (mixed: frozen encoder BN +2.6 val on Sen1Floods11 at batch 2, GroupNorm decoder +0.5 on Pet; neither passes on both). Running: E013, E008. Remaining candidates; a budget is set before each one starts:
 
 | Id | Question | Budget |
 | --- | --- | --- |
 | E008 | Accuracy cost of bf16 / fp16 / int8 (`manyseg.quantize`) vs the speed gains in E014 | Post-training on saved checkpoints; a few `--save-model` runs |
-| E007 | Normalisation in the decoder (BN / GN / none + skip BN) at small batch sizes | 3 seeds, Setonix |
 | — | `input_cross` default: only if E013 Q3 replicates *and* SMP parity is given up (currently a design commitment, so not planned) | — |
 
 Stopping rule: an idea is kept only if it beats its baseline by more than 2 seed standard

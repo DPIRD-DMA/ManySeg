@@ -1,6 +1,6 @@
 # E007: Normalisation at small batch sizes (pre-registered)
 
-Status: **planned** (registered 2026-10-15, before any run; trimmed 09:52 before any result, see the amendment).
+Status: **complete** (2026-10-15; 30 runs, Pawsey Setonix MI250X, code `c3b4bda`). **Mixed or negative by the rule: no arm passes on both datasets. Freezing encoder BN helps a lot on Sen1Floods11; GroupNorm in the decoder helps on Pet.**
 
 ## Question
 Large remote-sensing tiles often force batches of 1–4 per GPU. BatchNorm statistics are then
@@ -42,3 +42,41 @@ The project's Pawsey GPU allocation is being used too fast, so the design is cut
 * Batch 16: only the default (`batch` + `train`), for the batch-2 vs batch-16 gap.
 * The decision rule's batch-16 check ("within 1 pooled SD of the default at batch 16") is run
   afterwards, only for an arm that passes at batch 2 (3 seeds × 2 datasets for that arm).
+
+## Results (mean ± seed SD, 3 seeds; Δ vs the batch-2 default, in mIoU points)
+
+| Dataset | Arm | Val mIoU | Test mIoU | Val bF1 | Val Δ (2 pooled SD) | Test Δ |
+| --- | --- | --- | --- | --- | --- | --- |
+| Pet | b16 default (batch, encoder BN train) | 0.8209 ± 0.0007 | 0.8217 ± 0.0002 | 0.787 | | |
+| Pet | **b2 default** | 0.8077 ± 0.0011 | 0.8093 ± 0.0010 | 0.763 | — | — |
+| Pet | b2 batch + frozen encoder BN | 0.8087 ± 0.0014 | 0.8137 ± 0.0013 | 0.769 | +0.10 (0.25) | +0.44 |
+| Pet | b2 group + train | 0.8129 ± 0.0005 | 0.8132 ± 0.0012 | 0.765 | **+0.52** (0.17) | +0.39 |
+| Pet | b2 group + frozen | 0.8139 ± 0.0004 | 0.8165 ± 0.0010 | 0.772 | **+0.62** (0.17) | +0.72 |
+| Sen1Floods11 | b16 default | 0.8971 ± 0.0031 | 0.8914 ± 0.0040 | 0.562 | | |
+| Sen1Floods11 | **b2 default** | 0.8816 ± 0.0076 | 0.8939 ± 0.0016 | 0.554 | — | — |
+| Sen1Floods11 | b2 batch + frozen encoder BN | 0.9071 ± 0.0019 | 0.9002 ± 0.0030 | 0.584 | **+2.55** (1.11) | +0.63 |
+| Sen1Floods11 | b2 group + train | 0.8748 ± 0.0077 | 0.8784 ± 0.0209 | 0.571 | −0.68 (1.54) | −1.55 |
+| Sen1Floods11 | b2 group + frozen | 0.9017 ± 0.0018 | 0.8868 ± 0.0011 | 0.601 | +2.01 (1.10) | −0.71 |
+
+* **Small batches do hurt the default.** At batch 2 vs 16, val mIoU is −1.32 on Pet (≫ 2 SD)
+  and −1.55 on Sen1Floods11 (> 2 SD, though test is +0.25 there).
+* **By the rule, no arm passes on both datasets with test agreeing:**
+  * `batch` + frozen encoder BN passes on Sen1Floods11 (+2.55 val, +0.63 test) but not on
+    Pet (+0.10).
+  * `group` + `train` passes on Pet (+0.52 / +0.39) but not on Sen1Floods11.
+  * `group` + frozen passes on Pet and on Sen1Floods11 val, but Sen1Floods11 test disagrees
+    (−0.71).
+* **Freezing the encoder's BN statistics is the largest single effect on the multispectral
+  dataset.** It stabilises seeds (val SD 0.0076 → 0.0019) and, at batch 2, even beats the
+  batch-16 default (0.9071 vs 0.8971 val, 0.9002 vs 0.8914 test). Batch 2 also takes 8× more
+  optimiser steps, so this is not a pure normalisation effect.
+* Throughput at batch 2 is about a third of batch 16 (81–88 vs 246–273 img/s).
+
+## Decision
+* **No default changes**, and the pre-registered batch-16 follow-up is not run, since no arm
+  passed at batch 2.
+* The docs report the numbers. For small-batch training on multispectral or remote-sensing
+  inputs, `freeze_encoder_bn=True` is worth trying (it was strongly positive on Sen1Floods11),
+  and decoder `norm="group"` is worth trying on natural images (Pet). Both are stated as
+  single-dataset results, not recommendations.
+* Pawsey cost: 252 units for the 30 runs, plus 81 for the cancelled 72-run array (64 units/GCD-h).
