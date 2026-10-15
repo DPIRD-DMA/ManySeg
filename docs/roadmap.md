@@ -39,7 +39,7 @@ Status as of 2026-10-15, 08:35 AWST. ✅ done · 🔄 in progress · ⏳ planned
 * ✅ Execution on Pawsey Setonix (MI250X) via Slurm arrays: `scripts/setonix/` (see its README for the container, offline weights, MIOpen and Lustre gotchas).
 * ✅ Datasets prepared: AI4Boundaries ortho (13 GB cache), OAM-TCD (CC-BY, 1024², ~22 GB cache).
 * ✅ CloudSEN12+ high (clouds/shadows, S2 L1C; CC0 labels + Copernicus Sentinel notice): `cloudsen12` (S2), `cloudsen12_s2_aux` (+ static S1GBM backscatter + DEM) and `cloudsen12_meta` (+ lat/lon, date, sun angles) on ROI-disjoint splits; 2048² samples tiled to 512².
-* 🔄 E013 (CloudSEN12+; Setonix 8-GCD pack jobs): auxiliary S1GBM/DEM layers, metadata conditioning on unseen locations, and `input_cross` on a second dataset. Pre-registered; the cache is being built on Setonix.
+* ✅ E013 (CloudSEN12+; Setonix): negative on all three questions. S1GBM/DEM layers, metadata (FiLM, lat/lon on unseen locations) and `input_cross` give no gain; `input_cross` stays a water-mapping recommendation. 5,126 Pawsey units.
 * ✅ E014 (profiling sweep on an idle 4090): bf16 1.61× over fp32; compile 1.46× more for inference in bf16 (10/10 pairs), only 1.17× for training; cold compile 8–15 s (inference) / 28–54 s (train) per shape.
 * ✅ CI workflow (Linux unit tests on every push; macOS/MPS on PRs and nightly; slow tier nightly).
 
@@ -67,8 +67,8 @@ Status as of 2026-10-15, 08:35 AWST. ✅ done · 🔄 in progress · ⏳ planned
     `"kind": "vector"` inputs with cyclic / continuous / coords / categorical fields, missing
     values (mask, NaN, learned unknowns, field dropout), and `film` / `head` / `channels`
     injection with exact identity init, export and ONNX. Bench: vectors in dict mode,
-    Sen1Floods11 and CloudSEN12+ metadata, leave-events-out splits (E009 done; E013 running).
-    ⏳ `token` mode for ViTs.
+    Sen1Floods11 and CloudSEN12+ metadata, leave-events-out splits (E009 and E013 done).
+    `token` mode for ViTs: not planned, since metadata showed no benefit in E009 or E013.
 12. ✅ **Reduced output resolution**: decoder `out_stride`
     for `unet` / `unetplusplus` / `fastai_unet`, where reduced decoders are strict prefixes of
     the default and the defaults keep SMP / fastai parity. Per-head `scale` (1 to 1/8; ceil
@@ -80,7 +80,7 @@ Status as of 2026-10-15, 08:35 AWST. ✅ done · 🔄 in progress · ⏳ planned
 ## Phase 5: research and optimisation 🔄
 
 Done (see Phase 3 for results and `experiments/` for write-ups): E001b, E002–E006, E009–E012,
-E011b, E014, E007 (mixed: frozen encoder BN +2.6 val on Sen1Floods11 at batch 2, GroupNorm decoder +0.5 on Pet; neither passes on both). Running: E013, E008. Remaining candidates; a budget is set before each one starts:
+E011b, E014, E007 (mixed: frozen encoder BN +2.6 val on Sen1Floods11 at batch 2, GroupNorm decoder +0.5 on Pet; neither passes on both). E013 (negative). Running: E008 (re-run), E007b. Remaining candidates; a budget is set before each one starts:
 
 | Id | Question | Budget |
 | --- | --- | --- |

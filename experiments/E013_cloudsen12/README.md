@@ -1,7 +1,6 @@
 # E013: CloudSEN12+ cloud and shadow masking. Auxiliary layers, metadata, input_cross (pre-registered)
 
-Status: **planned** (registered 2026-10-15 before any training run; a 2-epoch throughput pilot
-on 2,000 tiles, val mIoU not used, set the epoch budget).
+Status: **complete** except one re-submitted seed of a secondary arm (2026-10-15; Pawsey Setonix, code `7f05bf0`, 5,126 units). **Negative on all three questions.**
 
 CloudSEN12+ "high" (expert labels, Sentinel-2 L1C, 13 bands, 4 classes: clear, thick cloud,
 thin cloud, cloud shadow). The official splits are **ROI-disjoint**, so test scenes are at
@@ -85,3 +84,56 @@ as registered.
   at epoch 12 while seed 0's `fastai_unet` kept running. The fastai step was then cancelled.
   The seed-0 `meta-channels` run was re-submitted alone (job 50910604, same code `7f05bf0`, same
   task line). `manyseg_pack.sbatch` now names steps `t<task>` so they can be identified.
+
+## Results (mean ± seed SD; 3 seeds unless noted)
+
+| arm | n | val mIoU | test mIoU | test thin IoU | test shadow IoU | val bF1 | params | img/s |
+|---|---|---|---|---|---|---|---|---|
+| e013-aux-early | 3 | 0.7284 ± 0.0027 | 0.6828 ± 0.0012 | 0.3934 | 0.5688 | 0.281 | 24.5 M | 55 |
+| e013-aux-mid | 3 | 0.7323 ± 0.0035 | 0.6806 ± 0.0019 | 0.3895 | 0.5628 | 0.286 | 68.1 M | 40 |
+| e013-meta-channels | 2 | 0.7321 ± 0.0058 | 0.6859 ± 0.0012 | 0.4086 | 0.5596 | 0.283 | 24.5 M | 47 |
+| e013-meta-film | 3 | 0.7316 ± 0.0027 | 0.6824 ± 0.0022 | 0.3995 | 0.5590 | 0.285 | 24.6 M | 54 |
+| e013-meta-film-nogeo | 3 | 0.7307 ± 0.0043 | 0.6812 ± 0.0040 | 0.3952 | 0.5573 | 0.286 | 24.6 M | 66 |
+| e013-s2 | 3 | 0.7324 ± 0.0011 | 0.6850 ± 0.0030 | 0.4006 | 0.5675 | 0.286 | 24.5 M | 55 |
+| e013-unet-cross | 3 | 0.7355 ± 0.0017 | 0.6848 ± 0.0045 | 0.3974 | 0.5684 | 0.302 | 24.5 M | 55 |
+
+`e013-meta-channels` has 2 seeds until the re-submitted seed 0 finishes (see the correction
+above). Per-class IoU on test, S2 baseline (seed 0): clear 0.907, thick cloud 0.865, thin
+cloud 0.397, shadow 0.573. Thin cloud is the hard class. Val mIoU is about 5 points above test
+throughout (val 0.732 vs test 0.685). This is consistent with the ROI-disjoint test set
+containing harder scenes, and it is the same for every arm.
+
+Pre-registered comparisons (val Δ vs 2 pooled SD; test must agree):
+
+```
+e013-aux-early vs e013-s2: val -0.41 pts (2 pooled SD 0.42), test -0.22, test shadow IoU +0.13, thin -0.72 -> no
+e013-aux-mid vs e013-s2: val -0.02 pts (2 pooled SD 0.51), test -0.43, test shadow IoU -0.47, thin -1.11 -> no
+e013-meta-film vs e013-s2: val -0.08 pts (2 pooled SD 0.41), test -0.26, test shadow IoU -0.85, thin -0.11 -> no
+e013-meta-channels vs e013-s2: val -0.03 pts (2 pooled SD 0.84), test +0.09, test shadow IoU -0.79, thin +0.80 -> no
+e013-meta-film-nogeo vs e013-s2: val -0.17 pts (2 pooled SD 0.63), test -0.37, test shadow IoU -1.02, thin -0.54 -> no
+e013-unet-cross vs e013-s2: val +0.31 pts (2 pooled SD 0.28), test -0.01, test shadow IoU +0.09, thin -0.32 -> no
+e013-meta-film vs e013-meta-channels: val -0.05 pts (2 pooled SD 0.91), test -0.35, test shadow IoU -0.06, thin -0.90 -> no
+e013-meta-film-nogeo vs e013-meta-film: val -0.09 pts (2 pooled SD 0.72), test -0.11, test shadow IoU -0.17, thin -0.44 -> no
+```
+
+## Decision
+* **Q1 (S1GBM backscatter + DEM): negative.** Neither early (−0.41 val, −0.22 test) nor
+  intermediate fusion (−0.02 val, −0.43 test, 3× parameters) helps. Shadow IoU is not improved
+  either (+0.13 / −0.47 on test). A static, multi-year backscatter mosaic and terrain add
+  nothing the 13 S2 bands do not already carry for cloud and shadow. This is consistent with
+  E005 (no fusion gain on Sen1Floods11). The docs do not recommend these layers for cloud
+  masking.
+* **Q2 (metadata conditioning): negative.** FiLM is −0.08 val / −0.26 test vs no metadata.
+  Solar geometry did not help shadow (−0.85 test shadow IoU). By the location-shortcut rule,
+  `meta-film-nogeo` is within 1 pooled SD of `meta-film` (−0.09 val), so lat/lon adds nothing on
+  unseen locations. With E009 (FiLM under the bar on held-out flood events), metadata
+  conditioning has now shown no benefit on two remote-sensing datasets. The docs present it as
+  an available tool without a recommendation, and advise against lat/lon on geographic splits.
+  The ViT `token` metadata mode (roadmap) is not worth building on this evidence.
+* **Q3 (`input_cross` replication): does not replicate.** Val +0.31 just clears 2 pooled SD
+  (0.28), but test is −0.01, and test must agree. The E012 recommendation is narrowed to tasks
+  like Sen1Floods11, where labels follow per-pixel input thresholds (water). It is not a general
+  multispectral recommendation. The default stays `False` (unchanged).
+* Cost: 5,126 Pawsey units in total, about 15% over the 09:50 forecast. The three packs ran
+  3.3 h, held by the slowest arms; see the amendments and the `pawsey-budget` lesson (pack only
+  runs of similar length together).

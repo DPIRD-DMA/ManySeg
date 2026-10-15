@@ -85,7 +85,7 @@ CPU in a few seconds.
   `fastai_unet` (identical to fastai's DynamicUnet), `fpn`, `deeplabv3plus`, `upernet`,
   `segformer`. One decoder can be shared by all heads, or a head can have its own. `unet`'s
   optional `input_cross` (fastai's full-resolution input stage) recovers most of fastai's
-  gain on remote sensing at +14% FLOPs (E012).
+  gain on water mapping at +14% FLOPs (E012; it did not replicate on cloud masking, E013).
 * **Output resolution.** The U-Net-family decoders take `out_stride` 1 (default), 2 or 4. The
   stages finer than that are not built: `fastai_unet` at stride 2 drops its full-resolution
   stages, about 40% of its FLOPs. Pixel heads take `"scale"` 1, 1/2, 1/4 or 1/8 and return
@@ -133,8 +133,11 @@ results included. Highlights:
 * Negative results: aligned upsampling (E001b), fusion beyond early stacking on Sen1Floods11
   (E005), and the `projection` stem adapter (E004). Metadata FiLM helps less than 2 SE on held-out
   flood events (E009).
-* Running: CloudSEN12+ cloud and shadow masking (auxiliary layers, metadata on unseen locations,
-  `input_cross` replication; E013).
+* CloudSEN12+ cloud masking was negative on all three questions (E013): static S1 backscatter
+  and DEM layers, metadata conditioning on unseen locations, and `input_cross` (it helps water
+  mapping, not cloud masking).
+* Precision and size: bf16, fp16 and int8 weight-only cost no measurable accuracy (E008). The
+  same experiment found and fixed an int8 bug on CPUs without VNNI.
 
 ## Development
 

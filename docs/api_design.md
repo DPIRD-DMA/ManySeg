@@ -296,9 +296,10 @@ the last block, followed by fastai's residual block (about +7k parameters). It r
 
 > **Evidence (E012, Sen1Floods11):** it recovered 83% (ResNet-34) and 81% (PVTv2-b2) of
 > fastai_unet's val mIoU gain over `unet`. On test it matched or beat fastai_unet (+2.1 / +1.8
-> mIoU over `unet`), at +14% FLOPs against fastai's 4×. On Oxford Pet it did nothing. Use it
-> when labels depend on per-pixel input values at full resolution (water and multispectral
-> thresholds, thin structures). The default stays SMP-identical.
+> mIoU over `unet`), at +14% FLOPs against fastai's 4×. On Oxford Pet it did nothing, and on
+> CloudSEN12+ cloud masking (E013) it did not replicate (+0.31 val, −0.01 test). Use it for tasks
+> like water mapping, where labels follow per-pixel input thresholds at full resolution; it is not
+> a general multispectral recommendation. The default stays SMP-identical.
 
 **Head `scale`** (`{"type": ..., "channels": ..., "scale": s}`, pixel heads only; image heads
 reject it). `s` ∈ {1, 1/2, 1/4, 1/8}, default 1. With `f = 1/s`, a primary input of `H × W`
@@ -437,8 +438,11 @@ over-/under-segmentation, point F1, count MAE) live in `manyseg-bench`
 
 > **Evidence (E009, Sen1Floods11, leave-events-out):** FiLM beat metadata-as-channels (+1.3
 > water IoU, 2.9 SE, all folds); FiLM vs no metadata was +0.9 but under the 2 SE bar. Lat/lon added
-> nothing on held-out events. Only use `coords` fields with geographic or event-level splits;
-> otherwise the model can memorise locations and the evaluation will not show it.
+> nothing on held-out events. **E013 (CloudSEN12+, unseen locations):** FiLM with lat/lon, day of
+> year and solar angles was −0.08 val / −0.26 test vs no metadata, and lat/lon added nothing.
+> Metadata conditioning has not shown a benefit on two remote-sensing datasets, so treat it as a
+> tool to test on your data, not a default. Only use `coords` fields with geographic or event-level
+> splits; otherwise the model can memorise locations and the evaluation will not show it.
 
 ## Inspecting a built model
 
