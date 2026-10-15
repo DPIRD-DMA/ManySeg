@@ -59,9 +59,11 @@ def _worker(rank: int, world: int, port: int, kind: str, out):
     ref = {k: v.detach().clone() for k, v in ddp.module.state_dict().items()}
 
     fsdp = shard_model(_build(kind))
-    # Units that own sharded parameters (a class change alone proves nothing).
-    units = [m for m in fsdp.modules() if type(m).__name__.startswith("FSDP") and any(
-        type(p).__name__ == "DTensor" for p in m.parameters(recurse=False))]
+    # Units that own a parameter group (a class change alone proves nothing: Codex review).
+    from torch.distributed.fsdp import FSDPModule
+
+    units = [m for m in fsdp.modules() if isinstance(m, FSDPModule)
+             and m._get_fsdp_state()._fsdp_param_group is not None]
     sharded = all(type(p).__name__ == "DTensor" for p in fsdp.parameters())
     _step(fsdp, x)
     full = {k: (v.full_tensor() if hasattr(v, "full_tensor") else v).detach().clone()
@@ -82,6 +84,8 @@ def test_shard_model_matches_ddp(kind):
     for rank in (0, 1):
         r = out[rank]
         assert r["sharded"]  # every parameter is owned by some unit
+        # backbone (or the weight-sharing multi-encoder), shared + task decoder, 3 heads
+        assert r["units"] >= 6, r["units"]
         for k, v in r["ref"].items():
             if "running_" in k or "num_batches_tracked" in k:
                 continue  # BN statistics are per rank under both DDP and FSDP

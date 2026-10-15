@@ -178,8 +178,8 @@ def train(
                 n = _batch_size(x)
                 scaler.scale(loss * n).backward()
                 backward, group_n = True, group_n + n
-                loss_sum += float(loss.detach())
-                nb += 1
+                loss_sum += float(loss.detach()) * n  # per-image mean, as optimised
+                nb += n
             if not last:
                 continue
             if not backward:  # every micro-batch was non-finite: skip the update

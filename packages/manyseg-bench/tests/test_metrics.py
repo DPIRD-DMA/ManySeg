@@ -55,3 +55,14 @@ def test_boundary_f1_perfect_and_shifted():
 def test_pareto():
     pts = [(1, 0.5, "a"), (2, 0.6, "b"), (3, 0.55, "c"), (4, 0.7, "d")]
     assert pareto_front(pts) == ["a", "b", "d"]
+
+
+def test_boundary_f1_ignores_borders_of_ignored_regions():
+    """Codex review: valid pixels next to ignore (void / padding) are not target boundaries,
+    so a prediction that is exact on the valid region scores 1."""
+    t = torch.zeros(1, 32, 32, dtype=torch.long)
+    t[:, :, 16:] = 1          # one real boundary (vertical)
+    t[:, :8, :] = 255         # a void band along the top
+    pred = t.clone()
+    pred[:, :8, :] = 0        # whatever is predicted under void
+    assert boundary_f1(pred, t, tolerance=1, ignore_index=255).item() == 1.0

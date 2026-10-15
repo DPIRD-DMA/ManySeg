@@ -267,3 +267,25 @@ def test_freeze_encoder_bn_includes_non_affine_bn():
                   loader(False), num_classes=3, recipe=rec, device=torch.device("cpu"),
                   log=lambda *_: None)
     assert torch.equal(before, enc[1].running_mean)
+
+
+def test_reported_train_loss_weights_batches_by_image_count(monkeypatch):
+    """Codex review: with a short last batch, the reported epoch loss must be the per-image
+    mean, as the optimisation is (lr 0 so the model is fixed during the epoch)."""
+    from manyseg_bench.training import trainer
+
+    imgs, masks = synthetic(n=6)
+    ld = GPULoader(imgs, masks, 4, (0.5,) * 3, (0.25,) * 3, torch.device("cpu"), False)
+    monkeypatch.setattr(trainer, "build_optimizer", lambda enc, dec, rec: torch.optim.SGD(
+        [{"params": enc + dec, "lr": 0.0, "base_lr": 0.0}], lr=0.0))
+    torch.manual_seed(0)
+    m = nn.Sequential(nn.Conv2d(3, 8, 3, padding=1), nn.ReLU(), nn.Conv2d(8, 3, 1))
+    params = list(m.parameters())
+    rec = get_recipe("standard", epochs=1, batch_size=4, precision="fp32", warmup_epochs=0,
+                     schedule="constant")
+    out = trainer.train(m, params[:2], params[2:], ld, ld, num_classes=3, recipe=rec,
+                        device=torch.device("cpu"), log=lambda *_: None)
+    with torch.no_grad():
+        per_image = [float(nn.functional.cross_entropy(m(x[i:i + 1]), y[i:i + 1].long()))
+                     for x, y in ld for i in range(x.shape[0])]
+    assert out["history"][0]["train_loss"] == pytest.approx(sum(per_image) / 6, rel=1e-4)

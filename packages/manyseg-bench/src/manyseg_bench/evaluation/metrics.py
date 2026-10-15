@@ -54,16 +54,22 @@ def boundary_f1(pred: Tensor, target: Tensor, tolerance: int = 2, ignore_index=N
     """
     import torch.nn.functional as F
 
-    def edges(lbl: Tensor) -> Tensor:
+    def edges(lbl: Tensor, valid: Tensor | None = None) -> Tensor:
+        # A boundary pixel sees two different labels in its 3x3 neighbourhood. With ``valid``,
+        # only valid neighbours count, so the border of an ignored region is not an edge.
         lbl = lbl.float().unsqueeze(1)
-        mx = F.max_pool2d(lbl, 3, 1, 1)
-        mn = -F.max_pool2d(-lbl, 3, 1, 1)
+        hi = lbl if valid is None else torch.where(valid, lbl, torch.full_like(lbl, -1e9))
+        lo = lbl if valid is None else torch.where(valid, lbl, torch.full_like(lbl, 1e9))
+        mx = F.max_pool2d(hi, 3, 1, 1)
+        mn = -F.max_pool2d(-lo, 3, 1, 1)
         return (mx != mn).float()
 
-    pe, te = edges(pred), edges(target)
     if ignore_index is not None:
-        valid = (target != ignore_index).float().unsqueeze(1)
-        pe, te = pe * valid, te * valid
+        valid = (target != ignore_index).unsqueeze(1)
+        pe = edges(pred, valid) * valid.float()  # judged on valid pixels and neighbours only
+        te = edges(target, valid) * valid.float()
+    else:
+        pe, te = edges(pred), edges(target)
     k = 2 * tolerance + 1
     pd = F.max_pool2d(pe, k, 1, tolerance)
     td = F.max_pool2d(te, k, 1, tolerance)

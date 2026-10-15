@@ -97,7 +97,10 @@ Recipe options added by experiments, all off by default and recorded in every ru
 ## Metrics
 
 * Quality: confusion-matrix mIoU, mean Dice, pixel accuracy, per-class IoU/Dice/accuracy,
-  boundary F1 (2 px tolerance, per image), validation loss, training-loss curve,
+  boundary F1 (2 px tolerance, per image; edges only between *valid* labels since
+  2026-10-15: before that, the border of an ignored region (void, no-data, padding) counted
+  as a target edge. That biased absolute bF1 on Sen1Floods11, CloudSEN12+ and PASTIS, equally
+  for every arm; no pre-registered decision used bF1), validation loss, training-loss curve,
   non-finite step count (a stability signal).
 * Efficiency: parameters, serialised `state_dict` bytes, forward FLOPs (`FlopCounterMode`,
   2×MAC).
