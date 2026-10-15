@@ -111,14 +111,20 @@ out = model({"optical": o, "sar": s})
 ```
 
 * **Early fusion**: `fusion={"type": "early"}`. Inputs are concatenated on the channel axis
-  in front of one shared backbone. Inputs must share spatial size.
+  in front of one shared backbone. Inputs must share spatial size (`same_grid`). Per-input
+  encoder keys (`backbone`, `pretrained`, `channel_adapter`, `out_indices`,
+  `backbone_kwargs`) must agree across inputs, and they then override the top-level arguments.
+  Conflicting values, and a per-input `rgb_indices`, are errors.
 * **Intermediate fusion**: each input has its own backbone. Features with the same stride
   are fused by an op (`concat`, `add`, `gated`, `attention`, `cross_attention`) whose output
   has the primary input's channels. Strides that are not selected, or that exist only in the
   primary, pass the primary feature through unchanged. The first input in `inputs` is the
   primary.
 * **Late fusion**: `fusion={"type": "late", "op": ...}`. Each input has its own backbone and
-  decoder (same type and options). The decoder outputs are fused before the heads.
+  decoder (same type and options). The decoder outputs are fused before the heads. A
+  `same_extent` input's decoder output is resampled by its valid region onto the primary's
+  valid region, as in intermediate fusion. Image-scope heads read the primary input's deepest
+  encoder level.
 * Inputs without a `backbone` key use the top-level `backbone=` argument.
 * **Shared encoder**: `{"backbone": "shared:optical"}` reuses another input's backbone weights.
   Each input keeps its own input adapter.
