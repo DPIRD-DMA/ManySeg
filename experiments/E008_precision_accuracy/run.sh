@@ -15,6 +15,11 @@ if [ "$STAGE" = train ]; then
       --seeds "$seed" --out "$E/runs" --tag e008-s1f11 --evaluate-test --save-model \
       || echo "FAILED s1f11 $seed"
   done
+elif [ "$STAGE" = pt2e_rerun ]; then  # amendment: fixed default quantizer (reduce_range)
+  for run in "$E"/runs/*_manyseg_unet_resnet34_s*.json; do
+    CUDA_VISIBLE_DEVICES="" uv run manyseg-bench evaluate "$run" --device cpu --threads 8 \
+      --variants int8_pt2e,int8_pt2e_compiled --out "$E/runs/eval_rr" || echo "FAILED cpu $run"
+  done
 else
   for run in "$E"/runs/*_manyseg_unet_resnet34_s*.json; do
     CUDA_VISIBLE_DEVICES="${GPU_FOR_EVAL-0}" uv run manyseg-bench evaluate "$run" \

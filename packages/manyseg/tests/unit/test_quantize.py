@@ -205,3 +205,25 @@ def test_pt2e_names_dynamic_batch_when_calibration_batch_differs():
     m = create_model(backbone="resnet18", pretrained=False, in_channels=4, num_classes=3).eval()
     with pytest.raises(ValueError, match="dynamic_batch=True"):
         quantize_pt2e(m, torch.randn(1, 4, 64, 64), [torch.randn(2, 4, 64, 64)])
+
+
+@pytest.mark.parametrize("vnni,expected_max", [(True, 255), (False, 127)])
+def test_default_x86_quantizer_reduces_range_without_vnni(monkeypatch, vnni, expected_max):
+    """E008: on CPUs without VNNI (e.g. AMD Zen 3), compiled u8 x s8 kernels saturate and the
+    deployed int8 model lost ~6 mIoU on Pet; reduce_range (7-bit activations) fixes it."""
+    pytest.importorskip("torchao")
+    from manyseg import quantize as mq
+
+    monkeypatch.setattr(torch.cpu, "_is_vnni_supported", lambda: vnni)
+    q = mq._x86_quantizer(None)
+    assert q.global_config.input_activation.quant_max == expected_max
+    assert mq._x86_quantizer(True).global_config.input_activation.quant_max == 127
+    assert mq._x86_quantizer(False).global_config.input_activation.quant_max == 255
+
+
+def test_reduce_range_falls_back_to_safe_when_undetectable(monkeypatch):
+    pytest.importorskip("torchao")
+    from manyseg import quantize as mq
+
+    monkeypatch.delattr(torch.cpu, "_is_vnni_supported", raising=False)
+    assert mq._x86_quantizer(None).global_config.input_activation.quant_max == 127

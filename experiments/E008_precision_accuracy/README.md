@@ -38,3 +38,16 @@ no new training per variant.
   the user's own data. For int8, the docs recommend whichever of `int8_pt2e_compiled` and
   `int8_weight_only` is safe. If neither is, they say int8 needs quantisation-aware training,
   which is out of scope.
+
+## Amendment (2026-10-15 11:45, after the first pass)
+The first pass found that `int8_pt2e_compiled` lost about 6 mIoU on every Pet seed (agreement
+94–95%), while the eager `int8_pt2e` reference and Sen1Floods11 were lossless. Cause: this
+machine's CPU (AMD Ryzen 9 5950X, Zen 3) has **no VNNI**. On such CPUs, inductor's
+u8 × s8 int8 kernels saturate their 16-bit intermediate sums unless activations use a reduced
+range (torchao's docs advise this). On a 256-image Pet test subset, `reduce_range=True` raised
+compiled agreement from 0.9501 to 0.9949, matching eager. This is a **library bug**:
+`manyseg.quantize`'s default quantizer assumed VNNI. It is fixed: `quantize_pt2e` now
+defaults to `reduce_range` when the CPU lacks VNNI. Both PT2E variants are re-evaluated with
+the fixed library on all 6 checkpoints (`runs/eval_rr/`). The first-pass records stay in
+`runs/eval/` as the evidence for the bug. The decision uses the fixed library, which is what
+users get.

@@ -40,10 +40,26 @@ def _require_torchao() -> None:
 
 # --- PT2E: static int8, exported -----------------------------------------------------------
 
-def _x86_quantizer():
+def _has_vnni() -> bool:
+    """Whether this CPU has VNNI; unknown counts as no (``reduce_range`` is then the safe
+    choice)."""
+    probe = getattr(torch.cpu, "_is_vnni_supported", None)
+    try:
+        return bool(probe()) if probe is not None else False
+    except Exception:
+        return False
+
+
+def _x86_quantizer(reduce_range: bool | None = None):
+    """torchao's x86 quantizer. ``reduce_range`` (7-bit activations) defaults to "this CPU has
+    no VNNI": there, inductor's u8 x s8 kernels saturate their 16-bit intermediate sums, and
+    in E008 the compiled int8 model lost ~6 mIoU on Oxford Pet (AMD Zen 3; the eager
+    reference was fine). torchao's own docs give the same advice."""
     from torchao.quantization.pt2e.quantizer import x86_inductor_quantizer as xiq
 
-    return xiq.X86InductorQuantizer().set_global(xiq.get_default_x86_inductor_quantization_config())
+    rr = (not _has_vnni()) if reduce_range is None else bool(reduce_range)
+    cfg = xiq.get_default_x86_inductor_quantization_config(reduce_range=rr)
+    return xiq.X86InductorQuantizer().set_global(cfg)
 
 
 # timm's window-attention classes, by (module, class): their dynamic-size export hangs rather
@@ -109,7 +125,8 @@ def _drop_unused_attrs(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
 
 def quantize_pt2e(model: nn.Module, example, calibration: Iterable, *, quantizer=None,
                   dynamic: bool = True, max_size: int = 4096,
-                  dynamic_batch: bool = False) -> torch.export.ExportedProgram:
+                  dynamic_batch: bool = False,
+                  reduce_range: bool | None = None) -> torch.export.ExportedProgram:
     """Static int8 (weights and activations) by PT2E post-training quantisation.
 
     ``example`` is a Tensor or, for multi-input models, a ``dict[str, Tensor]``, exactly as the
@@ -117,6 +134,8 @@ def quantize_pt2e(model: nn.Module, example, calibration: Iterable, *, quantizer
     representative batches); activation ranges are observed on it. ``quantizer`` defaults to
     torchao's ``X86InductorQuantizer`` (per-channel weights, per-tensor activations); pass any
     other PT2E quantizer (e.g. ``ArmInductorQuantizer``) to target another backend.
+    ``reduce_range`` (default: on when *this* CPU lacks VNNI) uses 7-bit activations, which
+    is needed for correct compiled int8 on such CPUs; set it for the CPU you deploy on.
 
     H/W stay dynamic as in ``export_model`` (and the batch too with ``dynamic_batch``).
     Window-attention backbones (Swin, DaViT) cannot export dynamically and need
@@ -135,7 +154,8 @@ def quantize_pt2e(model: nn.Module, example, calibration: Iterable, *, quantizer
     model.eval()
     shapes = _shapes(model, example, dynamic, max_size, dynamic_batch)
     gm = _export(model, example, shapes).module()
-    prepared = prepare_pt2e(gm, quantizer if quantizer is not None else _x86_quantizer())
+    prepared = prepare_pt2e(gm, quantizer if quantizer is not None
+                            else _x86_quantizer(reduce_range))
     n, bs = 0, _batch_of(example)
     with torch.no_grad():
         for x in calibration:
