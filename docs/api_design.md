@@ -446,6 +446,19 @@ timm blocks produce guards that are always true but that the export solver canno
 Window-attention backbones (Swin, DaViT) cannot be exported with dynamic sizes. See
 `backbone_compatibility.md`.
 
+### Speed: compile and precision
+
+> **Evidence (E014, idle RTX 4090, 512², 2 encoders × 5 decoders):** bf16 autocast was ≥ 1.3×
+> faster than fp32 in 9 of 10 pairs (median 1.61×, inference batch 8). `torch.compile` on top
+> gave a median 1.46× in bf16 (≥ 1.2× in 10/10) and only 1.22× in fp32. For training steps,
+> compile gained only a median 1.17× and was sometimes slower. A cold compile cost 8–15 s per
+> inference shape and 28–54 s per training shape.
+
+Recommended for inference: `torch.autocast("cuda", torch.bfloat16)` +
+`torch.compile(model, dynamic=True)` (one graph across input sizes; see the spatial policy).
+At batch 1 in eager mode, fp32 can beat bf16 because cast overhead dominates small decoders;
+compiling removes that. For training, use bf16 autocast; compile is optional.
+
 ## Registries
 
 Decoders, heads, fusion ops, metadata field types and channel adapters register by name in a plain `dict`-backed

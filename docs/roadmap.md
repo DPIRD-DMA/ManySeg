@@ -40,7 +40,7 @@ Status as of 2026-10-15 (morning update). ✅ done · 🔄 in progress · ⏳ pl
 * ✅ Datasets prepared: AI4Boundaries ortho (13 GB cache), OAM-TCD (CC-BY, 1024², ~22 GB cache).
 * ✅ CloudSEN12+ high (clouds/shadows, S2 L1C; CC0 labels + Copernicus Sentinel notice): `cloudsen12` (S2), `cloudsen12_s2_aux` (+ static S1GBM backscatter + DEM) and `cloudsen12_meta` (+ lat/lon, date, sun angles) on ROI-disjoint splits; 2048² samples tiled to 512².
 * 🔄 E013 (CloudSEN12+; Setonix 8-GCD pack jobs): auxiliary S1GBM/DEM layers, metadata conditioning on unseen locations, and `input_cross` on a second dataset. Pre-registered; the cache is being built on Setonix.
-* 🔄 E014 (profiling sweep on an idle 4090): eager vs compile × fp32/bf16/fp16, 60 configs, with compile cost. Running.
+* ✅ E014 (profiling sweep on an idle 4090): bf16 1.61× over fp32; compile 1.46× more for inference in bf16 (10/10 pairs), only 1.17× for training; cold compile 8–15 s (inference) / 28–54 s (train) per shape.
 * ✅ CI workflow (Linux unit tests on every push; macOS/MPS on PRs and nightly; slow tier nightly).
 
 ## Phase 4: expanded architecture support 🔄

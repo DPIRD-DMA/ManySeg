@@ -1,0 +1,108 @@
+{
+ "run_id": "20261015-081238-196572",
+ "kind": "profile",
+ "tag": "e014-fpn-fp32",
+ "provider": "manyseg",
+ "provider_version": "0.1.0.dev0",
+ "spec": {
+  "arch": "fpn",
+  "encoder": "convnext_tiny",
+  "weights": null,
+  "in_channels": 3,
+  "num_classes": 2,
+  "inputs": null,
+  "vectors": null,
+  "input_mode": "stack",
+  "options": {}
+ },
+ "weights_fingerprint": "2534e7659253d2b7",
+ "env": {
+  "python": "3.12.11",
+  "platform": "Linux-6.8.0-138-generic-x86_64-with-glibc2.35",
+  "cpu": "x86_64",
+  "cpu_count": 32,
+  "torch": "2.14.1+cu130",
+  "cuda_runtime": "13.0",
+  "cudnn": 92400,
+  "packages": {
+   "manyseg": "0.1.0.dev0",
+   "manyseg-bench": "0.1.0.dev0",
+   "timm": "1.0.30",
+   "segmentation-models-pytorch": "0.5.0",
+   "fastai": "2.8.12",
+   "torchvision": "0.29.1",
+   "numpy": "2.5.4"
+  },
+  "device": "cuda",
+  "code_version": "2da5f72",
+  "hip": null,
+  "gpu": "NVIDIA GeForce RTX 4090",
+  "gpu_mem_gib": 23.5,
+  "gpu_contention_at_start": {
+   "gpu_util_pct": 0,
+   "mem_used_mib": 3526,
+   "mem_total_mib": 24564,
+   "other_compute_processes": 5,
+   "contended": true
+  }
+ },
+ "resolution": {
+  "decoder_out_stride": 4,
+  "head_scales": {
+   "logits": 1
+  },
+  "eval_resolution": "input"
+ },
+ "gpu_contention_at_end": {
+  "gpu_util_pct": 99,
+  "mem_used_mib": 9889,
+  "mem_total_mib": 24564,
+  "other_compute_processes": 5,
+  "contended": true
+ },
+ "params": 29814370,
+ "serialized_bytes": 119343837,
+ "flops_per_image": 63685656576,
+ "precision": "fp32",
+ "compiled": false,
+ "channels_last": false,
+ "img_size": [
+  512,
+  512
+ ],
+ "device": "cuda",
+ "inference": [
+  {
+   "batch_size": 1,
+   "median_ms": 4.280492008547299,
+   "p10_ms": 4.238257010001689,
+   "p90_ms": 4.346601024735719,
+   "iters": 30,
+   "first_call_ms": 7.33195900102146,
+   "images_per_s": 233.6180041927884,
+   "megapixels_per_s": 61.24155809111432,
+   "peak_mem_mib": 216.2412109375
+  },
+  {
+   "batch_size": 8,
+   "median_ms": 25.16943398222793,
+   "p10_ms": 24.95996598736383,
+   "p90_ms": 25.4713750036899,
+   "iters": 30,
+   "first_call_ms": 25.60050698230043,
+   "images_per_s": 317.8458445131813,
+   "megapixels_per_s": 83.3213810640634,
+   "peak_mem_mib": 756.49169921875
+  }
+ ],
+ "train": {
+  "batch_size": 8,
+  "median_ms": 98.16945099737495,
+  "p10_ms": 98.04299401002936,
+  "p90_ms": 98.36536800139584,
+  "iters": 15,
+  "first_call_ms": 332.6996210089419,
+  "images_per_s": 81.49174635003224,
+  "peak_mem_mib": 5308.0517578125
+ }
+}
