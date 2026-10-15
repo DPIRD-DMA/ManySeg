@@ -64,6 +64,17 @@ def main(argv=None) -> int:
     pr.add_argument("--train-batch-size", type=int, default=16,
                     help="training-step batch size (peak training memory); 0 skips it")
 
+    ep = sub.add_parser("evaluate", help="re-evaluate a saved run (--save-model) under "
+                        "precision / int8 variants")
+    ep.add_argument("run", help="the training run's JSON record")
+    ep.add_argument("--variants", default="fp32,bf16,fp16",
+                    help="comma-separated: fp32, bf16, fp16 (on --device), int8_pt2e, "
+                    "int8_pt2e_compiled, int8_weight_only (CPU; need manyseg[quant])")
+    ep.add_argument("--device", default="cuda")
+    ep.add_argument("--out", default="runs")
+    ep.add_argument("--calib-batches", type=int, default=32)
+    ep.add_argument("--threads", type=int, default=4, help="CPU threads for int8 variants")
+
     rp = sub.add_parser("report")
     rp.add_argument("paths", nargs="+")
 
@@ -123,6 +134,16 @@ def main(argv=None) -> int:
         path.write_text(json.dumps(rec, indent=1))
         print(json.dumps({k: rec[k] for k in ("params", "flops_per_image", "inference", "train")},
                          indent=1))
+    elif a.cmd == "evaluate":
+        from .experiments import evaluate_run
+
+        rec = evaluate_run(a.run, variants=tuple(a.variants.split(",")), device=a.device,
+                           data=a.data, out_dir=a.out, calib_batches=a.calib_batches,
+                           threads=a.threads)
+        for v, r in rec["variants"].items():
+            print(v, {s: {k: round(r[s][k], 4) for k in ("miou", "agreement")}
+                      for s in r if isinstance(r[s], dict) and "miou" in r[s]})
+        print(rec["path"])
     elif a.cmd == "report":
         from .reporting import load_runs, training_table
 
