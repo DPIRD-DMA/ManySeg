@@ -45,3 +45,11 @@ applies the blend to every group. Diagnostic arm `e015-groups-shared-frozenbn` (
 with `freeze_encoder_bn=True`, so the pretrained statistics are never blended), seeds 0–2. It is
 not part of the pre-registered comparison. It tests the hypothesis, and so a possible pitfall in
 `"backbone": "shared:..."` across heterogeneous inputs.
+
+## Amendment 2 (2026-10-15 13:28, after the pre-registered arms; before any CloudSEN12+ spend)
+`e015-groups` passed the rule (val +0.83 vs 2 pooled SD 0.68; test +1.39), but it has three
+encoders (68 M vs 24.5 M parameters), so capacity and native resolution are confounded. Control
+arm `e015-groups-10m`: the same three independent encoders and band split, every group at
+10 m (factor 1). Only the resolution differs from `e015-groups`. If `groups-10m` ≈ `groups`,
+the gain is capacity, not native resolution, and no CloudSEN12+ follow-up is run. Seeds 0–2,
+local 4090.
