@@ -99,7 +99,7 @@ Negative results are written up in `experiments/` like positive ones.
 * ✅ PyPI packaging for `manyseg` and `manyseg-bench` independently: metadata, licence and
   `py.typed` in each wheel, PyPI READMEs, `twine check` clean, and the `manyseg` wheel installs and
   runs alone (CI `package` job on PRs and nightly). Both names are free on PyPI. **Not
-  published**: that needs a decision on version and timing. ✅ Tested version range: nightly CI leg on the declared floor (torch 2.4.1 + timm 1.0.12, unit tier); the floor was raised from timm 1.0.9, where `mambaout` fails.
+  published**: that needs a decision on version and timing. ✅ Tested version range: the floor is **torch 2.9 + timm 1.0.20**, bisected locally. On torch 2.4–2.8 most dynamic export and compile tests fail, because `torch.export` lacks deferred runtime asserts before 2.9. On timm 1.0.12, CAFormer dynamic export fails. Swin dynamic fullgraph compile needs torch ≥ 2.11 (xfail below). A nightly CI leg on the floor runs the unit tier plus the export and compile tests.
 * ✅ Unsupported backbone/size combinations: fixed-size architectures are detected at construction (meta-device probe), smaller inputs are padded, and larger ones get a clear `ValueError` naming the `img_size` fix, instead of timm shape errors.
 
 ## Known risks

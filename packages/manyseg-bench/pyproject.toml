@@ -20,7 +20,7 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    "torch>=2.4",
+    "torch>=2.9",
     "numpy>=1.24",
     "pillow>=10",
     "pyyaml>=6",

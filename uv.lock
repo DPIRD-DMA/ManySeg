@@ -1733,8 +1733,8 @@ requires-dist = [
     { name = "scikit-image", marker = "extra == 'test'", specifier = ">=0.22" },
     { name = "scipy", marker = "extra == 'instances'", specifier = ">=1.10" },
     { name = "scipy", marker = "extra == 'test'", specifier = ">=1.10" },
-    { name = "timm", specifier = ">=1.0.12" },
-    { name = "torch", specifier = ">=2.4" },
+    { name = "timm", specifier = ">=1.0.20" },
+    { name = "torch", specifier = ">=2.9" },
     { name = "torchao", marker = "extra == 'quant'", specifier = ">=0.13" },
     { name = "torchao", marker = "extra == 'test'", specifier = ">=0.13" },
 ]
@@ -1791,7 +1791,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6" },
     { name = "segmentation-models-pytorch", marker = "extra == 'smp'", specifier = ">=0.4" },
     { name = "tifffile", marker = "extra == 'geo'", specifier = ">=2024.1" },
-    { name = "torch", specifier = ">=2.4" },
+    { name = "torch", specifier = ">=2.9" },
 ]
 provides-extras = ["manyseg", "smp", "fastai", "geo", "test"]
 
