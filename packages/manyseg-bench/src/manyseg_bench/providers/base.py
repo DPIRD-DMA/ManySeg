@@ -36,6 +36,9 @@ class ModelSpec:
         input_mode: ``"stack"`` (inputs concatenated: one tensor, any provider) or ``"dict"``
             (named inputs; only providers whose ``supports_dict_inputs`` is True).
         options: Provider-specific options (e.g. decoder widths). Recorded in results.
+        output: ``"pixel"`` (logits ``(N, num_classes, H, W)``) or ``"image"`` (one prediction
+            per image, ``(N, num_classes)``: classifiers / regressors; set by the runner from
+            the task).
     """
 
     arch: str
@@ -47,6 +50,7 @@ class ModelSpec:
     vectors: dict[str, dict] | None = None
     input_mode: str = "stack"
     options: dict[str, Any] = field(default_factory=dict)
+    output: str = "pixel"
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

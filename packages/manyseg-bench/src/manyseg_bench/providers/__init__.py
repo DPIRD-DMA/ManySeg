@@ -1,13 +1,14 @@
 """Provider registry. Providers import their library lazily, so manyseg-bench works with any
-subset of {manyseg, smp, fastai} installed."""
+subset of {manyseg, smp, fastai, timm} installed."""
 
 from .base import BuiltModel, ModelSpec, Provider, fingerprint_module
 from .fastai_provider import FastaiProvider
 from .manyseg_provider import ManySegProvider
 from .smp_provider import SMPProvider
+from .timm_provider import TimmProvider
 
 PROVIDERS: dict[str, type[Provider]] = {
-    p.name: p for p in (ManySegProvider, SMPProvider, FastaiProvider)
+    p.name: p for p in (ManySegProvider, SMPProvider, FastaiProvider, TimmProvider)
 }
 
 

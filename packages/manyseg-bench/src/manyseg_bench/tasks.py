@@ -28,6 +28,8 @@ metrics; points are picked on the native heatmap and mapped to input-pixel coord
 
 from __future__ import annotations
 
+import math
+
 import torch
 import torch.nn.functional as F
 
@@ -80,6 +82,7 @@ class Task:
     name = "task"
     primary_metric = ""
     higher_is_better = True
+    image_level = False  # one label per image (classification / regression)
 
     def heads(self) -> dict | None:
         """Head configs for providers that support named heads (None = single logits output)."""
@@ -407,6 +410,142 @@ class _PointEval:
         return out
 
 
+# --- image-level tasks ------------------------------------------------------------------------
+#
+# Labels are one per image: class ids ``(B,)`` (classification), multi-hot ``(B, K)``
+# (multilabel) or floats ``(B, K)`` (regression). Models output ``(B, K)``: a tensor, or a
+# dict whose ``"logits"`` entry is used (ManySeg named heads). Providers build image-level
+# models when ``ModelSpec.output == "image"``.
+
+def _image_out(out):
+    return out["logits"] if isinstance(out, dict) else out
+
+
+class ClassificationTask(Task):
+    """Single-label (softmax + cross-entropy; primary: accuracy) or multi-label (sigmoid + BCE;
+    primary: macro average precision) image classification."""
+
+    image_level = True
+
+    def __init__(self, num_classes: int, multilabel: bool = False,
+                 label_smoothing: float = 0.0) -> None:
+        self.num_classes, self.multilabel = num_classes, multilabel
+        self.label_smoothing = label_smoothing
+        self.name = "multilabel" if multilabel else "classification"
+        self.primary_metric = "map_macro" if multilabel else "accuracy"
+
+    def loss(self, out, y):
+        out = _image_out(out).float()
+        if self.multilabel:
+            return F.binary_cross_entropy_with_logits(out, y.float())
+        return F.cross_entropy(out, y, label_smoothing=self.label_smoothing)
+
+    def evaluator(self):
+        return _MultiLabelEval(self) if self.multilabel else _ClassEval(self)
+
+
+class _ClassEval:
+    def __init__(self, task: ClassificationTask) -> None:
+        self.t, self.cm, self.loss, self.n = task, None, 0.0, 0
+
+    def update(self, out, y) -> None:
+        out = _image_out(out).float()
+        k = self.t.num_classes
+        if self.cm is None:
+            self.cm = torch.zeros(k, k, dtype=torch.long, device=y.device)
+        self.cm += torch.bincount(y * k + out.argmax(1), minlength=k * k).view(k, k)
+        self.loss += float(F.cross_entropy(out, y, reduction="sum"))
+        self.n += y.shape[0]
+
+    def compute(self) -> dict:
+        cm = self.cm.double()  # rows: truth, columns: prediction
+        tp, support, predicted = cm.diag(), cm.sum(1), cm.sum(0)
+        f1 = (2 * tp / (support + predicted).clamp(min=1)).tolist()
+        recall = tp / support.clamp(min=1)
+        present = support > 0
+        return {"accuracy": float(tp.sum() / cm.sum().clamp(min=1)),
+                "macro_f1": sum(f1) / len(f1), "f1": f1,
+                "balanced_accuracy": float(recall[present].mean()),
+                "confusion": self.cm.tolist(), "loss": self.loss / max(1, self.n)}
+
+
+def average_precision(scores: torch.Tensor, labels: torch.Tensor) -> float:
+    """Non-interpolated AP (mean precision at each positive, scores ranked high to low; ties
+    keep input order). NaN without positives."""
+    order = torch.argsort(scores, descending=True, stable=True)
+    hits = labels[order].double()
+    if hits.sum() == 0:
+        return float("nan")
+    prec = hits.cumsum(0) / torch.arange(1, len(hits) + 1, dtype=torch.double, device=hits.device)
+    return float((prec * hits).sum() / hits.sum())
+
+
+class _MultiLabelEval:
+    def __init__(self, task: ClassificationTask) -> None:
+        self.t, self.scores, self.labels, self.loss, self.n = task, [], [], 0.0, 0
+
+    def update(self, out, y) -> None:
+        out = _image_out(out).float()
+        self.loss += float(F.binary_cross_entropy_with_logits(out, y.float(), reduction="sum")
+                           / out.shape[1])
+        self.n += y.shape[0]
+        self.scores.append(out.cpu())
+        self.labels.append(y.cpu())
+
+    def compute(self) -> dict:
+        s, y = torch.cat(self.scores), torch.cat(self.labels)
+        ap = [average_precision(s[:, k], y[:, k]) for k in range(s.shape[1])]
+        valid = [a for a in ap if not math.isnan(a)]
+        pred, pos = s > 0, y > 0
+        tp, fp, fn = (pred & pos).sum(0).double(), (pred & ~pos).sum(0).double(), \
+            (~pred & pos).sum(0).double()
+        f1 = (2 * tp / (2 * tp + fp + fn).clamp(min=1)).tolist()
+        return {"map_macro": sum(valid) / max(1, len(valid)),
+                "map_micro": average_precision(s.flatten(), y.flatten()), "ap": ap,
+                "classes_without_positives": len(ap) - len(valid),
+                "f1_micro": float(2 * tp.sum() / (2 * tp + fp + fn).sum().clamp(min=1)),
+                "f1_macro": sum(f1) / len(f1), "f1": f1, "loss": self.loss / max(1, self.n)}
+
+
+class RegressionTask(Task):
+    """Image-level regression of ``num_outputs`` targets. Primary: RMSE (lower is better)."""
+
+    name = "regression"
+    primary_metric = "rmse"
+    higher_is_better = False
+    image_level = True
+
+    def __init__(self, num_outputs: int, loss: str = "mse") -> None:
+        if loss not in ("mse", "l1", "smooth_l1"):
+            raise ValueError(f"loss must be mse|l1|smooth_l1, got {loss!r}")
+        self.num_outputs, self.kind = num_outputs, loss
+
+    def loss(self, out, y):
+        fn = {"mse": F.mse_loss, "l1": F.l1_loss, "smooth_l1": F.smooth_l1_loss}[self.kind]
+        return fn(_image_out(out).float(), y.float())
+
+    def evaluator(self):
+        return _RegressionEval(self)
+
+
+class _RegressionEval:
+    def __init__(self, task: RegressionTask) -> None:
+        self.t, self.pred, self.y = task, [], []
+
+    def update(self, out, y) -> None:
+        self.pred.append(_image_out(out).float().cpu())
+        self.y.append(y.float().cpu())
+
+    def compute(self) -> dict:
+        p, y = torch.cat(self.pred).double(), torch.cat(self.y).double()
+        err = p - y
+        ss_tot = ((y - y.mean(0)) ** 2).sum(0)
+        r2 = (1 - (err ** 2).sum(0) / ss_tot.clamp(min=1e-12)).tolist()
+        return {"mae": float(err.abs().mean()), "rmse": float(err.pow(2).mean().sqrt()),
+                "rmse_per_output": err.pow(2).mean(0).sqrt().tolist(), "r2": r2,
+                "r2_mean": sum(r2) / len(r2), "loss": float(self.t.loss(p.float(), y.float()))}
+
+
 def build_task(name: str, num_classes: int, ignore_index: int | None = None, **kwargs) -> Task:
     if name == "semantic":
         return SemanticTask(num_classes, ignore_index, **kwargs)
@@ -414,4 +553,11 @@ def build_task(name: str, num_classes: int, ignore_index: int | None = None, **k
         return InstanceTask(num_classes=num_classes, **kwargs)
     if name == "points":
         return PointTask(**kwargs)
-    raise ValueError(f"unknown task {name!r}; choose from semantic, instances, points")
+    if name == "classification":
+        return ClassificationTask(num_classes, **kwargs)
+    if name == "multilabel":
+        return ClassificationTask(num_classes, multilabel=True, **kwargs)
+    if name == "regression":
+        return RegressionTask(num_classes, **kwargs)
+    raise ValueError(f"unknown task {name!r}; choose from semantic, instances, points, "
+                     "classification, multilabel, regression")

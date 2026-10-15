@@ -8,6 +8,10 @@ Inputs may be a single array ``(N, H, W, C)`` or a dict of such arrays (multi-in
 all on the same grid). ``stack=True`` concatenates dict inputs along channels in key order, so
 single-input libraries can be benchmarked on multi-input data (early fusion).
 
+Labels are per-pixel masks ``(N, H, W)`` (augmented with the images) or image-level labels
+``(N,)`` / ``(N, K)`` (class ids, multi-hot or regression targets; never augmented). Float
+labels stay float32; integer labels are returned as int64.
+
 ``vectors`` (``{name: (N, columns)}`` float arrays, NaN = missing) are per-sample metadata. In
 dict mode they are yielded as extra ``(B, columns)`` entries of the input dict, unaugmented
 (a random-resized crop moves a chip centre by at most half a chip, which we ignore). In
@@ -70,12 +74,14 @@ class GPULoader:
             self.mean[k] = torch.tensor(means[k], device=device).view(1, -1, 1, 1) * unit
             self.std[k] = torch.tensor(stds[k], device=device).view(1, -1, 1, 1) * unit
         self.masks = _to_device(masks, device) if device_resident else masks
+        self.pixel_labels = masks.ndim == 3
+        self.float_labels = np.issubdtype(np.asarray(masks[:0]).dtype, np.floating)
         self.n = self.masks.shape[0]
         self.bs = batch_size
         self.train = train
         self.device = device
         self.gen = torch.Generator(device="cpu").manual_seed(seed)
-        self.out_size = out_size or tuple(self.masks.shape[1:3])
+        self.out_size = out_size or tuple(next(iter(self.images.values())).shape[1:3])
         self.scale, self.ratio, self.hflip, self.vflip = scale, ratio, hflip, vflip
         self.drop_last = train if drop_last is None else drop_last
         self.stack = stack
@@ -88,14 +94,17 @@ class GPULoader:
     def _fetch(self, idx: Tensor):
         if self.device_resident:
             idx = idx.to(self.device)
-            return {k: self.images[k][idx] for k in self.names}, self.masks[idx].long()
+            return {k: self.images[k][idx] for k in self.names}, self._label(self.masks[idx])
         # Sorted reads are faster on memory-mapped files; restore the requested order after.
         sidx, inv = torch.sort(idx)
         npi = sidx.numpy()
         imgs = {k: _to_device(np.asarray(self.images[k][npi]), self.device)[inv]
                 for k in self.names}
-        y = _to_device(np.asarray(self.masks[npi]), self.device)[inv].long()
-        return imgs, y
+        y = _to_device(np.asarray(self.masks[npi]), self.device)[inv]
+        return imgs, self._label(y)
+
+    def _label(self, y: Tensor) -> Tensor:
+        return y.float() if self.float_labels else y.long()
 
     def __len__(self) -> int:
         return self.n // self.bs if self.drop_last else math.ceil(self.n / self.bs)
@@ -122,6 +131,8 @@ class GPULoader:
         theta = theta.to(self.device)
         grid = F.affine_grid(theta, (n, 1, *self.out_size), align_corners=False)
         x = F.grid_sample(x, grid, mode="bilinear", padding_mode="reflection", align_corners=False)
+        if not self.pixel_labels:  # image-level labels do not move with the pixels
+            return x, y
         y = F.grid_sample(y[:, None].float(), grid, mode="nearest", padding_mode="reflection",
                           align_corners=False)[:, 0].round().long()
         return x, y

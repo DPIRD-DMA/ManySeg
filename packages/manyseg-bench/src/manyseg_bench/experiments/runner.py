@@ -148,9 +148,11 @@ def run_training(
     torch.backends.cudnn.benchmark = torch.version.hip is None
     task_name = getattr(ds, "TASK", "semantic")
     task_kwargs = {**getattr(ds, "TASK_KWARGS", {}), **(task_overrides or {})}
-    if task_name == "semantic":
+    if task_name in ("semantic", "classification"):
         task_kwargs.setdefault("label_smoothing", rec.label_smoothing)
     task = build_task(task_name, info.num_classes, info.ignore_index, **task_kwargs)
+    if task.image_level:
+        spec = ModelSpec(**{**spec.to_dict(), "output": "image"})
     if task.heads() is not None:
         if provider != "manyseg":
             raise ValueError(f"task {task.name!r} needs named heads; provider {provider!r} "
@@ -176,7 +178,8 @@ def run_training(
         if None in mean:
             mean, std = mean[None], std[None]
         norm_source = f"train split of {split}"
-    img_size = tuple(train_split.masks.shape[1:3])
+    imgs = train_split.images
+    img_size = tuple((next(iter(imgs.values())) if isinstance(imgs, dict) else imgs).shape[1:3])
     built = prov.build(spec, img_size=img_size)
 
     stack = spec.input_mode != "dict"

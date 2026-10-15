@@ -51,7 +51,15 @@ class ManySegProvider(Provider):
         # "head": options for the single logits head (e.g. {"scale": 0.5}); the model still
         # returns one tensor.
         head = opts.pop("head", None)
-        if head is not None:
+        if spec.output == "image":
+            # Classifier / regressor: one image-scope head pooling the deepest encoder feature
+            # (no decoder is built), returned as a single (N, K) tensor.
+            if "heads" in opts:
+                raise ValueError("output='image' builds its own head; use 'head' for options")
+            opts["heads"] = {"logits": {"type": "classification", "channels": spec.num_classes,
+                                        "scope": "image", **(head or {})}}
+            n_cls, head = None, head or {}
+        elif head is not None:
             if n_cls is None:
                 raise ValueError("'head' configures the single logits head; with 'heads', put "
                                  "the options in each head's config")
