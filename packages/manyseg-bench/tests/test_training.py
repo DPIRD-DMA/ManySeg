@@ -220,3 +220,50 @@ def test_grad_accumulation_steps_and_equivalence(monkeypatch):
     (pa, na), (pb, nb) = results
     assert na == nb == 2  # 8 images: 2 steps of 4, or 4 micro-batches of 2 accumulated in pairs
     assert all(torch.allclose(u, v, atol=1e-5) for u, v in zip(pa, pb))
+
+
+def test_grad_accumulation_weights_micro_batches_by_size(monkeypatch):
+    """Codex review: a short final micro-batch must not count as much as a full one. 6 images,
+    batch 4 + accumulate 2 (micro-batches of 4 and 2) must equal one batch of 6. (Training
+    loaders drop the last partial batch, so this only arises with drop_last=False.) Plain SGD,
+    because AdamW's first step normalises gradient magnitude and would hide the difference."""
+    from manyseg_bench.training import trainer
+
+    monkeypatch.setattr(trainer, "build_optimizer", lambda enc, dec, rec: torch.optim.SGD(
+        [{"params": enc + dec, "lr": 0.5, "base_lr": 0.5}], lr=0.5))
+
+    imgs, masks = synthetic(n=6)
+
+    def fixed_loader(bs):
+        return GPULoader(imgs, masks, bs, (0.5,) * 3, (0.25,) * 3, torch.device("cpu"), False)
+
+    def build():
+        torch.manual_seed(0)
+        return nn.Sequential(nn.Conv2d(3, 8, 3, padding=1), nn.ReLU(), nn.Conv2d(8, 3, 1))
+
+    got = []
+    for bs, k in ((6, 1), (4, 2)):
+        m = build()
+        params = list(m.parameters())
+        rec = get_recipe("standard", epochs=1, batch_size=bs, precision="fp32", warmup_epochs=0,
+                         schedule="constant", grad_accum_steps=k)
+        trainer.train(m, params[:2], params[2:], fixed_loader(bs), fixed_loader(6),
+                      num_classes=3, recipe=rec, device=torch.device("cpu"), log=lambda *_: None)
+        got.append([p.detach().clone() for p in m.parameters()])
+    assert all(torch.allclose(u, v, atol=1e-5) for u, v in zip(*got))
+
+
+def test_freeze_encoder_bn_includes_non_affine_bn():
+    """Codex review: an encoder BN with affine=False has no weight to match on."""
+    from manyseg_bench.training import trainer
+
+    enc = nn.Sequential(nn.Conv2d(3, 4, 3, padding=1), nn.BatchNorm2d(4, affine=False))
+    dec = nn.Conv2d(4, 3, 1)
+    model = nn.Sequential(enc, dec)
+    before = enc[1].running_mean.clone()
+    rec = get_recipe("standard", epochs=1, batch_size=4, precision="fp32",
+                     freeze_encoder_bn=True)
+    trainer.train(model, list(enc.parameters()), list(dec.parameters()), loader(True),
+                  loader(False), num_classes=3, recipe=rec, device=torch.device("cpu"),
+                  log=lambda *_: None)
+    assert torch.equal(before, enc[1].running_mean)

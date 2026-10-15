@@ -48,19 +48,40 @@ def _quantised(name: str, model, calib, example):
     # Deployed form. Inductor freezing on a program with symbolic sizes crashes in dynamo
     # (torch 2.14: IndexError in _maybe_preserve_original_meta), so export at the fixed eval
     # shape and pad a smaller final batch up to it (extra outputs are dropped).
-    bs = example.shape[0]
-    ep = quantize_pt2e(model, example, [c for c in calib if c.shape[0] == bs], dynamic=False)
+    bs = _batch_of(example)
+    ep = quantize_pt2e(model, example, [c for c in calib if _batch_of(c) == bs], dynamic=False)
     torch._inductor.config.freezing = True  # constant-folds the int8 weights (oneDNN kernels)
     compiled = torch.compile(ep.module())
 
     def run(x):
-        n = x.shape[0]
-        if n < bs:
-            x = torch.cat([x, x[-1:].expand(bs - n, *x.shape[1:])])
-        out = compiled(x)
+        n = _batch_of(x)
+        out = compiled(_pad_batch(x, bs))
         return out[:n] if torch.is_tensor(out) else {k: v[:n] for k, v in out.items()}
 
     return run, model_size(ep)
+
+
+def _batch_of(x) -> int:
+    return int((x if torch.is_tensor(x) else next(iter(x.values()))).shape[0])
+
+
+def _pad_batch(x, bs: int):
+    """Repeat the last sample up to ``bs`` (tensor or dict of tensors, e.g. multi-input)."""
+    if not torch.is_tensor(x):
+        return {k: _pad_batch(v, bs) for k, v in x.items()}
+    n = x.shape[0]
+    return x if n >= bs else torch.cat([x, x[-1:].expand(bs - n, *x.shape[1:])])
+
+
+def _agreement(ref, out, y, ignore_index):
+    """(agreeing, total) valid pixels between reference and candidate class predictions, or
+    None when the outputs are not single full-resolution logits (multi-head tasks, reduced
+    head scale): there is no meaningful pixel argmax to compare then."""
+    if not (torch.is_tensor(ref) and torch.is_tensor(out)) or ref.ndim != 4 or \
+            ref.shape[-2:] != y.shape[-2:] or ref.shape != out.shape:
+        return None
+    valid = y != ignore_index if ignore_index is not None else torch.ones_like(y, dtype=torch.bool)
+    return int(((ref.argmax(1) == out.argmax(1)) & valid).sum()), int(valid.sum())
 
 
 def _size_bytes(model) -> int:
@@ -146,12 +167,9 @@ def _score(v, ref, loader, splits, task, info, dev, precision, calib_batches) ->
                 with autocast(dev, precision):
                     o = model(x)
             ev.update(o, y)
-            r = ref_out if torch.is_tensor(ref_out) else next(iter(ref_out.values()))
-            p = o if torch.is_tensor(o) else next(iter(o.values()))
-            valid = y != info.ignore_index if info.ignore_index is not None else \
-                torch.ones_like(y, dtype=torch.bool)
-            agree += int(((r.argmax(1) == p.argmax(1)) & valid).sum())
-            total += int(valid.sum())
-        res[split] = {**ev.compute(), "agreement": agree / max(1, total),
+            a = _agreement(ref_out, o, y, info.ignore_index)
+            if a is not None:
+                agree, total = agree + a[0], total + a[1]
+        res[split] = {**ev.compute(), "agreement": agree / total if total else None,
                       "seconds": time.perf_counter() - t0}
     return res

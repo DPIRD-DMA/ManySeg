@@ -56,7 +56,7 @@ Status as of 2026-10-15, 08:35 AWST. ✅ done · 🔄 in progress · ⏳ planned
    `same_grid` / `same_extent`.
 5. ✅ **Multi-task**: named heads, uncertainty heads, per-head task-specific decoders (`"decoder"` key in a head config).
 6. ✅ **Export helper** `manyseg.export.export_model`. ✅ Quantisation entry points `manyseg.quantize` (`manyseg[quant]`, torchao): PT2E static int8 with dynamic H/W, int8 weight-only / dynamic, size and agreement reports.
-7. ✅ DDP verified (CPU gloo). ⏳ FSDP2.
+7. ✅ DDP verified (CPU gloo). ✅ FSDP2: `manyseg.distributed.shard_model` (per-stage `fully_shard`), matching DDP after a step on CPU (gloo).
 8. ✅ **Instance heads** (`manyseg.instances`): boundary + distance presets, torch targets
    (exact EDT), seeded growth or watershed post-processing, with round-trip tests.
 9. ✅ **Point and density heads** (`manyseg.points`): heatmap + offset and density presets,
@@ -101,7 +101,7 @@ Negative results are written up in `experiments/` like positive ones.
   `py.typed` in each wheel, PyPI READMEs, `twine check` clean, and the `manyseg` wheel installs and
   runs alone (CI `package` job on PRs and nightly). Both names are free on PyPI. **Not
   published**: that needs a decision on version and timing. ⏳ A tested torch/timm version range
-  (minimum-versions CI leg).
+  (minimum-versions CI leg). Locally: the unit tier passes on torch 2.4.1 + timm 1.0.12 (the declared floor was raised from timm 1.0.9, where `mambaout` fails).
 * ✅ Unsupported backbone/size combinations: fixed-size architectures are detected at construction (meta-device probe), smaller inputs are padded, and larger ones get a clear `ValueError` naming the `img_size` fix, instead of timm shape errors.
 
 ## Known risks

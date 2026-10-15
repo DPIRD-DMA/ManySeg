@@ -54,39 +54,68 @@ def introspect(name: str) -> dict:
 _FIXED_SIZE_CACHE: dict[str, tuple[int, int] | None] = {}
 
 
-def _probe_fixed_size(name: str, kwargs: dict, divisor: int) -> tuple[int, int] | None:
+def _probe_fixed_size(name: str, kwargs: dict, divisor: int, model: nn.Module,
+                      in_channels: int) -> tuple[int, int] | None:
     key = repr((name.split(".", 1)[0], sorted(kwargs.items(), key=str), divisor))
     if key not in _FIXED_SIZE_CACHE:  # depends only on the architecture and its kwargs
-        _FIXED_SIZE_CACHE[key] = _probe_fixed_size_uncached(name, kwargs, divisor)
+        found = _probe_fixed_size_uncached(name, kwargs, divisor)
+        if found == "inconclusive":  # meta-device ops missing (older torch): probe for real
+            found = _probe_real(model, in_channels, divisor)
+        _FIXED_SIZE_CACHE[key] = found
     return _FIXED_SIZE_CACHE[key]
 
 
-def _probe_fixed_size_uncached(name: str, kwargs: dict,
-                               divisor: int) -> tuple[int, int] | None:
+def _native_and_odd(cfg: dict, divisor: int):
+    c, h, w = (tuple(cfg.get("input_size") or (3, 224, 224)) + (224, 224))[:3]
+    return c, (int(h), int(w)), tuple(-(-n // divisor) * divisor for n in (97, 131))
+
+
+def _probe_real(model: nn.Module, in_channels: int, divisor: int) -> tuple[int, int] | None:
+    """The same test on the built (CPU) model; only reached when the meta probe cannot run."""
+    _, native, odd = _native_and_odd(getattr(model, "pretrained_cfg", {}) or {}, divisor)
+    if odd == native:
+        return None
+    was = model.training
+    model.eval()
+    try:
+        with torch.no_grad():
+            dev = next(model.parameters()).device
+            try:
+                model(torch.zeros(1, in_channels, *native, device=dev))
+            except Exception:  # noqa: BLE001 - fails even at native size: conclude nothing
+                return None
+            try:
+                model(torch.zeros(1, in_channels, *odd, device=dev))
+            except Exception:  # noqa: BLE001
+                return native
+            return None
+    finally:
+        model.train(was)
+
+
+def _probe_fixed_size_uncached(name: str, kwargs: dict, divisor: int):
     """Native (H, W) if the architecture only runs at its native size, else None.
 
     Some timm models (MaxViT, CoAtNet, LeViT, EfficientFormerV2, Hiera, ...) bake the input size
     into window partitions or positional tables and fail deep inside timm at other sizes. A
     meta-device forward (shapes only, no memory or compute) at the native size and at an
     awkward padded size tells them apart. If even the native probe fails (an op without meta
-    support), nothing is concluded."""
+    support, e.g. on older torch), ``_probe_real`` repeats the test on the built CPU model."""
     try:
         with torch.device("meta"):
             m = timm.create_model(name.split(".", 1)[0], pretrained=False, **kwargs)
-        cfg = getattr(m, "pretrained_cfg", {}) or {}
-        c, h, w = (tuple(cfg.get("input_size") or (3, 224, 224)) + (224, 224))[:3]
-        odd = tuple(-(-n // divisor) * divisor for n in (97, 131))
-        if odd == (h, w):
+        c, native, odd = _native_and_odd(getattr(m, "pretrained_cfg", {}) or {}, divisor)
+        if odd == native:
             return None
         with torch.no_grad():
-            m(torch.empty(1, c, h, w, device="meta"))
-    except Exception:  # noqa: BLE001 - the probe itself failed: leave the size unrestricted
-        return None
+            m(torch.empty(1, c, *native, device="meta"))
+    except Exception:  # noqa: BLE001 - the meta probe itself cannot run
+        return "inconclusive"
     try:
         with torch.no_grad():
             m(torch.empty(1, c, *odd, device="meta"))
     except Exception:  # noqa: BLE001 - any failure at a non-native size means "fixed"
-        return (int(h), int(w))
+        return native
     return None
 
 
@@ -221,7 +250,8 @@ class TimmBackbone(nn.Module):
         self.feature_specs: tuple[FeatureSpec, ...] = specs
         if self.fixed_size is None and not self.is_plain and "img_size" not in timm_kwargs:
             # DenseModel pads smaller inputs up to a fixed size and rejects larger ones clearly.
-            self.fixed_size = _probe_fixed_size(name, kwargs, self.input_divisor)
+            self.fixed_size = _probe_fixed_size(name, kwargs, self.input_divisor, self.model,
+                                                in_channels)
         self.mean = tuple(cfg.get("mean", (0.485, 0.456, 0.406)))
         self.std = tuple(cfg.get("std", (0.229, 0.224, 0.225)))
 

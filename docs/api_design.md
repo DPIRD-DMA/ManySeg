@@ -524,6 +524,14 @@ Window-attention backbones (Swin, DaViT) cannot be exported with dynamic sizes. 
 dynamic_shapes=manyseg.export.dynamic_shapes(model, x))` (see `examples/06_export.py`; the
 parity check needs `onnxruntime`, which the `onnx` extra does not install).
 
+### Distributed training
+
+DDP needs nothing from ManySeg: wrap the model as usual. For FSDP2,
+`manyseg.distributed.shard_model(model, mp_policy=..., mesh=...)` applies `fully_shard` per
+stage (each encoder, the shared decoder, each task decoder, each head, the conditioner), then
+the root. It is tested against DDP on CPU (gloo): parameters after a step match. BatchNorm
+statistics stay per rank, as with DDP.
+
 ### Speed: compile and precision
 
 > **Evidence (E014, idle RTX 4090, 512², 2 encoders × 5 decoders):** bf16 autocast was ≥ 1.3×

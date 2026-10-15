@@ -98,6 +98,7 @@ def test_model_size_counts_state_dict_bytes():
 @pytest.mark.parametrize("backbone", ["resnet18", "mobilenetv3_small_100", "caformer_s18"])
 def test_quantize_weights_odd_sizes_agreement_and_size(mode, backbone):
     """MobileNetV3 has depthwise convs (left in float); CAFormer is mostly Linear layers."""
+    pytest.importorskip("torchao")
     model = _model(backbone)
     q = quantize_weights(model, mode)
     for hw in [(64, 96), (97, 131), (75, 33)]:
@@ -110,6 +111,7 @@ def test_quantize_weights_odd_sizes_agreement_and_size(mode, backbone):
 
 
 def test_quantize_weights_copies_unless_inplace():
+    pytest.importorskip("torchao")
     model = _model()
     w = model.backbone.model.conv1.weight
     quantize_weights(model)
@@ -119,6 +121,7 @@ def test_quantize_weights_copies_unless_inplace():
 
 
 def test_quantize_weights_conv_false_leaves_convs():
+    pytest.importorskip("torchao")
     model = _model("caformer_s18")
     q = quantize_weights(model, conv=False)
     for m in q.modules():
@@ -129,11 +132,13 @@ def test_quantize_weights_conv_false_leaves_convs():
 
 
 def test_quantize_weights_rejects_unknown_mode():
+    pytest.importorskip("torchao")
     with pytest.raises(ValueError, match="int8_weight_only"):
         quantize_weights(_model(), "int4")
 
 
 def test_quantize_weights_device(device):
+    pytest.importorskip("torchao")
     model = _model().to(device)
     q = quantize_weights(model)
     x = torch.randn(1, 3, 97, 131, device=device)

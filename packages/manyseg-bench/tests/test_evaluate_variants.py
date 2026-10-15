@@ -129,3 +129,18 @@ def test_compiled_int8_with_uneven_batches_and_failures_are_recorded(saved_run, 
                       data=root, out_dir=root / "eval")
     assert "quantiser exploded" in ev["variants"]["int8_weight_only"]["error"]
     assert ev["variants"]["fp32"]["test"]["agreement"] == 1.0
+
+
+def test_pad_batch_and_agreement_helpers():
+    """Codex review: compiled int8 must handle dict (multi-input) batches, and agreement is
+    only defined for single full-resolution logits."""
+    from manyseg_bench.experiments.evaluate import _agreement, _pad_batch
+
+    d = _pad_batch({"a": torch.ones(2, 3, 4, 4), "b": torch.zeros(2, 1, 4, 4)}, 5)
+    assert d["a"].shape[0] == 5 and d["b"].shape[0] == 5
+    y = torch.zeros(2, 4, 4, dtype=torch.long)
+    y[0, 0, 0] = 255
+    logits = torch.randn(2, 3, 4, 4)
+    assert _agreement(logits, logits, y, 255) == (31, 31)
+    assert _agreement(logits[..., :2, :2], logits[..., :2, :2], y, 255) is None  # scaled head
+    assert _agreement({"h": logits}, {"h": logits}, y, 255) is None  # multi-head task

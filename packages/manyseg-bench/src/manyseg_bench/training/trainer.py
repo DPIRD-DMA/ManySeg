@@ -24,6 +24,21 @@ def seed_everything(seed: int) -> None:
     torch.cuda.manual_seed_all(seed)
 
 
+def _encoder_bn(model: nn.Module, enc_params) -> list[nn.Module]:
+    """BatchNorm modules inside the encoder: matched by module path (a sibling of, or the owner
+    of, an encoder parameter), so BN layers without affine weights are found too."""
+    ids = {id(p) for p in enc_params}
+    owners = {n.rsplit(".", 1)[0] for n, p in model.named_parameters() if id(p) in ids}
+    parents = {o.rsplit(".", 1)[0] if "." in o else "" for o in owners}
+    out = []
+    for name, m in model.named_modules():
+        if isinstance(m, nn.modules.batchnorm._BatchNorm):
+            parent = name.rsplit(".", 1)[0] if "." in name else ""
+            if name in owners or parent in parents:
+                out.append(m)
+    return out
+
+
 def autocast(device: torch.device, precision: str):
     dt = _DTYPES[precision]
     return nullcontext() if dt is None else torch.autocast(device.type, dtype=dt)
@@ -127,10 +142,7 @@ def train(
     warmup = int(recipe.warmup_epochs * steps_per_epoch)
     scaler = torch.amp.GradScaler(enabled=recipe.precision == "fp16")
 
-    enc_ids = {id(p) for p in enc_params}
-    enc_bn = [m for m in model.modules() if isinstance(m, nn.modules.batchnorm._BatchNorm)
-              and m.weight is not None and id(m.weight) in enc_ids] \
-        if recipe.freeze_encoder_bn else []
+    enc_bn = _encoder_bn(model, enc_params) if recipe.freeze_encoder_bn else []
     history, step = [], 0
     t_start = time.perf_counter()
     for epoch in range(recipe.epochs):
@@ -154,15 +166,18 @@ def train(
                 for g in opt.param_groups:
                     g["lr"] = g["base_lr"] * f
                 opt.zero_grad(set_to_none=True)
-                backward = False
+                backward, group_n = False, 0
             with autocast(device, recipe.precision):
                 out = run(x)
             loss = task.loss(out, task.targets(y))
             if not torch.isfinite(loss):
                 nonfinite += 1
             else:
-                scaler.scale(loss / group).backward()
-                backward = True
+                # Sum of per-image-weighted losses; divided by the group's image count below,
+                # so a short micro-batch weighs as many images as it has.
+                n = _batch_size(x)
+                scaler.scale(loss * n).backward()
+                backward, group_n = True, group_n + n
                 loss_sum += float(loss.detach())
                 nb += 1
             if not last:
@@ -170,6 +185,9 @@ def train(
             if not backward:  # every micro-batch was non-finite: skip the update
                 step += 1
                 continue
+            for p in model.parameters():
+                if p.grad is not None:
+                    p.grad.div_(group_n)
             if recipe.grad_clip:
                 scaler.unscale_(opt)
                 torch.nn.utils.clip_grad_norm_(model.parameters(), recipe.grad_clip)
