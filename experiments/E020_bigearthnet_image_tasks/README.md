@@ -103,7 +103,8 @@ Regression (19 class fractions): `frac` val RMSE 0.0821 ± 0.0003, test 0.0836 (
   epoch (chosen on val, which flatters them), `seg`'s final epoch still leads by +0.5 to +1.0
   val (0.7581 vs 0.7477–0.7527).
 * **Cost of `seg`:** +9.0 M decoder parameters and 37% lower training throughput; the
-  decoder also runs at inference unless the seg head is dropped (not yet supported).
+  decoder also runs at inference unless the seg head is dropped
+  (`model.select_heads(["logits"])`, added after this experiment, removes it).
 * **Caveats:** one encoder (ResNet-50), a 60k / 15k / 30k subset of the official splits,
   12 epochs; the regularisation effect may shrink with early stopping or stronger
   augmentation. The masks are the same reference maps the labels come from, so this needs

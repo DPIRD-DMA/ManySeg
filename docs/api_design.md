@@ -161,7 +161,9 @@ stem adaptation, pool + linear head. Exception: families whose timm head has a p
 > post-hoc look suggests regularisation (no gain at the classifier's early peak, less late
 > overfitting), so the gain may shrink with early stopping. Worth trying when pixel labels exist;
 > cost: the decoder's parameters and ~37% lower training throughput. Mix image and pixel heads freely: the decoder is built only when a pixel
-head needs it. Head and input names must not be Python keywords (`yield`, `class`, ...):
+head needs it. After training with auxiliary heads, `model.select_heads(["crop"])` keeps only
+the heads you deploy and removes decoders (and FiLM / head-bias layers) only the dropped heads
+used; the kept outputs are unchanged. Head and input names must not be Python keywords (`yield`, `class`, ...):
 `torch.export` reads modules as attributes.
 
 ### Multiple inputs

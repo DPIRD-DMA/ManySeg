@@ -77,6 +77,42 @@ class DenseModel(nn.Module):
     def feature_specs(self):
         return self.backbone.feature_specs
 
+    def select_heads(self, names) -> DenseModel:
+        """Keep only the heads ``names`` (in place; returns the model): their decoders stay,
+        decoders, FiLM and head-bias layers only the dropped heads used are removed. For
+        deployment after training with auxiliary heads, e.g. a classifier trained with a pixel
+        head (E020). Outputs of the kept heads are unchanged; the output stays a dict."""
+        names = list(names)
+        if self.single_output is not None:
+            if names != [self.single_output]:
+                raise ValueError(f"single-output model: its only head is {self.single_output!r}")
+            return self
+        if not names:
+            raise ValueError("keep at least one head")
+        unknown = sorted(set(names) - set(self.heads))
+        if unknown:
+            raise ValueError(f"unknown heads {unknown}; the model has {list(self.heads)}")
+        cond = self.conditioner
+        for n in [n for n in self.heads if n not in names]:
+            del self.heads[n]
+            self._head_sources.pop(n)
+            self._pixel_heads.discard(n)
+            if n in self.task_decoders:
+                del self.task_decoders[n]
+            if cond is not None:
+                for d, key in ((cond.film, f"task_{n}"), (cond.head_bias, n)):
+                    if key in d:
+                        del d[key]
+        if "decoder" not in self._head_sources.values():
+            self.decoder = None
+            if cond is not None and "decoder" in cond.film:
+                del cond.film["decoder"]
+        if cond is not None and "image" in cond.film and not any(
+                self._head_sources[n] == "encoder" and n not in self._pixel_heads
+                for n in self.heads):
+            del cond.film["image"]
+        return self
+
     def describe(self, sample: Tensor | Mapping[str, Tensor] | None = None,
                  format: str = "text") -> str:
         """Stage-level description of the built model (``"text"``, ``"mermaid"`` or
