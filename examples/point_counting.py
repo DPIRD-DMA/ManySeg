@@ -42,7 +42,7 @@ def main():
     den_t = density_map(pts, (96, 96), sigma=2.0) * 100  # scaled for optimisation
     fg = (masks > 0)[:, None].float()
     opt = torch.optim.AdamW(model.parameters(), lr=1e-3)
-    for step in range(40):
+    for _ in range(40):
         out = model(img)
         loss = (F.mse_loss(out["heatmap"], hm_t) + F.mse_loss(out["density"], den_t)
                 + (F.l1_loss(out["offset"], off_t, reduction="none") * fg).sum() / fg.sum())
