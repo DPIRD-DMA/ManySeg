@@ -154,6 +154,7 @@ forecast before submission.
 | Smoke / core | Oxford-IIIT Pet (3-class trimap, 256²) | Cheap natural images; boundary class. |
 | Smoke / core | Sen1Floods11 hand-labelled (S1 + S2) | Multi-input SAR + optical; binary; has an event-level holdout (Bolivia). |
 | Core | CloudSEN12+ high (S2 L1C, 4 classes) | Clouds, thin cloud and shadows; 13 bands; ROI-disjoint (geographic) splits; static auxiliary layers and acquisition metadata for fusion and conditioning. |
+| Core | PASTIS single-date (S2 L2A, 10 bands, 19 classes, 128²) | Crop types from one acquisition; the date carries real signal (phenology), so metadata conditioning can be tested where it should matter; official folds. |
 | Core | CamVid (11 classes, 480×360) | Small and thin objects; video sequences split. |
 | Core | WHU Building aerial (binary, 512², 0.3 m) | Sharp boundaries, small buildings; official geographic split. |
 | Core | MADOS (Sentinel-2, 15 classes) | Multispectral (11 bands), rare and small objects; sparse labels. |
@@ -201,3 +202,43 @@ Licenses and access details are in `datasets/*.py` docstrings and in
   0.59, thick 0.23, thin 0.10, shadow 0.08; 4.9-8.5% of pixels are padding (ignored).
 * **Storage.** The float16 cache (23,552 tiles, 16 channels, 190 GB) stays memory-mapped on
   the host (`device_resident: False`); batches are moved to the GPU on demand.
+
+### PASTIS single-date (`pastis`, `pastis_meta`, `pastis_meta_shuffled`, `pastis_meta_tileshuffled`)
+
+* **Source and licence.** PASTIS (Sainte Fare Garnot & Landrieu, ICCV 2021), Zenodo record
+  5012942 (doi:10.5281/zenodo.5012942, `PASTIS.zip`, 28.8 GB, md5
+  `cfc441bf18137ff0bbf4fad58828fb98`; `prepare` requires an `MD5_OK` line in
+  `raw/pastis/download.log`). Licence CC BY 4.0; cite the paper. Imagery: THEIA L2A
+  ("value-added data processed by the CNES for the Theia data cluster using Copernicus
+  data"); labels from the French LPIS (IGN). The licence string is recorded in every run.
+* **Data.** 2,433 patches, 128×128 px at 10 m, four Sentinel-2 tiles (T30UXV, T31TFJ,
+  T31TFM, T32ULU). Each patch is a time series of 38–61 acquisitions (Sept 2018 – Nov 2019),
+  10 bands in wavelength order (B2, B3, B4, B5, B6, B7, B8, B8A, B11, B12; 20 m bands
+  bilinearly upsampled), stored as reflectance (DN / 1e4, float16). Labels: 0 background
+  (kept as a class, as in the paper), 1–18 crop types, 19 void (out-of-nomenclature crops,
+  parcels mostly outside the patch) → ignore (255). 35 S2 series in the release have no
+  metadata or annotation and are skipped.
+* **Single-date samples.** One sample per (patch, date) for 8 dates per patch: the season
+  window 2018-11-01..2019-10-31 (365 days, so a cyclic day of year is unambiguous) is cut into
+  8 equal parts, and the acquisition nearest each part's centre is taken. Every tile has one
+  date list shared by its patches, so all patches of a tile get the same 8 dates. Names are
+  `<patch>_<tile>_<YYYYMMDD>`.
+* **Splits.** Official fold I: train folds 1–3 (1,455 patches, 11,640 samples), val fold 4
+  (482, 3,856), test fold 5 (496, 3,968). All dates of a patch stay in its fold; the release
+  keeps adjacent patches in one fold, and every fold has patches from all four tiles.
+  `prepare` re-checks that no patch id crosses splits. Normalisation statistics come from
+  train only (`meta.json`).
+* **Metadata and leakage rules.** `pastis_meta` adds a vector input `meta` with `doy`
+  (cyclic, period 365.25), parsed from the sample name. Two controls keep the doy marginal
+  distribution and break its link to the image: `pastis_meta_shuffled` (permuted across the
+  split's samples, fixed seed) and `pastis_meta_tileshuffled` (permuted within each tile).
+  The second exists because each tile's dates are unique to it, so the exact doy identifies
+  the tile and hence the region's crop mix; that control keeps the tile information and
+  removes only the seasonal signal. The label-derived `N_Parcel` and `Parcel_Cover`
+  properties of `metadata.geojson` are never read, and `load_vectors` refuses them.
+* **Prepared.** Labelled-pixel class fractions (train): background 0.44, meadow 0.20, corn
+  0.10, soft winter wheat 0.07, then 15 classes between 0.003 (potatoes) and 0.032
+  (grapevine); 9–10% of pixels are void. Clouds were not filtered beyond THEIA's 90%
+  tile-cover rule: 15% of samples have a patch-mean blue reflectance > 0.2 (mostly cloud,
+  some snow), concentrated on a few tile dates.
+* **Storage.** 6.3 GiB float16 cache, memory-mapped on the host (`device_resident: False`).
