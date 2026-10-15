@@ -294,3 +294,13 @@ def test_cli_trains_band_groups(tmp_path, capsys):
                "--device", "cpu", "--out", str(tmp_path / "runs")])
     assert rc == 0
     assert "final val mIoU" in capsys.readouterr().out
+
+
+def test_select_dates_takes_one_date_per_part_even_when_clustered():
+    """Codex review: a clustered calendar must not yield several dates from one part."""
+    from manyseg_bench.datasets.pastis import select_dates
+
+    nov = [f"201811{d:02d}" for d in range(2, 30, 3)]  # nine November dates
+    picked = select_dates(nov + ["20190601"], k=8)
+    months = [nov[i][:6] if i < len(nov) else "201906" for i in picked]
+    assert months == ["201811", "201906"]  # one from November's part, one from June's

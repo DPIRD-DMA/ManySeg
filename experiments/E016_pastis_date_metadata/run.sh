@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# E016 (DRAFT, not yet reviewed; do not run), PASTIS single-date crop types, local RTX 4090.
+# E016 (registered), PASTIS single-date crop types, local RTX 4090.
 # Q1: does the acquisition day of year help (FiLM / channels, two shuffled-date controls)?
 # Q2: do Sentinel-2 resolution band groups with a shared encoder beat the stack (E015 replication)?
 # 6 arms x 3 seeds = 18 runs; e016-none is the shared baseline of Q1 and Q2.
@@ -18,9 +18,12 @@ mb() {
   if [ -n "${EMIT_TASKS:-}" ]; then printf '%q ' "$@" >> "$EMIT_TASKS"; echo >> "$EMIT_TASKS"
   else uv run manyseg-bench "$@"; fi
 }
+FAILS=0
 run() { echo "=== $*"; mb train --provider manyseg --arch unet --encoder resnet34 \
           --weights tv_in1k --recipe "$RECIPE" --set "$SET" --out "$OUT" --evaluate-test "$@" \
-          || echo "FAILED $*"; }
+          || { echo "FAILED $*"; FAILS=$((FAILS + 1)); }
+        # Pre-registered stopping rule: abort on a systemic failure (more than 2 failed runs).
+        if [ "$FAILS" -gt 2 ]; then echo "ABORT: $FAILS failed runs"; exit 1; fi; }
 for seed in 0 1 2; do
   S="--seeds $seed"
   run $S --dataset pastis --tag e016-none                         # S2 only (stack)

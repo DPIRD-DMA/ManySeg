@@ -19,7 +19,7 @@ no-metadata baseline.
 patches of 128×128 px at 10 m from four Sentinel-2 tiles in France, 10 L2A bands (B2, B3,
 B4, B5, B6, B7, B8, B8A, B11, B12; the 20 m bands were bilinearly upsampled by the authors).
 Each patch gives **8 single-date samples**: the acquisition nearest the centre of each eighth
-of the 365-day season window 2018-11-01..2019-10-31. 19 classes (background + 18 crops);
+of the 365-day season window 2018-11-01..2019-10-31, taken from within that eighth. 19 classes (background + 18 crops);
 void (out-of-nomenclature or mostly-outside parcels) is ignored. Official fold I: train
 folds 1–3, val fold 4, test fold 5. All dates of a patch stay in its fold.
 
@@ -92,7 +92,7 @@ Hypothesis: a gain of similar size to E015's.
   `fastai_like`, **30 epochs**, batch 16, last-epoch model, no tuning. Augmentation: the
   dataset loader default, random resized crop (area 0.5–1) back to 128², horizontal and
   vertical flips (the doy vector is not augmented). Seeds 0, 1, 2. Test is evaluated once per
-  run after training (`--evaluate-test`), never for selection.
+  run after training (`--evaluate-test`). Test never selects a model, an epoch or a setting; the decision rules use it only to confirm a val result ("test agrees"), as in every experiment here.
 * Arms (`run.sh`; 6 per seed, 18 runs, ordered seed → arm):
 
   | tag | dataset / mode | question |

@@ -141,20 +141,20 @@ def doy_of(name: str) -> float:
 def select_dates(dates, k: int = K_DATES, season: tuple[str, str] = SEASON) -> list[int]:
     """Indices (into ``dates``, ``YYYYMMDD``) of ``k`` acquisitions spread over ``season``.
 
-    The season window is cut into ``k`` equal parts; for each part's centre, in order, the
-    nearest acquisition inside the window not yet chosen is taken (ties -> the earlier date).
-    Returned sorted by time; fewer than ``k`` if the window has fewer acquisitions."""
+    The season window is cut into ``k`` equal parts; from each part, the acquisition nearest the
+    part's centre is taken (ties -> the earlier date), so every date comes from its own part.
+    A part without acquisitions contributes nothing (fewer than ``k`` dates)."""
     d = [_date(v) for v in dates]
     lo, hi = _date(season[0]), _date(season[1])
-    cand = [i for i, x in enumerate(d) if lo <= x <= hi]
     span = (hi - lo).days + 1
     chosen: list[int] = []
     for j in range(k):
-        free = [i for i in cand if i not in chosen]
-        if not free:
-            break
-        centre = lo + datetime.timedelta(days=(j + 0.5) * span / k)
-        chosen.append(min(free, key=lambda i: (abs((d[i] - centre).days), d[i])))
+        a = lo + datetime.timedelta(days=j * span / k)
+        b = lo + datetime.timedelta(days=(j + 1) * span / k)
+        part = [i for i, x in enumerate(d) if a <= x < b and lo <= x <= hi]
+        if part:
+            centre = lo + datetime.timedelta(days=(j + 0.5) * span / k)
+            chosen.append(min(part, key=lambda i: (abs((d[i] - centre).days), d[i])))
     return sorted(chosen, key=lambda i: d[i])
 
 
@@ -251,7 +251,6 @@ def prepare(raw: Path, cache: Path, size: int = SIZE, workers: int = 4, k: int =
     summary, stats = {}, {}
     nc = len(CLASS_NAMES)
     with (ProcessPoolExecutor(workers) if workers > 1 else contextlib.nullcontext()) as ex:
-        run = ex.map if ex is not None else map
         for split, patches in by_split.items():
             n = sum(len(select_dates(p["dates"], k)) for p in patches)
             images = np.lib.format.open_memmap(cache / f"{split}_images.s2.npy", "w+", np.float16,
@@ -263,8 +262,17 @@ def prepare(raw: Path, cache: Path, size: int = SIZE, workers: int = 4, k: int =
             names: list[str] = []
             blues: list[float] = []
             jobs = [(root, p, k) for p in patches]
-            for b, (nm, img, m, blue) in enumerate(run(read_patch, jobs, chunksize=8)
-                                                   if ex is not None else run(read_patch, jobs)):
+
+            def results(jobs=jobs):
+                # Bounded window: at most 4 x workers patches in flight, so finished results
+                # cannot pile up behind a slow early one (RAM stays bounded).
+                step = 4 * workers
+                for s0 in range(0, len(jobs), step):
+                    batch = jobs[s0:s0 + step]
+                    yield from (ex.map(read_patch, batch) if ex is not None
+                                else map(read_patch, batch))
+
+            for b, (nm, img, m, blue) in enumerate(results()):
                 if img.shape[1:3] != (size, size):
                     raise RuntimeError(f"integrity: {nm[0]} is {img.shape[1:3]}, expected {size}")
                 j = len(names)
