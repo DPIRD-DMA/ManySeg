@@ -1,9 +1,9 @@
-from . import ai4boundaries, cloudsen12, oam_tcd, oxford_pet, sen1floods11
+from . import ai4boundaries, cloudsen12, oam_tcd, oxford_pet, pastis, sen1floods11
 from .base import DatasetInfo, Split, data_root, load_split
 from .gpu_loader import GPULoader
 
 DATASETS = {"oxford_pet": oxford_pet, "sen1floods11": sen1floods11, "oam_tcd": oam_tcd,
-            "ai4boundaries": ai4boundaries, "cloudsen12": cloudsen12}
+            "ai4boundaries": ai4boundaries, "cloudsen12": cloudsen12, "pastis": pastis}
 
 
 class _Variant:
@@ -22,6 +22,8 @@ for _info in (sen1floods11.INFO_DEM, sen1floods11.INFO_S1, sen1floods11.INFO_S2,
     DATASETS[_info.name] = _Variant(sen1floods11, _info, "sen1floods11")
 for _info in cloudsen12.VARIANTS:
     DATASETS[_info.name] = _Variant(cloudsen12, _info, cloudsen12.CACHE_NAME)
+for _info in pastis.VARIANTS:
+    DATASETS[_info.name] = _Variant(pastis, _info, pastis.CACHE_NAME)
 
 
 def get_dataset(name: str):
