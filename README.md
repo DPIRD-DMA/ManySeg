@@ -19,7 +19,9 @@ benchmark.
 Each stage is configured independently. The row under the line lists the options for each
 stage. The diagram shows the model built by the multi-input example below.
 
-> Status: pre-alpha (Phases 1–4 in progress). APIs may change. See `docs/roadmap.md`.
+> Status: pre-alpha. The model library is feature-complete for the original plan (FSDP2 and a
+> ViT metadata-token mode remain); experiments and release preparation are ongoing. APIs may
+> change. See `docs/roadmap.md`.
 
 This monorepo holds two independent packages:
 
@@ -102,11 +104,30 @@ out = model({"optical": optical, "sar": sar_at_half_resolution, "meta": meta})
   Spatial alignment is tested numerically.
 * **Deployment.** `torch.compile(fullgraph=True, dynamic=True)` (one graph across 10 sizes
   on CUDA), `torch.export` with dynamic H/W, ONNX with onnxruntime parity, AMP,
-  channels_last. Swin's dynamic export is a known timm limitation.
+  channels_last. Swin's dynamic export is a known timm limitation. For inference, use bf16
+  autocast plus `torch.compile`: on an idle RTX 4090 this was 1.6× (bf16) × 1.46× (compile)
+  faster than eager fp32 (E014).
 * **Quantisation.** `manyseg.quantize` (optional `manyseg[quant]` extra, torchao): static int8
   through PT2E with dynamic H/W, returned as an `ExportedProgram`, and int8 weight-only or
   dynamic quantisation of the eager model. A ResNet-34 U-Net shrinks to 0.27x. Reports give the
   serialized size and the agreement with the float model.
+
+## What the experiments found
+
+All experiments are pre-registered, multi-seed and written up in `experiments/`, negative
+results included. Highlights:
+
+* `fastai_unet`'s edge over SMP-style `unet` on Sen1Floods11 comes from reinjecting the raw
+  input at full resolution. `unet` + `input_cross` recovers 81–83% of it at +14% FLOPs, against
+  fastai's 4× (E006, E012). On Oxford Pet the recipe matters more than the decoder (E002, E003).
+* Decoder `out_stride=2` costs no accuracy for `unet` and saves 11–18% memory (E006).
+* Boundary + distance heads double instance PQ over extent + connected components (E010).
+  Point detection needs a validation-calibrated peak threshold: F1 0.40 → 0.59 (E011b).
+* Negative results: aligned upsampling (E001b), fusion beyond early stacking on Sen1Floods11
+  (E005), and the `projection` stem adapter (E004). Metadata FiLM helps less than 2 SE on held-out
+  flood events (E009).
+* Running: CloudSEN12+ cloud and shadow masking (auxiliary layers, metadata on unseen locations,
+  `input_cross` replication; E013).
 
 ## Development
 
@@ -121,7 +142,7 @@ Benchmarks:
 
 ```bash
 export MANYSEG_BENCH_DATA=/path/to/data
-uv run manyseg-bench prepare oxford_pet
+uv run manyseg-bench prepare oxford_pet   # or sen1floods11, ai4boundaries, oam_tcd, cloudsen12
 uv run manyseg-bench train --provider smp --arch unet --encoder resnet34 --seeds 0,1,2
 uv run manyseg-bench profile --provider manyseg --size 512,512 --compile
 uv run manyseg-bench report experiments/
