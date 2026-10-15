@@ -461,9 +461,10 @@ compiling removes that. For training, use bf16 autocast; compile is optional.
 
 ## Quantisation
 
-`manyseg.quantize` needs torchao (`pip install 'manyseg[quant]'`, BSD-3-Clause). Without it,
-each entry point raises an `ImportError` that names the extra. In torch 2.14, PT2E moved out
-of `torch.ao` into torchao, so both routes use it.
+`quantize_pt2e` and `quantize_weights` need torchao (`pip install 'manyseg[quant]'`,
+BSD-3-Clause). Without it, they raise an `ImportError` that names the extra. `model_size` and
+`compare_outputs` work without torchao. In torch 2.14, PT2E moved out of `torch.ao` into
+torchao, so both quantisation routes use it.
 
 ```python
 from manyseg.quantize import compare_outputs, model_size, quantize_pt2e, quantize_weights
@@ -484,7 +485,8 @@ q = quantize_weights(model, "int8_dynamic")             # + int8 activations in 
 model_size(ep), model_size(q)                           # serialized bytes
 compare_outputs(model, ep, test_batches)
 # {"max_abs_diff": ..., "mean_abs_diff": ..., "argmax_agreement": ...}
-# dict outputs: "segmentation/argmax_agreement", ...
+# argmax only for float (B, C) / (B, C, H, W); integer outputs get "exact_agreement";
+# "dtype_changed" (and a warning) if the dtype differs; dict outputs: "seg/argmax_agreement"
 ```
 
 `quantize_pt2e` returns an `ExportedProgram`, like `export_model`. H/W stay dynamic, and the

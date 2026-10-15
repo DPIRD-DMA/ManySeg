@@ -125,6 +125,13 @@ def test_pt2e_window_attention_needs_fixed_size():
     assert q.module()(ex).shape == (1, 2, 224, 224)
 
 
+def test_pt2e_unrelated_window_size_attribute_is_not_rejected():
+    model = create_model(backbone="resnet18", pretrained=False, num_classes=3).eval()
+    model.decoder.window_size = 7
+    q = quantize_pt2e(model, torch.randn(1, 3, 64, 96), _batches(1))
+    assert q.module()(torch.randn(1, 3, 97, 131)).shape == (1, 3, 97, 131)
+
+
 def test_pt2e_rejects_empty_calibration():
     model = create_model(backbone="resnet18", pretrained=False, num_classes=3).eval()
     with pytest.raises(ValueError, match="calibration"):

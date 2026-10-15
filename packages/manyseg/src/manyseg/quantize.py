@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import copy
 import io
+import warnings
 from collections.abc import Iterable, Mapping
 
 import torch
@@ -45,11 +46,21 @@ def _x86_quantizer():
     return xiq.X86InductorQuantizer().set_global(xiq.get_default_x86_inductor_quantization_config())
 
 
+# timm's window-attention classes, by (module, class): their dynamic-size export hangs rather
+# than fails (``architecture_review.md``). Matched exactly so that an unrelated module with a
+# ``window_size`` attribute is not rejected.
+_WINDOW_ATTENTION = {
+    ("timm.models.swin_transformer", "WindowAttention"),
+    ("timm.models.swin_transformer_v2", "WindowAttention"),
+    ("timm.models.swin_transformer_v2_cr", "WindowMultiHeadAttention"),
+    ("timm.models.davit", "WindowAttention"),
+}
+
+
 def _windowed(model: nn.Module) -> str | None:
-    """Name of the first window-attention block (timm Swin, Swin V2, DaViT all carry a
-    ``window_size``), whose dynamic-size export hangs rather than fails
-    (``architecture_review.md``)."""
-    return next((type(m).__name__ for m in model.modules() if hasattr(m, "window_size")), None)
+    """Class name of the first timm window-attention module (Swin, Swin V2, DaViT), if any."""
+    return next((type(m).__name__ for m in model.modules()
+                 if (type(m).__module__, type(m).__name__) in _WINDOW_ATTENTION), None)
 
 
 def _shapes(model: nn.Module, example, dynamic: bool, max_size: int, dynamic_batch: bool):
@@ -78,9 +89,16 @@ def _export(module: nn.Module, example, shapes) -> torch.export.ExportedProgram:
 
 def _drop_unused_attrs(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
     """``convert_pt2e`` adds int8 copies of the weights but leaves the float originals
-    registered (unused); drop every parameter and buffer the graph no longer reads."""
-    used = {n.target for n in gm.graph.nodes if n.op == "get_attr"}
-    for name in [n for n, _ in [*gm.named_parameters(), *gm.named_buffers()] if n not in used]:
+    registered (unused); drop every parameter and buffer the graph no longer reads. An attribute
+    is read if a ``get_attr`` or ``call_module`` target is it or a dotted prefix of it (e.g.
+    ``body`` for ``body.weight``)."""
+    targets = {n.target for n in gm.graph.nodes if n.op in ("get_attr", "call_module")}
+
+    def used(name: str) -> bool:
+        parts = name.split(".")
+        return any(".".join(parts[:i]) in targets for i in range(1, len(parts) + 1))
+
+    for name in [n for n, _ in [*gm.named_parameters(), *gm.named_buffers()] if not used(n)]:
         owner, _, leaf = name.rpartition(".")
         mod = gm.get_submodule(owner)
         mod._parameters.pop(leaf, None)
@@ -195,22 +213,32 @@ class _Diff:
     """Running agreement statistics for one output."""
 
     def __init__(self):
-        self.max, self.abs_sum, self.n, self.agree, self.pixels = 0.0, 0.0, 0, 0, 0
+        self.max, self.abs_sum, self.n, self.agree, self.count = 0.0, 0.0, 0, 0, 0
+        self.kind: str | None = None  # "argmax" (float logits), "exact" (integer/bool) or None
+        self.dtype_changed = False
 
     def add(self, ref: Tensor, out: Tensor) -> None:
-        d = (ref.float() - out.float().to(ref.device)).abs()
+        out = out.to(ref.device)
+        self.dtype_changed |= ref.dtype != out.dtype
+        d = (ref.double() - out.double()).abs()
         self.max = max(self.max, d.max().item())
         self.abs_sum += d.sum().item()
         self.n += d.numel()
-        if ref.ndim >= 2 and ref.shape[1] > 1:  # class dimension: argmax is meaningful
-            agree = ref.argmax(1) == out.to(ref.device).argmax(1)
-            self.agree += agree.sum().item()
-            self.pixels += agree.numel()
+        if not ref.is_floating_point():  # label maps, counts: compare exactly
+            self.kind, agree = "exact", ref == out
+        elif ref.ndim in (2, 4) and ref.shape[1] > 1:  # (B, C) or (B, C, H, W) logits
+            self.kind, agree = "argmax", ref.argmax(1) == out.argmax(1)
+        else:
+            return
+        self.agree += agree.sum().item()
+        self.count += agree.numel()
 
     def report(self, prefix: str = "") -> dict[str, float]:
         r = {f"{prefix}max_abs_diff": self.max, f"{prefix}mean_abs_diff": self.abs_sum / self.n}
-        if self.pixels:
-            r[f"{prefix}argmax_agreement"] = self.agree / self.pixels
+        if self.kind is not None:
+            r[f"{prefix}{self.kind}_agreement"] = self.agree / self.count
+        if self.dtype_changed:
+            r[f"{prefix}dtype_changed"] = 1.0
         return r
 
 
@@ -219,10 +247,17 @@ def compare_outputs(reference, candidate, inputs: Iterable) -> dict[str, float]:
     ``inputs`` (an iterable of model inputs, Tensor or dict). Either model may be an
     ``nn.Module`` or an ``ExportedProgram``.
 
-    Returns ``max_abs_diff`` and ``mean_abs_diff`` of the raw outputs and, for outputs with
-    more than one channel, ``argmax_agreement`` (the fraction of pixels, or images for image
-    heads, whose argmax over dim 1 is unchanged). For dict outputs every key is prefixed with
-    the head name, e.g. ``"segmentation/argmax_agreement"``.
+    Returns ``max_abs_diff`` and ``mean_abs_diff`` of the raw outputs, plus:
+
+    * ``argmax_agreement`` for floating outputs shaped like logits, ``(B, C)`` or
+      ``(B, C, H, W)`` with ``C > 1``: the fraction of images or pixels whose argmax over dim 1
+      is unchanged;
+    * ``exact_agreement`` for integer or bool outputs (e.g. label maps): the fraction of equal
+      elements;
+    * ``dtype_changed`` = 1.0, with a warning, if the candidate's dtype differs.
+
+    For dict outputs every key is prefixed with the head name, e.g.
+    ``"segmentation/argmax_agreement"``.
     """
     reference, candidate = (m.module() if isinstance(m, torch.export.ExportedProgram) else m
                             for m in (reference, candidate))
@@ -237,4 +272,7 @@ def compare_outputs(reference, candidate, inputs: Iterable) -> dict[str, float]:
                 diffs.setdefault("", _Diff()).add(ref, out)
     if not diffs:
         raise ValueError("compare_outputs needs at least one input")
+    if changed := [p.rstrip("/") or "output" for p, d in diffs.items() if d.dtype_changed]:
+        warnings.warn(f"candidate output dtype differs from the reference for: {changed}",
+                      stacklevel=2)
     return {k: v for prefix, d in diffs.items() for k, v in d.report(prefix).items()}

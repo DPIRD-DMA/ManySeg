@@ -54,6 +54,39 @@ def test_compare_outputs_rejects_empty_inputs():
         compare_outputs(nn.Identity(), nn.Identity(), [])
 
 
+class _Labels(nn.Module):
+    """Returns an integer label map (B, H, W), optionally as another dtype."""
+
+    def __init__(self, dtype=torch.long, offset=0):
+        super().__init__()
+        self.dtype, self.offset = dtype, offset
+
+    def forward(self, x):
+        return (x[:, 0] > 0).to(self.dtype) + self.offset
+
+
+def test_compare_outputs_integer_labels_use_exact_match():
+    """No argmax over dim 1 of a (B, H, W) label map: exact-match agreement instead."""
+    r = compare_outputs(_Labels(), _Labels(offset=1), _batches())
+    assert "argmax_agreement" not in r
+    assert r["exact_agreement"] == 0.0
+    assert compare_outputs(_Labels(), _Labels(), _batches())["exact_agreement"] == 1.0
+
+
+def test_compare_outputs_flags_dtype_change():
+    with pytest.warns(UserWarning, match="dtype"):
+        r = compare_outputs(_Labels(), _Labels(torch.int32), _batches())
+    assert r["dtype_changed"] == 1.0
+    assert "dtype_changed" not in compare_outputs(_Labels(), _Labels(), _batches())
+
+
+def test_compare_outputs_argmax_only_for_logit_shapes():
+    """(B, C) and (B, C, H, W) floats get argmax agreement; a (B, N, D) float does not."""
+    assert "argmax_agreement" in compare_outputs(nn.Flatten(), nn.Flatten(), _batches(1))
+    tokens = nn.Flatten(2)  # (B, C, H*W): not a logit shape
+    assert "argmax_agreement" not in compare_outputs(tokens, tokens, _batches(1))
+
+
 def test_model_size_counts_state_dict_bytes():
     m = nn.Linear(100, 10)  # 1010 float32 values
     assert 1010 * 4 <= model_size(m) < 1010 * 4 + 2048
@@ -107,6 +140,47 @@ def test_quantize_weights_device(device):
     with torch.no_grad():
         assert q(x).shape == (1, 3, 97, 131)
     assert compare_outputs(model, q, [x])["argmax_agreement"] > 0.95
+
+
+# --- PT2E helpers (no export needed) -------------------------------------------------------
+
+@pytest.mark.parametrize("backbone", ["swin_tiny_patch4_window7_224", "swinv2_tiny_window8_256",
+                                      "davit_tiny"])
+def test_windowed_detects_timm_window_attention(backbone):
+    from manyseg.quantize import _windowed
+
+    assert _windowed(_model(backbone)) == "WindowAttention"
+
+
+def test_windowed_ignores_unrelated_window_size_attribute():
+    from manyseg.quantize import _windowed
+
+    model = _model()
+    model.decoder.window_size = 7  # e.g. a user module with an unrelated attribute
+    assert _windowed(model) is None
+
+
+def test_drop_unused_attrs_keeps_params_of_called_submodules():
+    """A parameter reached through a call_module (target ``body``, param ``body.weight``) is
+    used; only attributes no node reaches are dropped."""
+    from manyseg.quantize import _drop_unused_attrs
+
+    class M(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.body = nn.Conv2d(3, 4, 1)
+            self.scale = nn.Parameter(torch.ones(1))
+            self.unused = nn.Parameter(torch.ones(5))
+
+        def forward(self, x):
+            return self.body(x) * self.scale
+
+    gm = torch.fx.symbolic_trace(M())
+    x = torch.randn(1, 3, 8, 8)
+    ref = gm(x)
+    _drop_unused_attrs(gm)
+    assert set(dict(gm.named_parameters())) == {"body.weight", "body.bias", "scale"}
+    torch.testing.assert_close(gm(x), ref)
 
 
 # --- missing optional dependency -----------------------------------------------------------
