@@ -11,6 +11,7 @@ Publishing (GitHub Pages or elsewhere) is a separate, deliberate step.
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -19,7 +20,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "build" / "site_src"
-OUT = ROOT / "build" / "site"
+# Read the Docs sets READTHEDOCS_OUTPUT and installs mkdocs with pip (.readthedocs.yaml).
+RTD_OUT = os.environ.get("READTHEDOCS_OUTPUT")
+OUT = Path(RTD_OUT) / "html" if RTD_OUT else ROOT / "build" / "site"
 
 DOCS = [("Architecture review", "architecture_review.md"), ("API design", "api_design.md"),
         ("Benchmark design", "benchmark_design.md"), ("Testing strategy", "testing_strategy.md"),
@@ -71,9 +74,12 @@ def main() -> int:
         "markdown_extensions: [tables, admonition, toc, pymdownx.superfences]",
         "nav:", *nav, ""]))
     # mkdocs 2.0 drops the plugin/theme system Material needs: stay on 1.x.
-    return subprocess.call(["uvx", "--from", "mkdocs<2", "--with", "mkdocs-material<10",
-                            "mkdocs", "build", "-q",
-                            "-f", str(cfg)])
+    if RTD_OUT or shutil.which("uvx") is None:  # mkdocs already installed (pip)
+        cmd = [sys.executable, "-m", "mkdocs", "build", "-q"]
+    else:
+        cmd = ["uvx", "--from", "mkdocs<2", "--with", "mkdocs-material<10", "mkdocs", "build",
+               "-q"]
+    return subprocess.call(cmd + ["-f", str(cfg)])
 
 
 if __name__ == "__main__":
