@@ -1,9 +1,34 @@
 from __future__ import annotations
 
+import torch.nn.functional as F
+from torch import Tensor, nn
+
 from .base import BuiltModel, ModelSpec, Provider, fingerprint_module, split_params
 
 # canonical weight id -> timm pretrained tag
 _TIMM_TAGS = {"tv_in1k": "tv_in1k"}
+
+
+class BandGroupModel(nn.Module):
+    """Splits a stacked (B, C, H, W) tensor into named band groups, block-averaging each group
+    by its integer ``factor`` (ceil, so every pixel belongs to one coarse cell; partial edge
+    cells average only the pixels they cover), then runs a multi-input ManySeg model."""
+
+    def __init__(self, model: nn.Module, groups: dict) -> None:
+        super().__init__()
+        self.model, self.groups = model, {n: dict(g) for n, g in groups.items()}
+
+    @staticmethod
+    def split(x: Tensor, groups: dict) -> dict[str, Tensor]:
+        out = {}
+        for name, g in groups.items():
+            t = x[:, list(g["bands"])]
+            f = int(g.get("factor", 1))
+            out[name] = t if f == 1 else F.avg_pool2d(t, f, f, ceil_mode=True)
+        return out
+
+    def forward(self, x: Tensor):
+        return self.model(self.split(x, self.groups))
 
 
 class ManySegProvider(Provider):
@@ -32,6 +57,22 @@ class ManySegProvider(Provider):
                                  "the options in each head's config")
             opts["heads"] = {"logits": {"type": "segmentation", "channels": n_cls, **head}}
             n_cls = None
+        groups = opts.pop("band_groups", None)
+        group_inputs = opts.pop("band_group_inputs", {})
+        if groups is not None:
+            # One stacked tensor (e.g. 13 S2 bands resampled to 10 m) -> one input per native
+            # resolution group, coarse groups block-averaged and aligned by extent (E015).
+            inputs = {n: {"channels": len(g["bands"]),
+                          "alignment": "same_extent" if g.get("factor", 1) > 1 else "same_grid",
+                          **group_inputs.get(n, {})} for n, g in groups.items()}
+            opts.setdefault("fusion", {"type": "intermediate"})
+            inner = create_model(backbone=backbone, pretrained=spec.weights is not None,
+                                 inputs=inputs, decoder=spec.arch, num_classes=n_cls, **opts)
+            if head is not None:
+                inner.single_output = "logits"
+            model = BandGroupModel(inner, groups)
+            enc, dec = split_params(model, inner.backbone.encoders)
+            return BuiltModel(model, enc, dec, fingerprint_module(inner.backbone))
         if spec.input_mode == "dict" and spec.inputs:
             inputs = {n: {"channels": c} for n, c in spec.inputs.items()}
             inputs.update({n: {"kind": "vector", **cfg} for n, cfg in (spec.vectors or {}).items()})
