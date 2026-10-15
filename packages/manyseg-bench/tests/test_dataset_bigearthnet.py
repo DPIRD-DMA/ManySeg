@@ -105,6 +105,16 @@ def test_load_vectors_doy_and_country(prepared):
     assert v.tolist() == [[31 + 28 + 31 + 30 + 31 + 30 + 13, 1.0]]  # 13 July; Belgium
 
 
+def test_shuffled_metadata_is_a_row_permutation(prepared):
+    raw, _, rows, *_ = prepared
+    names = [r["patch_id"] for r in rows]
+    real = ben.load_vectors(raw, names, {"m": {"fields": ben.META_FIELDS}})["m"]
+    shuf = ben.load_vectors(raw, names, get_dataset("bigearthnet_meta_shuffled").INFO.vectors)
+    shuf = shuf["meta"]
+    perm = np.random.default_rng(ben.SHUFFLE_SEED).permutation(len(names))
+    assert np.array_equal(shuf, real[perm]) and not np.array_equal(shuf, real)
+
+
 def test_seg_multilabel_targets_ignore_and_class_zero():
     t = build_task("seg_multilabel", 4, 255)
     y = torch.tensor([[[0, 255], [2, 2]], [[255, 255], [3, 3]]])

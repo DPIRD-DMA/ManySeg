@@ -99,8 +99,11 @@ def _variant(name, **kw):
 INFO_S1S2 = _variant("bigearthnet_s1s2", inputs={"s2": 12, "s1": 2}, in_channels=14)
 INFO_META = _variant("bigearthnet_meta", vectors={"meta": {"fields": META_FIELDS}})
 INFO_SEG = _variant("bigearthnet_seg", ignore_index=255)
+INFO_META_SHUFFLED = _variant("bigearthnet_meta_shuffled", vectors={"meta": {"fields": {
+    "doy_shuffled": META_FIELDS["doy"], "country_shuffled": META_FIELDS["country"]}}})
 INFO_FRAC = _variant("bigearthnet_frac")
-VARIANTS = (INFO_S1S2, INFO_META, INFO_SEG, INFO_FRAC)
+VARIANTS = (INFO_S1S2, INFO_META, INFO_META_SHUFFLED, INFO_SEG, INFO_FRAC)
+SHUFFLE_SEED = 20261015
 
 
 def subset_ids(meta, split: str, n: int | None = None) -> list[str]:
@@ -218,14 +221,19 @@ def split_labels(raw: Path, split) -> np.ndarray | None:
 
 def load_vectors(raw: Path, names: list[str], vectors: dict) -> dict[str, np.ndarray]:
     """``doy`` (day of year of the S2 acquisition, from the patch id) and ``country`` (index
-    into ``COUNTRIES``), columns in field order."""
+    into ``COUNTRIES``), columns in field order. ``*_shuffled`` (control): the same values with
+    whole rows permuted across the given patches (one fixed permutation, ``SHUFFLE_SEED``), so
+    each patch gets another patch's date and country."""
     from datetime import date
 
     meta = _read_meta(raw).set_index("patch_id")
+    perm = np.random.default_rng(SHUFFLE_SEED).permutation(len(names))
     out = {}
     for vname, cfg in vectors.items():
         cols = []
         for f in cfg["fields"]:
+            shuffled = f.endswith("_shuffled")
+            f = f.removesuffix("_shuffled")
             if f == "doy":
                 d = [n.split("_")[2][:8] for n in names]  # S2A_MSIL2A_YYYYMMDDT..._...
                 cols.append([date(int(s[:4]), int(s[4:6]), int(s[6:])).timetuple().tm_yday
@@ -234,6 +242,8 @@ def load_vectors(raw: Path, names: list[str], vectors: dict) -> dict[str, np.nda
                 cols.append([COUNTRIES.index(c) for c in meta.loc[names, "country"]])
             else:
                 raise ValueError(f"unknown BigEarthNet metadata field {f!r}")
+            if shuffled:
+                cols[-1] = np.asarray(cols[-1])[perm].tolist()
         out[vname] = np.asarray(cols, np.float32).T
     return out
 
