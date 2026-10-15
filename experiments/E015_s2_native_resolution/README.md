@@ -1,6 +1,6 @@
 # E015: Native-resolution Sentinel-2 band groups vs the 10 m stack (pre-registered)
 
-Status: **planned** (registered 2026-10-15, before any run).
+Status: **complete** (2026-10-15; 18 runs, local RTX 4090, no Pawsey units). **Native resolution itself adds nothing, but it halves the compute of a grouped model. Splitting the bands into groups is what helps (+0.9 to +1.3 mIoU). The shared-encoder arm exposed a library bug (BatchNorm blended across inputs), now fixed.**
 
 ## Question
 Every experiment so far feeds the 13 S2 bands as one 10 m stack, with the 20 m and 60 m bands
@@ -60,3 +60,42 @@ The diagnostic confirmed the BN-blending hypothesis: `e015-groups-shared-frozenb
 `shared:` encoders per-input BatchNorm by default (commit `0a4025d`). Verification arm
 `e015-groups-shared-perbn`: the shared arm unchanged except for the new default (BN statistics
 still update, per input), seeds 0–2, local 4090.
+
+## Results (Sen1Floods11 S2, mean ± seed SD, 3 seeds)
+
+| Arm | n | Val mIoU | Test mIoU | Bolivia | Params | GFLOPs | Train img/s |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `e015-stack` (13-band 10 m stack) | 3 | 0.8899 ± 0.0045 | 0.8909 ± 0.0107 | 0.8590 | 24.5 M | 66.7 | 521 |
+| `e015-groups` (3 encoders, native resolution) | 3 | 0.8982 ± 0.0015 | 0.9049 ± 0.0026 | 0.8553 | 68.1 M | 77.4 | 229 |
+| `e015-groups-10m` (3 encoders, all at 10 m; amendment 2) | 3 | 0.8987 ± 0.0008 | 0.9015 ± 0.0049 | 0.8598 | 68.1 M | 144.0 | 255 |
+| `e015-groups-shared` (1 encoder, BN shared; old library) | 3 | 0.5715 ± 0.0741 | 0.5633 ± 0.1021 | 0.4453 | 25.5 M | 77.3 | 252 |
+| `e015-groups-shared-frozenbn` (diagnostic; amendment 1) | 3 | 0.9040 ± 0.0010 | 0.9052 ± 0.0042 | 0.8473 | 25.5 M | 77.3 | 251 |
+| `e015-groups-shared-perbn` (fixed library default; amendment 3) | 3 | 0.9024 ± 0.0033 | 0.9038 ± 0.0073 | 0.8616 | 25.5 M | 77.3 | 247 |
+
+Comparisons (val Δ in points vs 2 pooled SD; test Δ):
+
+* groups − stack: +0.83 (0.68), test +1.39. **Passes the pre-registered rule.**
+* groups − groups-10m: −0.05 (0.24), test +0.34. **Native resolution adds no accuracy.**
+* groups-10m − stack: +0.88 (0.65), test +1.06. **The band split is the effect.**
+* shared-perbn − stack: +1.25 (0.80), test +1.29, at 25.5 M parameters (+4%).
+* shared-perbn − shared-frozenbn: −0.16 (0.49). The library fix matches the diagnostic.
+
+## Decision
+* **Pre-registered rule:** the groups arm is better than the stack. **The capacity control
+  (amendment 2) attributes the gain**: the same three encoders on 10 m groups score the same,
+  so the gain comes from splitting the 13 bands into resolution groups with their own stems and
+  encoders, not from native resolution. Native resolution does buy compute: 77 vs 144 GFLOPs for
+  the same accuracy (−46%). It is still 16% more than the single stack.
+* **Best model:** one shared encoder over the three groups, with per-input BatchNorm (now the
+  library default for `shared:` encoders). +1.25 val / +1.29 test over the stack for +4%
+  parameters and +16% FLOPs. Throughput halves (three encoder passes).
+* **CloudSEN12+ follow-up: not run.** Its trigger was the native-resolution hypothesis, which the
+  control refutes. Band grouping is a *new* hypothesis that was not pre-registered. It should be
+  tested on a second dataset before any recommendation: PASTIS (S2, 10 bands at 10/20 m, local,
+  no Pawsey units) is being prepared for E016 and can host it.
+* **Library:** no band-group helper yet (the bench's `band_groups` stays a bench option) until
+  the grouping effect replicates. The **construction bug** is fixed (commit `0a4025d`):
+  `shared:` encoders used to share BatchNorm, which blends running statistics across inputs with
+  different statistics and collapsed evaluation (0.57 val). They now keep BN per input, and
+  `"share_norm": True` restores full sharing.
+* Earlier results are unaffected: no earlier experiment used a shared encoder.

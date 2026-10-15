@@ -80,7 +80,7 @@ Status as of 2026-10-15, 08:35 AWST. ✅ done · 🔄 in progress · ⏳ planned
 ## Phase 5: research and optimisation 🔄
 
 Done (see Phase 3 for results and `experiments/` for write-ups): E001b, E002–E006, E009–E012,
-E011b, E014, E007 (mixed: frozen encoder BN +2.6 val on Sen1Floods11 at batch 2, GroupNorm decoder +0.5 on Pet; neither passes on both). E013 (negative), E008 (all variants safe; found and fixed an int8 bug on CPUs without VNNI). E007b (frozen encoder BN is a real small-batch fix on both datasets; accumulation alone is not). Running: E015, E016 (PASTIS, being prepared). Remaining candidates; a budget is set before each one starts:
+E011b, E014, E007 (mixed: frozen encoder BN +2.6 val on Sen1Floods11 at batch 2, GroupNorm decoder +0.5 on Pet; neither passes on both). E013 (negative), E008 (all variants safe; found and fixed an int8 bug on CPUs without VNNI). E007b (frozen encoder BN is a real small-batch fix on both datasets; accumulation alone is not). E015 (native resolution adds nothing but halves grouped-model FLOPs; splitting bands into groups helps +0.9 to +1.3; found the shared-encoder BN bug, fixed). Running: E016 (PASTIS, being prepared). Remaining candidates; a budget is set before each one starts:
 
 | Id | Question | Budget |
 | --- | --- | --- |
