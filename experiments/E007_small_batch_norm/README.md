@@ -1,6 +1,6 @@
 # E007: Normalisation at small batch sizes (pre-registered)
 
-Status: **planned** (registered 2026-10-15, before any run).
+Status: **planned** (registered 2026-10-15, before any run; trimmed 09:52 before any result, see the amendment).
 
 ## Question
 Large remote-sensing tiles often force batches of 1–4 per GPU. BatchNorm statistics are then
@@ -33,3 +33,12 @@ Pooled SD over 3 seeds; "test agrees" means the same direction on test.
   commitment. A decoder default therefore stays `batch` regardless, and only the docs change.
 * Also reported: the default's batch-2 − batch-16 gap. If it is within 2 pooled SD on both
   datasets, small batches are not a problem for this setup, and the result is negative.
+
+## Amendment (2026-10-15 09:52, before any run finished)
+The project's Pawsey GPU allocation is being used too fast, so the design is cut from 72 to
+**30 runs**. The array was cancelled about 2 minutes after it started, and no run had finished.
+* Batch 2: decoder `norm` ∈ {`batch`, `group`} × encoder BN ∈ {`train`, `frozen`}. `none` is
+  dropped as the least plausible arm.
+* Batch 16: only the default (`batch` + `train`), for the batch-2 vs batch-16 gap.
+* The decision rule's batch-16 check ("within 1 pooled SD of the default at batch 16") is run
+  afterwards, only for an arm that passes at batch 2 (3 seeds × 2 datasets for that arm).

@@ -72,3 +72,11 @@ same direction.
   multispectral and remote-sensing segmentation in the docs and the README. **The default
   stays `False`** to keep exact SMP parity; that is a design commitment, not an evidence
   question. If Q3 fails, the E012 recommendation is narrowed to Sen1Floods11-like tasks.
+
+## Amendment (2026-10-15 09:51, before any run finished)
+The project's Pawsey GPU allocation is being used too fast. The three `e013-fastai_unet` runs
+were cancelled at epoch 4 of 20, because at about 850 s per epoch they would have held all three
+8-GCD pack nodes about 2 h after every other arm had finished. Q3's decision bar
+(`unet-cross` − `e013-s2` > 2 pooled SD, test agrees) does not need them. The secondary
+"gap closed" figure is dropped, and E012 remains the fastai comparison. Every other arm runs
+as registered.
