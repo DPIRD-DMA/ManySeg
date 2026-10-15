@@ -28,6 +28,7 @@ def gap(ds, enc, arm, split):
     return (st.mean(a) - st.mean(b)) * 100, sd * 100
 
 
+means = {}
 for arm in ("manyseg", "manyseg-init02"):
     if not any(k[2] == arm for k in runs):
         continue
@@ -52,3 +53,10 @@ for arm in ("manyseg", "manyseg-init02"):
                   f"{dv:+.2f} | {bar:.2f} | {'yes' if abs(dv) <= bar else 'NO'} | "
                   f"{dt:+.2f} ({s_t:.2f}) | {f1[0]:.4f} / {f1[1]:.4f} |")
     print(f"\nmean gap over {len(vg)} cells: val {st.mean(vg):+.2f}, test {st.mean(tg):+.2f}")
+    means[arm] = (st.mean(vg), st.mean(tg))
+
+if "manyseg-init02" in means and "manyseg" in means:
+    (v0, _), (v1, t1) = means["manyseg"], means["manyseg-init02"]
+    adopt = abs(t1) <= 0.20 and v1 >= v0
+    print(f"\nE019b: mean test gap {t1:+.2f} (needs within ±0.20), mean val gap {v1:+.2f} "
+          f"(needs >= {v0:+.2f}) -> {'ADOPT init_std=0.02' if adopt else 'keep the default init'}")

@@ -1,8 +1,9 @@
 """Image-level classification and regression: no decoder, timm-equivalent when simple.
 
 Heads with ``"scope": "image"`` pool the deepest encoder feature; when every head is an image
-head, no decoder is built. With one tensor input and one head this is the same network as
-``timm.create_model(backbone, num_classes=K, in_chans=C)`` (E019 compares them). What timm
+head, no decoder is built. With one tensor input and one head this matches
+``timm.create_model(backbone, num_classes=K, in_chans=C)`` (same encoder, weights and stem
+adaptation; timm's ConvNeXt head adds a LayerNorm; E019 compares them). What timm
 cannot express composes as for dense models:
 
 1. a multi-label land-cover classifier on 12-band Sentinel-2 (sigmoid + BCE outside the model);

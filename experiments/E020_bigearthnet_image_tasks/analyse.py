@@ -66,13 +66,20 @@ if arms["frac"] and arms["timm-frac"]:
     bar = max(2 * sd, 0.002)
     print(f"Q1 reg parity frac - timm-frac: val RMSE {d:+.4f} (bar {bar:.4f}), test {dt:+.4f} -> "
           f"{'PARITY' if abs(d) <= bar else 'NO'}")
-for a, q in (("groups", "Q2"), ("s1s2-stack", "Q3"), ("s1s2-fusion", "Q3"), ("meta", "Q4"),
-             ("meta-shuffled", "Q4 control"), ("seg", "Q5")):
+def helps(a, b="s2"):
+    d, sd, dt = diff(a, b, "map_macro")
+    return d > 2 * sd and dt > 0, d, sd, dt
+
+
+for a, q in (("groups", "Q2"), ("s1s2-stack", "Q3"), ("s1s2-fusion", "Q3"),
+             ("meta-shuffled", "Q4 control (must not pass)"), ("seg", "Q5")):
     if arms[a] and arms["s2"]:
-        d, sd, dt = diff(a, "s2", "map_macro")
-        ok = d > 2 * sd and dt > 0
+        ok, d, sd, dt = helps(a)
         print(f"{q} {a} - s2: val {100 * d:+.2f} (2 SD {200 * sd:.2f}), test {100 * dt:+.2f} -> "
               f"{'HELPS' if ok else 'no'}")
-if arms["meta"] and arms["meta-shuffled"]:
-    d, sd, dt = diff("meta", "meta-shuffled", "map_macro")
-    print(f"Q4 meta - meta-shuffled: val {100 * d:+.2f} (2 SD {200 * sd:.2f}), test {100 * dt:+.2f}")
+if arms["meta"] and arms["meta-shuffled"] and arms["s2"]:
+    ok_s2, d1, sd1, t1 = helps("meta")
+    ok_sh, d2, sd2, t2 = helps("meta", "meta-shuffled")
+    print(f"Q4 meta - s2: val {100 * d1:+.2f} (2 SD {200 * sd1:.2f}), test {100 * t1:+.2f}; "
+          f"meta - meta-shuffled: val {100 * d2:+.2f} (2 SD {200 * sd2:.2f}), test "
+          f"{100 * t2:+.2f} -> {'HELPS' if ok_s2 and ok_sh else 'no'} (needs both)")

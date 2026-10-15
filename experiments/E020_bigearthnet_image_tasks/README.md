@@ -3,7 +3,7 @@
 Status: **done** (registered 2026-10-15 before any run; run 2026-10-15/16 at code `7be9202`).
 Result: ManySeg matches timm on classification and regression (Q1). Band groups, Sentinel-1
 and metadata do not help (Q2–Q4). A segmentation head on the reference maps **helps** the
-image classifier (Q5: +2.1 val, +2.3 test macro mAP), as a regulariser.
+image classifier (Q5: +2.1 val, +2.3 test macro mAP); post hoc, it looks like regularisation.
 
 ## Question
 Once ManySeg's classifiers match timm (E019), do the things timm cannot express help an

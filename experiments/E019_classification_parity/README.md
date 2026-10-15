@@ -1,6 +1,6 @@
 # E019: Image classification parity: ManySeg image heads vs plain timm (pre-registered)
 
-Status: **done** (registered 2026-10-15 before any run; run at code `1da0559`, E019b at `30a1364`). Result: **parity** in all six cells on val; ManySeg is 0.43 points lower on test on average (ConvNeXt most), and timm-style head init (E019b) halves that but misses its adoption bar, so the default is unchanged.
+Status: **done** (registered 2026-10-15 before any run; run at code `1da0559`, E019b at `30a1364`). Result: **parity** in all six cells on val; ManySeg is 0.43 points lower on test on average (ConvNeXt most), and timm-style head init (E019b) narrows it to 0.27 but misses its adoption bar, so the default is unchanged.
 
 ## Question
 ManySeg can build classifiers and regressors: an encoder plus an image-scope head (global

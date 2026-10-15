@@ -142,8 +142,10 @@ model = create_model(
 out = model({"s2_10m": a, "s2_20m": b, "meta": doy})   # crop (N, 10), harvest (N, 2)
 ```
 
-For a single RGB/multispectral tensor and one output this is the same network as
-`timm.create_model(backbone, num_classes=K, in_chans=C)` (same pretrained stem adaptation).
+For a single RGB/multispectral tensor and one output this matches
+`timm.create_model(backbone, num_classes=K, in_chans=C)`: same encoder, pretrained weights and
+stem adaptation, pool + linear head. Exception: families whose timm head has a pre-logits norm
+(ConvNeXt's LayerNorm) are pooled without it here.
 
 > **Evidence (E019):** on EuroSAT-MS (13 bands) and Pet breeds, with ResNet-50, ConvNeXt-T and
 > PVTv2-b0, ManySeg and timm classifiers are at parity on validation accuracy in all six cells.
@@ -153,11 +155,12 @@ For a single RGB/multispectral tensor and one output this is the same network as
 >
 > **Evidence (E020, BigEarthNet v2, 19-class multi-label, ResNet-50):** parity with timm for
 > classification and for class-fraction regression. Resolution band groups, Sentinel-1 (stacked
-> or fused) and date + country metadata did not help. **When pixel labels exist, add a pixel
-> head:** a segmentation head on the reference maps (U-Net decoder; the classifier still pools
-> the encoder) raised test macro mAP by +2.3 (val +2.1), mostly on hard classes, by
-> regularising the classifier (no gain at its early peak; it stops the late overfitting). Cost:
-> the decoder's parameters and ~37% lower training throughput. Mix image and pixel heads freely: the decoder is built only when a pixel
+> or fused) and date + country metadata did not help. A segmentation head on the reference maps
+> (U-Net decoder; the classifier still pools the encoder) raised test macro mAP by +2.3 (val
+> +2.1), mostly on hard classes. One encoder, a 60k-patch subset and a fixed 12-epoch budget; a
+> post-hoc look suggests regularisation (no gain at the classifier's early peak, less late
+> overfitting), so the gain may shrink with early stopping. Worth trying when pixel labels exist;
+> cost: the decoder's parameters and ~37% lower training throughput. Mix image and pixel heads freely: the decoder is built only when a pixel
 head needs it. Head and input names must not be Python keywords (`yield`, `class`, ...):
 `torch.export` reads modules as attributes.
 

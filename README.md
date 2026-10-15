@@ -135,9 +135,10 @@ results included. Highlights:
   fastai's 4× (E006, E012). On Oxford Pet the recipe matters more than the decoder (E002, E003).
 * Decoder `out_stride=2` costs no accuracy for `unet` and saves 11–18% memory (E006).
 * Image classification (E019, E020): ManySeg classifiers and regressors match plain timm ones
-  (val parity on EuroSAT-MS, Pet breeds and BigEarthNet v2). On BigEarthNet, a segmentation
-  head on the reference maps next to the classifier raised test macro mAP by +2.3 as a
-  regulariser; band groups, Sentinel-1 and metadata did not help.
+  (val parity on EuroSAT-MS, Pet breeds and BigEarthNet v2; ConvNeXt slightly lower on test).
+  On BigEarthNet, a segmentation head on the reference maps next to the classifier raised test
+  macro mAP by +2.3 (one encoder, fixed 12 epochs; post hoc it looks like regularisation); band
+  groups, Sentinel-1 and metadata did not help.
 * Pareto front (E018): PVTv2-b0 with a half-width U-Net is about 2× faster than the ResNet-34
   U-Net default on a 4090 (bf16, compiled) and more accurate on both Pet and Sen1Floods11. The
   four front configs ship as opt-in `manyseg.presets` (`fast`, `compact`, `balanced`,
