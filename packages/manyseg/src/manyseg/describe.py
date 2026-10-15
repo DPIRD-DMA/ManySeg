@@ -158,8 +158,12 @@ def _strides(specs, idx) -> str:
 
 def _read_levels(dec: nn.Module) -> list[int] | None:
     """Encoder levels a decoder reads, from its own attributes (no probe)."""
-    from .decoders import (DeepLabV3PlusDecoder, FastaiUNetDecoder, UNetDecoder,
-                           UNetPlusPlusDecoder)
+    from .decoders import (
+        DeepLabV3PlusDecoder,
+        FastaiUNetDecoder,
+        UNetDecoder,
+        UNetPlusPlusDecoder,
+    )
 
     declared = getattr(dec, "read_levels", None)
     if declared is not None:
@@ -176,9 +180,23 @@ def _read_levels(dec: nn.Module) -> list[int] | None:
     return sorted(levels) if levels is not None else None
 
 
+def _image_use(dec: nn.Module) -> str:
+    """How a ``wants_input`` decoder uses the raw image: ``fastai_unet`` below stride 1 only
+    reads its size."""
+    from .decoders import FastaiUNetDecoder
+
+    if isinstance(dec, FastaiUNetDecoder) and not dec.last_cross:
+        return "size only"
+    return "concatenated at stride 1"
+
+
 def _decoder_options(dec: nn.Module) -> list[tuple[str, str, bool]]:
-    from .decoders import (DeepLabV3PlusDecoder, FastaiUNetDecoder, UNetDecoder,
-                           UNetPlusPlusDecoder)
+    from .decoders import (
+        DeepLabV3PlusDecoder,
+        FastaiUNetDecoder,
+        UNetDecoder,
+        UNetPlusPlusDecoder,
+    )
 
     if isinstance(dec, UNetDecoder):
         return [("block channels", str(tuple(dec.channels)), False),
@@ -246,7 +264,7 @@ class _Builder:
         elif self.multi or self.early:
             self.rasters = list(bb.names)
         else:
-            self.rasters = ["input"]
+            self.rasters = ["x"]  # model(x) takes a plain tensor
         self.cap = _Capture()
         self.flops: dict[str, int] = {}
         self.output = None
@@ -380,11 +398,16 @@ class _Builder:
             for v in self.cond.vectors:
                 enc = self.cond.encoders[v]
                 mode = self.cond.modes[v]
-                n = self.add(f"in_{v}", "input", v, f"vector, {enc.columns} cols, {mode}",
-                             modules=[enc], style="vector")
-                fields = ", ".join(f"{f} ({_registry_name(FIELD_TYPES, enc.fields[f])})"
-                                   for f in enc.field_names)
-                n.attrs.append(("fields", fields, True))
+                cols = f"{enc.columns} col" + ("s" if enc.columns != 1 else "")
+                n = self.add(f"in_{v}", "input", v, f"vector, {cols}, {mode}", modules=[enc],
+                             style="vector")
+                if enc.field_names == tuple(str(i) for i in range(len(enc.field_names))):
+                    n.attrs.append(("fields", f"{len(enc.field_names)} pre-normalised floats",
+                                    True))
+                else:
+                    fields = ", ".join(f"{f} ({_registry_name(FIELD_TYPES, enc.fields[f])})"
+                                       for f in enc.field_names)
+                    n.attrs.append(("fields", fields, True))
                 mlp = "no MLP" if isinstance(enc.mlp, nn.Identity) else f"MLP -> {enc.dim}"
                 n.attrs.append(("encoding", f"width {enc.width}, {mlp}", True))
                 if enc.dropout:
@@ -405,15 +428,17 @@ class _Builder:
             native = (cfg.get("input_size") or (3,))[0]
             if isinstance(enc.input_adapter, ProjectionAdapter):
                 p = enc.input_adapter.proj
-                stem = f"{enc.in_channels} ch, projection 1x1 conv {p.in_channels}->{p.out_channels}"
+                stem = (f"{enc.in_channels} ch, projection 1x1 conv "
+                        f"{p.in_channels}->{p.out_channels}")
             elif enc.in_channels != native:
                 stem = f"{enc.in_channels} ch, '{enc.channel_adapter}' weights from {native} ch"
             else:
                 stem = f"{enc.in_channels} ch, unchanged"
             n.attrs.append(("stem", stem, True))
             if enc.neck is not None:
-                n.attrs.append(("layout", f"plain ViT, blocks {list(enc.block_indices)} "
-                                f"at /{enc.neck.patch_stride} -> pyramid neck", True))
+                blocks = ",".join(map(str, enc.block_indices))
+                n.attrs.append(("layout", f"plain ViT, blocks {blocks} at "
+                                f"/{enc.neck.patch_stride} -> pyramid neck", True))
             elif enc.nhwc:
                 n.attrs.append(("layout", "NHWC features, permuted to NCHW", False))
             if enc.fixed_size is not None:
@@ -424,13 +449,13 @@ class _Builder:
         n.attrs.append(("divisor", str(getattr(enc, "input_divisor", "?")), False))
         return n
 
-    def _shapes(self, node: Node, mod: nn.Module, call: int = 0, inp: bool = True) -> None:
-        got = self.cap.get(mod, call)
+    def _shapes(self, node: Node, mod: nn.Module, inp: bool = True) -> None:
+        got = self.cap.get(mod)
         if got is None:
             return
         args, out = got
         if inp and args and isinstance(args[0], Tensor):
-            node.shapes.append(("in", _fmt_shape(args[0])))
+            node.shapes.append(("padded in", _fmt_shape(args[0])))
         node.shapes.append(("out", _fmt_shape(out)))
 
     def _encoders(self):
@@ -443,12 +468,12 @@ class _Builder:
             fuse.attrs.append(("order", " + ".join(bb.names), True))
             for r in bb.names:
                 self.edge(self.inputs[r], fuse)
-            enc = self._encoder_node(bb.backbone, "shared", "enc")
+            enc = self._encoder_node(bb.backbone, "encoder", "enc")
             self.edge(fuse, enc, f"{getattr(bb.backbone, 'in_channels', '?')} ch")
             self._shapes(enc, bb.backbone)
             return enc
         if not self.multi:
-            enc = self._encoder_node(bb, self.rasters[0], "enc")
+            enc = self._encoder_node(bb, "encoder", "enc")
             self.edge(self.inputs[self.rasters[0]], enc)
             self._shapes(enc, bb)
             return enc
@@ -502,6 +527,10 @@ class _Builder:
         plan = "; ".join(f"/{pspecs[li].stride}: " + "+".join(n for n, _ in members)
                          for li, members in enumerate(bb._plan) if len(members) > 1)
         fuse.attrs.append(("plan", plan or "-", False))
+        extent = [r for r in bb.names if r != bb.primary and bb.alignment[r] == "same_extent"]
+        if extent:
+            fuse.attrs.append(("resampled", f"{', '.join(extent)} (same_extent: valid region, "
+                               "bilinear, onto the primary grid)", True))
         fuse.attrs.append(("output levels", _levels(pspecs), False))
         for r in bb.names:
             if r == bb.primary:
@@ -522,7 +551,7 @@ class _Builder:
     def _film(self, key: str) -> nn.Module | None:
         if self.cond is None:
             return None
-        return self.cond.film[key] if key in self.cond.film else None
+        return self.cond.film[key] if key in self.cond.film else None  # noqa: SIM401 (ModuleDict has no get)
 
     def _decoder_node(self, node_id: str, name: str, dec: nn.Module, specs) -> Node:
         from .decoders import DECODERS
@@ -536,7 +565,7 @@ class _Builder:
             n.attrs.append(("reads", _strides(specs, reads), True))
         n.attrs += _decoder_options(dec)
         if getattr(dec, "wants_input", False):
-            n.attrs.append(("input image", "yes (stride 1)", True))
+            n.attrs.append(("input image", _image_use(dec), True))
         self._shapes(n, dec, inp=False)
         return n
 
@@ -563,9 +592,15 @@ class _Builder:
             self.edge(feats, target, _strides(specs, reads) if reads is not None else "")
             if getattr(dec, "wants_input", False):
                 src = self.inputs[self.rasters[0]]
-                self.edge(src, target, "input image", kind="image")
+                label = "input image" + (" (size only)" if _image_use(dec) == "size only" else "")
+                self.edge(src, target, label, kind="image")
         if film is not None:
-            lv = ", ".join(f"/{specs[i].stride}" for i in film.levels) or "none"
+            if isinstance(dec, self.LateFusionDecoder):
+                lv = "; ".join(f"{r} " + (", ".join(f"/{specs[i].stride}" for i in film.levels
+                                                    if a <= i < b) or "none")
+                               for r, (a, b) in zip(self.bb.names, dec.groups))
+            else:
+                lv = ", ".join(f"/{specs[i].stride}" for i in film.levels) or "none"
             out = "yes" if film.output is not None else "no"
             target.attrs.append(("FiLM", f"levels {lv}; output {out}", True))
             target.attrs.append(("FiLM params", _fmt_count(_nparams(film)), False))
@@ -773,7 +808,7 @@ def _to_text(g: ModelGraph) -> str:
                     src = g.nodes[e.src]
                     tag = f" ({e.label})" if e.label else ""
                     via = "" if e.kind == "data" else f" [{e.kind}]"
-                    lines.append(f"      <- {src.stage} {src.name}{tag}{via}")
+                    lines.append(f"      <- {_heading(src)}{tag}{via}")
             for k, v in n.shapes:
                 lines.append(f"      shape {k}: {v}")
     return "\n".join(lines) + "\n"
@@ -790,21 +825,30 @@ def _diagram_lines(n: Node) -> list[str]:
 
 
 def _wrap(s: str, width: int = 48) -> list[str]:
-    """Break long comma-separated values so diagram boxes stay narrow."""
+    """Break long values at "; " first, then at ", ", so diagram boxes stay narrow."""
     if len(s) <= width:
         return [s]
     out, cur = [], ""
-    for part in re.split(r"(?<=[,;]) ", s):
-        if cur and len(cur) + len(part) + 1 > width:
-            out.append(cur)
-            cur = "  " + part
-        else:
-            cur = f"{cur} {part}" if cur else part
+    for chunk in re.split(r"(?<=;) ", s):
+        parts = [chunk] if len(chunk) <= width else re.split(r"(?<=,) ", chunk)
+        for part in parts:
+            if cur and len(cur) + len(part) + 1 > width:
+                out.append(cur)
+                cur = "  " + part
+            else:
+                cur = f"{cur} {part}" if cur else part
     return out + [cur]
 
 
+def _heading(n: Node) -> str:
+    """Bold first line of a diagram box: the name, prefixed by its stage where that helps."""
+    if n.name.startswith(n.stage) or n.name.startswith("fusion"):
+        return n.name
+    return f"{n.stage}: {n.name}"
+
+
 def _dot_label(n: Node) -> str:
-    rows = [f"<b>{html.escape(n.name)}</b>"]
+    rows = [f"<b>{html.escape(_heading(n))}</b>"]
     for line in _diagram_lines(n):
         rows += [html.escape(w) for w in _wrap(line)]
     return "<" + '<br align="left"/>'.join(rows) + '<br align="left"/>>'
@@ -845,8 +889,9 @@ def _to_dot(g: ModelGraph) -> str:
 
 
 def _mermaid_text(s: str) -> str:
-    return (s.replace("&", "&amp;").replace('"', "#quot;").replace("<", "&lt;")
-            .replace(">", "&gt;").replace("|", "/"))
+    # Mermaid entity codes (#quot; ...) rather than HTML ones, which some renderers show raw.
+    return (s.replace("->", "→").replace('"', "#quot;").replace("<", "#lt;")
+            .replace(">", "#gt;").replace("|", "/"))
 
 
 _MERMAID_SHAPES = {"input": ('(["', '"])'), "adapter": ('["', '"]'), "encoder": ('["', '"]'),
@@ -857,7 +902,7 @@ def _to_mermaid(g: ModelGraph) -> str:
     out = ["flowchart LR"]
     for n in g.nodes.values():
         a, b = _MERMAID_SHAPES[n.stage]
-        rows = [f"<b>{_mermaid_text(n.name)}</b>"]
+        rows = [f"<b>{_mermaid_text(_heading(n))}</b>"]
         for line in _diagram_lines(n):
             rows += [_mermaid_text(w.strip()) for w in _wrap(line)]
         out.append(f"  {n.id}{a}{'<br/>'.join(rows)}{b}")
@@ -865,8 +910,10 @@ def _to_mermaid(g: ModelGraph) -> str:
         label = _mermaid_text(e.label)
         arrow = {"data": "-->", "condition": "-.->", "image": "-.->"}[e.kind]
         out.append(f"  {e.src} {arrow}" + (f"|{label}|" if label else "") + f" {e.dst}")
+    used = {n.style or n.stage for n in g.nodes.values()}
     for key, color in _COLORS.items():
-        out.append(f"  classDef {key} fill:{color},stroke:#5f6368")
+        if key in used:
+            out.append(f"  classDef {key} fill:{color},stroke:#5f6368")
     for n in g.nodes.values():
         out.append(f"  class {n.id} {n.style or n.stage}")
     return "\n".join(out) + "\n"
