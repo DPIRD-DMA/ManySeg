@@ -1,6 +1,6 @@
 # E019: Image classification parity: ManySeg image heads vs plain timm (pre-registered)
 
-Status: **planned** (registered 2026-10-15, before any run).
+Status: **done** (registered 2026-10-15 before any run; run at code `1da0559`, E019b at `30a1364`). Result: **parity** in all six cells on val; ManySeg is 0.43 points lower on test on average (ConvNeXt most), and timm-style head init (E019b) halves that but misses its adoption bar, so the default is unchanged.
 
 ## Question
 ManySeg can build classifiers and regressors: an encoder plus an image-scope head (global
@@ -52,3 +52,33 @@ ManySeg was ahead on test (+0.79). ConvNeXt additionally has timm's pretrained h
   ManySeg − timm test gap moves from −0.43 to within ±0.20 points and the mean val gap is no
   worse than E019's (−0.16). Otherwise the default stays and the gap is documented. Per-cell
   results are reported either way (ConvNeXt's head norm is not addressed by this arm).
+
+## Results
+
+36 E019 runs + 18 E019b runs, no failures (local 4090). Val/test accuracy, mean of seeds 0–2;
+gap = ManySeg − timm in points; bar = the parity threshold. Full tables:
+`uv run python experiments/E019_classification_parity/analyse.py`.
+
+| dataset | encoder | val ManySeg / timm | val gap (bar) | test gap (pooled SD) | E019b val gap | E019b test gap |
+|---|---|---|---|---|---|---|
+| EuroSAT-MS | ResNet-50 | 0.9574 / 0.9578 | −0.04 (1.06) | +0.79 (0.38) | −0.31 | +0.59 |
+| EuroSAT-MS | ConvNeXt-T | 0.9627 / 0.9653 | −0.26 (0.70) | −0.86 (0.43) | −0.13 | −0.78 |
+| EuroSAT-MS | PVTv2-b0 | 0.9566 / 0.9570 | −0.04 (0.64) | −0.79 (0.57) | +0.01 | −0.24 |
+| Pet breeds | ResNet-50 | 0.9264 / 0.9264 | +0.00 (1.11) | −0.49 (0.43) | −0.09 | −0.12 |
+| Pet breeds | ConvNeXt-T | 0.9504 / 0.9566 | −0.62 (1.87) | −0.76 (0.31) | +0.18 | −0.60 |
+| Pet breeds | PVTv2-b0 | 0.9122 / 0.9122 | +0.00 (2.71) | −0.49 (0.37) | −0.44 | −0.45 |
+| **mean** | | | **−0.16** | **−0.43** | **−0.13** | **−0.27** |
+
+* **Decision (E019):** all six cells are at parity on val. ManySeg image heads are documented
+  as equivalent to timm classifiers, with the test caveat below, and E020 proceeds.
+* **Test caveat:** ManySeg was lower on test in 5 of 6 cells (−0.43 on average; 1.1–2.5 pooled
+  SD per cell). Same parameters (ConvNeXt: timm has 1,536 more, its head LayerNorm), same
+  pretrained weights (fingerprint test), same throughput (±6%).
+* **Decision (E019b):** timm's classifier init (`{"head": {"init_std": 0.02}}`) moved the mean
+  test gap to −0.27, outside the pre-registered ±0.20, so it stays an option and the default
+  init is unchanged. It closed most of the PVTv2 EuroSAT and ResNet-50 Pet gaps; the remaining
+  gap is mostly ConvNeXt (−0.78, −0.60), consistent with timm's pretrained pre-logits
+  LayerNorm, which ManySeg's image head (pool + linear on the encoder's last stage) does not
+  have.
+* **Not tested here:** heads with a norm before the linear layer; larger datasets; other
+  recipes. For ConvNeXt classification today, plain timm is marginally better on test.
