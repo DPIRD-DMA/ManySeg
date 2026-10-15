@@ -10,15 +10,35 @@ import torch.multiprocessing as mp
 pytestmark = pytest.mark.slow
 
 
-def _build(seed=0):
+HEADS = {"seg": {"type": "segmentation", "channels": 2},
+         "area": {"type": "regression", "channels": 1, "scope": "image"},
+         "edge": {"type": "segmentation", "channels": 1, "decoder": "fpn"}}
+
+
+def _build(kind):
     from manyseg import create_model
 
-    torch.manual_seed(seed)
-    return create_model(backbone="resnet18", pretrained=False, decoder="unet",
-                        heads={"seg": {"type": "segmentation", "channels": 2},
-                               "area": {"type": "regression", "channels": 1, "scope": "image"},
-                               "edge": {"type": "segmentation", "channels": 1,
-                                        "decoder": "fpn"}})
+    torch.manual_seed(0)
+    if kind == "single":
+        return create_model(backbone="resnet18", pretrained=False, decoder="unet", heads=HEADS)
+    # Multi-input + shared encoder + metadata (FiLM on decoders, bias on a head): the
+    # conditioner's parameters are used outside its own forward (Codex review).
+    return create_model(
+        backbone="resnet18", pretrained=False, decoder="unet", heads=HEADS,
+        fusion={"type": "intermediate", "op": "gated"},
+        inputs={"a": {"channels": 3}, "b": {"channels": 2, "backbone": "shared:a"},
+                "meta": {"kind": "vector", "conditioning": "film",
+                         "fields": {"doy": {"type": "cyclic", "period": 365.25}}},
+                "meta2": {"kind": "vector", "conditioning": {"mode": "head", "pixel": True},
+                          "fields": {"elev": {"type": "continuous", "mean": 0.0, "std": 1.0}}}})
+
+
+def _inputs(kind, rank):
+    torch.manual_seed(100 + rank)  # different data per rank
+    if kind == "single":
+        return torch.randn(2, 3, 64, 96)
+    return {"a": torch.randn(2, 3, 64, 96), "b": torch.randn(2, 2, 64, 96),
+            "meta": torch.rand(2, 1) * 365, "meta2": torch.randn(2, 1)}
 
 
 def _step(model, x):
@@ -28,38 +48,40 @@ def _step(model, x):
     opt.step()
 
 
-def _worker(rank: int, world: int, port: int, out):
+def _worker(rank: int, world: int, port: int, kind: str, out):
     os.environ.update(MASTER_ADDR="127.0.0.1", MASTER_PORT=str(port))
     dist.init_process_group("gloo", rank=rank, world_size=world)
     from manyseg.distributed import shard_model
 
-    torch.manual_seed(100 + rank)  # different data per rank
-    x = torch.randn(2, 3, 64, 96)
-
-    ddp = torch.nn.parallel.DistributedDataParallel(_build())
+    x = _inputs(kind, rank)
+    ddp = torch.nn.parallel.DistributedDataParallel(_build(kind))
     _step(ddp, x)
     ref = {k: v.detach().clone() for k, v in ddp.module.state_dict().items()}
 
-    fsdp = shard_model(_build())
-    units = [m for m in fsdp.modules() if type(m).__name__.startswith("FSDP")]
+    fsdp = shard_model(_build(kind))
+    # Units that own sharded parameters (a class change alone proves nothing).
+    units = [m for m in fsdp.modules() if type(m).__name__.startswith("FSDP") and any(
+        type(p).__name__ == "DTensor" for p in m.parameters(recurse=False))]
+    sharded = all(type(p).__name__ == "DTensor" for p in fsdp.parameters())
     _step(fsdp, x)
     full = {k: (v.full_tensor() if hasattr(v, "full_tensor") else v).detach().clone()
             for k, v in fsdp.state_dict().items()}
-    out[rank] = {"ref": ref, "fsdp": full, "units": len(units)}
+    out[rank] = {"ref": ref, "fsdp": full, "units": len(units), "sharded": sharded}
     dist.destroy_process_group()
 
 
-def test_shard_model_matches_ddp():
+@pytest.mark.parametrize("kind", ["single", "multi_conditioned"])
+def test_shard_model_matches_ddp(kind):
     import socket
 
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
     out = mp.Manager().dict()
-    mp.spawn(_worker, args=(2, port, out), nprocs=2, join=True)
+    mp.spawn(_worker, args=(2, port, kind, out), nprocs=2, join=True)
     for rank in (0, 1):
         r = out[rank]
-        assert r["units"] >= 6  # backbone, shared + task decoder, 3 heads, root
+        assert r["sharded"]  # every parameter is owned by some unit
         for k, v in r["ref"].items():
             if "running_" in k or "num_batches_tracked" in k:
                 continue  # BN statistics are per rank under both DDP and FSDP

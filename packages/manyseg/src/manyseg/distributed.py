@@ -1,8 +1,8 @@
 """FSDP2 sharding for ManySeg models.
 
 ``shard_model`` applies ``torch.distributed.fsdp.fully_shard`` stage by stage: the backbone
-(each input's encoder for multi-input models), the shared decoder, each task decoder, the
-heads and the conditioner, then the root. One FSDP unit per stage lets FSDP overlap
+(each input's encoder for multi-input models), the shared decoder, each task decoder and each
+head, then the root (which also owns the conditioner, fusion and adapters). One FSDP unit per stage lets FSDP overlap
 communication with compute; finer units buy little at segmentation-model sizes. DDP needs
 nothing from ManySeg (wrap the model as usual).
 """
@@ -28,8 +28,9 @@ def _stages(model: nn.Module) -> list[nn.Module]:
         stages.append(model.decoder)
     stages += list(model.task_decoders.values())
     stages += list(model.heads.values())  # a ModuleDict has no forward; shard each head
-    if getattr(model, "conditioner", None) is not None:
-        stages.append(model.conditioner)
+    # The conditioner is *not* its own unit: DenseModel calls its FiLM / head-bias methods
+    # outside Conditioner.forward, after a separate unit would have resharded them. Its
+    # parameters belong to the root unit, which stays gathered for the whole forward.
     return [s for s in stages if any(p.requires_grad for p in s.parameters())]
 
 

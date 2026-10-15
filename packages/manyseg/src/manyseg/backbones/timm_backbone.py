@@ -54,43 +54,67 @@ def introspect(name: str) -> dict:
 _FIXED_SIZE_CACHE: dict[str, tuple[int, int] | None] = {}
 
 
-def _probe_fixed_size(name: str, kwargs: dict, divisor: int, model: nn.Module,
-                      in_channels: int) -> tuple[int, int] | None:
-    key = repr((name.split(".", 1)[0], sorted(kwargs.items(), key=str), divisor))
-    if key not in _FIXED_SIZE_CACHE:  # depends only on the architecture and its kwargs
+def _probe_fixed_size(name: str, kwargs: dict, divisor: int, run, in_channels: int,
+                      adapter: str) -> tuple[int, int] | None:
+    # The meta probe depends on the architecture and its kwargs; the real fallback also on
+    # the (adapted) input channels, so those are part of the key.
+    key = repr((name.split(".", 1)[0], sorted(kwargs.items(), key=str), divisor, in_channels,
+                adapter))
+    if key not in _FIXED_SIZE_CACHE:
         found = _probe_fixed_size_uncached(name, kwargs, divisor)
         if found == "inconclusive":  # meta-device ops missing (older torch): probe for real
-            found = _probe_real(model, in_channels, divisor)
+            found = _probe_real(run, in_channels, divisor)
         _FIXED_SIZE_CACHE[key] = found
     return _FIXED_SIZE_CACHE[key]
 
 
-def _native_and_odd(cfg: dict, divisor: int):
+def _probe_sizes(cfg: dict, divisor: int):
+    """(channels, native size, other sizes): fixed means only the native size runs. Two
+    other sizes, an awkward one and native + one stride, so an any-size model with an extra
+    divisibility rule is not mistaken for a fixed-size one."""
     c, h, w = (tuple(cfg.get("input_size") or (3, 224, 224)) + (224, 224))[:3]
-    return c, (int(h), int(w)), tuple(-(-n // divisor) * divisor for n in (97, 131))
+    native = (int(h), int(w))
+    odd = tuple(-(-n // divisor) * divisor for n in (97, 131))
+    others = [s for s in (odd, (native[0] + divisor, native[1] + divisor)) if s != native]
+    return c, native, others
 
 
-def _probe_real(model: nn.Module, in_channels: int, divisor: int) -> tuple[int, int] | None:
-    """The same test on the built (CPU) model; only reached when the meta probe cannot run."""
-    _, native, odd = _native_and_odd(getattr(model, "pretrained_cfg", {}) or {}, divisor)
-    if odd == native:
+def _fixed_from(try_size, native, others):
+    """``try_size(hw) -> bool``. Fixed iff native runs and every other size fails; None if
+    native fails too (nothing can be concluded)."""
+    if not try_size(native):
+        return "inconclusive"
+    return native if others and not any(try_size(s) for s in others) else None
+
+
+def _probe_real(run, in_channels: int, divisor: int) -> tuple[int, int] | None:
+    """The same test on the built CPU backbone (through its input adapter), only reached when
+    the meta probe cannot run. Skipped for very large models (two full CPU forwards)."""
+    model = run.__self__ if hasattr(run, "__self__") else None
+    params = sum(p.numel() for p in model.parameters()) if model is not None else 0
+    if params > 150_000_000:
         return None
-    was = model.training
-    model.eval()
+    cfg = getattr(getattr(model, "model", None), "pretrained_cfg", {}) or {}
+    _, native, others = _probe_sizes(cfg, divisor)
+    was = model.training if model is not None else False
+    if model is not None:
+        model.eval()
+    dev = next(model.parameters()).device if model is not None else torch.device("cpu")
+
+    def try_size(hw):
+        try:
+            with torch.no_grad():
+                run(torch.zeros(1, in_channels, *hw, device=dev))
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
     try:
-        with torch.no_grad():
-            dev = next(model.parameters()).device
-            try:
-                model(torch.zeros(1, in_channels, *native, device=dev))
-            except Exception:  # noqa: BLE001 - fails even at native size: conclude nothing
-                return None
-            try:
-                model(torch.zeros(1, in_channels, *odd, device=dev))
-            except Exception:  # noqa: BLE001
-                return native
-            return None
+        found = _fixed_from(try_size, native, others)
+        return None if found == "inconclusive" else found
     finally:
-        model.train(was)
+        if model is not None:
+            model.train(was)
 
 
 def _probe_fixed_size_uncached(name: str, kwargs: dict, divisor: int):
@@ -98,25 +122,25 @@ def _probe_fixed_size_uncached(name: str, kwargs: dict, divisor: int):
 
     Some timm models (MaxViT, CoAtNet, LeViT, EfficientFormerV2, Hiera, ...) bake the input size
     into window partitions or positional tables and fail deep inside timm at other sizes. A
-    meta-device forward (shapes only, no memory or compute) at the native size and at an
-    awkward padded size tells them apart. If even the native probe fails (an op without meta
-    support, e.g. on older torch), ``_probe_real`` repeats the test on the built CPU model."""
+    meta-device forward (shapes only, no memory or compute) at the native size and at two other
+    sizes tells them apart. If even the native probe fails (an op without meta support, e.g. on
+    older torch), "inconclusive" sends the caller to ``_probe_real``."""
     try:
         with torch.device("meta"):
             m = timm.create_model(name.split(".", 1)[0], pretrained=False, **kwargs)
-        c, native, odd = _native_and_odd(getattr(m, "pretrained_cfg", {}) or {}, divisor)
-        if odd == native:
-            return None
-        with torch.no_grad():
-            m(torch.empty(1, c, *native, device="meta"))
-    except Exception:  # noqa: BLE001 - the meta probe itself cannot run
+    except Exception:  # noqa: BLE001
         return "inconclusive"
-    try:
-        with torch.no_grad():
-            m(torch.empty(1, c, *odd, device="meta"))
-    except Exception:  # noqa: BLE001 - any failure at a non-native size means "fixed"
-        return native
-    return None
+    c, native, others = _probe_sizes(getattr(m, "pretrained_cfg", {}) or {}, divisor)
+
+    def try_size(hw):
+        try:
+            with torch.no_grad():
+                m(torch.empty(1, c, *hw, device="meta"))
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
+    return _fixed_from(try_size, native, others)
 
 
 def _size_kwargs(init_params: set[str]) -> dict:
@@ -198,8 +222,10 @@ class TimmBackbone(nn.Module):
         kwargs = dict(features_only=True, **_size_kwargs(arch["init_params"]))
         kwargs.update(timm_kwargs)
         self.fixed_size: tuple[int, int] | None = None
-        if "img_size" in timm_kwargs and not ({"dynamic_img_size", "strict_img_size"}
-                                              & arch["init_params"]):
+        # A user img_size fixes the size unless timm is told to accept others: no dynamic
+        # size support, or the dynamic/strict flags (ours or the user's) leave it strict.
+        dynamic = bool(kwargs.get("dynamic_img_size")) or kwargs.get("strict_img_size") is False
+        if "img_size" in timm_kwargs and not dynamic:
             size = timm_kwargs["img_size"]
             self.fixed_size = (size, size) if isinstance(size, int) else tuple(size)
         if self.is_plain and out_indices is None:
@@ -250,8 +276,9 @@ class TimmBackbone(nn.Module):
         self.feature_specs: tuple[FeatureSpec, ...] = specs
         if self.fixed_size is None and not self.is_plain and "img_size" not in timm_kwargs:
             # DenseModel pads smaller inputs up to a fixed size and rejects larger ones clearly.
-            self.fixed_size = _probe_fixed_size(name, kwargs, self.input_divisor, self.model,
-                                                in_channels)
+            self.fixed_size = _probe_fixed_size(name, kwargs, self.input_divisor,
+                                                self._run_adapted, in_channels,
+                                                channel_adapter)
         self.mean = tuple(cfg.get("mean", (0.485, 0.456, 0.406)))
         self.std = tuple(cfg.get("std", (0.229, 0.224, 0.225)))
 
@@ -259,6 +286,9 @@ class TimmBackbone(nn.Module):
     def input_divisor(self) -> int:
         """Inputs whose H and W are multiples of this give exactly aligned feature maps."""
         return math.lcm(*(s.stride for s in self.feature_specs))
+
+    def _run_adapted(self, x: Tensor):
+        return self.model(self.input_adapter(x))
 
     def stem_conv(self) -> nn.Conv2d:
         return self.model.get_submodule(self._stem_name)

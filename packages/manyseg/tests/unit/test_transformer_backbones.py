@@ -115,3 +115,23 @@ def test_size_restricted_backbone_detected_without_img_size(name):
 def test_any_size_backbones_stay_unrestricted():
     for name in ("resnet18", "convnext_atto", "swin_tiny_patch4_window7_224"):
         assert create_backbone(name, pretrained=False).fixed_size is None, name
+
+
+def test_fixed_size_rule_needs_every_other_size_to_fail():
+    """Codex review: one failing odd size must not mark an any-size model with an extra
+    divisibility rule as fixed; native failing means nothing can be concluded."""
+    from manyseg.backbones.timm_backbone import _fixed_from
+
+    native, others = (224, 224), [(128, 160), (256, 256)]
+    assert _fixed_from(lambda hw: hw == native, native, others) == native
+    assert _fixed_from(lambda hw: hw != (128, 160), native, others) is None  # 256 runs
+    assert _fixed_from(lambda hw: False, native, others) == "inconclusive"
+
+
+def test_projection_adapter_fixed_model_still_detected():
+    """Codex review: the probe cache is keyed by channels/adapter; a 13-band projection stem
+    on a fixed-size model is detected and still runs at a smaller size via padding."""
+    model = create_model(backbone="levit_128s", pretrained=False, in_channels=13,
+                         channel_adapter="projection", num_classes=2).eval()
+    assert model.backbone.fixed_size == (224, 224)
+    assert model(torch.randn(1, 13, 97, 131)).shape == (1, 2, 97, 131)
