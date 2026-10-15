@@ -594,7 +594,12 @@ slow as float. The speedup only appears after `torch.compile` with inductor free
 > *current* CPU lacks VNNI. If you quantise on one machine and deploy on another, pass
 > `reduce_range=` for the deployment CPU (`True` is always safe; `False` is about 0.1 mIoU
 > better only where VNNI exists). Always measure `compare_outputs` on the compiled module you
-> deploy, not only on `ep.module()`. Window-attention backbones are rejected before export, because their
+> deploy, not only on `ep.module()`.
+
+A full-range program (`reduce_range=False`, the default on VNNI CPUs) warns when it is made, and
+records the choice in the program (it survives `torch.export.save` / `load`). In the deployment
+script, `manyseg.quantize.check_deployment(ep)` raises if this CPU cannot run that program
+correctly. Window-attention backbones are rejected before export, because their
 dynamic export hangs rather than fails.
 
 `quantize_weights` stores Linear and Conv2d weights as int8, symmetric per output channel.

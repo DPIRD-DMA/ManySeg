@@ -154,8 +154,18 @@ def quantize_pt2e(model: nn.Module, example, calibration: Iterable, *, quantizer
     model.eval()
     shapes = _shapes(model, example, dynamic, max_size, dynamic_batch)
     gm = _export(model, example, shapes).module()
-    prepared = prepare_pt2e(gm, quantizer if quantizer is not None
-                            else _x86_quantizer(reduce_range))
+    rr = None  # unknown with a custom quantizer
+    if quantizer is None:
+        rr = (not _has_vnni()) if reduce_range is None else bool(reduce_range)
+        if not rr:
+            warnings.warn(
+                "this int8 program uses full-range activations, which are only accurate on CPUs "
+                "with VNNI (e.g. Intel Cascade Lake or newer, AMD Zen 4 or newer); on others, "
+                "compiled int8 kernels saturate silently (-6.5 mIoU on Oxford Pet in E008). To "
+                "deploy on any x86 CPU, quantise with reduce_range=True (~0.1 mIoU). "
+                "manyseg.quantize.check_deployment(ep) verifies the deployment CPU.",
+                UserWarning, stacklevel=2)
+    prepared = prepare_pt2e(gm, quantizer if quantizer is not None else _x86_quantizer(rr))
     n, bs = 0, _batch_of(example)
     with torch.no_grad():
         for x in calibration:
@@ -167,7 +177,32 @@ def quantize_pt2e(model: nn.Module, example, calibration: Iterable, *, quantizer
             n += 1
     if n == 0:
         raise ValueError("calibration must yield at least one input")
-    return _export(_drop_unused_attrs(convert_pt2e(prepared)), example, shapes)
+    converted = _drop_unused_attrs(convert_pt2e(prepared))
+    if rr is not None:  # survives torch.export.save / load; read by check_deployment
+        converted.register_buffer(_RR_KEY, torch.tensor(rr))
+    return _export(converted, example, shapes)
+
+
+_RR_KEY = "manyseg_int8_reduce_range"
+
+
+def check_deployment(ep: torch.export.ExportedProgram) -> None:
+    """Check that a ``quantize_pt2e`` program is accurate on *this* CPU: raises if it was
+    quantised with full-range activations (``reduce_range=False``) and this CPU lacks VNNI, where
+    compiled int8 kernels saturate silently (E008). Call it in the deployment script, e.g. after
+    ``torch.export.load``. Warns if the program carries no record (not produced by
+    ``quantize_pt2e``'s default quantizer)."""
+    rec = ep.state_dict.get(_RR_KEY)
+    if rec is None:
+        warnings.warn("program was not produced by manyseg.quantize.quantize_pt2e with the "
+                      "default quantizer; cannot check its activation range", UserWarning,
+                      stacklevel=2)
+        return
+    if not bool(rec) and not _has_vnni():
+        raise RuntimeError(
+            "this int8 program was quantised with full-range activations, but this CPU has no "
+            "VNNI: compiled int8 results will be silently wrong. Re-quantise with "
+            "quantize_pt2e(..., reduce_range=True).")
 
 
 def _batch_of(x) -> int:

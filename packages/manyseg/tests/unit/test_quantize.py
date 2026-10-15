@@ -232,3 +232,46 @@ def test_reduce_range_falls_back_to_safe_when_undetectable(monkeypatch):
 
     monkeypatch.delattr(torch.cpu, "_is_vnni_supported", raising=False)
     assert mq._x86_quantizer(None).global_config.input_activation.quant_max == 127
+
+
+def _tiny_int8(monkeypatch, vnni, **kw):
+    from manyseg import quantize as mq
+
+    monkeypatch.setattr(mq, "_has_vnni", lambda: vnni)
+    m = nn.Sequential(nn.Conv2d(3, 4, 3, padding=1), nn.ReLU(), nn.Conv2d(4, 2, 1)).eval()
+    x = torch.randn(2, 3, 16, 16)
+    return mq, mq.quantize_pt2e(m, x, [x], dynamic=False, **kw)
+
+
+def test_full_range_int8_warns_and_records_vnni_requirement(monkeypatch, tmp_path):
+    """E008: a full-range (non-reduce_range) int8 program is only accurate on VNNI CPUs, so the
+    risky choice warns at quantisation time and is recorded in the program, and
+    check_deployment refuses a non-VNNI CPU (survives torch.export.save / load)."""
+    pytest.importorskip("torchao")
+    with pytest.warns(UserWarning, match="VNNI"):
+        mq, ep = _tiny_int8(monkeypatch, vnni=True)
+    path = tmp_path / "m.pt2"
+    torch.export.save(ep, str(path))
+    ep = torch.export.load(str(path))
+    mq.check_deployment(ep)  # this (VNNI) CPU is fine
+    monkeypatch.setattr(mq, "_has_vnni", lambda: False)
+    with pytest.raises(RuntimeError, match="reduce_range"):
+        mq.check_deployment(ep)
+
+
+def test_reduce_range_int8_is_silent_and_deploys_anywhere(monkeypatch, recwarn):
+    pytest.importorskip("torchao")
+    mq, ep = _tiny_int8(monkeypatch, vnni=False)
+    assert not [w for w in recwarn if "VNNI" in str(w.message)]
+    mq.check_deployment(ep)
+    monkeypatch.setattr(mq, "_has_vnni", lambda: True)
+    mq.check_deployment(ep)
+
+
+def test_check_deployment_warns_when_unrecorded():
+    from manyseg.quantize import check_deployment
+
+    m = nn.Conv2d(3, 2, 1)
+    ep = torch.export.export(m, (torch.randn(1, 3, 4, 4),))
+    with pytest.warns(UserWarning, match="not produced by"):
+        check_deployment(ep)
