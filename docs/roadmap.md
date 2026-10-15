@@ -1,6 +1,6 @@
 # Roadmap
 
-Status as of 2026-10-15 (morning update). ✅ done · 🔄 in progress · ⏳ planned.
+Status as of 2026-10-15, 08:35 AWST. ✅ done · 🔄 in progress · ⏳ planned.
 
 ## Phase 1: research and architecture ✅
 
@@ -63,32 +63,30 @@ Status as of 2026-10-15 (morning update). ✅ done · 🔄 in progress · ⏳ pl
    targets, NMS peaks, counting, offset grouping and panoptic labels, with round-trip tests.
 10. ✅ **Bench tasks**: losses, object/point/count metrics, and task-aware training for
     multi-head outputs. ✅ AI4Boundaries and OAM-TCD datasets.
-11. ✅ **Metadata conditioning** (`manyseg.conditioning`; branch `feature/metadata-conditioning`):
+11. ✅ **Metadata conditioning** (`manyseg.conditioning`):
     `"kind": "vector"` inputs with cyclic / continuous / coords / categorical fields, missing
     values (mask, NaN, learned unknowns, field dropout), and `film` / `head` / `channels`
     injection with exact identity init, export and ONNX. Bench: vectors in dict mode,
-    Sen1Floods11 metadata, leave-events-out splits. ⏳ `token` mode for ViTs; E009.
-12. ✅ **Reduced output resolution** (branch `feature/reduced-resolution`): decoder `out_stride`
+    Sen1Floods11 and CloudSEN12+ metadata, leave-events-out splits (E009 done; E013 running).
+    ⏳ `token` mode for ViTs.
+12. ✅ **Reduced output resolution**: decoder `out_stride`
     for `unet` / `unetplusplus` / `fastai_unet`, where reduced decoders are strict prefixes of
     the default and the defaults keep SMP / fastai parity. Per-head `scale` (1 to 1/8; ceil
     sizes; no upsampling when the stride matches). Target downsampling and coordinate helpers,
     alignment, export and ONNX tests. Bench: scaled heads are evaluated at input resolution, and
-    runs record FLOPs, throughput and peak memory. E006 is pre-registered.
+    runs record FLOPs, throughput and peak memory (E006 done).
+13. ✅ **`input_cross`** for `unet` (fastai's full-resolution input stage, opt-in; E012).
 
-## Phase 5: research and optimisation ⏳
+## Phase 5: research and optimisation 🔄
 
-Candidate experiments. A budget is set before each one starts.
+Done (see Phase 3 for results and `experiments/` for write-ups): E001b, E002–E006, E009–E012,
+E011b, E014. Running: E013. Remaining candidates; a budget is set before each one starts:
 
 | Id | Question | Budget |
 | --- | --- | --- |
-| E003 | Is fastai's advantage (if any) decoder capacity? Width-matched U-Nets. | 3 seeds × 3 configs, Pet |
-| E001b | Does `aligned` upsampling improve trained mIoU or boundary F1? | 3 seeds × 3 modes, Pet + WHU |
-| E004 | Channel adapters on multispectral data (MADOS, Sen1Floods11 S2) | 5 adapters × 3 seeds |
-| E005 | Early vs intermediate vs late fusion on Sen1Floods11 (S1+S2) | 3 × 5 seeds |
-| E006 | Decoder Pareto front (accuracy vs FLOPs and latency): U-Net family at out_stride 1/2/4 vs stride-4 decoders, ResNet-34 + PVTv2-b2, Pet + Sen1Floods11. Pre-registered (`experiments/E006_decoder_pareto`); runs on Pawsey Setonix as Slurm arrays (`EMIT_TASKS`) | 36 runs at 1 seed, then 2 more seeds for ≤ 16 frontier configs (≤ 68 runs, about 9 GPU-h) |
-| E007 | Normalisation in the decoder (BN / GN / none + skip BN) at small batch sizes | 3 seeds |
-| E008 | bf16 / fp16 / int8 (torchao) accuracy loss vs speed | post-training, no training cost |
-| E009 | Does metadata conditioning (FiLM / channels) help flood mapping on held-out events, or does it only memorise events? Pre-registered; `queue3_metadata.sh` | 4 configs × 5 event folds × 3 seeds, plus 6 official-split runs |
+| E008 | Accuracy cost of bf16 / fp16 / int8 (`manyseg.quantize`) vs the speed gains in E014 | Post-training on saved checkpoints; a few `--save-model` runs |
+| E007 | Normalisation in the decoder (BN / GN / none + skip BN) at small batch sizes | 3 seeds, Setonix |
+| — | `input_cross` default: only if E013 Q3 replicates *and* SMP parity is given up (currently a design commitment, so not planned) | — |
 
 Stopping rule: an idea is kept only if it beats its baseline by more than 2 seed standard
 deviations on at least two datasets, at no more than a small, stated cost in latency or memory.
@@ -96,7 +94,10 @@ Negative results are written up in `experiments/` like positive ones.
 
 ## Phase 6: release preparation ⏳
 
-* Docs site, examples (single input, multispectral, multi-modal, multi-task, export).
+* Runnable examples: single input, multispectral, multi-modal, multi-task, instances/points,
+  export, quantisation.
+* Docs site.
+* README status line (currently "pre-alpha").
 * PyPI packaging for `manyseg` and `manyseg-bench` independently. Supported torch/timm range
   tested in CI.
 * Clear error messages for unsupported backbone/size combinations, using the capability table.
