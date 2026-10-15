@@ -2,8 +2,9 @@
 
 ``shard_model`` applies ``torch.distributed.fsdp.fully_shard`` stage by stage: the backbone
 (each input's encoder for multi-input models), the shared decoder, each task decoder and each
-head, then the root (which also owns the conditioner, fusion and adapters). One FSDP unit per stage lets FSDP overlap
-communication with compute; finer units buy little at segmentation-model sizes. DDP needs
+head, then the root (which also owns the conditioner, fusion and adapters). One FSDP unit per
+stage lets FSDP overlap communication with compute; finer units buy little at
+segmentation-model sizes. DDP needs
 nothing from ManySeg (wrap the model as usual).
 """
 
