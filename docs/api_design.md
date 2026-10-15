@@ -449,7 +449,9 @@ over-/under-segmentation, point F1, count MAE) live in `manyseg-bench`
 > **E016 (PASTIS, single-date crop types):** day-of-year by FiLM was +0.12 val mIoU (bar 0.99),
 > the same as a shuffled-date control. Metadata conditioning has now shown no benefit on three
 > datasets (flood events, unseen cloud scenes, crop phenology), so treat it as a tool to test on
-> your data, not a default. Only use `coords` fields with geographic or event-level
+> your data, not a default. The mechanism itself is verified end to end: a label-deciding metadata
+> bit is learned to > 0.95 mIoU through the bench's real training recipe, and a shuffled bit stays
+> at chance. The negative results are about the metadata, not the plumbing. Only use `coords` fields with geographic or event-level
 > splits; otherwise the model can memorise locations and the evaluation will not show it.
 
 ## Inspecting a built model

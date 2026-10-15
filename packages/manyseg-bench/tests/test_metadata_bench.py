@@ -253,3 +253,36 @@ def test_official_split_keeps_meta_json_statistics(tmp_path):
     norm = _run(tmp_path, data, split="official")["norm_stats"]
     assert norm["source"] == "meta.json (official train split)"
     assert norm["mean"]["s2"] == [0] * 13 and norm["std"]["s2"] == [1] * 13
+
+
+@pytest.mark.parametrize("shuffle", [False, True])
+def test_oracle_metadata_learned_through_the_bench_training_path(shuffle):
+    """Decisive conditioning check (Codex diagnosis of E009/E013/E016): noise images whose
+    labels are decided only by a metadata bit, trained with the real `fastai_like` recipe
+    (frozen first epoch, 0.1x encoder LR, weight decay) via GPULoader + train(). The real bit
+    must be learned; a shuffled bit (the controls' path) must stay at chance."""
+    from manyseg_bench.training import get_recipe, train
+
+    rng = np.random.default_rng(0)
+    n, h, w = 48, 32, 32
+    bit = rng.integers(0, 2, n)
+    imgs = {"a": rng.normal(size=(n, h, w, 2)).astype(np.float16),
+            "b": rng.normal(size=(n, h, w, 3)).astype(np.float16)}
+    masks = np.broadcast_to(bit[:, None, None], (n, h, w)).astype(np.uint8).copy()
+    shown = rng.permutation(bit) if shuffle else bit
+    vec = np.stack([np.zeros(n), shown], axis=1).astype(np.float32)  # (doy unused, orbit=bit)
+
+    def ld(train_):
+        return GPULoader(imgs, masks, 8, MEAN, STD, torch.device("cpu"), train_, seed=0,
+                         stack=False, vectors={"meta": vec}, scale=(1.0, 1.0))
+
+    torch.manual_seed(0)
+    b = get_provider("manyseg").build(_spec(), img_size=(h, w))
+    rec = get_recipe("fastai_like", epochs=8, batch_size=8, precision="fp32")
+    out = train(b.model, b.encoder_params, b.decoder_params, ld(True), ld(False),
+                num_classes=2, recipe=rec, device=torch.device("cpu"), log=lambda *_: None)
+    miou = out["final_val"]["miou"]
+    if shuffle:
+        assert miou < 0.7, miou  # labels unpredictable from a shuffled bit (chance ~0.33-0.5)
+    else:
+        assert miou > 0.95, miou

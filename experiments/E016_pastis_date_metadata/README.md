@@ -205,3 +205,23 @@ Q2 band groups vs stack: val +0.13 (2 pooled SD 0.75), test +0.12 -> no
   increasingly fair chances (E009 flood events, E013 unseen cloud scenes, E016 crop phenology).
   The docs keep presenting it as an available tool without a recommendation, now with three
   negative results. The ViT `token` mode stays unplanned.
+
+## Follow-up: is the conditioning mechanism working? (2026-10-15)
+A Codex trace of the whole path found no bug:
+* vectors reach the model in every conditioned arm, row-aligned through shuffling and
+  augmentation;
+* conditioning parameters sit in the full-LR decoder group and are never frozen;
+* the shuffled controls differ from the real arm.
+
+A decisive end-to-end check was then added as a bench test
+(`test_oracle_metadata_learned_through_the_bench_training_path`). Noise images get labels set
+only by a metadata bit, and the model trains with the real `fastai_like` recipe through
+`GPULoader` and `train()`. The real bit is learned to > 0.95 mIoU; a shuffled bit stays at
+chance. **The mechanism works.** The negative results in E009, E013 and E016 mean that the
+metadata gave these models no usable extra information. They do not point to a training-path
+failure.
+
+Two design caveats noted in the trace remain:
+* FiLM is spatially global (one affine transform per image).
+* `channels` mode trains its stem at the encoder's 0.1× LR after a frozen epoch, which
+  plausibly explains why it trailed FiLM in E009.
