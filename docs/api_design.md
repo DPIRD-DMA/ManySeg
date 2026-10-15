@@ -297,9 +297,10 @@ the last block, followed by fastai's residual block (about +7k parameters). It r
 > **Evidence (E012, Sen1Floods11):** it recovered 83% (ResNet-34) and 81% (PVTv2-b2) of
 > fastai_unet's val mIoU gain over `unet`. On test it matched or beat fastai_unet (+2.1 / +1.8
 > mIoU over `unet`), at +14% FLOPs against fastai's 4×. On Oxford Pet it did nothing, and on
-> CloudSEN12+ cloud masking (E013) it did not replicate (+0.31 val, −0.01 test). Use it for tasks
-> like water mapping, where labels follow per-pixel input thresholds at full resolution; it is not
-> a general multispectral recommendation. The default stays SMP-identical.
+> CloudSEN12+ cloud masking (E013) it did not replicate (+0.31 val, −0.01 test). Try it when the
+> label at a pixel is largely decided by that pixel's own input values at full resolution (a
+> spectral threshold or index rule, e.g. water, burnt area, bare soil, snow), and validate it on
+> your data. It is not a general improvement, so the default stays SMP-identical.
 
 **Head `scale`** (`{"type": ..., "channels": ..., "scale": s}`, pixel heads only; image heads
 reject it). `s` ∈ {1, 1/2, 1/4, 1/8}, default 1. With `f = 1/s`, a primary input of `H × W`

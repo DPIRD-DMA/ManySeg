@@ -39,7 +39,7 @@ Status as of 2026-10-15, 08:35 AWST. ✅ done · 🔄 in progress · ⏳ planned
 * ✅ Execution on Pawsey Setonix (MI250X) via Slurm arrays: `scripts/setonix/` (see its README for the container, offline weights, MIOpen and Lustre gotchas).
 * ✅ Datasets prepared: AI4Boundaries ortho (13 GB cache), OAM-TCD (CC-BY, 1024², ~22 GB cache).
 * ✅ CloudSEN12+ high (clouds/shadows, S2 L1C; CC0 labels + Copernicus Sentinel notice): `cloudsen12` (S2), `cloudsen12_s2_aux` (+ static S1GBM backscatter + DEM) and `cloudsen12_meta` (+ lat/lon, date, sun angles) on ROI-disjoint splits; 2048² samples tiled to 512².
-* ✅ E013 (CloudSEN12+; Setonix): negative on all three questions. S1GBM/DEM layers, metadata (FiLM, lat/lon on unseen locations) and `input_cross` give no gain; `input_cross` stays a water-mapping recommendation. 5,126 Pawsey units.
+* ✅ E013 (CloudSEN12+; Setonix): negative on all three questions. S1GBM/DEM layers, metadata (FiLM, lat/lon on unseen locations) and `input_cross` give no gain; `input_cross` stays a targeted option for tasks whose labels follow per-pixel input values. 5,126 Pawsey units.
 * ✅ E014 (profiling sweep on an idle 4090): bf16 1.61× over fp32; compile 1.46× more for inference in bf16 (10/10 pairs), only 1.17× for training; cold compile 8–15 s (inference) / 28–54 s (train) per shape.
 * ✅ CI workflow (Linux unit tests on every push; macOS/MPS on PRs and nightly; slow tier nightly).
 

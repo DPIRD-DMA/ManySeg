@@ -10,9 +10,9 @@ reduce_range=True by ~6%. Expected: the compiled int8 graph should match its eag
 (or the quantizer should default to / require reduce_range on such CPUs).
 """
 
+import timm
 import torch
 import torch.nn.functional as F
-import timm
 from torchao.quantization.pt2e.quantize_pt2e import convert_pt2e, prepare_pt2e
 from torchao.quantization.pt2e.quantizer import x86_inductor_quantizer as xiq
 

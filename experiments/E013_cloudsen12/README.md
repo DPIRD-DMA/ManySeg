@@ -132,8 +132,9 @@ e013-meta-film-nogeo vs e013-meta-film: val -0.09 pts (2 pooled SD 0.72), test -
   The ViT `token` metadata mode (roadmap) is not worth building on this evidence.
 * **Q3 (`input_cross` replication): does not replicate.** Val +0.31 just clears 2 pooled SD
   (0.28), but test is −0.01, and test must agree. The E012 recommendation is narrowed to tasks
-  like Sen1Floods11, where labels follow per-pixel input thresholds (water). It is not a general
-  multispectral recommendation. The default stays `False` (unchanged).
+  whose labels are largely decided by per-pixel input values at full resolution (spectral
+  thresholds or index rules, as for water on Sen1Floods11). It is not a general multispectral
+  recommendation. The default stays `False` (unchanged).
 * Cost: 5,126 Pawsey units in total, about 15% over the 09:50 forecast. The three packs ran
   3.3 h, held by the slowest arms; see the amendments and the `pawsey-budget` lesson (pack only
   runs of similar length together).
