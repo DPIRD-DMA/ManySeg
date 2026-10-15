@@ -137,6 +137,8 @@ results included. Highlights:
 * CloudSEN12+ cloud masking was negative on all three questions (E013): static S1 backscatter
   and DEM layers, metadata conditioning on unseen locations, and `input_cross` (it helps
   where labels follow per-pixel input values, such as water, but not on cloud masking).
+* Small batches: freezing the encoder's BatchNorm statistics is the fix (+0.8 / +2.3 mIoU at
+  batch 2); gradient accumulation alone is not (E007, E007b).
 * Precision and size: bf16, fp16 and int8 weight-only cost no measurable accuracy (E008). The
   same experiment found and fixed an int8 bug on CPUs without VNNI.
 

@@ -537,6 +537,24 @@ stage (each encoder, the shared decoder, each task decoder, each head, the condi
 the root. It is tested against DDP on CPU (gloo): parameters after a step match. BatchNorm
 statistics stay per rank, as with DDP.
 
+### Small batches
+
+> **Evidence (E007, E007b; Pet and Sen1Floods11):** at batch 2, keeping the pretrained encoder's
+> BatchNorm in eval mode (statistics frozen, affine weights still training) gave +0.8 (Pet)
+> and +2.3 (Sen1Floods11) val mIoU at matched optimiser steps. Gradient accumulation alone did
+> not help, because BN still sees micro-batches. Batch 2 × accumulate 8 with frozen encoder BN
+> came within 0.2 mIoU of batch 16 on Pet and beat it on Sen1Floods11.
+
+When memory forces batches of about 1–4, freeze the encoder's BN statistics after every
+`model.train()`:
+
+```python
+model.train()
+for m in model.backbone.modules():          # model.backbone.encoders for multi-input models
+    if isinstance(m, torch.nn.modules.batchnorm._BatchNorm):
+        m.eval()                            # running stats fixed; weights and biases still train
+```
+
 ### Speed: compile and precision
 
 > **Evidence (E014, idle RTX 4090, 512², 2 encoders × 5 decoders):** bf16 autocast was ≥ 1.3×
