@@ -35,3 +35,13 @@ extent (`same_extent`): 10 m (B2, B3, B4, B8), 20 m (B5, B6, B7, B8A, B11, B12) 
   for at least 20% fewer FLOPs. Otherwise the result is reported as negative and no Pawsey units
   are spent.
 * The library gets a `band_groups`-style input helper only if a groups arm is better.
+
+## Amendment (2026-10-15 13:20, diagnostic; after seed 0 of the shared arm)
+`e015-groups-shared` seed 0 collapsed at evaluation (val 0.56, water IoU 0.21) while its
+training loss fell normally (0.056). Hypothesis: the shared encoder's BatchNorm running
+statistics blend three inputs with very different statistics (10 m bands, plus the projected 20 m
+and 60 m groups). Training normalises each pass with its own batch statistics, but evaluation
+applies the blend to every group. Diagnostic arm `e015-groups-shared-frozenbn` (the same model
+with `freeze_encoder_bn=True`, so the pretrained statistics are never blended), seeds 0–2. It is
+not part of the pre-registered comparison. It tests the hypothesis, and so a possible pitfall in
+`"backbone": "shared:..."` across heterogeneous inputs.
