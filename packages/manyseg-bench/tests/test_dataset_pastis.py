@@ -3,6 +3,7 @@ controls, on a tiny synthetic copy of the release layout (no download)."""
 
 import datetime
 import json
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -258,3 +259,34 @@ def test_cli_trains_end_to_end(tmp_path, capsys, dataset, mode, options):
     assert rec["vectors_dropped"] is False
     assert bool(rec["spec"]["vectors"]) == dataset.startswith("pastis_meta")
     assert "test" in rec
+
+
+GROUPS = ('{"band_groups": {"s2_10m": {"bands": [0, 1, 2, 6], "factor": 1}, "s2_20m": '
+          '{"bands": [3, 4, 5, 7, 8, 9], "factor": 2}}, "fusion": {"type": "intermediate", '
+          '"op": "concat"}, "band_group_inputs": {"s2_20m": {"backbone": "shared:s2_10m"}}}')
+
+
+def test_band_group_indices_match_the_band_order():
+    """E016 Q2: 10 m = B2, B3, B4, B8; 20 m = B5, B6, B7, B8A, B11, B12 (PASTIS order)."""
+    g = json.loads(GROUPS)["band_groups"]
+    assert [P.BANDS[i] for i in g["s2_10m"]["bands"]] == ["B2", "B3", "B4", "B8"]
+    assert [P.BANDS[i] for i in g["s2_20m"]["bands"]] == ["B5", "B6", "B7", "B8A", "B11", "B12"]
+    run_sh = Path(__file__).parents[3] / "experiments" / "E016_pastis_date_metadata" / "run.sh"
+    if run_sh.exists():
+        text = run_sh.read_text()
+        assert '"s2_10m": {"bands": [0, 1, 2, 6], "factor": 1}' in text
+        assert '"s2_20m": {"bands": [3, 4, 5, 7, 8, 9], "factor": 2}' in text
+
+
+def test_cli_trains_band_groups(tmp_path, capsys):
+    """E016 Q2 arm: 10 m / 20 m band groups through one shared encoder."""
+    from manyseg_bench.cli import main
+
+    raw = make_raw(tmp_path)
+    _prepare(raw, tmp_path)
+    rc = main(["--data", str(tmp_path), "train", "--provider", "manyseg", "--encoder",
+               "resnet18", "--weights", "none", "--dataset", "pastis", "--recipe", "smoke",
+               "--options", GROUPS, "--set", '{"precision": "fp32", "batch_size": 4}',
+               "--device", "cpu", "--out", str(tmp_path / "runs")])
+    assert rc == 0
+    assert "final val mIoU" in capsys.readouterr().out
