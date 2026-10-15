@@ -55,7 +55,7 @@ Status as of 2026-10-15 (morning update). ✅ done · 🔄 in progress · ⏳ pl
 4. ✅ **Multi-input fusion**: early, intermediate and late; five ops; shared encoders;
    `same_grid` / `same_extent`.
 5. ✅ **Multi-task**: named heads, uncertainty heads, per-head task-specific decoders (`"decoder"` key in a head config).
-6. ✅ **Export helper** `manyseg.export.export_model`. ⏳ Quantisation entry points (torchao / PT2E).
+6. ✅ **Export helper** `manyseg.export.export_model`. ✅ Quantisation entry points `manyseg.quantize` (`manyseg[quant]`, torchao): PT2E static int8 with dynamic H/W, int8 weight-only / dynamic, size and agreement reports.
 7. ✅ DDP verified (CPU gloo). ⏳ FSDP2.
 8. ✅ **Instance heads** (`manyseg.instances`): boundary + distance presets, torch targets
    (exact EDT), seeded growth or watershed post-processing, with round-trip tests.

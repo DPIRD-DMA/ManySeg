@@ -459,6 +459,64 @@ Recommended for inference: `torch.autocast("cuda", torch.bfloat16)` +
 At batch 1 in eager mode, fp32 can beat bf16 because cast overhead dominates small decoders;
 compiling removes that. For training, use bf16 autocast; compile is optional.
 
+## Quantisation
+
+`manyseg.quantize` needs torchao (`pip install 'manyseg[quant]'`, BSD-3-Clause). Without it,
+each entry point raises an `ImportError` that names the extra. In torch 2.14, PT2E moved out
+of `torch.ao` into torchao, so both routes use it.
+
+```python
+from manyseg.quantize import compare_outputs, model_size, quantize_pt2e, quantize_weights
+
+# Static int8 for CPU (PT2E): export -> prepare -> calibrate -> convert -> export.
+ep = quantize_pt2e(model, example, calibration)         # calibration: iterable of inputs
+ep = quantize_pt2e(multi_input_model, {"optical": o, "sar": s}, dict_batches)
+ep = quantize_pt2e(swin_model, example, batches, dynamic=False)   # fixed size only
+torch.export.save(ep, "model_int8.pt2")
+
+torch._inductor.config.freezing = True
+fast = torch.compile(ep.module())                       # oneDNN int8 kernels
+
+# int8 weights on the eager module (CPU or GPU), no calibration.
+q = quantize_weights(model)                             # "int8_weight_only" (default)
+q = quantize_weights(model, "int8_dynamic")             # + int8 activations in Linear layers
+
+model_size(ep), model_size(q)                           # serialized bytes
+compare_outputs(model, ep, test_batches)
+# {"max_abs_diff": ..., "mean_abs_diff": ..., "argmax_agreement": ...}
+# dict outputs: "segmentation/argmax_agreement", ...
+```
+
+`quantize_pt2e` returns an `ExportedProgram`, like `export_model`. H/W stay dynamic, and the
+batch too with `dynamic_batch=True`. The default quantizer is torchao's
+`X86InductorQuantizer`, with per-channel int8 weights and per-tensor uint8 activations. Pass
+`quantizer=` to target another backend. Calling `ep.module()` eagerly runs the int8 graph as
+quantise/dequantise pairs in float. That shows the accuracy cost, but it is about twice as
+slow as float. The speedup only appears after `torch.compile` with inductor freezing. The
+compiled int8 graph is not numerically the eager reference: on a ResNet-34 U-Net its argmax
+agreement with float fell from 0.96 to 0.90. Measure `compare_outputs` on the compiled
+module you deploy. Window-attention backbones are rejected before export, because their
+dynamic export hangs rather than fails.
+
+`quantize_weights` stores Linear and Conv2d weights as int8, symmetric per output channel.
+Depthwise convs stay float, because torchao rejects their weights and they are tiny anyway.
+Conv weights are dequantised on the fly, so a CNN gets about 4x smaller but no faster. torchao
+has no dynamic-activation conv, so `"int8_dynamic"` differs from weight-only only in Linear
+layers. For a ResNet U-Net the two modes are identical. `conv=False` quantises Linear layers
+only. The model is copied unless `inplace=True`.
+
+Measured on CPU (4 threads, shared machine, so the timings are contended): a ResNet-34 U-Net
+(ImageNet encoder, random decoder, 6 classes) at 256², with 16 calibration batches.
+
+| | Size | Max / mean abs diff | Argmax agreement | Latency |
+| --- | --- | --- | --- | --- |
+| float | 99.5 MB (exported) | | | 56 ms eager, 37 ms compiled |
+| `quantize_pt2e` | 26.5 MB (0.27x) | 1.94 / 0.12 | 0.961 (0.965 at 255×199) | 109 ms eager, 19 ms compiled |
+| `quantize_weights` | 25.1 MB (0.26x of the state dict) | 0.61 / 0.06 | 0.980 | 66 ms eager |
+
+A random decoder gives near-flat logits, so these agreement numbers are pessimistic. Check a
+trained model on your own validation data.
+
 ## Registries
 
 Decoders, heads, fusion ops, metadata field types and channel adapters register by name in a plain `dict`-backed

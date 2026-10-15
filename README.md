@@ -103,6 +103,10 @@ out = model({"optical": optical, "sar": sar_at_half_resolution, "meta": meta})
 * **Deployment.** `torch.compile(fullgraph=True, dynamic=True)` (one graph across 10 sizes
   on CUDA), `torch.export` with dynamic H/W, ONNX with onnxruntime parity, AMP,
   channels_last. Swin's dynamic export is a known timm limitation.
+* **Quantisation.** `manyseg.quantize` (optional `manyseg[quant]` extra, torchao): static int8
+  through PT2E with dynamic H/W, returned as an `ExportedProgram`, and int8 weight-only or
+  dynamic quantisation of the eager model. A ResNet-34 U-Net shrinks to 0.27x. Reports give the
+  serialized size and the agreement with the float model.
 
 ## Development
 
