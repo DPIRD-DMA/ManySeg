@@ -578,6 +578,11 @@ class _Builder:
             fuse = self.add(f"late_{key}", "fusion", f"fusion -> {name}",
                             f"late, op {_registry_name(FUSION_OPS, dec.fuse)}", modules=[dec.fuse])
             fuse.attrs.append(("fuses", f"{len(dec.decoders)} decoder outputs", True))
+            extent = [r for r in self.bb.names[1:] if self.bb.alignment[r] == "same_extent"]
+            if extent:
+                # LateFusionDecoder resizes the whole (padded) output, not its valid region.
+                fuse.attrs.append(("resized", f"{', '.join(extent)} (whole padded output, "
+                                   "bilinear, to the primary's size)", True))
             for r, sub, (a, b) in zip(self.bb.names, dec.decoders, dec.groups):
                 n = self._decoder_node(f"dec_{key}_{r}", f"{name} [{r}]", sub, specs[a:b])
                 self.edge(feats[r], n)
