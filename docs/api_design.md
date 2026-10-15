@@ -431,6 +431,72 @@ over-/under-segmentation, point F1, count MAE) live in `manyseg-bench`
 > nothing on held-out events. Only use `coords` fields with geographic or event-level splits;
 > otherwise the model can memorise locations and the evaluation will not show it.
 
+## Inspecting a built model
+
+`model.describe()` (or `manyseg.describe.describe(model)`) summarises the model stage by stage:
+inputs and channel adapters, encoders (backbone, pretrained or random, feature levels), fusion
+(type, op, fused strides, shared or independent encoders), metadata conditioning (fields, FiLM
+targets, head bias), decoders (type, `out_stride`, width, levels read, `input_cross`) and heads
+(type, channels, scope, scale, uncertainty, and the decoder that feeds each one), with
+parameters per stage. It reads the constructed modules, not the `create_model` arguments, so it
+shows what was actually built.
+
+```python
+print(model.describe())                       # indented text tree
+print(model.describe(sample))                 # + real shapes at each stage boundary and FLOPs
+mermaid = model.describe(format="mermaid")    # flowchart string
+dot = model.describe(format="dot")            # Graphviz string
+
+from manyseg.describe import model_graph, render_dot
+render_dot(dot, "model.png")                  # needs the Graphviz `dot` binary on PATH
+g = model_graph(model)                        # nodes and edges, for programmatic checks
+```
+
+With a `sample` (a tensor or dict, as for `model(sample)`), one `no_grad` forward pass in eval
+mode records the padded encoder inputs, each encoder level, the fusion inputs (a `same_extent`
+input shows up already resampled onto the primary grid), each decoder output, and each head's
+raw and cropped output. Train/eval flags are restored afterwards. All three formats are plain
+strings and need no extra dependencies. This model has a 4-channel raster, a FiLM metadata
+vector and an FPN decoder of its own for one head:
+
+```python
+create_model(backbone="resnet18", inputs={
+    "s2": {"channels": 4},
+    "meta": {"kind": "vector", "fields": {"doy": {"type": "cyclic", "period": 365.25}}}},
+    heads={"mask": {"type": "segmentation", "channels": 2},
+           "boundary": {"type": "segmentation", "channels": 1, "decoder": "fpn"}})
+```
+
+```mermaid
+flowchart LR
+  in_s2(["<b>input: s2</b><br/>raster, 4 ch"])
+  in_meta(["<b>input: meta</b><br/>vector, 1 col, film<br/>fields: doy (cyclic)<br/>encoding: width 2, MLP → 64<br/>4.35k params"])
+  enc["<b>encoder</b><br/>resnet18 (random init)<br/>stem: 4 ch, 'repeat' weights from 3 ch<br/>levels: 64@/2, 64@/4, 128@/8, 256@/16, 512@/32<br/>11.18M params"]
+  dec_decoder["<b>decoder</b><br/>unet, out_stride 1, width 16<br/>reads: /2, /4, /8, /16, /32<br/>input_cross: False<br/>FiLM: levels /2, /4, /8, /16, /32; output yes<br/>3.15M params"]
+  dec_task_boundary["<b>decoder[boundary]</b><br/>fpn, out_stride 4, width 128<br/>reads: /4, /8, /16, /32<br/>FiLM: levels /4, /8, /16, /32; output yes<br/>1.87M params"]
+  head_mask("<b>head: mask</b><br/>segmentation, pixel, 2 ch<br/>from: decoder<br/>scale: 1<br/>resample: /1 feature, none<br/>290 params")
+  head_boundary("<b>head: boundary</b><br/>segmentation, pixel, 1 ch<br/>from: decoder[boundary]<br/>scale: 1<br/>resample: /4 feature, bilinear x4<br/>1.15k params")
+  in_s2 --> enc
+  enc -->|/2, /4, /8, /16, /32| dec_decoder
+  enc -->|/4, /8, /16, /32| dec_task_boundary
+  dec_decoder --> head_mask
+  dec_task_boundary --> head_boundary
+  in_meta -.->|FiLM| dec_decoder
+  in_meta -.->|FiLM| dec_task_boundary
+  classDef input fill:#e8f0fe,stroke:#5f6368
+  classDef encoder fill:#e6f4ea,stroke:#5f6368
+  classDef decoder fill:#fce8e6,stroke:#5f6368
+  classDef head fill:#e0f2f1,stroke:#5f6368
+  classDef vector fill:#f3e8fd,stroke:#5f6368
+  class in_s2 input
+  class in_meta vector
+  class enc encoder
+  class dec_decoder decoder
+  class dec_task_boundary decoder
+  class head_mask head
+  class head_boundary head
+```
+
 ## Export
 
 ```python

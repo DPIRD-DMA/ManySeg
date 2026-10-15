@@ -107,6 +107,9 @@ out = model({"optical": optical, "sar": sar_at_half_resolution, "meta": meta})
   channels_last. Swin's dynamic export is a known timm limitation. For inference, use bf16
   autocast plus `torch.compile`: on an idle RTX 4090 this was 1.6× (bf16) × 1.46× (compile)
   faster than eager fp32 (E014).
+* **Inspection.** `model.describe()` prints what was built, stage by stage (encoders, fusion,
+  FiLM targets, decoders, the decoder feeding each head, params), with real shapes and FLOPs
+  when given a sample. It also emits Mermaid and Graphviz diagrams. See `docs/api_design.md`.
 * **Quantisation.** `manyseg.quantize` (optional `manyseg[quant]` extra, torchao): static int8
   through PT2E with dynamic H/W, returned as an `ExportedProgram`, and int8 weight-only or
   dynamic quantisation of the eager model. A ResNet-34 U-Net shrinks to 0.27x. Reports give the
