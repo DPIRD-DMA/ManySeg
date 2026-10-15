@@ -1,7 +1,9 @@
 # E020: What ManySeg adds to image-level tasks (BigEarthNet v2; pre-registered)
 
-Status: **planned** (registered 2026-10-15 before any run; timing from a 1-epoch smoke run of
-three arms only, outside `runs/`).
+Status: **done** (registered 2026-10-15 before any run; run 2026-10-15/16 at code `7be9202`).
+Result: ManySeg matches timm on classification and regression (Q1). Band groups, Sentinel-1
+and metadata do not help (Q2–Q4). A segmentation head on the reference maps **helps** the
+image classifier (Q5: +2.1 val, +2.3 test macro mAP), as a regulariser.
 
 ## Question
 Once ManySeg's classifiers match timm (E019), do the things timm cannot express help an
@@ -60,3 +62,49 @@ community LMDB conversion (see `datasets/bigearthnet.py`); labels and maps are o
   `meta-shuffled` passing against `s2` would mean the gain is not the information.
 * Helpful arms are documented as recommendations for image-level tasks with their cost
   (parameters, throughput). Arms that do not help are reported as negative results.
+
+## Results
+
+All 30 runs completed (4 h 01 min, local 4090, no failures; RAM never below 96 GB available).
+Final-epoch (12) metrics, mean ± SD over seeds 0–2. Full tables:
+`uv run python experiments/E020_bigearthnet_image_tasks/analyse.py`.
+
+| arm | val mAP macro | test mAP macro | test mAP micro | test F1 macro | params | train img/s |
+|---|---|---|---|---|---|---|
+| timm-s2 | 0.7344 ± 0.0031 | 0.6632 ± 0.0044 | 0.8384 | 0.6199 | 23.6 M | 2550 |
+| s2 | 0.7372 ± 0.0036 | 0.6622 ± 0.0026 | 0.8391 | 0.6238 | 23.6 M | 2504 |
+| groups | 0.7347 ± 0.0023 | 0.6611 ± 0.0023 | 0.8384 | 0.6137 | 40.4 M | 609 |
+| s1s2-stack | 0.7385 ± 0.0007 | 0.6690 ± 0.0071 | 0.8388 | 0.6272 | 23.6 M | 2368 |
+| s1s2-fusion | 0.7354 ± 0.0007 | 0.6646 ± 0.0019 | 0.8377 | 0.6242 | 58.2 M | 1361 |
+| meta | 0.7353 ± 0.0038 | 0.6628 ± 0.0022 | 0.8384 | 0.6201 | 23.8 M | 2391 |
+| meta-shuffled | 0.7359 ± 0.0030 | 0.6582 ± 0.0007 | 0.8384 | 0.6153 | 23.8 M | 2425 |
+| **seg** | **0.7581 ± 0.0010** | **0.6848 ± 0.0016** | **0.8584** | 0.6263 | 32.6 M | 1583 |
+
+Regression (19 class fractions): `frac` val RMSE 0.0821 ± 0.0003, test 0.0836 (R² 0.42);
+`timm-frac` 0.0824 ± 0.0007, test 0.0838 (R² 0.43).
+
+* **Q1 parity:** classification `s2` − `timm-s2` = +0.29 val (bar 0.68), −0.10 test: parity.
+  Regression `frac` − `timm-frac` = −0.0003 val RMSE (bar 0.0020): parity.
+* **Q2 band groups:** −0.25 val (2 SD 0.61): no. At 4× lower training throughput and +17 M
+  parameters (the shared encoder carries three per-input BatchNorm sets plus the fusion).
+  Across four datasets band grouping cleared its bar only on Sen1Floods11 (E015).
+* **Q3 Sentinel-1:** stacked +0.13 val / +0.68 test, separate-encoder fusion −0.18 / +0.24:
+  neither passes. S1 adds little to S2 for land-cover classification at 10 m.
+* **Q4 metadata:** day of year + country by FiLM −0.19 val; the shuffled control −0.13; meta
+  vs shuffled −0.06: no. The fourth dataset where metadata adds nothing (E009, E013, E016).
+* **Q5 segmentation head:** +2.09 val (2 SD 0.53), +2.26 test macro mAP, +1.93 test micro
+  mAP: **helps**. Per class (test AP), 18 of 19 classes improve; the largest gains are the
+  hard ones: moors/heathland +7.3, permanent crops +6.0, industrial +3.4, inland wetlands
+  +3.1 (coastal wetlands, 0.3% of patches, −1.1).
+* **Why it helps (post hoc, not pre-registered):** every arm except `seg` peaks at epoch 6–8
+  and then overfits (final − best val −1.15 to −1.73); `seg` peaks at epoch 10 (−0.11). At epoch 7 `s2` and
+  `seg` are tied (0.7506 vs 0.7509 val). So the pixel task is a **regulariser**: it does not
+  raise the early peak, it keeps the classifier improving. Against the other arms' best
+  epoch (chosen on val, which flatters them), `seg`'s final epoch still leads by +0.5 to +1.0
+  val (0.7581 vs 0.7477–0.7527).
+* **Cost of `seg`:** +9.0 M decoder parameters and 37% lower training throughput; the
+  decoder also runs at inference unless the seg head is dropped (not yet supported).
+* **Caveats:** one encoder (ResNet-50), a 60k / 15k / 30k subset of the official splits,
+  12 epochs; the regularisation effect may shrink with early stopping or stronger
+  augmentation. The masks are the same reference maps the labels come from, so this needs
+  pixel labels that a classification-only dataset may not have.

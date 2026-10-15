@@ -149,7 +149,15 @@ For a single RGB/multispectral tensor and one output this is the same network as
 > PVTv2-b0, ManySeg and timm classifiers are at parity on validation accuracy in all six cells.
 > On test ManySeg averaged 0.43 points lower, mostly ConvNeXt, whose timm head has a pretrained
 > LayerNorm that ManySeg's image head lacks. `{"init_std": 0.02}` in an image head's config uses
-> timm's classifier init; it narrowed the gap to 0.27 (E019b), not enough to become the default. Mix image and pixel heads freely: the decoder is built only when a pixel
+> timm's classifier init; it narrowed the gap to 0.27 (E019b), not enough to become the default.
+>
+> **Evidence (E020, BigEarthNet v2, 19-class multi-label, ResNet-50):** parity with timm for
+> classification and for class-fraction regression. Resolution band groups, Sentinel-1 (stacked
+> or fused) and date + country metadata did not help. **When pixel labels exist, add a pixel
+> head:** a segmentation head on the reference maps (U-Net decoder; the classifier still pools
+> the encoder) raised test macro mAP by +2.3 (val +2.1), mostly on hard classes, by
+> regularising the classifier (no gain at its early peak; it stops the late overfitting). Cost:
+> the decoder's parameters and ~37% lower training throughput. Mix image and pixel heads freely: the decoder is built only when a pixel
 head needs it. Head and input names must not be Python keywords (`yield`, `class`, ...):
 `torch.export` reads modules as attributes.
 
