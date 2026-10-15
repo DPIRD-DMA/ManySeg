@@ -49,4 +49,7 @@ def test_band_groups_block_average_is_exact():
 def test_band_groups_shared_encoder():
     b = _build(band_group_inputs={"s2_20m": {"backbone": "shared:s2_10m"},
                                   "s2_60m": {"backbone": "shared:s2_10m"}})
-    assert len({id(e) for e in b.model.model.backbone.encoders.values()}) == 1
+    encs = list(b.model.model.backbone.encoders.values())
+    # Shared weights (the same Parameter objects), BatchNorm per input since 0a4025d.
+    assert all(e.stem_conv().weight is encs[0].stem_conv().weight for e in encs)
+    assert len({id(e) for e in encs}) == 3
