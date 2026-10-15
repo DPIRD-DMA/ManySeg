@@ -162,3 +162,79 @@ def test_top_level_backbone_is_default_for_inputs():
     enc = model.backbone.encoders
     assert enc["a"] is not enc["b"]
     assert enc["a"].name == enc["b"].name == "resnet18"
+
+
+# --- construction bugs found by model.describe() (2026-10-15) ---------------------------------
+
+def test_early_fusion_uses_agreeing_per_input_encoder_keys():
+    """Regression: per-input encoder keys were silently dropped (resnet18 built instead)."""
+    same = {"channels": 3, "backbone": "convnext_atto"}
+    model = make(fusion={"type": "early"}, backbone="resnet18",
+                 inputs={"a": dict(same), "b": {**same, "channels": 2}})
+    assert model.backbone.backbone.name == "convnext_atto"
+
+
+@pytest.mark.parametrize("key,va,vb", [("backbone", "convnext_atto", "resnet18"),
+                                       ("channel_adapter", "repeat", "mean"),
+                                       ("pretrained", True, False)])
+def test_early_fusion_rejects_conflicting_per_input_encoder_keys(key, va, vb):
+    with pytest.raises(ValueError, match="early fusion"):
+        make(fusion={"type": "early"}, backbone="resnet18",
+             inputs={"a": {"channels": 3, key: va}, "b": {"channels": 2, key: vb}})
+
+
+@pytest.mark.parametrize("key,value", [("rgb_indices", [0, 1, 2]),
+                                       ("alignment", "same_extent")])
+def test_early_fusion_rejects_per_input_only_keys(key, value):
+    with pytest.raises(ValueError, match="early fusion"):
+        make(fusion={"type": "early"}, backbone="resnet18",
+             inputs={"a": {"channels": 3, key: value}, "b": {"channels": 2}})
+
+
+def test_late_fusion_image_head_reads_the_primary_deepest_level():
+    """Regression: DenseModel._deepest searched every input's levels, so an image head built
+    for the primary's 256-ch /16 level was fed the other input's 512-ch /32 level."""
+    model = make(fusion={"type": "late"}, num_classes=None,
+                 inputs={"a": {"channels": 4, "backbone": "resnet18", "out_indices": (0, 1, 2, 3)},
+                         "sar": {"channels": 2, "backbone": "resnet18"}},
+                 heads={"seg": {"type": "segmentation", "channels": 2},
+                        "cls": {"type": "classification", "channels": 4, "scope": "image"}}).eval()
+    out = model({"a": torch.randn(1, 4, 64, 64), "sar": torch.randn(1, 2, 64, 64)})
+    assert out["cls"].shape == (1, 4)
+    a, b = model.backbone.groups[0]
+    assert a <= model._deepest < b
+
+
+def test_late_fusion_same_extent_maps_valid_region_onto_valid_region():
+    """Regression: the whole padded per-input decoder output was interpolated onto the
+    primary's padded output, so 25 of 257 valid rows read the other input's padding."""
+    from manyseg.features import FeatureSpec
+    from manyseg.fusion import LateFusionDecoder
+    from torch import nn
+
+    class Identity(nn.Module):
+        def __init__(self, specs):
+            super().__init__()
+            self.out_spec = FeatureSpec(1, 1)
+
+        def forward(self, feats):
+            return feats[0]
+
+    H, W, h, w = 257, 301, 129, 151
+    dec = LateFusionDecoder([FeatureSpec(1, 1), FeatureSpec(1, 1)], [(0, 1), (1, 2)], Identity,
+                            op="add", alignment=("same_grid", "same_extent"))
+    a = torch.zeros(1, 1, 288, 320)
+    b = torch.zeros(1, 1, 160, 160)
+    b[..., :h, :w] = 1.0
+    out = dec([a, b], valid=[(H, W), (h, w)])[0, 0, :H, :W]
+    assert float(out.min()) > 0.5  # every valid primary pixel reads b's valid region
+
+
+def test_late_fusion_same_extent_end_to_end_alignment():
+    """Through create_model: a half-resolution same_extent input is aligned by extent."""
+    model = make(fusion={"type": "late", "op": "add"},
+                 inputs={"optical": {"channels": 4, "backbone": "resnet18"},
+                         "sar": {"channels": 2, "backbone": "resnet18",
+                                 "alignment": "same_extent"}}).eval()
+    out = model(batch(257, 301, n=1, sar_hw=(129, 151)))
+    assert out.shape == (1, 3, 257, 301)

@@ -48,9 +48,28 @@ def _build_inputs(inputs, fusion, *, backbone, pretrained, channel_adapter, out_
     if ftype == "early":
         if fusion:
             raise ValueError(f"early fusion takes no options, got {sorted(fusion)}")
+        # One encoder sees the stacked inputs, so per-input encoder keys must agree (they then
+        # override the top-level arguments); silently dropping them built the wrong backbone.
+        shared_cfg = {}
+        for key in ("backbone", "pretrained", "channel_adapter", "out_indices",
+                    "backbone_kwargs"):
+            vals = {n: cfg[key] for n, cfg in inputs.items() if key in cfg}
+            if len({repr(v) for v in vals.values()}) > 1:
+                raise ValueError(f"early fusion stacks all inputs into one encoder; per-input "
+                                 f"{key!r} values differ: {vals}")
+            if vals:
+                shared_cfg[key] = next(iter(vals.values()))
+        for n, cfg in inputs.items():
+            if "rgb_indices" in cfg:
+                raise ValueError(f"early fusion: input {n!r} sets 'rgb_indices', which would "
+                                 "index the stacked channels; adapt the stem with intermediate "
+                                 "fusion or stack the inputs yourself")
+            if cfg.get("alignment", "same_grid") != "same_grid":
+                raise ValueError(f"early fusion stacks channels, so every input must be "
+                                 f"same_grid; input {n!r} is {cfg['alignment']!r}")
         total = sum(cfg["channels"] for cfg in inputs.values())
         channels = {n: cfg["channels"] for n, cfg in inputs.items()}
-        return EarlyFusionEncoder(list(inputs), make_bb({}, total), channels), ftype, {}
+        return EarlyFusionEncoder(list(inputs), make_bb(shared_cfg, total), channels), ftype, {}
 
     encoders, adapters = {}, {}
     for n, cfg in inputs.items():
@@ -141,7 +160,7 @@ def create_model(
             from ..fusion import LateFusionDecoder
 
             return LateFusionDecoder(specs, bb.groups, lambda sp: dec_cls(sp, **dkw),
-                                     op=fopts["op"])
+                                     op=fopts["op"], alignment=[bb.alignment[n] for n in bb.names])
         wants = (dec_cls.wants_input_for(dkw) if hasattr(dec_cls, "wants_input_for")
                  else getattr(dec_cls, "wants_input", False))
         if wants:

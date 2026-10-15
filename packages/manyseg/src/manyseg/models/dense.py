@@ -67,9 +67,11 @@ class DenseModel(nn.Module):
         self.single_output = single_output
         self.pad_to_stride = pad_to_stride
         self.divisor = int(getattr(backbone, "input_divisor", 1)) if pad_to_stride else 1
-        self._deepest = max(
-            range(len(backbone.feature_specs)), key=lambda i: backbone.feature_specs[i].stride
-        )
+        # Image heads read the deepest encoder level; with late fusion the specs are every
+        # input's levels concatenated, and the heads are built for the primary input's group.
+        late = getattr(backbone, "mode", None) == "late"
+        levels = range(*backbone.groups[0]) if late else range(len(backbone.feature_specs))
+        self._deepest = max(levels, key=lambda i: backbone.feature_specs[i].stride)
 
     @property
     def feature_specs(self):
@@ -85,24 +87,28 @@ class DenseModel(nn.Module):
         return describe(self, sample, format)
 
     @staticmethod
-    def _decode(decoder: nn.Module, x: Tensor | None, feats: list[Tensor]) -> Tensor:
+    def _decode(decoder: nn.Module, x: Tensor | None, feats: list[Tensor], valid=None) -> Tensor:
+        if getattr(decoder, "wants_valid", False):  # late fusion: per-input unpadded sizes
+            return decoder(feats, valid=valid)
         return decoder([x, *feats] if getattr(decoder, "wants_input", False) else feats)
 
-    def _decode_cond(self, key: str, decoder: nn.Module, x, feats: list[Tensor], cond) -> Tensor:
+    def _decode_cond(self, key: str, decoder: nn.Module, x, feats: list[Tensor], cond,
+                     valid=None) -> Tensor:
         if cond is None:
-            return self._decode(decoder, x, feats)
+            return self._decode(decoder, x, feats, valid)
         c = self.conditioner
-        return c.output(key, self._decode(decoder, x, c.features(key, feats, cond)), cond)
+        return c.output(key, self._decode(decoder, x, c.features(key, feats, cond), valid), cond)
 
     def _run_head(self, name: str, dec, feats: list[Tensor], x, h: int, w: int,
-                  cond=None) -> Tensor:
+                  cond=None, valid=None) -> Tensor:
         src = self._head_sources[name]
         if src == "decoder":
             inp = dec
         elif src == "encoder":
             inp = feats[self._deepest]
         else:
-            inp = self._decode_cond(f"task_{name}", self.task_decoders[name], x, feats, cond)
+            inp = self._decode_cond(f"task_{name}", self.task_decoders[name], x, feats, cond,
+                                    valid)
         head = self.heads[name]
         y = head(inp)
         if name in self._pixel_heads:
@@ -137,13 +143,15 @@ class DenseModel(nn.Module):
                                 f"{list(self.backbone.names)}")
             h, w = x[primary].shape[-2], x[primary].shape[-1]
             xin = None
+            valid = [(x[n].shape[-2], x[n].shape[-1]) for n in self.backbone.names]
             feats = self.backbone(x)
         else:
             h, w = x.shape[-2], x.shape[-1]
-            xin = self._pad(x)
+            xin, valid = self._pad(x), None
             feats = self.backbone(xin)
-        dec = (self._decode_cond("decoder", self.decoder, xin, feats, cond)
+        dec = (self._decode_cond("decoder", self.decoder, xin, feats, cond, valid)
                if self.decoder is not None else None)
         if self.single_output is not None:
-            return self._run_head(self.single_output, dec, feats, xin, h, w, cond)
-        return {name: self._run_head(name, dec, feats, xin, h, w, cond) for name in self.heads}
+            return self._run_head(self.single_output, dec, feats, xin, h, w, cond, valid)
+        return {name: self._run_head(name, dec, feats, xin, h, w, cond, valid)
+                for name in self.heads}
