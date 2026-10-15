@@ -67,6 +67,17 @@ recipe. Built-in recipes:
 Model selection uses the **final epoch**, with no early stopping, so every model gets the
 same budget. The best validation epoch is recorded for information only.
 
+Recipe options added by experiments, all off by default and recorded in every run:
+
+* `freeze_encoder_bn`: the encoder's BatchNorm layers (found by module path, so non-affine BN
+  is included) stay in eval mode, keeping their running statistics at the pretrained values.
+  Affine weights still train (E007).
+* `grad_accum_steps = k`: one optimiser step per k micro-batches of `batch_size`. Each
+  micro-batch's loss is weighted by its image count, and the lr schedule counts optimiser
+  steps. BatchNorm still sees micro-batches (E007b).
+* `calibrate` (point tasks; on by default since E011b): the peak threshold is chosen on
+  validation, and test is scored once at it.
+
 ## Data protocol
 
 * Each dataset module provides `INFO` (classes, ignore index, normalisation, license,
@@ -108,6 +119,25 @@ every model library; GPU name and memory; the seed; the recipe; the spec; the we
 fingerprint; and a snapshot of **other GPU processes and utilisation** at the start and end.
 The development workstation is shared, so a result with `contended: true` is labelled
 *exploratory* for speed. Accuracy is unaffected by contention, but timing is not.
+
+### Re-evaluating saved runs
+
+`manyseg-bench evaluate <run.json> --variants ...` reloads a `--save-model` checkpoint (sha256
+checked) with the run's own spec, split scheme and normalisation statistics, and scores it under
+`fp32`/`bf16`/`fp16` (autocast on the GPU) and `int8_pt2e`, `int8_pt2e_compiled` and
+`int8_weight_only` (CPU, `manyseg.quantize`). Every batch also goes through the fp32 reference
+on the same device, so `agreement` is a paired pixel argmax agreement. It is defined only for
+single full-resolution logits, and is `null` otherwise. A failing variant is recorded and does
+not discard the others (E008).
+
+### Remote execution (Pawsey Setonix)
+
+Experiments emit their exact runs as task lines (`EMIT_TASKS`), which run as Slurm arrays
+(`scripts/setonix/`). Datasets too large to copy once per task (CloudSEN12+, 191 GB) run as
+8-GCD **pack** jobs that stage only the needed cache files once into the job's node-local NVMe.
+A pack holds all its GCDs until its slowest run ends, so only runs of similar length are packed
+together. Steps are named by task index. Usage is charged at 64 units per GCD-hour; costs are
+forecast before submission.
 
 ## Statistics
 
