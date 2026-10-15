@@ -76,13 +76,17 @@ Status as of 2026-10-15, 08:35 AWST. ✅ done · 🔄 in progress · ⏳ planned
     alignment, export and ONNX tests. Bench: scaled heads are evaluated at input resolution, and
     runs record FLOPs, throughput and peak memory (E006 done).
 13. ✅ **`input_cross`** for `unet` (fastai's full-resolution input stage, opt-in; E012).
+15. ✅ **Image classification and regression**: models with only image heads build no
+    decoder; FiLM metadata on the pooled feature; bench tasks (classification, multi-label,
+    regression, segmentation + multi-label), a plain-timm provider, EuroSAT, Pet breeds and
+    BigEarthNet v2 datasets (E019 parity with timm; E020 running).
 14. ✅ **Presets** (`manyseg.presets`): `fast` / `compact` / `balanced` / `accurate`, the E018
     accuracy/latency front, opt-in with their measured numbers.
 
 ## Phase 5: research and optimisation 🔄
 
 Done (see Phase 3 for results and `experiments/` for write-ups): E001b, E002–E006, E009–E012,
-E011b, E014, E007 (mixed: frozen encoder BN +2.6 val on Sen1Floods11 at batch 2, GroupNorm decoder +0.5 on Pet; neither passes on both). E013 (negative), E008 (all variants safe; found and fixed an int8 bug on CPUs without VNNI). E007b (frozen encoder BN is a real small-batch fix on both datasets; accumulation alone is not). E015 (native resolution adds nothing but halves grouped-model FLOPs; splitting bands into groups helps +0.9 to +1.3; found the shared-encoder BN bug, fixed). E016 (PASTIS: day of year adds nothing even for crop phenology; band grouping does not replicate). E017 (CloudSEN12+: band groups +0.37 val, under the 0.76 bar; grouping stays a single-dataset result). E018 (Pareto front: four PVTv2-b0 configs are on the front of both datasets and ship as opt-in `manyseg.presets`; three of them (all but the SegFormer-head `fast`, which is 0.34 lower on Pet) dominate the ResNet-34 U-Net default). Remaining candidates; a budget is set before each one starts:
+E011b, E014, E007 (mixed: frozen encoder BN +2.6 val on Sen1Floods11 at batch 2, GroupNorm decoder +0.5 on Pet; neither passes on both). E013 (negative), E008 (all variants safe; found and fixed an int8 bug on CPUs without VNNI). E007b (frozen encoder BN is a real small-batch fix on both datasets; accumulation alone is not). E015 (native resolution adds nothing but halves grouped-model FLOPs; splitting bands into groups helps +0.9 to +1.3; found the shared-encoder BN bug, fixed). E016 (PASTIS: day of year adds nothing even for crop phenology; band grouping does not replicate). E017 (CloudSEN12+: band groups +0.37 val, under the 0.76 bar; grouping stays a single-dataset result). E019/E019b (ManySeg image heads at val parity with timm classifiers in 6/6 cells; test −0.43, mostly ConvNeXt). E018 (Pareto front: four PVTv2-b0 configs are on the front of both datasets and ship as opt-in `manyseg.presets`; three of them (all but the SegFormer-head `fast`, which is 0.34 lower on Pet) dominate the ResNet-34 U-Net default). Remaining candidates; a budget is set before each one starts:
 
 | Id | Question | Budget |
 | --- | --- | --- |

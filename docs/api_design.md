@@ -143,8 +143,13 @@ out = model({"s2_10m": a, "s2_20m": b, "meta": doy})   # crop (N, 10), harvest (
 ```
 
 For a single RGB/multispectral tensor and one output this is the same network as
-`timm.create_model(backbone, num_classes=K, in_chans=C)` (same pretrained stem adaptation;
-E019 compares the two). Mix image and pixel heads freely: the decoder is built only when a pixel
+`timm.create_model(backbone, num_classes=K, in_chans=C)` (same pretrained stem adaptation).
+
+> **Evidence (E019):** on EuroSAT-MS (13 bands) and Pet breeds, with ResNet-50, ConvNeXt-T and
+> PVTv2-b0, ManySeg and timm classifiers are at parity on validation accuracy in all six cells.
+> On test ManySeg averaged 0.43 points lower, mostly ConvNeXt, whose timm head has a pretrained
+> LayerNorm that ManySeg's image head lacks. `{"init_std": 0.02}` in an image head's config uses
+> timm's classifier init; it narrowed the gap to 0.27 (E019b), not enough to become the default. Mix image and pixel heads freely: the decoder is built only when a pixel
 head needs it. Head and input names must not be Python keywords (`yield`, `class`, ...):
 `torch.export` reads modules as attributes.
 
