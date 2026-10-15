@@ -302,3 +302,16 @@ def test_intermediate_fusion_image_head_reads_a_fused_level():
                      heads={"seg": {"type": "segmentation", "channels": 2},
                             "area": {"type": "regression", "channels": 1, "scope": "image"}})
     assert "from: fused level" in m.describe()
+
+
+def test_weight_shared_encoders_are_one_node_with_per_input_bn():
+    """Default `shared:` encoders are weight-sharing copies with their own BatchNorm (E015);
+    describe() still shows one encoder and says so, and counts every parameter once."""
+    model = make(inputs={"optical": {"channels": 3, "backbone": "resnet18"},
+                         "sar": {"channels": 3, "backbone": "shared:optical"}},
+                 fusion={"type": "intermediate"}, num_classes=2)
+    g = model_graph(model)
+    (enc,) = g.by_stage("encoder")
+    assert "BatchNorm per input" in enc.attr("sharing")
+    assert sum(n.params or 0 for n in g.nodes.values()) == \
+        sum(p.numel() for p in model.parameters())

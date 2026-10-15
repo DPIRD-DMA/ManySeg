@@ -480,20 +480,31 @@ class _Builder:
             self._shapes(enc, bb)
             return enc
 
+        # Encoders share weights either as one module ("share_norm": True) or as weight-sharing
+        # copies with their own BatchNorm (the default): group by a shared parameter.
+        def key(mod):
+            return id(next(iter(mod.parameters()), mod))
+
         users: dict[int, list[str]] = {}
         for r in bb.names:
-            users.setdefault(id(bb.encoders[r]), []).append(r)
+            users.setdefault(key(bb.encoders[r]), []).append(r)
         enc_nodes, calls = {}, {}
         for r in bb.names:
             mod = bb.encoders[r]
-            group = users[id(mod)]
+            group = users[key(mod)]
             if r == group[0]:
                 name = r if len(group) == 1 else f"shared ({', '.join(group)})"
                 node = self._encoder_node(mod, name, f"enc_{r}")
+                one = len({id(bb.encoders[g]) for g in group}) == 1
                 node.attrs.append(("sharing", "independent" if len(group) == 1 else
-                                   f"one module for {', '.join(group)}", True))
-                enc_nodes[id(mod)] = node
-            node = enc_nodes[id(mod)]
+                                   f"one module for {', '.join(group)}" if one else
+                                   f"weights shared by {', '.join(group)}; BatchNorm per input",
+                                   True))
+                if not one:  # count each group member's own BatchNorm once, shared weights once
+                    members = list({id(bb.encoders[g]): bb.encoders[g] for g in group}.values())
+                    node.params, node.flops = _nparams(*members), self._flops(*members)
+                enc_nodes[key(mod)] = node
+            node = enc_nodes[key(mod)]
             src = self.inputs[r]
             if r in bb.adapters:
                 ad = bb.adapters[r]
@@ -512,7 +523,7 @@ class _Builder:
                 pre = f"[{r}] " if len(group) > 1 else ""
                 node.shapes.append((f"{pre}padded in", _fmt_shape(got[0][0])))
                 node.shapes.append((f"{pre}out", _fmt_shape(got[1])))
-        per_input = {r: enc_nodes[id(bb.encoders[r])] for r in bb.names}
+        per_input = {r: enc_nodes[key(bb.encoders[r])] for r in bb.names}
         if self.late:
             return per_input
 

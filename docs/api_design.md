@@ -127,7 +127,12 @@ out = model({"optical": o, "sar": s})
   encoder level.
 * Inputs without a `backbone` key use the top-level `backbone=` argument.
 * **Shared encoder**: `{"backbone": "shared:optical"}` reuses another input's backbone weights.
-  Each input keeps its own input adapter.
+  Each input keeps its own input adapter **and its own BatchNorm layers** (affine weights and
+  running statistics). One BN shared by inputs with different statistics blends its running
+  statistics, and evaluation then applies the blend to every input: in E015 that collapsed a
+  shared-encoder model from 0.90 to 0.50–0.65 val mIoU. `"share_norm": True` shares BN too (the
+  old behaviour); use it only for inputs with matching statistics (e.g. two dates of the same
+  sensor).
 
 #### Spatial alignment
 

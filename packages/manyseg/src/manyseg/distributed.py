@@ -17,12 +17,16 @@ def _stages(model: nn.Module) -> list[nn.Module]:
     bb = model.backbone
     encoders = getattr(bb, "encoders", None)
     stages: list[nn.Module] = []
-    if encoders is not None:  # multi-input: one unit per distinct encoder (shared ones once)
-        seen = set()
-        for enc in encoders.values():
-            if id(enc) not in seen:
-                seen.add(id(enc))
-                stages.append(enc)
+    if encoders is not None:  # multi-input: one unit per encoder...
+        encs = list({id(e): e for e in encoders.values()}.values())
+        owned = [id(p) for e in encs for p in e.parameters()]
+        if len(owned) != len(set(owned)):
+            # ...unless encoders share weights across modules (shared:<input> copies with
+            # their own BatchNorm): then the whole multi-input encoder is one unit, so shared
+            # parameters stay gathered for every input's pass.
+            stages.append(bb)
+        else:
+            stages += encs
     else:
         stages.append(bb)
     if model.decoder is not None:

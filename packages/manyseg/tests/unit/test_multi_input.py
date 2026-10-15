@@ -109,7 +109,12 @@ def test_shared_encoder_reuses_weights():
               "t1": {"channels": 3, "backbone": "shared:t0"}}
     model = make(inputs=inputs, fusion={"type": "intermediate", "op": "add"})
     enc = model.backbone.encoders
-    assert enc["t0"] is enc["t1"]
+    # Weights are shared (the same Parameter objects); BatchNorm is per input (E015).
+    assert enc["t0"].stem_conv().weight is enc["t1"].stem_conv().weight
+    def bn(e):
+        return [m for m in e.modules() if isinstance(m, torch.nn.BatchNorm2d)]
+
+    assert bn(enc["t0"]) and all(a is not b for a, b in zip(bn(enc["t0"]), bn(enc["t1"])))
     n_shared = sum(p.numel() for p in model.parameters())
     single = create_model(backbone="resnet18", pretrained=False, num_classes=3)
     assert n_shared < 1.5 * sum(p.numel() for p in single.parameters())
@@ -238,3 +243,30 @@ def test_late_fusion_same_extent_end_to_end_alignment():
                                  "alignment": "same_extent"}}).eval()
     out = model(batch(257, 301, n=1, sar_hw=(129, 151)))
     assert out.shape == (1, 3, 257, 301)
+
+
+
+def test_shared_encoder_keeps_batchnorm_statistics_per_input():
+    """Regression (E015): one BatchNorm shared by inputs with different statistics blends its
+    running statistics, so evaluation used the blend for every input and the model collapsed
+    (val 0.50-0.65 vs 0.89). Shared encoders now keep BN per input."""
+    inputs = {"t0": {"channels": 3, "backbone": "resnet18"},
+              "t1": {"channels": 3, "backbone": "shared:t0"}}
+    model = make(inputs=inputs, fusion={"type": "intermediate", "op": "add"}).train()
+    for _ in range(3):
+        model({"t0": torch.randn(2, 3, 64, 64), "t1": 5 + 3 * torch.randn(2, 3, 64, 64)})
+    bn0 = model.backbone.encoders["t0"].model.bn1
+    bn1 = model.backbone.encoders["t1"].model.bn1
+    assert bn0 is not bn1 and not torch.allclose(bn0.running_mean, bn1.running_mean)
+
+
+def test_share_norm_true_keeps_one_module():
+    inputs = {"t0": {"channels": 3, "backbone": "resnet18"},
+              "t1": {"channels": 3, "backbone": "shared:t0", "share_norm": True}}
+    model = make(inputs=inputs, fusion={"type": "intermediate", "op": "add"})
+    assert model.backbone.encoders["t0"] is model.backbone.encoders["t1"]
+
+
+def test_share_norm_requires_shared_backbone():
+    with pytest.raises(ValueError, match="share_norm"):
+        make(inputs={"a": {"channels": 3}, "b": {"channels": 3, "share_norm": True}})

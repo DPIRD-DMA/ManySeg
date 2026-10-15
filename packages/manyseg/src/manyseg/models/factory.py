@@ -16,8 +16,22 @@ from ..registry import check_module_names
 from .dense import DenseModel
 
 FUSION_TYPES = ("early", "intermediate", "late")
-_INPUT_KEYS = {"channels", "backbone", "pretrained", "channel_adapter", "alignment",
+_INPUT_KEYS = {"channels", "backbone", "pretrained", "channel_adapter", "alignment", "share_norm",
                "backbone_kwargs", "out_indices", "rgb_indices"}
+
+
+def share_weights(encoder: nn.Module) -> nn.Module:
+    """A copy of ``encoder`` that shares every parameter (the same ``Parameter`` objects) except
+    those of its BatchNorm layers, which get their own affine weights and running statistics."""
+    import copy
+
+    clone = copy.deepcopy(encoder)
+    for (_, mine), (_, theirs) in zip(clone.named_modules(), encoder.named_modules()):
+        if isinstance(mine, nn.modules.batchnorm._BatchNorm):
+            continue
+        for name, p in theirs.named_parameters(recurse=False):
+            setattr(mine, name, p)
+    return clone
 
 
 def _build_inputs(inputs, fusion, *, backbone, pretrained, channel_adapter, out_indices,
@@ -78,10 +92,17 @@ def _build_inputs(inputs, fusion, *, backbone, pretrained, channel_adapter, out_
             target = bname.split(":", 1)[1]
             if target not in encoders:
                 raise ValueError(f"input {n!r} shares {target!r}, which must be defined earlier")
-            encoders[n] = encoders[target]
+            # Weights shared, BatchNorm per input by default: one BN shared by inputs with
+            # different statistics blends its running statistics, and evaluation then applies
+            # the blend to every input (E015: val 0.50-0.65 vs 0.89).
+            encoders[n] = (encoders[target] if cfg.get("share_norm", False)
+                           else share_weights(encoders[target]))
             if cfg["channels"] != encoders[target].in_channels:
                 adapters[n] = ProjectionAdapter(cfg["channels"], encoders[target].in_channels)
         else:
+            if "share_norm" in cfg:
+                raise ValueError(f"input {n!r}: 'share_norm' only applies to a "
+                                 "'shared:<input>' backbone")
             encoders[n] = make_bb(cfg, cfg["channels"])
     alignment = {n: cfg.get("alignment", "same_grid") for n, cfg in inputs.items()}
     op = fusion.pop("op", "concat")
