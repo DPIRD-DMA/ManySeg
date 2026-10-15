@@ -51,6 +51,45 @@ def introspect(name: str) -> dict:
     }
 
 
+_FIXED_SIZE_CACHE: dict[str, tuple[int, int] | None] = {}
+
+
+def _probe_fixed_size(name: str, kwargs: dict, divisor: int) -> tuple[int, int] | None:
+    key = repr((name.split(".", 1)[0], sorted(kwargs.items(), key=str), divisor))
+    if key not in _FIXED_SIZE_CACHE:  # depends only on the architecture and its kwargs
+        _FIXED_SIZE_CACHE[key] = _probe_fixed_size_uncached(name, kwargs, divisor)
+    return _FIXED_SIZE_CACHE[key]
+
+
+def _probe_fixed_size_uncached(name: str, kwargs: dict,
+                               divisor: int) -> tuple[int, int] | None:
+    """Native (H, W) if the architecture only runs at its native size, else None.
+
+    Some timm models (MaxViT, CoAtNet, LeViT, EfficientFormerV2, Hiera, ...) bake the input size
+    into window partitions or positional tables and fail deep inside timm at other sizes. A
+    meta-device forward (shapes only, no memory or compute) at the native size and at an
+    awkward padded size tells them apart. If even the native probe fails (an op without meta
+    support), nothing is concluded."""
+    try:
+        with torch.device("meta"):
+            m = timm.create_model(name.split(".", 1)[0], pretrained=False, **kwargs)
+        cfg = getattr(m, "pretrained_cfg", {}) or {}
+        c, h, w = (tuple(cfg.get("input_size") or (3, 224, 224)) + (224, 224))[:3]
+        odd = tuple(-(-n // divisor) * divisor for n in (97, 131))
+        if odd == (h, w):
+            return None
+        with torch.no_grad():
+            m(torch.empty(1, c, h, w, device="meta"))
+    except Exception:  # noqa: BLE001 - the probe itself failed: leave the size unrestricted
+        return None
+    try:
+        with torch.no_grad():
+            m(torch.empty(1, c, *odd, device="meta"))
+    except Exception:  # noqa: BLE001 - any failure at a non-native size means "fixed"
+        return (int(h), int(w))
+    return None
+
+
 def _size_kwargs(init_params: set[str]) -> dict:
     """Enable timm's own dynamic-size support where the architecture offers it."""
     kw = {}
@@ -180,6 +219,9 @@ class TimmBackbone(nn.Module):
             self.neck = ViTPyramidNeck(specs[0].channels, strides, channels, specs[0].stride)
             specs = self.neck.feature_specs
         self.feature_specs: tuple[FeatureSpec, ...] = specs
+        if self.fixed_size is None and not self.is_plain and "img_size" not in timm_kwargs:
+            # DenseModel pads smaller inputs up to a fixed size and rejects larger ones clearly.
+            self.fixed_size = _probe_fixed_size(name, kwargs, self.input_divisor)
         self.mean = tuple(cfg.get("mean", (0.485, 0.456, 0.406)))
         self.std = tuple(cfg.get("std", (0.229, 0.224, 0.225)))
 

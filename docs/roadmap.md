@@ -102,7 +102,7 @@ Negative results are written up in `experiments/` like positive ones.
   runs alone (CI `package` job on PRs and nightly). Both names are free on PyPI. **Not
   published**: that needs a decision on version and timing. ⏳ A tested torch/timm version range
   (minimum-versions CI leg).
-* ⏳ Clear error messages for unsupported backbone/size combinations, using the capability table.
+* ✅ Unsupported backbone/size combinations: fixed-size architectures are detected at construction (meta-device probe), smaller inputs are padded, and larger ones get a clear `ValueError` naming the `img_size` fix, instead of timm shape errors.
 
 ## Known risks
 

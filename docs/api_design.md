@@ -246,9 +246,12 @@ line up exactly. ManySeg handles this explicitly:
   The pad value is 0 (applied after the user's normalisation, so 0 is the per-channel mean).
 * Decoders resize the upsampled feature to each skip's exact size rather than assuming
   `2×`, so they also work when padding is disabled and a backbone rounds feature sizes up.
-* Backbones that cannot accept a size at all (for example, fixed-size ViTs without dynamic
-  position embeddings) raise a clear error at construction or call time. They never silently
-  resize.
+* Backbones that only run at one size (MaxViT, CoAtNet, LeViT, EfficientFormerV2, Hiera:
+  window partitions or positional tables baked in) are detected at construction by a
+  meta-device probe and marked `fixed_size` at their native size, or at `img_size` when
+  `backbone_kwargs={"img_size": ...}` is given. Smaller inputs are padded up to it and the
+  output is cropped back. Larger inputs raise a `ValueError` that names the backbone and the
+  `img_size` fix. Nothing is ever silently resized.
 
 ### Reduced output resolution
 

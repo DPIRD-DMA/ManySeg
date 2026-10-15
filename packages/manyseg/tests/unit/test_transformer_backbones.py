@@ -98,3 +98,20 @@ def test_multi_branch_stem_all_convs_adapted():
     bb = create_backbone("fastvit_t8", pretrained=False, in_channels=5).eval()
     assert bb(torch.randn(1, 5, 64, 64))[-1].shape[1] == bb.feature_specs[-1].channels
     assert len(bb.stem_conv_names) >= 2
+
+
+@pytest.mark.parametrize("name", ["levit_128s", "efficientformerv2_s0", "coatnet_0_rw_224"])
+def test_size_restricted_backbone_detected_without_img_size(name):
+    """Phase 6: models that only run at their native size (window / positional constraints)
+    used to fail deep in timm with shape errors at other sizes. A meta-device probe now marks
+    them fixed at the native size, so smaller inputs are padded and larger ones fail clearly."""
+    model = create_model(backbone=name, pretrained=False, num_classes=2).eval()
+    assert model.backbone.fixed_size == (224, 224)
+    assert model(torch.randn(1, 3, 97, 131)).shape == (1, 2, 97, 131)
+    with pytest.raises(ValueError, match="img_size"):
+        model(torch.randn(1, 3, 257, 301))
+
+
+def test_any_size_backbones_stay_unrestricted():
+    for name in ("resnet18", "convnext_atto", "swin_tiny_patch4_window7_224"):
+        assert create_backbone(name, pretrained=False).fixed_size is None, name
