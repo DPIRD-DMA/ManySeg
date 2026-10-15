@@ -80,3 +80,8 @@ were cancelled at epoch 4 of 20, because at about 850 s per epoch they would hav
 (`unet-cross` − `e013-s2` > 2 pooled SD, test agrees) does not need them. The secondary
 "gap closed" figure is dropped, and E012 remains the fastai comparison. Every other arm runs
 as registered.
+* Correction (11:50): `scancel <pack>.7` assumed step ids follow task order, but they follow
+  launch timing. In pack 1 (seed 0), step 7 was `e013-meta-channels`, so that run was cancelled
+  at epoch 12 while seed 0's `fastai_unet` kept running. The fastai step was then cancelled.
+  The seed-0 `meta-channels` run was re-submitted alone (job 50910604, same code `7f05bf0`, same
+  task line). `manyseg_pack.sbatch` now names steps `t<task>` so they can be identified.

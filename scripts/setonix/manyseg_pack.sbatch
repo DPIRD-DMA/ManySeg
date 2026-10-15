@@ -4,7 +4,8 @@
 # For datasets too large to copy once per task (CloudSEN12+: 157-191 GB). Each job has its own
 # /tmp (job_container/tmpfs on /nvmetmp), so array *jobs* cannot share a staged copy; the steps
 # of one job can, and the shared files also share the page cache.
-# Usage: sbatch --array=1-M [--gres=gpu:N,tmp:400G --ntasks=N] [--time=HH:MM:SS] manyseg_pack.sbatch <tasks.txt> <code_sha> <N>
+# Steps are named t<task index>, so `sacct -j <job> -o JobID,JobName` maps a step to its task
+# (step ids follow launch timing, not task order). Usage: sbatch --array=1-M [--gres=gpu:N,tmp:400G --ntasks=N] [--time=HH:MM:SS] manyseg_pack.sbatch <tasks.txt> <code_sha> <N>
 # Node-local NVMe is a GRES on Setonix (tmp:3500G per node) and must be requested explicitly;
 # CPUs must not be (each GPU brings 8 cores; the cli_filter rejects --cpus-per-task).
 #SBATCH --account=$PROJECT-gpu
@@ -31,7 +32,7 @@ for (( i = 0; i < N; i++ )); do
   [ "$IDX" -le "$TOTAL" ] || break
   DB=/tmp/miopen-$IDX; mkdir -p "$DB"
   MIOPEN_USER_DB_PATH=$DB MIOPEN_CUSTOM_CACHE_DIR=$DB \
-    srun --exact -N 1 -n 1 -c 8 --gres=gpu:1 --gpus-per-task=1 --gpu-bind=closest \
+    srun --exact --job-name="t$IDX" -N 1 -n 1 -c 8 --gres=gpu:1 --gpus-per-task=1 --gpu-bind=closest \
     singularity exec "$SINGULARITY_CONTAINER" \
     bash "$ROOT/code/$CODE/scripts/setonix/run_task.sh" "$TASKS" "$IDX" \
     > "$ROOT/logs/${SLURM_JOB_NAME}_${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}_t${IDX}.out" 2>&1 &
