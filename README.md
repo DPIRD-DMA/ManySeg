@@ -144,7 +144,8 @@ results included. Highlights:
 * Sentinel-2 bands split into resolution groups (one shared encoder, per-input BatchNorm) beat
   the 13-band stack by +1.3 mIoU on Sen1Floods11 (E015); native resolution itself adds
   nothing. The experiment found and fixed a shared-encoder BatchNorm bug. It did not
-  replicate on PASTIS (E016), so it stays a single-dataset result.
+  replicate on PASTIS (E016, +0.1) or CloudSEN12+ (E017, +0.4 against a 0.8 bar), so it stays a
+  single-dataset result.
 * Small batches: freezing the encoder's BatchNorm statistics is the fix (+0.8 / +2.3 mIoU at
   batch 2); gradient accumulation alone is not (E007, E007b).
 * Precision and size: bf16, fp16 and int8 weight-only cost no measurable accuracy (E008). The

@@ -1,6 +1,6 @@
 # E017: Do Sentinel-2 band groups help cloud masking? (CloudSEN12+; pre-registered)
 
-Status: **planned** (registered 2026-10-15, before any run). It decides between E015 and E016.
+Status: **done, negative** (registered 2026-10-15 before any run; Setonix job 50937758 at code `d0edcb9`). Band groups do not pass on CloudSEN12+; grouping stays a single-dataset result (Sen1Floods11).
 
 ## Question
 E015 (Sen1Floods11) found that feeding the 13 S2 bands as three resolution groups (10 m, 20 m,
@@ -26,3 +26,24 @@ like Sen1Floods11, and is the deciding dataset.
   (Sen1Floods11, CloudSEN12+). The docs then recommend it for 13-band S2, and a library helper
   for band groups is considered. If they do not, it stays a single-dataset result (Sen1Floods11).
 * Secondary: thin-cloud and shadow IoU deltas, throughput.
+
+## Results
+
+One 6-GCD pack, all 6 runs completed (2 h 19 min wall, **890 units** against the 1,300 forecast;
+`pawseyAccountBalance -jobs`). Val is the final-epoch val mIoU; mean ± SD over seeds
+0–2.
+
+| arm | val mIoU | test mIoU | test IoU clear / thick / thin / shadow | params | GFLOPs (512²) | train time |
+|---|---|---|---|---|---|---|
+| stack | 0.7308 ± 0.0028 | 0.6832 ± 0.0068 | 0.904 / 0.865 / 0.398 / 0.565 | 24.5 M | 66.8 | ~100 min |
+| groups-shared | 0.7345 ± 0.0046 | 0.6883 ± 0.0021 | 0.908 / 0.868 / 0.399 / 0.578 | 25.5 M | 77.4 | ~132 min |
+
+* **Decision:** groups − stack = **+0.37 val** against 2 pooled SD = 0.76, so it **does not pass**.
+  Test moves the same way (+0.51). Per the rule, band grouping stays a single-dataset result
+  (Sen1Floods11, E015): the docs do not recommend it for 13-band S2 and no library helper is
+  added.
+* **Secondary:** the small gain is mostly cloud shadow (+1.3 test IoU); thin cloud is unchanged
+  (+0.1). Grouping costs +16% FLOPs and ~30% more training time here.
+* **Across the three datasets:** +1.25 (Sen1Floods11), +0.13 (PASTIS), +0.37 (CloudSEN12+) val.
+  It is never negative, but only Sen1Floods11 clears the bar, so it is an option to try, not a
+  default.
