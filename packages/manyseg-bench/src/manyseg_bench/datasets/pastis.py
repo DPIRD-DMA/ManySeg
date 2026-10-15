@@ -16,7 +16,8 @@ filtering, so some dates are partly or fully cloudy. ``ANNOTATIONS/TARGET_<id>.n
 (non-agricultural land), 1-18 crop classes, 19 void (parcels of out-of-nomenclature crops or
 mostly outside the patch). As in the paper (and U-TAE's code: void gets zero loss weight and is
 removed from the confusion matrix), **background is a class** and **void -> ignore (255)**,
-so there are 19 classes.
+so there are 19 classes. ``DATA_S2`` also holds 35 series that have neither a metadata entry
+nor an annotation; they are skipped (ids recorded in ``meta.json``).
 
 **Single-date samples.** The label is one per season (2019 LPIS declarations), but each image
 is one acquisition: the same field looks very different across the season, so the acquisition
@@ -26,7 +27,7 @@ its patches (one date list per tile). Dates are taken from the 365-day **season 
 2018, the previous season's stubble, is excluded); the window is cut into ``K_DATES`` = 8
 equal parts and, for each part's centre, the nearest unused acquisition is chosen
 (``select_dates``). Each (patch, date) is one sample named ``<patch>_<tile>_<YYYYMMDD>``.
-19,464 samples, ~6.4 GB float16 (reflectance / 1e4, stored as input ``s2``); the cache stays
+19,464 samples, 6.3 GiB float16 (reflectance / 1e4, stored as input ``s2``); the cache stays
 memory-mapped (``device_resident: False``).
 
 **Splits.** The official fold I: train = folds 1-3, val = fold 4, test = fold 5. All dates of
@@ -311,8 +312,13 @@ def prepare(raw: Path, cache: Path, size: int = SIZE, workers: int = 4, k: int =
                 "blue_mean_quantiles": (np.quantile(blues_a, [0.1, 0.5, 0.9]).round(4).tolist()
                                         if blues else None)}
             log(f"{split}: {json.dumps(summary[split])}")
+    # The release ships some S2 series with no metadata entry and no annotation: never used.
+    known = {p["id"] for ps in by_split.values() for p in ps}
+    unlisted = sorted(int(f.stem[3:]) for f in (root / "DATA_S2").glob("S2_*.npy")
+                      if f.stem[3:].isdigit() and int(f.stem[3:]) not in known)
+    summary["unlisted_s2_series"] = len(unlisted)
     meta = {**stats, "inputs": INPUTS, "bands": BANDS, "k_dates": k, "season": SEASON,
-            "summary": summary}
+            "summary": summary, "unlisted_s2_ids": unlisted}
     (cache / "meta.json").write_text(json.dumps(meta, indent=1))
     return summary
 

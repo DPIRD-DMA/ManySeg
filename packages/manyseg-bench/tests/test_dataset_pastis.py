@@ -49,6 +49,8 @@ def make_raw(root, patches=PATCHES, log="MD5_OK"):
         feats.append({"type": "Feature", "geometry": None, "properties": {
             "Fold": fold, "ID_PATCH": pid, "N_Parcel": 7, "Parcel_Cover": 0.5,
             "TILE": tile, "dates-S2": {str(i): d for i, d in enumerate(dates)}}})
+    # the release has S2 series without metadata or annotation: must be skipped
+    np.save(base / "DATA_S2" / "S2_99999.npy", np.zeros((3, 10, S, S), np.int16))
     (base / "metadata.geojson").write_text(json.dumps({"type": "FeatureCollection",
                                                        "features": feats}))
     (raw / "download.log").write_text(f"PASTIS.zip: {P.MD5}\n{log}\n")
@@ -153,6 +155,8 @@ def test_prepare_samples_masks_and_no_leakage(tmp_path):
     assert summary["train"]["class_frac"]["background"] > 0
     assert 0 < summary["train"]["void_frac"] < 1
     assert summary["train"]["doy_min_max"][0] >= 1
+    assert summary["unlisted_s2_series"] == 1
+    assert json.loads((cache / "meta.json").read_text())["unlisted_s2_ids"] == [99999]
 
 
 def test_stats_from_train_only(tmp_path):
