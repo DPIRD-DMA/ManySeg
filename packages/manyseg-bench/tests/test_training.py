@@ -4,6 +4,7 @@ import torch
 from manyseg_bench.datasets import GPULoader
 from manyseg_bench.providers import ModelSpec, get_provider
 from manyseg_bench.training import build_optimizer, get_recipe, lr_factor, train
+from torch import nn
 
 
 def synthetic(n=12, h=64, w=64, k=3, seed=0):
@@ -158,3 +159,27 @@ def test_instance_id_masks_survive_augmentation():
     ids[:, 40:60, 5:25] = 123
     for _, y in GPULoader(imgs, ids, 2, (0.5,) * 3, (0.25,) * 3, torch.device("cpu"), True):
         assert set(y.unique().tolist()) <= {0, 123, 70000}
+
+
+@pytest.mark.parametrize("provider", ["manyseg", "smp"])
+def test_freeze_encoder_bn_keeps_encoder_running_stats(provider):
+    """E007: freeze_encoder_bn keeps the encoder's BN in eval mode (running statistics fixed;
+    affine weights still train); decoder BN keeps updating."""
+    pytest.importorskip("segmentation_models_pytorch") if provider == "smp" else None
+    b = get_provider(provider).build(
+        ModelSpec("unet", "resnet18", weights=None, num_classes=3), img_size=(64, 64))
+    enc = {id(p) for p in b.encoder_params}
+    bns = [m for m in b.model.modules() if isinstance(m, nn.modules.batchnorm._BatchNorm)]
+    enc_bn = [m for m in bns if id(m.weight) in enc]
+    dec_bn = [m for m in bns if id(m.weight) not in enc]
+    assert enc_bn and dec_bn
+    before_enc = [m.running_mean.clone() for m in enc_bn]
+    before_dec = [m.running_mean.clone() for m in dec_bn]
+    before_w = [m.weight.detach().clone() for m in enc_bn]
+    rec = get_recipe("standard", epochs=1, batch_size=4, precision="fp32",
+                     freeze_encoder_bn=True)
+    train(b.model, b.encoder_params, b.decoder_params, loader(True), loader(False),
+          num_classes=3, recipe=rec, device=torch.device("cpu"), log=lambda *_: None)
+    assert all(torch.equal(u, m.running_mean) for u, m in zip(before_enc, enc_bn))
+    assert not all(torch.equal(u, m.running_mean) for u, m in zip(before_dec, dec_bn))
+    assert not all(torch.equal(u, m.weight) for u, m in zip(before_w, enc_bn))

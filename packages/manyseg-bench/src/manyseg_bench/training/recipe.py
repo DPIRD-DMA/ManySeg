@@ -23,6 +23,9 @@ class Recipe:
     warmup_epochs: float = 1.0
     schedule: str = "cosine"  # cosine | onecycle | constant
     freeze_encoder_epochs: int = 0
+    # Keep the encoder's BatchNorm layers in eval mode (running statistics fixed at their
+    # pretrained values; affine weights still train). For small batches (E007).
+    freeze_encoder_bn: bool = False
     precision: str = "bf16"  # fp32 | bf16 | fp16
     grad_clip: float | None = None
     compile: bool = False

@@ -125,6 +125,10 @@ def train(
     warmup = int(recipe.warmup_epochs * steps_per_epoch)
     scaler = torch.amp.GradScaler(enabled=recipe.precision == "fp16")
 
+    enc_ids = {id(p) for p in enc_params}
+    enc_bn = [m for m in model.modules() if isinstance(m, nn.modules.batchnorm._BatchNorm)
+              and m.weight is not None and id(m.weight) in enc_ids] \
+        if recipe.freeze_encoder_bn else []
     history, step = [], 0
     t_start = time.perf_counter()
     for epoch in range(recipe.epochs):
@@ -132,6 +136,8 @@ def train(
         for p in enc_params:  # fastai-style freeze keeps norm params trainable
             p.requires_grad_(not frozen or _is_no_decay(p))
         model.train()
+        for m in enc_bn:  # running statistics stay at their pretrained values
+            m.eval()
         t0 = time.perf_counter()
         loss_sum, nb, nonfinite, n_img = 0.0, 0, 0, 0
         for x, y in train_loader:
