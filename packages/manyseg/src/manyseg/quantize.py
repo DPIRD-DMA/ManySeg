@@ -1,0 +1,240 @@
+"""Quantisation entry points (deployment is kept separate from model construction).
+
+Two routes, both through torchao (``pip install 'manyseg[quant]'``):
+
+* ``quantize_pt2e``: static int8 for CPU deployment. ``torch.export`` (with
+  ``export_model``'s dynamic H/W) → ``prepare_pt2e`` → calibration → ``convert_pt2e`` →
+  ``torch.export`` again, so the result is an ``ExportedProgram`` like ``export_model``'s.
+  Weights and activations are int8; ``torch.compile`` lowers the graph to oneDNN int8 kernels.
+* ``quantize_weights``: int8 weights (optionally int8 dynamic activations for Linear layers)
+  on the eager ``nn.Module``, for CPU or GPU, no calibration and no export.
+
+``model_size`` and ``compare_outputs`` report what the conversion saved and what it cost.
+
+This is a module of its own rather than part of ``manyseg.export`` because it carries an
+optional dependency and because ``quantize_weights`` does not export at all. The PT2E path
+reuses ``manyseg.export.dynamic_shapes`` rather than duplicating it.
+"""
+
+from __future__ import annotations
+
+import copy
+import io
+from collections.abc import Iterable, Mapping
+
+import torch
+from torch import Tensor, nn
+
+from .export import dynamic_shapes
+
+WEIGHT_MODES = ("int8_weight_only", "int8_dynamic")
+
+
+def _require_torchao() -> None:
+    try:
+        import torchao  # noqa: F401
+    except ImportError as e:
+        raise ImportError("quantisation needs torchao: pip install 'manyseg[quant]'") from e
+
+
+# --- PT2E: static int8, exported -----------------------------------------------------------
+
+def _x86_quantizer():
+    from torchao.quantization.pt2e.quantizer import x86_inductor_quantizer as xiq
+
+    return xiq.X86InductorQuantizer().set_global(xiq.get_default_x86_inductor_quantization_config())
+
+
+def _windowed(model: nn.Module) -> str | None:
+    """Name of the first window-attention block (timm Swin, Swin V2, DaViT all carry a
+    ``window_size``), whose dynamic-size export hangs rather than fails
+    (``architecture_review.md``)."""
+    return next((type(m).__name__ for m in model.modules() if hasattr(m, "window_size")), None)
+
+
+def _shapes(model: nn.Module, example, dynamic: bool, max_size: int, dynamic_batch: bool):
+    """``export_model``'s dynamic-shape spec, or None (fixed size). Computed once from the float
+    model: the quantised graph is re-exported with the same spec."""
+    if not dynamic:
+        return None
+    if (block := _windowed(model)) is not None:
+        raise ValueError(f"window-attention backbones ({block}) cannot be exported with dynamic "
+                         "H/W; pass dynamic=False to quantise at the example's fixed size")
+    return dynamic_shapes(model, example, max_size, dynamic_batch)
+
+
+def _export(module: nn.Module, example, shapes) -> torch.export.ExportedProgram:
+    """``torch.export`` as ``export_model`` does it, for the float model and the int8 graph."""
+    try:
+        return torch.export.export(module, (example,), dynamic_shapes=shapes,
+                                   prefer_deferred_runtime_asserts_over_guards=True)
+    except Exception as e:  # torch.export raises several types (UserError, RuntimeError, ...)
+        if shapes is None:
+            raise
+        raise ValueError(
+            "could not export this model with dynamic H/W; pass dynamic=False to quantise at "
+            f"the example's fixed size. Export error: {type(e).__name__}: {e}") from e
+
+
+def _drop_unused_attrs(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
+    """``convert_pt2e`` adds int8 copies of the weights but leaves the float originals
+    registered (unused); drop every parameter and buffer the graph no longer reads."""
+    used = {n.target for n in gm.graph.nodes if n.op == "get_attr"}
+    for name in [n for n, _ in [*gm.named_parameters(), *gm.named_buffers()] if n not in used]:
+        owner, _, leaf = name.rpartition(".")
+        mod = gm.get_submodule(owner)
+        mod._parameters.pop(leaf, None)
+        mod._buffers.pop(leaf, None)
+    gm.delete_all_unused_submodules()
+    return gm
+
+
+def quantize_pt2e(model: nn.Module, example, calibration: Iterable, *, quantizer=None,
+                  dynamic: bool = True, max_size: int = 4096,
+                  dynamic_batch: bool = False) -> torch.export.ExportedProgram:
+    """Static int8 (weights and activations) by PT2E post-training quantisation.
+
+    ``example`` is a Tensor or, for multi-input models, a ``dict[str, Tensor]``, exactly as the
+    model takes it. ``calibration`` is an iterable of inputs of the same form (e.g. a few dozen
+    representative batches); activation ranges are observed on it. ``quantizer`` defaults to
+    torchao's ``X86InductorQuantizer`` (per-channel weights, per-tensor activations); pass any
+    other PT2E quantizer (e.g. ``ArmInductorQuantizer``) to target another backend.
+
+    H/W stay dynamic as in ``export_model`` (and the batch too with ``dynamic_batch``).
+    Window-attention backbones (Swin, DaViT) cannot export dynamically and need
+    ``dynamic=False``: the result then only accepts the example's size.
+
+    Returns an ``ExportedProgram``, like ``export_model``: ``torch.export.save`` it, or run
+    ``ep.module()``. Eager calls run int8 as quantise/dequantise pairs in float, which shows the
+    accuracy cost but is not faster; for speed, compile it with inductor freezing::
+
+        torch._inductor.config.freezing = True
+        fast = torch.compile(ep.module())
+    """
+    _require_torchao()
+    from torchao.quantization.pt2e.quantize_pt2e import convert_pt2e, prepare_pt2e
+
+    model.eval()
+    shapes = _shapes(model, example, dynamic, max_size, dynamic_batch)
+    gm = _export(model, example, shapes).module()
+    prepared = prepare_pt2e(gm, quantizer if quantizer is not None else _x86_quantizer())
+    n = 0
+    with torch.no_grad():
+        for x in calibration:
+            prepared(x)
+            n += 1
+    if n == 0:
+        raise ValueError("calibration must yield at least one input")
+    return _export(_drop_unused_attrs(convert_pt2e(prepared)), example, shapes)
+
+
+# --- torchao: weight-only / dynamic, eager -------------------------------------------------
+
+def _is_linear(mod: nn.Module, fqn: str) -> bool:
+    return isinstance(mod, nn.Linear)
+
+
+def _is_dense_conv(mod: nn.Module, fqn: str) -> bool:
+    """Conv2d with more than one input channel per group. Depthwise weights (C, 1, k, k) are
+    tiny and torchao's int8 conv weights reject them, so they stay float."""
+    return isinstance(mod, nn.Conv2d) and mod.weight.shape[1] > 1
+
+
+def quantize_weights(model: nn.Module, mode: str = "int8_weight_only", *, conv: bool = True,
+                     inplace: bool = False) -> nn.Module:
+    """int8 weights through torchao, for eager or ``torch.compile`` inference on CPU or GPU.
+
+    ``mode``:
+
+    * ``"int8_weight_only"``: Linear and Conv2d weights stored int8 (symmetric, per output
+      channel), activations stay float. About 4x smaller; on GPU torchao's int8 matmul makes
+      Linear layers faster under ``torch.compile``.
+    * ``"int8_dynamic"``: Linear layers also quantise their activations to int8 at run time.
+      torchao has no dynamic-activation conv, so Conv2d weights are int8 weight-only.
+
+    Conv2d weights are dequantised on the fly, so for CNNs this saves memory and disk, not
+    time. ``conv=False`` leaves convs in float (Linear only). Depthwise convs always stay float.
+    The model is copied first unless ``inplace``.
+    """
+    if mode not in WEIGHT_MODES:
+        raise ValueError(f"mode must be one of {WEIGHT_MODES}, got {mode!r}")
+    _require_torchao()
+    from torchao.quantization import (
+        Int8DynamicActivationInt8WeightConfig,
+        Int8WeightOnlyConfig,
+        IntxWeightOnlyConfig,
+        quantize_,
+    )
+    from torchao.quantization.granularity import PerAxis
+
+    if not inplace:
+        model = copy.deepcopy(model)
+    if conv:
+        quantize_(model, IntxWeightOnlyConfig(weight_dtype=torch.int8, granularity=PerAxis(0)),
+                  filter_fn=_is_dense_conv)
+    linear = (Int8WeightOnlyConfig() if mode == "int8_weight_only"
+              else Int8DynamicActivationInt8WeightConfig())
+    quantize_(model, linear, filter_fn=_is_linear)
+    return model
+
+
+# --- reports -------------------------------------------------------------------------------
+
+def model_size(model: nn.Module | torch.export.ExportedProgram) -> int:
+    """Serialized size in bytes: ``torch.export.save`` for an ``ExportedProgram`` (graph and
+    weights, as deployed), ``torch.save(model.state_dict())`` for a module (weights only)."""
+    buf = io.BytesIO()
+    if isinstance(model, torch.export.ExportedProgram):
+        torch.export.save(model, buf)
+    else:
+        torch.save(model.state_dict(), buf)
+    return buf.getbuffer().nbytes
+
+
+class _Diff:
+    """Running agreement statistics for one output."""
+
+    def __init__(self):
+        self.max, self.abs_sum, self.n, self.agree, self.pixels = 0.0, 0.0, 0, 0, 0
+
+    def add(self, ref: Tensor, out: Tensor) -> None:
+        d = (ref.float() - out.float().to(ref.device)).abs()
+        self.max = max(self.max, d.max().item())
+        self.abs_sum += d.sum().item()
+        self.n += d.numel()
+        if ref.ndim >= 2 and ref.shape[1] > 1:  # class dimension: argmax is meaningful
+            agree = ref.argmax(1) == out.to(ref.device).argmax(1)
+            self.agree += agree.sum().item()
+            self.pixels += agree.numel()
+
+    def report(self, prefix: str = "") -> dict[str, float]:
+        r = {f"{prefix}max_abs_diff": self.max, f"{prefix}mean_abs_diff": self.abs_sum / self.n}
+        if self.pixels:
+            r[f"{prefix}argmax_agreement"] = self.agree / self.pixels
+        return r
+
+
+def compare_outputs(reference, candidate, inputs: Iterable) -> dict[str, float]:
+    """Numerical agreement of ``candidate`` (e.g. a quantised model) with ``reference`` over
+    ``inputs`` (an iterable of model inputs, Tensor or dict). Either model may be an
+    ``nn.Module`` or an ``ExportedProgram``.
+
+    Returns ``max_abs_diff`` and ``mean_abs_diff`` of the raw outputs and, for outputs with
+    more than one channel, ``argmax_agreement`` (the fraction of pixels, or images for image
+    heads, whose argmax over dim 1 is unchanged). For dict outputs every key is prefixed with
+    the head name, e.g. ``"segmentation/argmax_agreement"``.
+    """
+    reference, candidate = (m.module() if isinstance(m, torch.export.ExportedProgram) else m
+                            for m in (reference, candidate))
+    diffs: dict[str, _Diff] = {}
+    with torch.no_grad():
+        for x in inputs:
+            ref, out = reference(x), candidate(x)
+            if isinstance(ref, Mapping):
+                for k, v in ref.items():
+                    diffs.setdefault(f"{k}/", _Diff()).add(v, out[k])
+            else:
+                diffs.setdefault("", _Diff()).add(ref, out)
+    if not diffs:
+        raise ValueError("compare_outputs needs at least one input")
+    return {k: v for prefix, d in diffs.items() for k, v in d.report(prefix).items()}
