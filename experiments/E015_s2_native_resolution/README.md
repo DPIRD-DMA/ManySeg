@@ -53,3 +53,10 @@ arm `e015-groups-10m`: the same three independent encoders and band split, every
 10 m (factor 1). Only the resolution differs from `e015-groups`. If `groups-10m` ≈ `groups`,
 the gain is capacity, not native resolution, and no CloudSEN12+ follow-up is run. Seeds 0–2,
 local 4090.
+
+## Amendment 3 (2026-10-15 13:36, library fix verification)
+The diagnostic confirmed the BN-blending hypothesis: `e015-groups-shared-frozenbn` scored
+0.9029 / 0.9043 / 0.9049 val, against 0.50–0.65 without frozen BN. The library now gives
+`shared:` encoders per-input BatchNorm by default (commit `0a4025d`). Verification arm
+`e015-groups-shared-perbn`: the shared arm unchanged except for the new default (BN statistics
+still update, per input), seeds 0–2, local 4090.
