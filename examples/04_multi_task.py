@@ -4,7 +4,6 @@ regression with its own decoder. Passing `heads=` makes the model return a dict.
 
 import torch
 import torch.nn.functional as F
-
 from manyseg import create_model
 
 

@@ -8,7 +8,6 @@ Random weights give near-flat logits, so the agreement printed here is pessimist
 """
 
 import torch
-
 from manyseg import create_model
 from manyseg.export import export_model
 from manyseg.quantize import compare_outputs, model_size, quantize_pt2e, quantize_weights

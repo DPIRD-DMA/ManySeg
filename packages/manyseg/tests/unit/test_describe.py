@@ -37,7 +37,7 @@ def test_single_input_structure_and_shapes():
     g = model_graph(model, x)
     (enc,) = g.by_stage("encoder")
     assert enc.title == "resnet18 (random init)"
-    assert "4 ch" in enc.attr("stem") and "repeat" in enc.attr("stem")
+    assert "4 ch" in enc.attr("stem") and "random init" in enc.attr("stem")  # nothing to adapt
     assert enc.shape("padded in") == "1x4x96x128"
     assert feeds(g, "logits").stage == "decoder"
     assert g.find("head", "logits").shape("out") == shape(model.eval()(x))
@@ -283,3 +283,22 @@ def test_dot_escapes_quotes_in_user_names(tmp_path):
         pytest.skip("graphviz not installed")
     r = subprocess.run(["dot", "-Tsvg"], input=src, capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
+
+
+def test_random_init_stem_does_not_claim_adapted_weights():
+    from manyseg import create_model
+
+    text = create_model(backbone="resnet18", pretrained=False, in_channels=4,
+                        num_classes=2).describe()
+    assert "random init (no pretrained weights to adapt)" in text
+    assert "weights from 3 ch" not in text
+
+
+def test_intermediate_fusion_image_head_reads_a_fused_level():
+    from manyseg import create_model
+
+    m = create_model(inputs={"a": {"channels": 3}, "b": {"channels": 2}}, backbone="resnet18",
+                     pretrained=False, fusion={"type": "intermediate"},
+                     heads={"seg": {"type": "segmentation", "channels": 2},
+                            "area": {"type": "regression", "channels": 1, "scope": "image"}})
+    assert "from: fused level" in m.describe()

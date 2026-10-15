@@ -6,7 +6,6 @@ any exported graph). Longer walkthroughs: `instance_fields.py`, `point_counting.
 
 import torch
 import torch.nn.functional as F
-
 from manyseg import create_model
 from manyseg.instances import instance_heads, instance_targets, instances_from_outputs
 from manyseg.points import (

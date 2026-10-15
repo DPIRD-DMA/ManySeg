@@ -6,7 +6,6 @@ export with a vector input.
 """
 
 import torch
-
 from manyseg import create_model
 from manyseg.export import export_model
 

@@ -10,7 +10,6 @@ import tempfile
 from pathlib import Path
 
 import torch
-
 from manyseg import create_model
 from manyseg.describe import render_dot
 from manyseg.instances import instance_heads

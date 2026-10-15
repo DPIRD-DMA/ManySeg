@@ -13,7 +13,6 @@ rule) cycles the RGB filters and rescales by 3/C; in E004 (13-band S2) nothing b
 
 import torch
 import torch.nn.functional as F
-
 from manyseg import create_model
 
 BANDS = 13  # B1..B12 + B8A

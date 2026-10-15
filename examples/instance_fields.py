@@ -7,7 +7,6 @@ Losses here are plain torch; manyseg-bench has Dice+BCE etc. (`manyseg_bench.los
 
 import torch
 import torch.nn.functional as F
-
 from manyseg import create_model
 from manyseg.instances import instance_heads, instance_targets, instances_from_outputs
 

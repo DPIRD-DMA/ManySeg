@@ -516,7 +516,10 @@ ep = export_model(conditioned_model, {"s2": s2, "meta": meta})   # meta: (B, N),
 `export_model` builds the `dynamic_shapes` spec itself and uses deferred runtime asserts. Some
 timm blocks produce guards that are always true but that the export solver cannot prove.
 Window-attention backbones (Swin, DaViT) cannot be exported with dynamic sizes. See
-`backbone_compatibility.md`.
+`backbone_compatibility.md`. For ONNX, pass the same spec to the dynamo exporter:
+`torch.onnx.export(model, (x,), path, dynamo=True,
+dynamic_shapes=manyseg.export.dynamic_shapes(model, x))` (see `examples/06_export.py`; the
+parity check needs `onnxruntime`, which the `onnx` extra does not install).
 
 ### Speed: compile and precision
 

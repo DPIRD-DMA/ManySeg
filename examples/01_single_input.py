@@ -6,7 +6,6 @@ step on random data and prints what was built.
 
 import torch
 import torch.nn.functional as F
-
 from manyseg import create_model
 
 

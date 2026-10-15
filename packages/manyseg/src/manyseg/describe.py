@@ -430,6 +430,8 @@ class _Builder:
                 p = enc.input_adapter.proj
                 stem = (f"{enc.in_channels} ch, projection 1x1 conv "
                         f"{p.in_channels}->{p.out_channels}")
+            elif enc.in_channels != native and not enc.pretrained:
+                stem = f"{enc.in_channels} ch, random init (no pretrained weights to adapt)"
             elif enc.in_channels != native:
                 stem = f"{enc.in_channels} ch, '{enc.channel_adapter}' weights from {native} ch"
             else:
@@ -644,7 +646,9 @@ class _Builder:
             elif src == "task":
                 feed, label = self.dec_out[f"task_{name}"], f"decoder[{name}]"
             else:
-                feed, label = enc_src, f"encoder level {deepest} ({dspec.channels}@/{dspec.stride})"
+                where = ("fused level" if self.multi and self.bb.mode == "intermediate"
+                         else "encoder level")
+                feed, label = enc_src, f"{where} {deepest} ({dspec.channels}@/{dspec.stride})"
             n.attrs.append(("from", label, True))
             if isinstance(head, PixelHead):
                 n.attrs.append(("scale", _fmt_scale(head.factor), True))

@@ -30,7 +30,3 @@ target-version = "py310"
 select = ["E", "F", "I", "UP", "B", "SIM"]
 # zip(strict=True) in forward() adds Dynamo work; lengths are validated at construction.
 ignore = ["B905"]
-
-[tool.ruff.lint.isort]
-# examples/ sit outside the packages, so ruff cannot detect these as first-party there.
-known-first-party = ["manyseg", "manyseg_bench"]

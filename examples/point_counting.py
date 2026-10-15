@@ -6,7 +6,6 @@ model: peaks via max-pool NMS, count = density integral, instances via offset gr
 
 import torch
 import torch.nn.functional as F
-
 from manyseg import create_model
 from manyseg.points import (
     centers_from_instances,

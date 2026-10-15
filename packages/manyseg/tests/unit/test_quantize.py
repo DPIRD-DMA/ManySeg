@@ -193,3 +193,15 @@ def test_missing_torchao_error(monkeypatch, call):
     monkeypatch.setitem(sys.modules, "torchao", None)  # makes `import torchao` raise
     with pytest.raises(ImportError, match=r"manyseg\[quant\]"):
         call(_model())
+
+
+def test_pt2e_names_dynamic_batch_when_calibration_batch_differs():
+    """Rough edge (examples review): a different calibration batch size failed deep in an
+    export guard; it is now a clear error up front."""
+    pytest.importorskip("torchao")
+    from manyseg import create_model
+    from manyseg.quantize import quantize_pt2e
+
+    m = create_model(backbone="resnet18", pretrained=False, in_channels=4, num_classes=3).eval()
+    with pytest.raises(ValueError, match="dynamic_batch=True"):
+        quantize_pt2e(m, torch.randn(1, 4, 64, 64), [torch.randn(2, 4, 64, 64)])

@@ -136,14 +136,24 @@ def quantize_pt2e(model: nn.Module, example, calibration: Iterable, *, quantizer
     shapes = _shapes(model, example, dynamic, max_size, dynamic_batch)
     gm = _export(model, example, shapes).module()
     prepared = prepare_pt2e(gm, quantizer if quantizer is not None else _x86_quantizer())
-    n = 0
+    n, bs = 0, _batch_of(example)
     with torch.no_grad():
         for x in calibration:
+            if not dynamic_batch and _batch_of(x) != bs:
+                raise ValueError(f"calibration batch size {_batch_of(x)} differs from the "
+                                 f"example's {bs}; the export fixes the batch dimension unless "
+                                 "dynamic_batch=True")
             prepared(x)
             n += 1
     if n == 0:
         raise ValueError("calibration must yield at least one input")
     return _export(_drop_unused_attrs(convert_pt2e(prepared)), example, shapes)
+
+
+def _batch_of(x) -> int:
+    if isinstance(x, Mapping):
+        x = next(v for v in x.values() if torch.is_tensor(v))
+    return int(x.shape[0])
 
 
 # --- torchao: weight-only / dynamic, eager -------------------------------------------------

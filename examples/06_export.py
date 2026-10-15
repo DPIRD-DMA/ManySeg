@@ -15,7 +15,6 @@ import tempfile
 from pathlib import Path
 
 import torch
-
 from manyseg import create_model
 from manyseg.export import dynamic_shapes, export_model
 
