@@ -97,8 +97,11 @@ Negative results are written up in `experiments/` like positive ones.
   instances/points, export, quantisation. Each runs on CPU in seconds; the slow tier runs them all.
 * ⏳ Docs site.
 * ⏳ README status line (currently "pre-alpha").
-* ⏳ PyPI packaging for `manyseg` and `manyseg-bench` independently. Supported torch/timm range
-  tested in CI.
+* ✅ PyPI packaging for `manyseg` and `manyseg-bench` independently: metadata, licence and
+  `py.typed` in each wheel, PyPI READMEs, `twine check` clean, and the `manyseg` wheel installs and
+  runs alone (CI `package` job on PRs and nightly). Both names are free on PyPI. **Not
+  published**: that needs a decision on version and timing. ⏳ A tested torch/timm version range
+  (minimum-versions CI leg).
 * ⏳ Clear error messages for unsupported backbone/size combinations, using the capability table.
 
 ## Known risks
