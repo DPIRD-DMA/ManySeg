@@ -132,15 +132,15 @@ results included. Highlights:
 * Boundary + distance heads double instance PQ over extent + connected components (E010).
   Point detection needs a validation-calibrated peak threshold: F1 0.40 → 0.59 (E011b).
 * Negative results: aligned upsampling (E001b), fusion beyond early stacking on Sen1Floods11
-  (E005), and the `projection` stem adapter (E004). Metadata FiLM helps less than 2 SE on held-out
-  flood events (E009).
+  (E005), and the `projection` stem adapter (E004). Metadata conditioning showed no benefit on three
+  datasets (E009 flood events, E013 cloud scenes, E016 crop phenology with day of year).
 * CloudSEN12+ cloud masking was negative on all three questions (E013): static S1 backscatter
   and DEM layers, metadata conditioning on unseen locations, and `input_cross` (it helps
   where labels follow per-pixel input values, such as water, but not on cloud masking).
 * Sentinel-2 bands split into resolution groups (one shared encoder, per-input BatchNorm) beat
   the 13-band stack by +1.3 mIoU on Sen1Floods11 (E015); native resolution itself adds
-  nothing. The experiment found and fixed a shared-encoder BatchNorm bug. Replication
-  pending.
+  nothing. The experiment found and fixed a shared-encoder BatchNorm bug. It did not
+  replicate on PASTIS (E016), so it stays a single-dataset result.
 * Small batches: freezing the encoder's BatchNorm statistics is the fix (+0.8 / +2.3 mIoU at
   batch 2); gradient accumulation alone is not (E007, E007b).
 * Precision and size: bf16, fp16 and int8 weight-only cost no measurable accuracy (E008). The

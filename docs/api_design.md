@@ -446,8 +446,10 @@ over-/under-segmentation, point F1, count MAE) live in `manyseg-bench`
 > water IoU, 2.9 SE, all folds); FiLM vs no metadata was +0.9 but under the 2 SE bar. Lat/lon added
 > nothing on held-out events. **E013 (CloudSEN12+, unseen locations):** FiLM with lat/lon, day of
 > year and solar angles was −0.08 val / −0.26 test vs no metadata, and lat/lon added nothing.
-> Metadata conditioning has not shown a benefit on two remote-sensing datasets, so treat it as a
-> tool to test on your data, not a default. Only use `coords` fields with geographic or event-level
+> **E016 (PASTIS, single-date crop types):** day-of-year by FiLM was +0.12 val mIoU (bar 0.99),
+> the same as a shuffled-date control. Metadata conditioning has now shown no benefit on three
+> datasets (flood events, unseen cloud scenes, crop phenology), so treat it as a tool to test on
+> your data, not a default. Only use `coords` fields with geographic or event-level
 > splits; otherwise the model can memorise locations and the evaluation will not show it.
 
 ## Inspecting a built model

@@ -1,6 +1,6 @@
 # E016: Acquisition date and S2 band groups for single-date crop types (PASTIS)
 
-Status: **planned** (drafted and reviewed 2026-10-15, registered before any run). Review decisions: the date rule stays as written (no cloud-aware choice); the per-month analysis is dropped (see Protocol).
+Status: **complete** (2026-10-15; 18 runs, local RTX 4090, code `166ec76`, no Pawsey units). **Negative on every question: day of year adds nothing even for single-date crop typing, and E015's band-grouping gain does not replicate.** Drafted and reviewed 2026-10-15, registered before any run. Review decisions: the date rule stays as written (no cloud-aware choice); the per-month analysis is dropped (see Protocol).
 
 E009 (Sen1Floods11) and E013 (CloudSEN12+) found no benefit from metadata conditioning. On
 both, the metadata was largely redundant with the image: a flood or a cloud looks the same in
@@ -161,3 +161,47 @@ the same direction. Decisions use val mIoU; test is confirmatory.
 18 runs × about 6 min ≈ 1.8 h of 4090 time uncontended (up to about 3 h contended), run
 sequentially with `bash experiments/E016_pastis_date_metadata/run.sh` from the repo root. No
 reruns except for crashes.
+
+## Results (mean ± seed SD, 3 seeds; 19 classes, void ignored)
+
+| arm | n | val mIoU | test mIoU | test winter cereals IoU | test summer crops IoU | params |
+|---|---|---|---|---|---|---|
+| e016-channels | 3 | 0.1986 ± 0.0027 | 0.1950 ± 0.0032 | 0.1701 | 0.1650 | 24.5 M |
+| e016-film | 3 | 0.2006 ± 0.0047 | 0.1989 ± 0.0047 | 0.1726 | 0.1710 | 24.6 M |
+| e016-film-shuffled | 3 | 0.2014 ± 0.0018 | 0.1993 ± 0.0018 | 0.1718 | 0.1705 | 24.6 M |
+| e016-film-tileshuffled | 3 | 0.2021 ± 0.0033 | 0.1997 ± 0.0038 | 0.1715 | 0.1731 | 24.6 M |
+| e016-groups-shared | 3 | 0.2007 ± 0.0012 | 0.1988 ± 0.0009 | 0.1718 | 0.1725 | 25.2 M |
+| e016-none | 3 | 0.1994 ± 0.0052 | 0.1977 ± 0.0046 | 0.1678 | 0.1716 | 24.5 M |
+
+```
+Q1a FiLM vs none: val +0.12 (2 pooled SD 0.99), test +0.12 -> no
+   test winter cereals +0.47, summer crops -0.06
+Q1b shuffled vs none (must NOT pass): val +0.20 (2 pooled SD 0.77), test +0.16 -> no
+   test winter cereals +0.40, summer crops -0.11
+Q1c FiLM vs tile-shuffled: val -0.15 (2 pooled SD 0.81), test -0.09 -> no
+Q1c tile-shuffled vs none: val +0.27 (2 pooled SD 0.87), test +0.21 -> no
+   test winter cereals +0.37, summer crops +0.15
+Q1d FiLM vs channels: val +0.20 (2 pooled SD 0.76), test +0.39 -> no
+Q2 band groups vs stack: val +0.13 (2 pooled SD 0.75), test +0.12 -> no
+```
+
+## Decision
+* **Q1a (FiLM date): negative.** +0.12 val (bar 0.99), +0.12 test. The per-class view points
+  the way the hypothesis predicted for winter cereals (+0.47 test IoU), but so does the
+  shuffled control (+0.40), so it is noise, not date information (Q1b). The tile-shuffled
+  control is no different either (Q1c). Channels vs FiLM: no difference (Q1d).
+* **Q2 (band groups, E015 replication): negative.** +0.13 val (bar 0.75), +0.12 test. E015's
+  band-grouping gain on Sen1Floods11 does not carry over to PASTIS. PASTIS has only a 10 m and a
+  20 m group, its 20 m bands were already bilinearly upsampled, and there is no 60 m group.
+  Band grouping stays a Sen1Floods11 result, and no library helper is added.
+* **Caveat, stated plainly.** Absolute accuracy is low (about 0.20 mIoU over 19 classes; the
+  time-series state of the art on PASTIS is about 0.63). Training had plateaued (last 5 epochs:
+  train loss about 1.085, val 0.202–0.206), so this is not undertraining: one 128² image
+  carries little crop information, and in that regime the date may not have enough image
+  evidence to disambiguate. The test is valid as pre-registered (same budget for
+  every arm), but it does not exclude a benefit for a much better-trained single-date model or
+  for time series. That would be a new experiment.
+* **Metadata conditioning, overall:** no benefit on three datasets chosen to give it
+  increasingly fair chances (E009 flood events, E013 unseen cloud scenes, E016 crop phenology).
+  The docs keep presenting it as an available tool without a recommendation, now with three
+  negative results. The ViT `token` mode stays unplanned.
