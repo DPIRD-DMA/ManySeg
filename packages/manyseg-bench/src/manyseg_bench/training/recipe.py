@@ -26,6 +26,9 @@ class Recipe:
     # Keep the encoder's BatchNorm layers in eval mode (running statistics fixed at their
     # pretrained values; affine weights still train). For small batches (E007).
     freeze_encoder_bn: bool = False
+    # Optimiser step every k micro-batches of ``batch_size`` (effective batch k*batch_size;
+    # BN still sees micro-batches). The lr schedule counts optimiser steps (E007b).
+    grad_accum_steps: int = 1
     precision: str = "bf16"  # fp32 | bf16 | fp16
     grad_clip: float | None = None
     compile: bool = False

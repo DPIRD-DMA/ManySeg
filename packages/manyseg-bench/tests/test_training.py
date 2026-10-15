@@ -183,3 +183,40 @@ def test_freeze_encoder_bn_keeps_encoder_running_stats(provider):
     assert all(torch.equal(u, m.running_mean) for u, m in zip(before_enc, enc_bn))
     assert not all(torch.equal(u, m.running_mean) for u, m in zip(before_dec, dec_bn))
     assert not all(torch.equal(u, m.weight) for u, m in zip(before_w, enc_bn))
+
+
+def test_grad_accumulation_steps_and_equivalence(monkeypatch):
+    """E007b: grad_accum_steps=k takes one optimiser step per k micro-batches (the lr schedule
+    counts optimiser steps), and k micro-batches of b match one batch of k*b (no BN)."""
+    from manyseg_bench.training import trainer
+
+    imgs, masks = synthetic(n=8)
+
+    def fixed_loader(bs):  # no augmentation: identical images in both runs
+        return GPULoader(imgs, masks, bs, (0.5,) * 3, (0.25,) * 3, torch.device("cpu"), False)
+
+    def build():
+        torch.manual_seed(0)
+        return nn.Sequential(nn.Conv2d(3, 8, 3, padding=1), nn.ReLU(), nn.Conv2d(8, 3, 1))
+
+    steps = []
+    orig = torch.optim.AdamW.step
+
+    def counting(self, *a, **k):
+        steps.append(1)
+        return orig(self, *a, **k)
+
+    monkeypatch.setattr(torch.optim.AdamW, "step", counting)
+    results = []
+    for bs, k in ((4, 1), (2, 2)):
+        m = build()
+        params = list(m.parameters())
+        rec = get_recipe("standard", epochs=1, batch_size=bs, precision="fp32", warmup_epochs=0,
+                         schedule="constant", grad_accum_steps=k)
+        steps.clear()
+        trainer.train(m, params[:2], params[2:], fixed_loader(bs), fixed_loader(4),
+                      num_classes=3, recipe=rec, device=torch.device("cpu"), log=lambda *_: None)
+        results.append(([p.detach().clone() for p in m.parameters()], len(steps)))
+    (pa, na), (pb, nb) = results
+    assert na == nb == 2  # 8 images: 2 steps of 4, or 4 micro-batches of 2 accumulated in pairs
+    assert all(torch.allclose(u, v, atol=1e-5) for u, v in zip(pa, pb))

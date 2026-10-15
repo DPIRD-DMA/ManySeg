@@ -120,7 +120,9 @@ def train(
         model = model.to(memory_format=torch.channels_last)
     run = torch.compile(model) if recipe.compile else model
     opt = build_optimizer(enc_params, dec_params, recipe)
-    steps_per_epoch = len(train_loader)
+    accum = max(1, int(recipe.grad_accum_steps))
+    micro_per_epoch = len(train_loader)
+    steps_per_epoch = math.ceil(micro_per_epoch / accum)  # optimiser steps
     total = steps_per_epoch * recipe.epochs
     warmup = int(recipe.warmup_epochs * steps_per_epoch)
     scaler = torch.amp.GradScaler(enabled=recipe.precision == "fp16")
@@ -140,29 +142,39 @@ def train(
             m.eval()
         t0 = time.perf_counter()
         loss_sum, nb, nonfinite, n_img = 0.0, 0, 0, 0
-        for x, y in train_loader:
+        for i, (x, y) in enumerate(train_loader):
             n_img += _batch_size(x)
             if recipe.channels_last:
                 x = _channels_last(x)
-            f = lr_factor(step, total, warmup, recipe.schedule)
-            for g in opt.param_groups:
-                g["lr"] = g["base_lr"] * f
-            opt.zero_grad(set_to_none=True)
+            first, start = i % accum == 0, i - i % accum
+            group = min(accum, micro_per_epoch - start)  # the last group may be shorter
+            last = i - start == group - 1
+            if first:
+                f = lr_factor(step, total, warmup, recipe.schedule)
+                for g in opt.param_groups:
+                    g["lr"] = g["base_lr"] * f
+                opt.zero_grad(set_to_none=True)
+                backward = False
             with autocast(device, recipe.precision):
                 out = run(x)
             loss = task.loss(out, task.targets(y))
             if not torch.isfinite(loss):
                 nonfinite += 1
+            else:
+                scaler.scale(loss / group).backward()
+                backward = True
+                loss_sum += float(loss.detach())
+                nb += 1
+            if not last:
+                continue
+            if not backward:  # every micro-batch was non-finite: skip the update
                 step += 1
                 continue
-            scaler.scale(loss).backward()
             if recipe.grad_clip:
                 scaler.unscale_(opt)
                 torch.nn.utils.clip_grad_norm_(model.parameters(), recipe.grad_clip)
             scaler.step(opt)
             scaler.update()
-            loss_sum += float(loss.detach())
-            nb += 1
             step += 1
         if device.type == "cuda":
             torch.cuda.synchronize(device)
