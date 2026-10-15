@@ -578,11 +578,12 @@ class _Builder:
             fuse = self.add(f"late_{key}", "fusion", f"fusion -> {name}",
                             f"late, op {_registry_name(FUSION_OPS, dec.fuse)}", modules=[dec.fuse])
             fuse.attrs.append(("fuses", f"{len(dec.decoders)} decoder outputs", True))
-            extent = [r for r in self.bb.names[1:] if self.bb.alignment[r] == "same_extent"]
+            # Read from the built decoder: it resamples same_extent outputs by valid region.
+            align = getattr(dec, "alignment", ("same_grid",) * len(dec.groups))
+            extent = [r for r, a in zip(self.bb.names[1:], align[1:]) if a == "same_extent"]
             if extent:
-                # LateFusionDecoder resizes the whole (padded) output, not its valid region.
-                fuse.attrs.append(("resized", f"{', '.join(extent)} (whole padded output, "
-                                   "bilinear, to the primary's size)", True))
+                fuse.attrs.append(("resampled", f"{', '.join(extent)} (same_extent: valid "
+                                   "region, bilinear, onto the primary's valid region)", True))
             for r, sub, (a, b) in zip(self.bb.names, dec.decoders, dec.groups):
                 n = self._decoder_node(f"dec_{key}_{r}", f"{name} [{r}]", sub, specs[a:b])
                 self.edge(feats[r], n)
@@ -859,6 +860,11 @@ def _dot_label(n: Node) -> str:
     return "<" + '<br align="left"/>'.join(rows) + '<br align="left"/>>'
 
 
+def _q(s) -> str:
+    """A DOT double-quoted string (user names may contain quotes or backslashes)."""
+    return '"' + str(s).replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
 def _to_dot(g: ModelGraph) -> str:
     out = ["digraph manyseg {",
            '  rankdir=LR; nodesep=0.25; ranksep=0.5; newrank=true;',
@@ -866,28 +872,28 @@ def _to_dot(g: ModelGraph) -> str:
            '  node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=10, '
            'margin="0.12,0.06"];',
            '  edge [fontname="Helvetica", fontsize=9, color="#5f6368"];']
-    summary = "\\l".join(f"{k}: {v}" for k, v in g.summary) + "\\l"
-    out.append(f'  label="{summary}"; labelloc=t;')
+    summary = _q("\n".join(f"{k}: {v}" for k, v in g.summary)).replace("\n", "\\l")
+    out.append(f"  label={summary[:-1]}\\l\"; labelloc=t;")
     for n in g.nodes.values():
         color = _COLORS[n.style or n.stage]
         # Fusion boxes are square-cornered so they stand apart from encoders and decoders.
         style = '"filled"' if n.stage in ("fusion", "adapter") else '"rounded,filled"'
-        out.append(f'  "{n.id}" [label={_dot_label(n)}, style={style}, fillcolor="{color}"];')
+        out.append(f'  {_q(n.id)} [label={_dot_label(n)}, style={style}, fillcolor="{color}"];')
     inputs = [n.id for n in g.by_stage("input")]
-    out.append("  { rank=same; " + " ".join(f'"{i}";' for i in inputs) + " }")
+    out.append("  { rank=same; " + " ".join(f"{_q(i)};" for i in inputs) + " }")
     heads = [n.id for n in g.by_stage("head")]
-    out.append("  { rank=same; " + " ".join(f'"{i}";' for i in heads) + " }")
+    out.append("  { rank=same; " + " ".join(f"{_q(i)};" for i in heads) + " }")
     for e in g.edges:
         attrs = []
         if e.label:
-            attrs.append(f'label="{e.label}"')
+            attrs.append(f"label={_q(e.label)}")
         if e.kind == "condition":
             attrs += ['style=dashed', 'color="#8e24aa"', 'fontcolor="#8e24aa"',
                       'constraint=false' if g.nodes[e.dst].stage == "input" else ""]
         elif e.kind == "image":
             attrs += ['style=dotted', 'color="#1a73e8"', 'fontcolor="#1a73e8"']
         attrs = [a for a in attrs if a]
-        out.append(f'  "{e.src}" -> "{e.dst}"' + (f" [{', '.join(attrs)}]" if attrs else "")
+        out.append(f"  {_q(e.src)} -> {_q(e.dst)}" + (f" [{', '.join(attrs)}]" if attrs else "")
                    + ";")
     out.append("}")
     return "\n".join(out) + "\n"

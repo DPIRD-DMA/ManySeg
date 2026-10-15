@@ -266,3 +266,20 @@ def test_text_golden():
         "area": {"type": "regression", "channels": 1, "scope": "image", "uncertainty": True}})
     assert model.describe() == GOLDEN
     assert isinstance(model.heads["seg"], PixelHead)
+
+
+def test_dot_escapes_quotes_in_user_names(tmp_path):
+    """Regression (Codex review): a head named with a quote broke the DOT summary label."""
+    import shutil
+    import subprocess
+
+    from manyseg import create_model
+
+    m = create_model(backbone="resnet18", pretrained=False,
+                     heads={'a"b': {"type": "segmentation", "channels": 2}})
+    m.single_output = 'a"b'  # the summary line names it: returns: Tensor (head 'a"b')
+    src = m.describe(format="dot")
+    if shutil.which("dot") is None:
+        pytest.skip("graphviz not installed")
+    r = subprocess.run(["dot", "-Tsvg"], input=src, capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
