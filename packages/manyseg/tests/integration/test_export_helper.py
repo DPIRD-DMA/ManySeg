@@ -65,3 +65,15 @@ def test_export_point_and_density_presets():
     ref = model(x)
     for k, v in ep.module()(x).items():
         torch.testing.assert_close(v, ref[k], atol=1e-4, rtol=1e-4)
+
+
+@pytest.mark.parametrize("name", ["fast", "compact", "balanced", "accurate"])
+def test_presets_export_dynamic_hw(name):
+    """The E018 presets (PVTv2-b0 encoder) are meant for deployment: dynamic H/W export."""
+    from manyseg.presets import preset
+
+    model = create_model(**preset(name), pretrained=False, in_channels=4, num_classes=2).eval()
+    ep = export_model(model, torch.randn(1, 4, 64, 96))
+    for hw in [(64, 96), (97, 131)]:
+        x = torch.randn(1, 4, *hw)
+        torch.testing.assert_close(ep.module()(x), model(x), atol=1e-4, rtol=1e-4)
