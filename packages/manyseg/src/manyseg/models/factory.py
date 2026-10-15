@@ -49,7 +49,8 @@ def _build_inputs(inputs, fusion, *, backbone, pretrained, channel_adapter, out_
         if fusion:
             raise ValueError(f"early fusion takes no options, got {sorted(fusion)}")
         total = sum(cfg["channels"] for cfg in inputs.values())
-        return EarlyFusionEncoder(list(inputs), make_bb({}, total)), ftype, {}
+        channels = {n: cfg["channels"] for n, cfg in inputs.items()}
+        return EarlyFusionEncoder(list(inputs), make_bb({}, total), channels), ftype, {}
 
     encoders, adapters = {}, {}
     for n, cfg in inputs.items():

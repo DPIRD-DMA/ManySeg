@@ -78,7 +78,8 @@ def create_head(spec_decoder: FeatureSpec, spec_encoder: FeatureSpec, cfg: dict)
     cfg = dict(cfg)
     kind = HEADS.get_or_raise(cfg.pop("type", "segmentation"))
     channels = cfg.pop("channels")
-    if cfg.pop("uncertainty", False):
+    uncertainty = bool(cfg.pop("uncertainty", False))
+    if uncertainty:
         # Heteroscedastic regression: [mean (C), log-variance (C)]; the loss (e.g. Gaussian NLL)
         # lives outside the model.
         if kind != "regression":
@@ -101,4 +102,5 @@ def create_head(spec_decoder: FeatureSpec, spec_encoder: FeatureSpec, cfg: dict)
         raise ValueError(f"source must be 'decoder' or 'encoder', got {source!r}")
     head.kind = kind
     head.scope = scope
+    head.uncertainty = uncertainty
     return head, source

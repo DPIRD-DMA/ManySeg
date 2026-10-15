@@ -75,6 +75,15 @@ class DenseModel(nn.Module):
     def feature_specs(self):
         return self.backbone.feature_specs
 
+    def describe(self, sample: Tensor | Mapping[str, Tensor] | None = None,
+                 format: str = "text") -> str:
+        """Stage-level description of the built model (``"text"``, ``"mermaid"`` or
+        ``"dot"``); with ``sample``, annotated with real tensor shapes and FLOPs. See
+        :func:`manyseg.describe.describe`."""
+        from ..describe import describe
+
+        return describe(self, sample, format)
+
     @staticmethod
     def _decode(decoder: nn.Module, x: Tensor | None, feats: list[Tensor]) -> Tensor:
         return decoder([x, *feats] if getattr(decoder, "wants_input", False) else feats)

@@ -142,6 +142,7 @@ class TimmBackbone(nn.Module):
         self.block_indices = tuple(out_indices) if self.is_plain else None
         self.model = _timm_create(name, pretrained=pretrained, **kwargs)
         self.name = name
+        self.pretrained = bool(pretrained)  # recorded for describe(); weights are already set
         self.in_channels = in_channels
         self.channel_adapter = channel_adapter
 

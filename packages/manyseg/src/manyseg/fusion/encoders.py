@@ -37,13 +37,19 @@ def _ceil_div(a, b):
 
 
 class EarlyFusionEncoder(nn.Module):
-    """Concatenate inputs along channels (fixed key order) in front of one backbone."""
+    """Concatenate inputs along channels (fixed key order) in front of one backbone.
+
+    ``channels`` (optional, ``{name: C}``) records each input's share of the concatenation for
+    :func:`manyseg.describe.describe`; the backbone's stem only sees the total.
+    """
 
     fused_strides: tuple[int, ...] = ()
 
-    def __init__(self, names: Sequence[str], backbone: nn.Module) -> None:
+    def __init__(self, names: Sequence[str], backbone: nn.Module,
+                 channels: Mapping[str, int] | None = None) -> None:
         super().__init__()
         self.names = tuple(names)
+        self.channels = dict(channels or {})
         self.backbone = backbone
         self.feature_specs = backbone.feature_specs
         self.input_divisor = backbone.input_divisor
