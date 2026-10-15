@@ -163,7 +163,8 @@ stem adaptation, pool + linear head. Exception: families whose timm head has a p
 > cost: the decoder's parameters and ~37% lower training throughput. Mix image and pixel heads freely: the decoder is built only when a pixel
 head needs it. After training with auxiliary heads, `model.select_heads(["crop"])` keeps only
 the heads you deploy and removes decoders (and FiLM / head-bias layers) only the dropped heads
-used; the kept outputs are unchanged. Head and input names must not be Python keywords (`yield`, `class`, ...):
+used; the kept outputs are unchanged in eval mode. To load such a checkpoint, rebuild the model
+and call `select_heads` with the same names first. Head and input names must not be Python keywords (`yield`, `class`, ...):
 `torch.export` reads modules as attributes.
 
 ### Multiple inputs

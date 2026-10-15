@@ -81,7 +81,10 @@ class DenseModel(nn.Module):
         """Keep only the heads ``names`` (in place; returns the model): their decoders stay,
         decoders, FiLM and head-bias layers only the dropped heads used are removed. For
         deployment after training with auxiliary heads, e.g. a classifier trained with a pixel
-        head (E020). Outputs of the kept heads are unchanged; the output stays a dict."""
+        head (E020). In eval mode the kept heads' outputs are unchanged (in training mode,
+        dropout in removed modules no longer consumes random numbers, so masks differ). The
+        output stays a dict. Removed modules leave the state dict: to load a pruned
+        checkpoint, rebuild the model, call ``select_heads`` with the same names, then load."""
         names = list(names)
         if self.single_output is not None:
             if names != [self.single_output]:

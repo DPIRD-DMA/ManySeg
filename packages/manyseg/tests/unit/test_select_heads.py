@@ -65,6 +65,17 @@ def test_select_heads_exports():
     torch.testing.assert_close(ep.module()(x)["labels"], m(x)["labels"], atol=1e-5, rtol=1e-5)
 
 
+def test_pruned_checkpoint_round_trip():
+    m = model().select_heads(["labels"])
+    sd = m.state_dict()
+    with pytest.raises(RuntimeError, match="Missing"):
+        model().load_state_dict(sd)  # the full model expects the removed modules
+    fresh = model().select_heads(["labels"])
+    fresh.load_state_dict(sd)
+    x = torch.randn(1, 3, 64, 64)
+    torch.testing.assert_close(fresh(x)["labels"], m(x)["labels"], rtol=0, atol=0)
+
+
 def test_errors():
     with pytest.raises(ValueError, match="unknown"):
         model().select_heads(["nope"])
