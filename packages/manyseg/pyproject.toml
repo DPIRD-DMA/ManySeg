@@ -13,8 +13,10 @@ dependencies = [
 [project.optional-dependencies]
 onnx = ["onnx>=1.16", "onnxscript>=0.1"]
 instances = ["scipy>=1.10", "scikit-image>=0.22"]
+# torchao (BSD-3-Clause): PT2E static int8 and weight-only / dynamic quantisation.
+quant = ["torchao>=0.13"]
 test = ["pytest>=8", "pytest-xdist>=3", "onnx>=1.16", "onnxscript>=0.1", "onnxruntime>=1.18",
-        "scipy>=1.10", "scikit-image>=0.22"]
+        "scipy>=1.10", "scikit-image>=0.22", "torchao>=0.13"]
 
 [build-system]
 requires = ["hatchling"]
