@@ -234,17 +234,22 @@ def test_registry_variants():
 
 # --- end to end -------------------------------------------------------------------------------
 
-@pytest.mark.parametrize("dataset,mode", [("pastis", "stack"), ("pastis_meta", "dict"),
-                                          ("pastis_meta_shuffled", "dict"),
-                                          ("pastis_meta_tileshuffled", "dict")])
-def test_cli_trains_end_to_end(tmp_path, capsys, dataset, mode):
+CHANNELS = '{"input_options": {"meta": {"conditioning": "channels"}}}'
+
+
+@pytest.mark.parametrize("dataset,mode,options", [
+    ("pastis", "stack", "{}"), ("pastis_meta", "dict", "{}"), ("pastis_meta", "dict", CHANNELS),
+    ("pastis_meta_shuffled", "dict", "{}"), ("pastis_meta_tileshuffled", "dict", "{}")])
+def test_cli_trains_end_to_end(tmp_path, capsys, dataset, mode, options):
+    """Every E016 arm (run.sh) trains and evaluates through the CLI."""
     from manyseg_bench.cli import main
 
     raw = make_raw(tmp_path)
     _prepare(raw, tmp_path)
     rc = main(["--data", str(tmp_path), "train", "--provider", "manyseg", "--encoder",
                "resnet18", "--weights", "none", "--dataset", dataset, "--recipe", "smoke",
-               "--input-mode", mode, "--set", '{"precision": "fp32", "batch_size": 4}',
+               "--input-mode", mode, "--options", options,
+               "--set", '{"precision": "fp32", "batch_size": 4}',
                "--device", "cpu", "--out", str(tmp_path / "runs"), "--evaluate-test"])
     assert rc == 0
     assert "final val mIoU" in capsys.readouterr().out
