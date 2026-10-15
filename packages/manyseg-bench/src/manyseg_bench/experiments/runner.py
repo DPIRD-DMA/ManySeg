@@ -72,6 +72,8 @@ def split_getter(ds, cache: Path, raw: Path, scheme: str = "official", mmap: boo
             split = _select(load_split(cache, name, mmap=mmap), info, subset)
         if info.vectors:
             split.vectors = ds.load_vectors(raw, split.names, info.vectors)
+        if hasattr(ds, "split_labels"):  # image-level labels for a shared (pixel) cache
+            split.masks = ds.split_labels(raw, split.names)
         return split
 
     return get
