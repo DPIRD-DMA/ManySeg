@@ -286,3 +286,16 @@ def test_scaled_head_gradients_and_training_step():
     out = model(torch.randn(2, 3, 64, 64))
     sum(v.square().mean() for v in out.values()).backward()
     assert all(p.grad is not None for p in model.parameters())
+
+
+def test_image_head_init_std():
+    """``init_std``: truncated-normal weights and zero bias (timm's ViT/ConvNeXt/PVT classifier
+    init); default keeps PyTorch's Linear init."""
+    torch.manual_seed(0)
+    heads = {"cls": {"type": "classification", "channels": 37, "scope": "image",
+                     "init_std": 0.02}}
+    fc = create_model(backbone="resnet18", pretrained=False, heads=heads).heads["cls"].fc
+    assert torch.all(fc.bias == 0) and abs(float(fc.weight.std()) - 0.02) < 0.002
+    plain = create_model(backbone="resnet18", pretrained=False, heads={
+        "cls": {"type": "classification", "channels": 37, "scope": "image"}}).heads["cls"].fc
+    assert float(plain.bias.abs().sum()) > 0

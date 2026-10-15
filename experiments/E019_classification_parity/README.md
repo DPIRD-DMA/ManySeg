@@ -35,3 +35,20 @@ heads are pool + linear in both libraries.
   classifiers and E020 proceeds with them.
 * A cell outside parity: explain it (e.g. the ConvNeXt head norm), fix ManySeg if the gap is
   a ManySeg defect, re-run that cell, and report both results.
+
+## E019b: image-head initialisation (pre-registered follow-up, before any E019b run)
+
+E019 passed its val parity rule in all six cells, but ManySeg's **test** accuracy was lower in
+5 of 6 cells (mean −0.43 points; per cell 1.1–2.5 pooled SD). Known differences: timm
+initialises the PVTv2 and ConvNeXt classifiers with normal(0, 0.02) weights and zero bias,
+while ManySeg's image head used PyTorch's default Linear init (std 0.036 and a random bias for
+PVTv2's 256 features); ResNet-50, where both use the default init, is the one cell where
+ManySeg was ahead on test (+0.79). ConvNeXt additionally has timm's pretrained head LayerNorm.
+
+* Arm `manyseg-init02`: ManySeg with `{"head": {"init_std": 0.02}}` (normal(0, 0.02) weights,
+  zero bias), all 3 encoders × 2 datasets × seeds 0–2 (18 runs, ~35 min, local 4090). The
+  timm arms are reused from E019.
+* **Decision:** `init_std=0.02` becomes the image-head default if, over the six cells, the mean
+  ManySeg − timm test gap moves from −0.43 to within ±0.20 points and the mean val gap is no
+  worse than E019's (−0.16). Otherwise the default stays and the gap is documented. Per-cell
+  results are reported either way (ConvNeXt's head norm is not addressed by this arm).

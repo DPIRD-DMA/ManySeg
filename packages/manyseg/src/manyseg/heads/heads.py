@@ -55,12 +55,19 @@ class PixelHead(nn.Module):
 
 
 class ImageHead(nn.Module):
-    """Image-level prediction: global average pool, optional dropout, linear."""
+    """Image-level prediction: global average pool, optional dropout, linear.
 
-    def __init__(self, spec: FeatureSpec, channels: int, dropout: float = 0.0) -> None:
+    ``init_std``: normal linear weights (timm's ``trunc_normal_``, bounds ±2) and zero bias instead of PyTorch's
+    default Linear init (E019b)."""
+
+    def __init__(self, spec: FeatureSpec, channels: int, dropout: float = 0.0,
+                 init_std: float | None = None) -> None:
         super().__init__()
         self.drop = nn.Dropout(dropout)
         self.fc = nn.Linear(spec.channels, channels)
+        if init_std is not None:  # timm's classifier init for ViT / ConvNeXt / PVT families
+            nn.init.trunc_normal_(self.fc.weight, std=init_std)  # timm: bounds ±2 absolute
+            nn.init.zeros_(self.fc.bias)
 
     def forward(self, x: Tensor) -> Tensor:
         return self.fc(self.drop(x.mean(dim=(-2, -1))))
