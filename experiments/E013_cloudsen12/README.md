@@ -1,6 +1,6 @@
 # E013: CloudSEN12+ cloud and shadow masking. Auxiliary layers, metadata, input_cross (pre-registered)
 
-Status: **complete** except one re-submitted seed of a secondary arm (2026-10-15; Pawsey Setonix, code `7f05bf0`, 5,126 units). **Negative on all three questions.**
+Status: **complete** (2026-10-15; Pawsey Setonix, code `7f05bf0`, 5,318 units including a timed-out re-run). **Negative on all three questions.**
 
 CloudSEN12+ "high" (expert labels, Sentinel-2 L1C, 13 bands, 4 classes: clear, thick cloud,
 thin cloud, cloud shadow). The official splits are **ROI-disjoint**, so test scenes are at
@@ -97,8 +97,9 @@ as registered.
 | e013-s2 | 3 | 0.7324 ± 0.0011 | 0.6850 ± 0.0030 | 0.4006 | 0.5675 | 0.286 | 24.5 M | 55 |
 | e013-unet-cross | 3 | 0.7355 ± 0.0017 | 0.6848 ± 0.0045 | 0.3974 | 0.5684 | 0.302 | 24.5 M | 55 |
 
-`e013-meta-channels` has 2 seeds until the re-submitted seed 0 finishes (see the correction
-above). Per-class IoU on test, S2 baseline (seed 0): clear 0.907, thick cloud 0.865, thin
+`e013-meta-channels` has **2 seeds**. The re-submitted seed 0 (job 50910604) hit its 3 h time
+limit at epoch 12 of 20, because staging the 157 GB cache on a single-GCD job took about 1 h.
+It was not resubmitted, because the arm is secondary and no decision depends on it. Per-class IoU on test, S2 baseline (seed 0): clear 0.907, thick cloud 0.865, thin
 cloud 0.397, shadow 0.573. Thin cloud is the hard class. Val mIoU is about 5 points above test
 throughout (val 0.732 vs test 0.685). This is consistent with the ROI-disjoint test set
 containing harder scenes, and it is the same for every arm.
