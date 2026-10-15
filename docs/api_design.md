@@ -67,6 +67,30 @@ logits = model(x)             # x: (N, 4, H, W) -> (N, 3, H, W); returns a Tenso
 `model(x)` returns logits at the input resolution `(H, W)` for any `H, W` the backbone supports,
 including odd and non-square sizes (see "Spatial policy").
 
+### Presets
+
+`manyseg.presets` names the configs on the measured accuracy/latency Pareto front (E018). They
+are keyword sets for `create_model` and are opt-in; the defaults above keep SMP parity.
+
+```python
+from manyseg.presets import PRESETS, preset
+
+model = create_model(**preset("balanced"), in_channels=4, num_classes=3)
+PRESETS["balanced"].measured   # latency, GFLOPs, params, val mIoU per dataset
+```
+
+| preset | config | 4090 bf16 b8 512² | Pet val | Sen1Floods11 val |
+|---|---|---|---|---|
+| `fast` | PVTv2-b0 + SegFormer head | 4.5 ms | 0.820 | 0.901 |
+| `compact` | PVTv2-b0 + U-Net (64…8) | 4.9 ms | 0.823 | 0.901 |
+| `balanced` | PVTv2-b0 + U-Net (128…8) | 5.3 ms | 0.825 | 0.902 |
+| `accurate` | PVTv2-b0 + U-Net (256…16) | 7.3 ms | 0.827 | 0.901 |
+| (default) | ResNet-34 + U-Net (256…16) | 10.9 ms | 0.823 | 0.890 |
+
+Two datasets and one GPU; validate on your own data. On CPU (fp32, contended) every preset was
+at least as fast as the default, by a smaller margin; see the E018 write-up. The ResNet-34 default stays because it is
+the familiar SMP baseline, not because it is on the front.
+
 ### Multiple outputs
 
 Passing `heads=` instead of `num_classes=` makes the model return a `dict[str, Tensor]` keyed by

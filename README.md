@@ -129,6 +129,10 @@ results included. Highlights:
   input at full resolution. `unet` + `input_cross` recovers 81–83% of it at +14% FLOPs, against
   fastai's 4× (E006, E012). On Oxford Pet the recipe matters more than the decoder (E002, E003).
 * Decoder `out_stride=2` costs no accuracy for `unet` and saves 11–18% memory (E006).
+* Pareto front (E018): PVTv2-b0 with a half-width U-Net is about 2× faster than the ResNet-34
+  U-Net default on a 4090 (bf16, compiled) and more accurate on both Pet and Sen1Floods11. The
+  four front configs ship as opt-in `manyseg.presets` (`fast`, `compact`, `balanced`,
+  `accurate`); `create_model(**preset("balanced"), num_classes=2)`.
 * Boundary + distance heads double instance PQ over extent + connected components (E010).
   Point detection needs a validation-calibrated peak threshold: F1 0.40 → 0.59 (E011b).
 * Negative results: aligned upsampling (E001b), fusion beyond early stacking on Sen1Floods11

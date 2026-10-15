@@ -1,0 +1,98 @@
+{
+ "run_id": "20261015-200743-4f7fa9",
+ "kind": "profile",
+ "tag": "e018cpu-pvt_v2_b0-unet-w25",
+ "provider": "manyseg",
+ "provider_version": "0.1.0.dev0",
+ "spec": {
+  "arch": "unet",
+  "encoder": "pvt_v2_b0",
+  "weights": null,
+  "in_channels": 15,
+  "num_classes": 2,
+  "inputs": null,
+  "vectors": null,
+  "input_mode": "stack",
+  "options": {
+   "decoder_kwargs": {
+    "channels": [
+     64,
+     32,
+     16,
+     8,
+     8
+    ]
+   }
+  }
+ },
+ "weights_fingerprint": "2b0ce5e5a6297e9c",
+ "env": {
+  "python": "3.12.11",
+  "platform": "Linux-6.8.0-138-generic-x86_64-with-glibc2.35",
+  "cpu": "x86_64",
+  "cpu_count": 32,
+  "torch": "2.14.1+cu130",
+  "cuda_runtime": "13.0",
+  "cudnn": 92400,
+  "packages": {
+   "manyseg": "0.1.0.dev0",
+   "manyseg-bench": "0.1.0.dev0",
+   "timm": "1.0.30",
+   "segmentation-models-pytorch": "0.5.0",
+   "fastai": "2.8.12",
+   "torchvision": "0.29.1",
+   "numpy": "2.5.4"
+  },
+  "device": "cpu",
+  "code_version": "586716d",
+  "hip": null
+ },
+ "resolution": {
+  "decoder_out_stride": 1,
+  "head_scales": {
+   "logits": 1
+  },
+  "eval_resolution": "input"
+ },
+ "gpu_contention_at_end": {
+  "gpu_util_pct": 0,
+  "mem_used_mib": 970,
+  "mem_total_mib": 24564,
+  "other_compute_processes": 0,
+  "contended": false
+ },
+ "params": 3766194,
+ "serialized_bytes": 15155555,
+ "flops_per_image": 8357675008,
+ "precision": "fp32",
+ "compiled": false,
+ "channels_last": false,
+ "img_size": [
+  512,
+  512
+ ],
+ "device": "cpu",
+ "inference": [
+  {
+   "batch_size": 1,
+   "median_ms": 175.03523298364598,
+   "p10_ms": 147.2642759908922,
+   "p90_ms": 207.18202597345226,
+   "iters": 30,
+   "first_call_ms": 175.00188000849448,
+   "images_per_s": 5.7131354810915855,
+   "megapixels_per_s": 1.4976641875552725,
+   "peak_mem_mib": null
+  }
+ ],
+ "train": {
+  "batch_size": 16,
+  "median_ms": 5049.443113995949,
+  "p10_ms": 4711.761610000394,
+  "p90_ms": 5245.541074022185,
+  "iters": 15,
+  "first_call_ms": 10500.612789997831,
+  "images_per_s": 3.1686662546314284,
+  "peak_mem_mib": null
+ }
+}
