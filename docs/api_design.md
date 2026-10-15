@@ -584,10 +584,17 @@ batch too with `dynamic_batch=True`. The default quantizer is torchao's
 `X86InductorQuantizer`, with per-channel int8 weights and per-tensor uint8 activations. Pass
 `quantizer=` to target another backend. Calling `ep.module()` eagerly runs the int8 graph as
 quantise/dequantise pairs in float. That shows the accuracy cost, but it is about twice as
-slow as float. The speedup only appears after `torch.compile` with inductor freezing. The
-compiled int8 graph is not numerically the eager reference: on a ResNet-34 U-Net its argmax
-agreement with float fell from 0.96 to 0.90. Measure `compare_outputs` on the compiled
-module you deploy. Window-attention backbones are rejected before export, because their
+slow as float. The speedup only appears after `torch.compile` with inductor freezing.
+
+> **Evidence (E008, trained ResNet-34 U-Nets, Pet and Sen1Floods11, 3 seeds):** bf16 and fp16
+> cost nothing measurable. `quantize_weights` costs ≤ 0.05 mIoU. Compiled PT2E int8 costs
+> 0.10–0.13 mIoU with ≥ 99.5% pixel agreement. On CPUs **without VNNI** (e.g. AMD Zen 3),
+> inductor's u8 × s8 kernels saturate unless activations use a reduced range, and compiled int8
+> silently lost 6.5 mIoU on Pet. `quantize_pt2e` therefore defaults to `reduce_range` when the
+> *current* CPU lacks VNNI. If you quantise on one machine and deploy on another, pass
+> `reduce_range=` for the deployment CPU (`True` is always safe; `False` is about 0.1 mIoU
+> better only where VNNI exists). Always measure `compare_outputs` on the compiled module you
+> deploy, not only on `ep.module()`. Window-attention backbones are rejected before export, because their
 dynamic export hangs rather than fails.
 
 `quantize_weights` stores Linear and Conv2d weights as int8, symmetric per output channel.
