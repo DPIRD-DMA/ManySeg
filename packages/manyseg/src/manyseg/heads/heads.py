@@ -57,8 +57,8 @@ class PixelHead(nn.Module):
 class ImageHead(nn.Module):
     """Image-level prediction: global average pool, optional dropout, linear.
 
-    ``init_std``: normal linear weights (timm's ``trunc_normal_``, bounds ±2) and zero bias instead of PyTorch's
-    default Linear init (E019b)."""
+    ``init_std``: normal linear weights (timm's ``trunc_normal_``, bounds ±2) and zero bias
+    instead of PyTorch's default Linear init (E019b)."""
 
     def __init__(self, spec: FeatureSpec, channels: int, dropout: float = 0.0,
                  init_std: float | None = None) -> None:
