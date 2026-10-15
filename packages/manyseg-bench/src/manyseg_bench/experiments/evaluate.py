@@ -42,7 +42,7 @@ def _quantised(name: str, model, calib, example):
     if name == "int8_weight_only":
         q = quantize_weights(model, inplace=False)
         return q, model_size(q)
-    ep = quantize_pt2e(model, example, calib)
+    ep = quantize_pt2e(model, example, calib, dynamic_batch=True)  # last eval batch is smaller
     if name == "int8_pt2e":
         return ep.module(), model_size(ep)
     torch._inductor.config.freezing = True  # constant-folds the int8 weights (oneDNN kernels)

@@ -92,3 +92,17 @@ def test_cli_evaluate(saved_run, capsys):
     assert main(["--data", str(root), "evaluate", rec["path"], "--variants", "fp32",
                  "--device", "cpu", "--out", str(root / "eval")]) == 0
     assert "fp32" in capsys.readouterr().out
+
+
+def test_int8_pt2e_handles_a_smaller_final_batch(saved_run, monkeypatch):
+    """Regression: calibration batches fixed the exported batch size, so the last (smaller)
+    eval batch failed the export guard."""
+    pytest.importorskip("torchao")
+    from manyseg_bench.datasets import oxford_pet
+    from manyseg_bench.experiments import evaluate_run
+
+    rec, root = saved_run
+    monkeypatch.setattr(oxford_pet, "EVAL_BATCH_SIZE", 3, raising=False)  # 8 = 3 + 3 + 2
+    ev = evaluate_run(rec["path"], variants=("int8_pt2e",), device="cpu", data=root,
+                      out_dir=root / "eval", calib_batches=2)
+    assert 0.5 < ev["variants"]["int8_pt2e"]["test"]["agreement"] <= 1.0
