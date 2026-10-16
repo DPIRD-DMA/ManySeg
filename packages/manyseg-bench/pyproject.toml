@@ -36,6 +36,7 @@ geo = [
     "pyarrow>=15",
     "lmdb>=1.4",
     "safetensors>=0.4",
+    "h5py>=3.10",
 ]
 test = ["pytest>=8", "manyseg"]
 

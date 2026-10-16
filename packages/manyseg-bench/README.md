@@ -2,8 +2,7 @@
 
 Implementation-neutral benchmarking of PyTorch segmentation models. It compares ManySeg, SMP
 (segmentation-models-pytorch) and fastai models under one protocol, on the same data, recipes
-and metrics. The [`manyseg`](https://pypi.org/project/manyseg/) model library never imports
-this package.
+and metrics.
 
 ```bash
 pip install "manyseg-bench[manyseg,smp]"

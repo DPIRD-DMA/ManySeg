@@ -157,7 +157,7 @@ Every claim here comes from a pre-registered, multi-seed experiment in
 ## Benchmarking (`manyseg-bench`)
 
 A separate package for comparing segmentation libraries (ManySeg, segmentation_models_pytorch,
-fastai, timm) under identical data, augmentation and training. `manyseg` does not depend on it.
+fastai, timm) under identical data, augmentation and training.
 See [`docs/benchmark_design.md`](docs/benchmark_design.md).
 
 ## Contributing
