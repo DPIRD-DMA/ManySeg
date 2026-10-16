@@ -120,6 +120,55 @@ class DenseModel(nn.Module):
             del cond.film["image"]
         return self
 
+    def tiling_spec(self) -> dict:
+        """How to tile this model for inference (read by ManyPred, which ManySeg does not
+        import). Plain data:
+
+        * ``inputs``: ``{name: {"kind": "raster" | "timeseries" | "vector", "scale": r}}``,
+          ``r`` the resolution ratio to the primary input: 1 on a shared grid, None for a
+          ``same_extent`` input (its ratio is read from its shape). Empty for a model that
+          takes a single tensor.
+        * ``outputs``: ``{head: {"scope": "pixel" | "image", "kind": ..., "scale": s}}``
+          (``scale`` for pixel heads only).
+        * ``pad_multiple``: the primary input is padded to a multiple of this.
+        * ``max_size``: ``(h, w)`` of a fixed-size backbone, else None.
+        * ``normalize``: None (models do not store their normalisation yet; TODO once
+          ``save_pretrained`` / ``load`` exist).
+        """
+        backbone = self.backbone
+        names = getattr(backbone, "names", None)
+        primary = getattr(backbone, "primary", None)
+        encoders = getattr(backbone, "encoders", {})
+        inputs: dict[str, dict] = {}
+        if names is not None:
+            alignment = getattr(backbone, "alignment", {})
+            for n in names:
+                temporal = getattr(encoders[n], "temporal", False) if n in encoders else False
+                inputs[n] = {"kind": "timeseries" if temporal else "raster",
+                             "scale": None if alignment.get(n) == "same_extent" else 1.0}
+        if self.conditioner is not None:
+            for n in self.conditioner.rasters:
+                inputs.setdefault(n, {"kind": "raster", "scale": 1.0})
+            for n in self.conditioner.vectors:
+                inputs[n] = {"kind": "vector"}
+        outputs: dict[str, dict] = {}
+        for name, head in self.heads.items():
+            entry: dict = {"scope": getattr(head, "scope", "pixel"),
+                           "kind": getattr(head, "kind", None)}
+            if entry["scope"] == "pixel":
+                entry["scale"] = 1 / getattr(head, "factor", 1)
+            outputs[name] = entry
+        main = dict(encoders).get(primary, backbone)  # ModuleDict has no .get
+        fixed = getattr(main, "fixed_size", None) or getattr(
+            getattr(main, "backbone", None), "fixed_size", None)
+        return {
+            "inputs": inputs,
+            "outputs": outputs,
+            "pad_multiple": int(getattr(backbone, "divisors", {}).get(primary, self.divisor)),
+            "max_size": tuple(fixed) if fixed is not None else None,
+            "normalize": None,
+        }
+
     def describe(self, sample: Tensor | Mapping[str, Tensor] | None = None,
                  format: str = "text") -> str:
         """Stage-level description of the built model (``"text"``, ``"mermaid"`` or
