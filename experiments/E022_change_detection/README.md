@@ -24,7 +24,9 @@ with `concat` (FC-Siam-conc), the new `diff` (`|f1 - f2|`, FC-Siam-diff) or `con
 * Arms (`--tag e022-<dataset>-<arm>`): `stack`, `siam-concat`, `siam-diff`, `siam-concat_diff`.
   2 datasets × 4 arms × 3 seeds = 24 runs.
 * Epochs: OSCD 100 (390 tiles); LEVIR-CD the largest of 30 / 20 / 15 for which its 12 runs fit
-  in 6 h at the smoke-timed rate (recorded here before any LEVIR-CD run).
+  in 6 h at the smoke-timed rate (recorded here before any LEVIR-CD run). **Smoke:** frozen
+  first epoch 19 s (`stack`) to 26 s (`siam-concat_diff`), so ~40 s per full epoch, 30 epochs
+  × 12 runs ≈ 4 h: **30 epochs**.
 * Metric: change-class F1 on val (test F1, IoU, precision, recall reported).
 
 ## Decision rule

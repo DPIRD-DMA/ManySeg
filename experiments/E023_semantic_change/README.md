@@ -26,7 +26,9 @@ One dataset only: results are single-dataset and reported as such.
 | `siam-perinput-separate` | Siamese, `concat_diff` | per input, separate decoders + heads |
 
   4 arms × 3 seeds = 12 runs. Epochs: the largest of 30 / 20 / 15 for which the 12 runs fit in
-  6 h at the smoke-timed rate (recorded here before any run).
+  6 h at the smoke-timed rate (recorded here before any run). **Smoke:** frozen first epoch
+  28 s (`stack`) to 53 s (`siam-perinput-separate`); 30 epochs ≈ 7.8 h, 20 epochs ≈ 5.2 h:
+  **20 epochs**.
 * Metrics (Yang et al. 2021): primary SECOND **Score** = 0.3 mIoU(change / no change) + 0.7
   SeK; SeK, mIoU and change F1 reported.
 
