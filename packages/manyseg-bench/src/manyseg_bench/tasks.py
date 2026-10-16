@@ -599,6 +599,64 @@ class _SegMultilabelEval:
         return {**self.cls.compute(), "seg": {k: seg[k] for k in ("miou", "iou", "loss")}}
 
 
+# --- multi-label segmentation -------------------------------------------------------------------
+
+class MultiLabelSegTask(Task):
+    """Overlapping classes per pixel (e.g. cloud and cloud shadow, or several land-use layers).
+    Labels ``(B, K, H, W)``: 1 / 0 per class, 255 = ignored for that class. The model's
+    segmentation head returns ``K`` logits; the loss is masked BCE (sigmoid per class, not a
+    softmax over classes) and predictions are ``sigmoid(logit) > threshold``. Primary: mean
+    IoU over classes (F1, precision and recall per class are reported)."""
+
+    name = "multilabel_seg"
+    primary_metric = "miou"
+
+    def __init__(self, num_classes: int, ignore_index: int | None = 255,
+                 threshold: float = 0.5) -> None:
+        self.num_classes, self.ignore = num_classes, 255 if ignore_index is None else ignore_index
+        self.threshold = threshold
+
+    def loss(self, out, y):
+        out = _image_out(out).float()
+        valid = y != self.ignore
+        if not bool(valid.any()):
+            return out.sum() * 0.0
+        bce = F.binary_cross_entropy_with_logits(out, (y == 1).float(), reduction="none")
+        return bce[valid].mean()
+
+    def evaluator(self):
+        return _MultiLabelSegEval(self)
+
+
+class _MultiLabelSegEval:
+    def __init__(self, task: MultiLabelSegTask) -> None:
+        self.t, self.loss, self.n = task, 0.0, 0
+        self.tp = self.fp = self.fn = None
+
+    def update(self, out, y) -> None:
+        out = _image_out(out).float()
+        self.loss += float(self.t.loss(out, y)) * y.shape[0]
+        self.n += y.shape[0]
+        valid, pos = y != self.t.ignore, y == 1
+        pred = torch.sigmoid(out) > self.t.threshold
+        tp = (pred & pos & valid).sum((0, 2, 3)).double().cpu()
+        fp = (pred & ~pos & valid).sum((0, 2, 3)).double().cpu()
+        fn = (~pred & pos & valid).sum((0, 2, 3)).double().cpu()
+        if self.tp is None:
+            self.tp, self.fp, self.fn = tp, fp, fn
+        else:
+            self.tp, self.fp, self.fn = self.tp + tp, self.fp + fp, self.fn + fn
+
+    def compute(self) -> dict:
+        tp, fp, fn = self.tp, self.fp, self.fn
+        iou = (tp / (tp + fp + fn).clamp(min=1)).tolist()
+        f1 = (2 * tp / (2 * tp + fp + fn).clamp(min=1)).tolist()
+        return {"miou": sum(iou) / len(iou), "iou": iou, "f1": f1,
+                "precision": (tp / (tp + fp).clamp(min=1)).tolist(),
+                "recall": (tp / (tp + fn).clamp(min=1)).tolist(),
+                "loss": self.loss / max(1, self.n), "threshold": self.t.threshold}
+
+
 # --- change detection --------------------------------------------------------------------------
 
 def _change_scores(mat: torch.Tensor) -> dict:
@@ -724,8 +782,10 @@ def build_task(name: str, num_classes: int, ignore_index: int | None = None, **k
         return SegMultilabelTask(num_classes, ignore_index, **kwargs)
     if name == "change":
         return ChangeTask(num_classes, ignore_index, **kwargs)
+    if name == "multilabel_seg":
+        return MultiLabelSegTask(num_classes, ignore_index, **kwargs)
     if name == "semantic_change":
         return SemanticChangeTask(num_classes, ignore_index, **kwargs)
     raise ValueError(f"unknown task {name!r}; choose from semantic, instances, points, "
                      "classification, multilabel, regression, seg_multilabel, change, "
-                     "semantic_change")
+                     "semantic_change, multilabel_seg")

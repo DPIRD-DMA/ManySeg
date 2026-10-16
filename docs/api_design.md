@@ -167,6 +167,61 @@ used; the kept outputs are unchanged in eval mode. To load such a checkpoint, re
 and call `select_heads` with the same names first. Head and input names must not be Python keywords (`yield`, `class`, ...):
 `torch.export` reads modules as attributes.
 
+### Multi-label pixel segmentation
+
+For classes that can overlap at a pixel (cloud and cloud shadow, or several land-use layers),
+use one segmentation head with `K` channels and treat each as an independent sigmoid; the
+model already returns raw logits:
+
+```python
+model = create_model(backbone="resnet34", in_channels=13,
+                     heads={"masks": {"type": "segmentation", "channels": 4}})
+logits = model(x)["masks"]                                  # (N, 4, H, W)
+loss = F.binary_cross_entropy_with_logits(logits, targets)  # targets (N, 4, H, W) in {0, 1}
+present = logits.sigmoid() > 0.5                            # per class, may overlap
+```
+
+Mask ignored pixels per class before the loss (the bench task `multilabel_seg` does this with
+label 255). Tune the threshold per class on validation if the classes are imbalanced.
+
+### Features and embeddings
+
+```python
+feats = model.features(x)                    # encoder pyramid (fused for multi-input),
+                                             # each level cropped to the valid region
+vec = model.embed(x, pool="mean")            # (N, C) from the deepest level
+pix = model.embed(x, source="decoder")       # (N, C, H/s, W/s) decoder features, FiLM applied
+unit = model.embed(x, level=2, pool="max", normalize=True)
+ep = export_model(model.embedder(pool="mean"), example)   # exportable module
+```
+
+For retrieval, clustering, few-shot learning and linear probing. A regression head with `C`
+channels is also a (trainable) embedding head.
+
+### Remote-sensing pretrained weights
+
+`pretrained` also takes a tag from `manyseg.weights` for supported timm architectures:
+
+```python
+from manyseg.weights import WEIGHTS
+model = create_model(backbone="resnet50", pretrained="ssl4eo_s2_moco", in_channels=13,
+                     num_classes=2)
+w = WEIGHTS["resnet50.ssl4eo_s2_moco"]       # bands (order!), mean, std, units, licence, source
+```
+
+| tags | architectures | input | licence |
+|---|---|---|---|
+| `ssl4eo_s2_moco`, `ssl4eo_s2_dino` | ResNet-18 / 50, ViT-S/16 | Sentinel-2 L1C, 13 bands, DN / 10000 | CC BY 4.0 |
+| `ssl4eo_s1_moco` | ResNet-50 | Sentinel-1 VV/VH dB, band statistics | CC BY 4.0 |
+| `satlas_s2_si_ms`, `satlas_s2_mi_ms` | ResNet-50 / 152 | Sentinel-2, 9 bands (RGB as TCI 0–255) | ODC-BY |
+
+Weights download through `torch.hub` (hash-checked, cached); every model parameter must be in
+the checkpoint. `in_channels` must equal the weights' band count and the bands must be in the
+listed order; normalise with the listed `mean` / `std` (in `units`) to match pretraining.
+Works per input in multi-input models (`inputs={"s2": {"channels": 13, "pretrained":
+"ssl4eo_s2_moco"}, ...}`). Whether these beat ImageNet weights on a given task is not yet
+measured here.
+
 ### Multiple inputs
 
 ```python

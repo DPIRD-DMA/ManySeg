@@ -121,6 +121,17 @@ inputs = {
 Missing values are handled. In our tests metadata rarely helped, so compare against a model
 without it on your data.
 
+**Overlapping classes** (e.g. cloud and shadow): one segmentation head with a channel per
+class, a sigmoid per channel and BCE loss.
+
+**Embeddings.** `model.features(x)` returns the encoder pyramid; `model.embed(x,
+pool="mean")` gives vectors for retrieval, clustering or probing.
+
+**Remote-sensing pretrained weights.** `create_model(backbone="resnet50",
+pretrained="ssl4eo_s2_moco", in_channels=13, ...)` loads SSL4EO-S12 or SatlasPretrain weights
+(Sentinel-2 / Sentinel-1); see `manyseg.weights` for the band order and normalisation each
+expects.
+
 **Objects and counts.** `manyseg.instances` (touching fields, crowns, buildings) and
 `manyseg.points` (trees, animals: centres, counts) provide the heads, training targets and
 post-processing.

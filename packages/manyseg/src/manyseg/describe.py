@@ -438,7 +438,8 @@ class _Builder:
             return n
 
         if isinstance(enc, TimmBackbone):
-            init = "pretrained" if enc.pretrained else "random init"
+            init = (f"weights {enc.weights}" if getattr(enc, "weights", None)
+                    else "pretrained" if enc.pretrained else "random init")
             n = self.add(node_id, "encoder", name, f"{enc.name} ({init})", modules=[enc])
             cfg = getattr(enc.model, "pretrained_cfg", {}) or {}
             native = (cfg.get("input_size") or (3,))[0]

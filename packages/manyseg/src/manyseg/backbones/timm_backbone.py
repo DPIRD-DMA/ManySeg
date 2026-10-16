@@ -159,18 +159,19 @@ def _norm(name: str) -> str:
     return name.replace(".", "_")
 
 
-def find_stem_convs(model: nn.Module, first_conv=None) -> list[tuple[str, nn.Conv2d]]:
+def find_stem_convs(model: nn.Module, first_conv=None,
+                    channels: int = 3) -> list[tuple[str, nn.Conv2d]]:
     """Locate the convolution(s) that consume the image.
 
     ``pretrained_cfg['first_conv']`` may be a name or a list of names (multi-branch stems such
     as MobileOne); feature wrappers may rename ``a.b`` to ``a_b``. Without it, the first
-    ``Conv2d`` with 3 input channels in module order is used.
+    ``Conv2d`` with ``channels`` (3, or a multispectral checkpoint's band count) input channels
+    in module order is used.
     """
-    candidates = [
-        (n, m) for n, m in model.named_modules() if isinstance(m, nn.Conv2d) and m.in_channels == 3
-    ]
+    candidates = [(n, m) for n, m in model.named_modules()
+                  if isinstance(m, nn.Conv2d) and m.in_channels == channels]
     if not candidates:
-        raise ValueError("could not find a 3-channel stem convolution to adapt")
+        raise ValueError(f"could not find a {channels}-channel stem convolution to adapt")
     wanted = [first_conv] if isinstance(first_conv, str) else list(first_conv or [])
     found = []
     for want in wanted:
@@ -190,7 +191,9 @@ class TimmBackbone(nn.Module):
 
     Args:
         name: timm model name, optionally with a pretrained tag (``"resnet50.a1_in1k"``).
-        pretrained: Load timm pretrained weights.
+        pretrained: Load timm pretrained weights (``True``), or a remote-sensing weights tag from
+            :mod:`manyseg.weights` (e.g. ``"ssl4eo_s2_moco"``; ``in_channels`` must equal its
+            band count).
         in_channels: Number of input channels.
         channel_adapter: How to adapt the RGB stem when ``in_channels != 3``; see
             :func:`manyseg.adapters.adapt_conv_weight` and :class:`ProjectionAdapter`.
@@ -202,7 +205,7 @@ class TimmBackbone(nn.Module):
     def __init__(
         self,
         name: str,
-        pretrained: bool = True,
+        pretrained: bool | str = True,
         in_channels: int = 3,
         channel_adapter: str = "repeat",
         out_indices: Sequence[int] | None = None,
@@ -234,14 +237,27 @@ class TimmBackbone(nn.Module):
         if out_indices is not None:
             kwargs["out_indices"] = tuple(out_indices)
         self.block_indices = tuple(out_indices) if self.is_plain else None
-        self.model = _timm_create(name, pretrained=pretrained, **kwargs)
+        self.weights: str | None = None
+        if isinstance(pretrained, str):  # remote-sensing weights (manyseg.weights)
+            from ..weights import get_weights, load_into
+
+            w = get_weights(name, pretrained)
+            if in_channels != w.in_chans:
+                raise ValueError(f"{w.key} expects {w.in_chans} bands ({', '.join(w.bands)}), in "
+                                 f"that order; got in_channels={in_channels}")
+            self.model = _timm_create(name, pretrained=False, **{**kwargs, "in_chans": w.in_chans})
+            load_into(self.model, w)
+            self.weights = w.key
+        else:
+            self.model = _timm_create(name, pretrained=pretrained, **kwargs)
         self.name = name
         self.pretrained = bool(pretrained)  # recorded for describe(); weights are already set
         self.in_channels = in_channels
         self.channel_adapter = channel_adapter
 
         cfg = getattr(self.model, "pretrained_cfg", {}) or {}
-        stems = find_stem_convs(self.model, cfg.get("first_conv"))
+        native = in_channels if self.weights is not None else 3
+        stems = find_stem_convs(self.model, cfg.get("first_conv"), native)
         self.stem_conv_names = [n for n, _ in stems]
         self._stem_name = self.stem_conv_names[0]
         self.input_adapter: nn.Module = nn.Identity()

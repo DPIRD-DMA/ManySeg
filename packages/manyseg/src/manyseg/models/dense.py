@@ -181,7 +181,8 @@ class DenseModel(nn.Module):
             )
         return F.pad(x, (0, fixed[1] - w, 0, fixed[0] - h))
 
-    def forward(self, x: Tensor | dict[str, Tensor]) -> Tensor | dict[str, Tensor]:
+    def _encode(self, x, inputs: bool = False):
+        """Conditioner + (padded) encoder: ``(feats, input_feats, cond, xin, h, w, valid)``."""
         cond, input_feats = None, None
         if self.conditioner is not None:  # vector inputs -> (raster inputs, embeddings)
             x, cond = self.conditioner(x)
@@ -193,7 +194,7 @@ class DenseModel(nn.Module):
             h, w = x[primary].shape[-2], x[primary].shape[-1]
             xin = None
             valid = [(x[n].shape[-2], x[n].shape[-1]) for n in self.backbone.names]
-            if self._head_inputs:
+            if inputs:
                 feats, input_feats = self.backbone(x, return_inputs=True)
             else:
                 feats = self.backbone(x)
@@ -201,6 +202,58 @@ class DenseModel(nn.Module):
             h, w = x.shape[-2], x.shape[-1]
             xin, valid = self._pad(x), None
             feats = self.backbone(xin)
+        return feats, input_feats, cond, xin, h, w, valid
+
+    def features(self, x: Tensor | dict[str, Tensor]) -> list[Tensor]:
+        """The encoder pyramid (fused, for multi-input models) for ``x``, each level cropped to
+        the input's valid region (``ceil(H / stride) x ceil(W / stride)``). Late fusion: the
+        per-input levels side by side, uncropped."""
+        feats, _, _, _, h, w, _ = self._encode(x)
+        if getattr(self.backbone, "mode", None) == "late":
+            return feats
+        # crop_to (negative padding), not slicing: export-safe for ceil-rounded sizes
+        return [crop_to(f, (h + s.stride - 1) // s.stride, (w + s.stride - 1) // s.stride)
+                for f, s in zip(feats, self.feature_specs)]
+
+    def embed(self, x: Tensor | dict[str, Tensor], source: str = "encoder", level: int = -1,
+              pool: str | None = None, normalize: bool = False) -> Tensor:
+        """Feature vectors for retrieval, clustering, probing: per pixel ``(B, C, h, w)`` or
+        pooled ``(B, C)``.
+
+        Args:
+            source: ``"encoder"`` (a level of :meth:`features`; default the deepest) or
+                ``"decoder"`` (the shared decoder's output, metadata FiLM applied).
+            level: Encoder level index (``-1`` = deepest).
+            pool: ``None`` (per pixel), ``"mean"`` or ``"max"`` over the valid region.
+            normalize: L2-normalise along channels.
+        """
+        if source not in ("encoder", "decoder"):
+            raise ValueError(f"source must be 'encoder' or 'decoder', got {source!r}")
+        if pool not in (None, "mean", "max"):
+            raise ValueError(f"pool must be None, 'mean' or 'max', got {pool!r}")
+        if source == "encoder":
+            e = self.features(x)[level]
+        else:
+            if self.decoder is None:
+                raise ValueError("source='decoder' needs a shared decoder (this model has only "
+                                 "image heads or per-head decoders)")
+            feats, _, cond, xin, h, w, valid = self._encode(x)
+            e = self._decode_cond("decoder", self.decoder, xin, feats, cond, valid)
+            s = self.decoder.out_spec.stride
+            e = crop_to(e, (h + s - 1) // s, (w + s - 1) // s)
+        if pool == "mean":
+            e = e.mean(dim=(-2, -1))
+        elif pool == "max":
+            e = e.amax(dim=(-2, -1))
+        return F.normalize(e, dim=1) if normalize else e
+
+    def embedder(self, **kwargs) -> Embedder:
+        """An ``nn.Module`` whose forward is ``self.embed(x, **kwargs)`` (exportable)."""
+        return Embedder(self, **kwargs)
+
+    def forward(self, x: Tensor | dict[str, Tensor]) -> Tensor | dict[str, Tensor]:
+        feats, input_feats, cond, xin, h, w, valid = self._encode(
+            x, inputs=bool(self._head_inputs))
         dec = (self._decode_cond("decoder", self.decoder, xin, feats, cond, valid)
                if self.decoder is not None else None)
         if self.single_output is not None:
@@ -208,3 +261,18 @@ class DenseModel(nn.Module):
                                   input_feats)
         return {name: self._run_head(name, dec, feats, xin, h, w, cond, valid, input_feats)
                 for name in self.heads}
+
+
+class Embedder(nn.Module):
+    """``model.embed(x, **kwargs)`` as a module, e.g. for ``manyseg.export.export_model``."""
+
+    def __init__(self, model: DenseModel, **kwargs) -> None:
+        super().__init__()
+        self.model, self.kwargs = model, dict(kwargs)
+
+    @property
+    def backbone(self):
+        return self.model.backbone
+
+    def forward(self, x):
+        return self.model.embed(x, **self.kwargs)

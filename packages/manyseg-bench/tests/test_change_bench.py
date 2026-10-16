@@ -86,3 +86,23 @@ def test_loader_multichannel_pixel_labels_follow_augmentation():
     marker = x["t1"][:, 0] > 0.5
     assert ((yy[:, 0] == 1) == marker).float().mean() > 0.97
     assert torch.equal(yy[:, 1] == 2, yy[:, 0] == 1)
+
+
+def test_multilabel_segmentation_task():
+    """Overlapping classes per pixel (e.g. cloud and shadow): (B, K, H, W) multi-hot labels,
+    255 = ignored; sigmoid + BCE; per-class IoU / F1 at a threshold."""
+    t = build_task("multilabel_seg", 2, threshold=0.5)
+    assert t.primary_metric == "miou"
+    y = torch.tensor([[[[1, 1], [0, 255]], [[1, 0], [0, 0]]]])  # class0, class1 on a 2x2 tile
+    logits = torch.full((1, 2, 2, 2), -5.0)
+    logits[0, 0, 0, :] = 5.0           # class 0 predicted on the top row: matches its labels
+    logits[0, 1, 0, 0] = logits[0, 1, 1, 1] = 5.0  # class 1: one hit, one false positive
+    ev = t.evaluator()
+    ev.update(logits, y)
+    m = ev.compute()
+    assert m["iou"] == pytest.approx([1.0, 0.5]) and m["miou"] == pytest.approx(0.75)
+    assert m["f1"][1] == pytest.approx(2 / 3)
+    loss = t.loss(logits, t.targets(y))
+    assert torch.isfinite(loss)
+    y_all_ignored = torch.full_like(y, 255)
+    assert float(t.loss(logits, t.targets(y_all_ignored))) == 0.0
