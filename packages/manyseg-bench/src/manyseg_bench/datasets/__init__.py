@@ -2,6 +2,7 @@ from . import (
     ai4boundaries,
     ai4boundaries_s2,
     bigearthnet,
+    change_detection,
     cloudsen12,
     eurosat,
     oam_tcd,
@@ -18,7 +19,8 @@ DATASETS = {"oxford_pet": oxford_pet, "sen1floods11": sen1floods11, "oam_tcd": o
             "ai4boundaries": ai4boundaries, "cloudsen12": cloudsen12, "pastis": pastis,
             "eurosat": eurosat, "oxford_pet_breeds": oxford_pet_breeds,
             "bigearthnet": bigearthnet, "pastis_ts": pastis_ts,
-            "ai4boundaries_s2": ai4boundaries_s2}
+            "ai4boundaries_s2": ai4boundaries_s2, "levircd": change_detection.LEVIRCD,
+            "second": change_detection.SECOND, "oscd": change_detection.OSCD}
 
 
 class _Variant:
