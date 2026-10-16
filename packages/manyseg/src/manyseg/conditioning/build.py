@@ -19,7 +19,9 @@ _MODE_OPTIONS = {"film": {"on"}, "head": {"pixel"}, "channels": {"target"}, "tok
 
 
 def has_kinds(inputs: Mapping[str, Mapping]) -> bool:
-    return any("kind" in cfg for cfg in inputs.values())
+    """Inputs that need the conditioning path: vector inputs, or explicit ``"raster"`` kinds
+    (stripped there). Time series are rasters handled by ``create_model`` itself."""
+    return any(cfg.get("kind", "timeseries") != "timeseries" for cfg in inputs.values())
 
 
 def split_inputs(inputs: Mapping[str, Mapping]) -> tuple[dict, dict]:
@@ -31,8 +33,11 @@ def split_inputs(inputs: Mapping[str, Mapping]) -> tuple[dict, dict]:
             vectors[n] = dict(cfg)
         elif kind == "raster":
             rasters[n] = {k: v for k, v in cfg.items() if k != "kind"}
+        elif kind == "timeseries":
+            rasters[n] = dict(cfg)
         else:
-            raise ValueError(f"input {n!r}: kind must be 'raster' or 'vector', got {kind!r}")
+            raise ValueError(f"input {n!r}: kind must be 'raster', 'timeseries' or 'vector', "
+                             f"got {kind!r}")
     return rasters, vectors
 
 
@@ -92,13 +97,17 @@ def build_conditioned_model(create_model: Callable[..., nn.Module], *, inputs, f
                                  f"input; choose from {list(rasters)}")
             if "channels" not in rasters[t]:
                 raise ValueError(f"input {t!r}: 'channels' is required")
+            if rasters[t].get("kind") == "timeseries":
+                raise ValueError(f"vector input {n!r}: 'channels' conditioning cannot target the "
+                                 f"time series {t!r}; use 'film' or 'head'")
             with torch.random.fork_rng(devices=[]):
                 width = makers[n]().width
             rasters[t] = {**rasters[t], "channels": rasters[t]["channels"] + width}
             targets[n] = t
 
     single = None
-    if len(rasters) == 1 and fusion is None:
+    if len(rasters) == 1 and fusion is None and \
+            next(iter(rasters.values())).get("kind") != "timeseries":
         # One raster: build the ordinary single-input model (plain-tensor backbone), so every
         # decoder (including those that need the input image) and adapter works unchanged.
         from ..models.factory import _INPUT_KEYS
@@ -161,5 +170,7 @@ def build_conditioned_model(create_model: Callable[..., nn.Module], *, inputs, f
                              "{'mode': 'head', 'pixel': True} to condition pixel heads")
 
     model.conditioner = Conditioner(encoders, modes, list(rasters), single=single,
+                                    temporal=[n for n, c in rasters.items()
+                                              if c.get("kind") == "timeseries"],
                                     channel_targets=targets, film=film, head_bias=head_bias)
     return model

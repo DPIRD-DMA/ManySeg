@@ -17,7 +17,7 @@ from .dense import DenseModel
 
 FUSION_TYPES = ("early", "intermediate", "late")
 _INPUT_KEYS = {"channels", "backbone", "pretrained", "channel_adapter", "alignment", "share_norm",
-               "backbone_kwargs", "out_indices", "rgb_indices"}
+               "backbone_kwargs", "out_indices", "rgb_indices", "kind", "temporal"}
 
 
 def share_weights(encoder: nn.Module) -> nn.Module:
@@ -46,7 +46,18 @@ def _build_inputs(inputs, fusion, *, backbone, pretrained, channel_adapter, out_
             raise ValueError(f"input {n!r}: unknown keys {sorted(unknown)}")
         if "channels" not in cfg:
             raise ValueError(f"input {n!r}: 'channels' is required")
+        if cfg.get("kind", "raster") not in ("raster", "timeseries"):
+            raise ValueError(f"input {n!r}: kind {cfg['kind']!r} is not a raster kind")
+        if "temporal" in cfg and cfg.get("kind") != "timeseries":
+            raise ValueError(f"input {n!r}: 'temporal' applies to "
+                             "{'kind': 'timeseries'} inputs only")
+        for suffix in ("mask", "dates"):
+            if cfg.get("kind") == "timeseries" and f"{n}_{suffix}" in inputs:
+                raise ValueError(f"input name {n}_{suffix} is reserved for the {suffix} of "
+                                 f"time series {n!r}")
+    series = {n for n, cfg in inputs.items() if cfg.get("kind") == "timeseries"}
     from ..fusion import EarlyFusionEncoder, MultiEncoder
+    from ..temporal import TemporalEncoder, parse_temporal
 
     def make_bb(cfg, channels):
         name = cfg.get("backbone", backbone)
@@ -59,6 +70,9 @@ def _build_inputs(inputs, fusion, *, backbone, pretrained, channel_adapter, out_
                             rgb_indices=cfg.get("rgb_indices"),
                             **dict(cfg.get("backbone_kwargs", backbone_kwargs) or {}))
 
+    if ftype == "early" and series:
+        raise ValueError(f"early fusion stacks channels and cannot take the time series "
+                         f"{sorted(series)}; use intermediate or late fusion")
     if ftype == "early":
         if fusion:
             raise ValueError(f"early fusion takes no options, got {sorted(fusion)}")
@@ -90,6 +104,9 @@ def _build_inputs(inputs, fusion, *, backbone, pretrained, channel_adapter, out_
         bname = cfg.get("backbone", backbone)
         if isinstance(bname, str) and bname.startswith("shared:"):
             target = bname.split(":", 1)[1]
+            if n in series or target in series:
+                raise ValueError(f"input {n!r}: a 'shared:' backbone cannot involve a time series "
+                                 "yet; give each input its own encoder")
             if target not in encoders:
                 raise ValueError(f"input {n!r} shares {target!r}, which must be defined earlier")
             # Weights shared, BatchNorm per input by default: one BN shared by inputs with
@@ -104,6 +121,9 @@ def _build_inputs(inputs, fusion, *, backbone, pretrained, channel_adapter, out_
                 raise ValueError(f"input {n!r}: 'share_norm' only applies to a "
                                  "'shared:<input>' backbone")
             encoders[n] = make_bb(cfg, cfg["channels"])
+            if n in series:
+                kind, opts = parse_temporal(n, cfg.get("temporal", "mean"))
+                encoders[n] = TemporalEncoder(encoders[n], kind, opts)
     alignment = {n: cfg.get("alignment", "same_grid") for n, cfg in inputs.items()}
     op = fusion.pop("op", "concat")
     strides = fusion.pop("strides", None)

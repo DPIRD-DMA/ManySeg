@@ -8,6 +8,11 @@ Inputs may be a single array ``(N, H, W, C)`` or a dict of such arrays (multi-in
 all on the same grid). ``stack=True`` concatenates dict inputs along channels in key order, so
 single-input libraries can be benchmarked on multi-input data (early fusion).
 
+Time series are ``(N, T, H, W, C)`` arrays: every date gets the same geometric transform. In
+dict mode they are yielded as ``(B, T, C, H, W)``; in stack mode their dates are flattened into
+``T * C`` channels (date-major), the "dates as channels" baseline. A series' optional mask /
+dates come in through ``vectors`` (e.g. ``"s2_dates"``, ``(N, T)``), like metadata.
+
 Labels are per-pixel masks ``(N, H, W)`` (augmented with the images) or image-level labels
 ``(N,)`` / ``(N, K)`` (class ids, multi-hot or regression targets; never augmented). Float
 labels stay float32; integer labels are returned as int64.
@@ -68,11 +73,13 @@ class GPULoader:
         else:  # keep (possibly memory-mapped) arrays on the host; move batches on demand
             self.images = dict(imgs)
         self.channels = {k: v.shape[-1] for k, v in self.images.items()}
+        self.times = {k: v.shape[1] for k, v in self.images.items() if v.ndim == 5}
         self.mean, self.std = {}, {}
         for k, v in self.images.items():
             unit = 255.0 if v.dtype in (torch.uint8, np.uint8) else 1.0
-            self.mean[k] = torch.tensor(means[k], device=device).view(1, -1, 1, 1) * unit
-            self.std[k] = torch.tensor(stds[k], device=device).view(1, -1, 1, 1) * unit
+            shape = (1, 1, -1, 1, 1) if k in self.times else (1, -1, 1, 1)
+            self.mean[k] = torch.tensor(means[k], device=device).view(shape) * unit
+            self.std[k] = torch.tensor(stds[k], device=device).view(shape) * unit
         self.masks = _to_device(masks, device) if device_resident else masks
         self.pixel_labels = masks.ndim == 3
         self.float_labels = np.issubdtype(np.asarray(masks[:0]).dtype, np.floating)
@@ -81,7 +88,7 @@ class GPULoader:
         self.train = train
         self.device = device
         self.gen = torch.Generator(device="cpu").manual_seed(seed)
-        self.out_size = out_size or tuple(next(iter(self.images.values())).shape[1:3])
+        self.out_size = out_size or tuple(next(iter(self.images.values())).shape[-3:-1])
         self.scale, self.ratio, self.hflip, self.vflip = scale, ratio, hflip, vflip
         self.drop_last = train if drop_last is None else drop_last
         self.stack = stack
@@ -142,16 +149,22 @@ class GPULoader:
         for b in range(len(self)):
             idx = order[b * self.bs:(b + 1) * self.bs]
             imgs, y = self._fetch(idx)
-            parts = [
-                (imgs[k].permute(0, 3, 1, 2).float() - self.mean[k]) / self.std[k]
-                for k in self.names
-            ]
+            parts = []
+            for k in self.names:
+                if k in self.times:  # (B, T, H, W, C) -> (B, T * C, H, W), date-major
+                    v = (imgs[k].permute(0, 1, 4, 2, 3).float() - self.mean[k]) / self.std[k]
+                    parts.append(v.flatten(1, 2))
+                else:
+                    parts.append((imgs[k].permute(0, 3, 1, 2).float() - self.mean[k])
+                                 / self.std[k])
             x = torch.nan_to_num(torch.cat(parts, dim=1))
             if self.train:
                 x, y = self._augment(x, y)
-            if self.multi and not self.stack:
-                x = dict(zip(self.names, torch.split(x, [self.channels[k] for k in self.names],
-                                                     dim=1)))
+            if (self.multi or self.times) and not self.stack:
+                widths = [self.channels[k] * self.times.get(k, 1) for k in self.names]
+                x = dict(zip(self.names, torch.split(x, widths, dim=1)))
+                for k, t in self.times.items():
+                    x[k] = x[k].unflatten(1, (t, self.channels[k]))
             if self.vectors:
                 x = x if isinstance(x, dict) else {self.names[0]: x}
                 x.update({k: v[idx.to(v.device)] for k, v in self.vectors.items()})

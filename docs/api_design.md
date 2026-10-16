@@ -207,6 +207,37 @@ out = model({"optical": o, "sar": s})
   old behaviour); use it only for inputs with matching statistics (e.g. two dates of the same
   sensor).
 
+#### Time series
+
+`{"kind": "timeseries", "channels": C, "temporal": ...}` takes `(B, T, C, H, W)` for any `T`.
+One 2D encoder (any timm backbone, pretrained weights unchanged) runs on every date, and each
+feature level is aggregated over time, so fusion, decoders and heads see an ordinary pyramid.
+Optional entries in the input dict: `"<name>_mask"` `(B, T)` bool (False = missing, cloudy or
+padded date) and `"<name>_dates"` `(B, T)` days (e.g. day of year).
+
+```python
+model = create_model(
+    inputs={
+        "s2":  {"kind": "timeseries", "channels": 10, "temporal": "attention"},
+        "dem": {"channels": 1, "alignment": "same_extent"},
+    },
+    heads={"crop": {"type": "segmentation", "channels": 20}},
+)
+out = model({"s2": s2, "s2_mask": valid, "s2_dates": doy, "dem": dem})
+```
+
+| `temporal` | aggregation per level |
+|---|---|
+| `"mean"` (default) | masked mean over valid dates |
+| `"max"` | masked per-channel max |
+| `"attention"` | per-pixel temporal attention over dates (L-TAE style: learned query, keys from features + a sinusoidal date encoding, `heads` channel groups). Starts as the masked mean (zero query). Options: `heads` (4), `key_dim` (16), `date_dim` (32), `max_period` (10000) |
+
+Time series combine with other rasters (any alignment), metadata vectors and every head type;
+fusion must be intermediate or late (early fusion cannot stack a `T` axis). Exports with
+dynamic `T`, `H` and `W`. The encoder runs once per date, so memory scales with `T`.
+Not yet: `shared:` backbones between a time series and another input, and metadata in
+`"channels"` mode targeting a time series.
+
 #### Spatial alignment
 
 Inputs with different pixel sizes are **not** assumed to cover the same ground extent. Each

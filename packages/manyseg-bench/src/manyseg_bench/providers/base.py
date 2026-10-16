@@ -36,6 +36,8 @@ class ModelSpec:
         input_mode: ``"stack"`` (inputs concatenated: one tensor, any provider) or ``"dict"``
             (named inputs; only providers whose ``supports_dict_inputs`` is True).
         options: Provider-specific options (e.g. decoder widths). Recorded in results.
+        timeseries: Inputs that are time series ``(N, T, C, H, W)`` (dict mode); set by the
+            runner. In stack mode their dates are flattened into channels instead.
         output: ``"pixel"`` (logits ``(N, num_classes, H, W)``) or ``"image"`` (one prediction
             per image, ``(N, num_classes)``: classifiers / regressors; set by the runner from
             the task).
@@ -51,6 +53,7 @@ class ModelSpec:
     input_mode: str = "stack"
     options: dict[str, Any] = field(default_factory=dict)
     output: str = "pixel"
+    timeseries: list[str] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

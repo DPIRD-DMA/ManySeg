@@ -83,6 +83,8 @@ class ManySegProvider(Provider):
             return BuiltModel(model, enc, dec, fingerprint_module(inner.backbone))
         if spec.input_mode == "dict" and spec.inputs:
             inputs = {n: {"channels": c} for n, c in spec.inputs.items()}
+            for n in spec.timeseries or []:
+                inputs[n]["kind"] = "timeseries"
             inputs.update({n: {"kind": "vector", **cfg} for n, cfg in (spec.vectors or {}).items()})
             for n, extra in opts.pop("input_options", {}).items():
                 inputs[n].update(extra)

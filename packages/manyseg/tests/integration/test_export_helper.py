@@ -77,3 +77,25 @@ def test_presets_export_dynamic_hw(name):
     for hw in [(64, 96), (97, 131)]:
         x = torch.randn(1, 4, *hw)
         torch.testing.assert_close(ep.module()(x), model(x), atol=1e-4, rtol=1e-4)
+
+
+@pytest.mark.parametrize("agg", ["mean", "attention"])
+def test_timeseries_export_dynamic_dates_and_size(agg):
+    """Time series export with dynamic H/W *and* number of dates, alongside a plain raster."""
+    inputs = {"s2": {"kind": "timeseries", "channels": 4, "temporal": agg},
+              "dem": {"channels": 1}}
+    model = create_model(backbone="resnet18", pretrained=False, num_classes=2,
+                         inputs=inputs).eval()
+    with torch.no_grad():
+        for n, p in model.named_parameters():
+            if n.endswith("query"):
+                p.normal_(0, 0.5)
+
+    def ex(t, h, w):
+        return {"s2": torch.randn(1, t, 4, h, w), "s2_mask": torch.rand(1, t) > 0.2,
+                "s2_dates": torch.rand(1, t) * 365, "dem": torch.randn(1, 1, h, w)}
+
+    ep = export_model(model, ex(4, 64, 96))
+    for t, h, w in ((4, 64, 96), (7, 97, 131), (2, 70, 65), (1, 64, 64)):
+        x = ex(t, h, w)
+        torch.testing.assert_close(ep.module()(x), model(x), atol=1e-4, rtol=1e-4)

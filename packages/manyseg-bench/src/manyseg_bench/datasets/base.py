@@ -39,6 +39,7 @@ class DatasetInfo:
     test_splits: tuple[str, ...] = ("test",)
     inputs: dict | None = None
     vectors: dict | None = None
+    timeseries: dict | None = None  # {input: T}: (N, T, H, W, C) arrays in the cache
     notes: tuple[str, ...] = field(default_factory=tuple)
 
     def to_dict(self) -> dict:

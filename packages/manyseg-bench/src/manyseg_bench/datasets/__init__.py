@@ -7,6 +7,7 @@ from . import (
     oxford_pet,
     oxford_pet_breeds,
     pastis,
+    pastis_ts,
     sen1floods11,
 )
 from .base import DatasetInfo, Split, data_root, load_split
@@ -15,7 +16,7 @@ from .gpu_loader import GPULoader
 DATASETS = {"oxford_pet": oxford_pet, "sen1floods11": sen1floods11, "oam_tcd": oam_tcd,
             "ai4boundaries": ai4boundaries, "cloudsen12": cloudsen12, "pastis": pastis,
             "eurosat": eurosat, "oxford_pet_breeds": oxford_pet_breeds,
-            "bigearthnet": bigearthnet}
+            "bigearthnet": bigearthnet, "pastis_ts": pastis_ts}
 
 
 class _Variant:
@@ -39,6 +40,9 @@ for _info in cloudsen12.VARIANTS:
     DATASETS[_info.name] = _Variant(cloudsen12, _info, cloudsen12.CACHE_NAME)
 for _info in pastis.VARIANTS:
     DATASETS[_info.name] = _Variant(pastis, _info, pastis.CACHE_NAME)
+for _info in pastis_ts.VARIANTS:
+    DATASETS[_info.name] = _Variant(pastis_ts, _info, pastis_ts.CACHE_NAME,
+                                    **pastis_ts.VARIANT_OVERRIDES.get(_info.name, {}))
 for _info in bigearthnet.VARIANTS:
     DATASETS[_info.name] = _Variant(bigearthnet, _info, bigearthnet.CACHE_NAME,
                                     **bigearthnet.VARIANT_OVERRIDES.get(_info.name, {}))

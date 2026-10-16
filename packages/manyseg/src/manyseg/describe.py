@@ -420,6 +420,13 @@ class _Builder:
     def _encoder_node(self, enc: nn.Module, name: str, node_id: str) -> Node:
         from .adapters import ProjectionAdapter
         from .backbones import TimmBackbone
+        from .temporal import TemporalEncoder
+
+        if isinstance(enc, TemporalEncoder):
+            n = self._encoder_node(enc.backbone, name, node_id)
+            n.attrs.insert(0, ("time series", f"(B, T, C, H, W); encoder per date, {enc.kind} "
+                                              "over dates at every level", True))
+            return n
 
         if isinstance(enc, TimmBackbone):
             init = "pretrained" if enc.pretrained else "random init"

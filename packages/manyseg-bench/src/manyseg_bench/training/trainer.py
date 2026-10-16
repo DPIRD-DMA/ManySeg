@@ -52,7 +52,7 @@ def _channels_last(x):
 
 
 def _batch_size(x) -> int:
-    return next(v for v in x.values() if v.ndim == 4).shape[0] if isinstance(x, dict) \
+    return next(v for v in x.values() if v.ndim >= 4).shape[0] if isinstance(x, dict) \
         else x.shape[0]
 
 

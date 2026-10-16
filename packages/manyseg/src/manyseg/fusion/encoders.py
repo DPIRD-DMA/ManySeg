@@ -153,7 +153,12 @@ class MultiEncoder(nn.Module):
                 )
             if n in self.adapters:
                 x = self.adapters[n](x)
-            feats[n] = self.encoders[n](pad_to_multiple(x, self.divisors[n]))
+            enc = self.encoders[n]
+            if getattr(enc, "temporal", False):  # (B, T, C, H, W) + optional mask / dates
+                feats[n] = enc(pad_to_multiple(x, self.divisors[n]), inputs.get(f"{n}_mask"),
+                               inputs.get(f"{n}_dates"))
+            else:
+                feats[n] = enc(pad_to_multiple(x, self.divisors[n]))
             valid[n] = (h, w)
         return feats, valid
 

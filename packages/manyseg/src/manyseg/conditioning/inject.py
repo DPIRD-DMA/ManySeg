@@ -147,8 +147,11 @@ class Conditioner(nn.Module):
                  rasters: Sequence[str], single: str | None = None,
                  channel_targets: Mapping[str, str] | None = None,
                  film: Mapping[str, DecoderFiLM] | None = None,
-                 head_bias: Mapping[str, nn.Module] | None = None) -> None:
+                 head_bias: Mapping[str, nn.Module] | None = None,
+                 temporal: Sequence[str] = ()) -> None:
         super().__init__()
+        # time-series rasters: their "<name>_mask" / "<name>_dates" entries pass through
+        self.temporal_extras = tuple(f"{n}_{s}" for n in temporal for s in ("mask", "dates"))
         self.encoders = nn.ModuleDict(encoders)
         self.vectors = tuple(encoders)
         self.modes = dict(modes)
@@ -175,6 +178,7 @@ class Conditioner(nn.Module):
                 raise KeyError(f"missing vector input {n!r}; expected keys "
                                f"{list(self.rasters) + list(self.vectors)}")
         rasters = {n: x[n] for n in self.rasters}
+        rasters.update({k: x[k] for k in getattr(self, "temporal_extras", ()) if k in x})
         for n in self._by_mode["channels"]:
             t = self.channel_targets[n]
             r = rasters[t]

@@ -72,6 +72,12 @@ def split_getter(ds, cache: Path, raw: Path, scheme: str = "official", mmap: boo
             split = _select(load_split(cache, name, mmap=mmap), info, subset)
         if info.vectors:
             split.vectors = ds.load_vectors(raw, split.names, info.vectors)
+        transform = getattr(ds, "transform_split", None)
+        if transform is not None:  # e.g. one date of a time series
+            split = transform(split)
+        extras = getattr(ds, "series_extras", None)
+        if extras is not None and part is None:  # time series dates / masks, by split name
+            split.vectors = {**(split.vectors or {}), **extras(cache, name)}
         labels = getattr(ds, "split_labels", None)
         if labels is not None:  # image-level labels for a shared (pixel) cache
             split.masks = labels(raw, split)
@@ -101,7 +107,7 @@ def _flops_per_image(model, loader) -> tuple[int | None, list[int] | None]:
     """Forward FLOPs for one evaluation sample (its full size; dict and vector inputs work)."""
     x, _ = next(iter(loader))
     ex = {k: v[:1] for k, v in x.items()} if isinstance(x, dict) else x[:1]
-    t = next(v for v in ex.values() if v.ndim == 4) if isinstance(ex, dict) else ex
+    t = next(v for v in ex.values() if v.ndim >= 4) if isinstance(ex, dict) else ex
     model.eval()
     return count_flops(model, ex), list(t.shape[-2:])
 
@@ -137,9 +143,15 @@ def run_training(
     mean, std = meta.get("mean", info.mean), meta.get("std", info.std)
     if info.inputs:
         mean, std = {k: mean[k] for k in info.inputs}, {k: std[k] for k in info.inputs}
+    series = dict(info.timeseries or {})
+    in_channels = info.in_channels
+    if series and spec.input_mode != "dict":  # stack mode: dates flattened into channels
+        in_channels = sum(c * series.get(k, 1) for k, c in (info.inputs or {}).items())
     spec = ModelSpec(**{**spec.to_dict(), "num_classes": info.num_classes,
-                        "in_channels": info.in_channels, "inputs": info.inputs,
-                        "vectors": info.vectors})
+                        "in_channels": in_channels, "inputs": info.inputs,
+                        "vectors": info.vectors,
+                        "timeseries": sorted(series) if spec.input_mode == "dict" and series
+                        else None})
     raw = data_root(data) / "raw" / getattr(ds, "CACHE_NAME", info.name)
     # Datasets too large for the (shared) GPU stay memory-mapped on the host.
     mmap = not info_loader_kwargs(ds).get("device_resident", True)
@@ -182,7 +194,7 @@ def run_training(
             mean, std = mean[None], std[None]
         norm_source = f"train split of {split}"
     imgs = train_split.images
-    img_size = tuple((next(iter(imgs.values())) if isinstance(imgs, dict) else imgs).shape[1:3])
+    img_size = tuple((next(iter(imgs.values())) if isinstance(imgs, dict) else imgs).shape[-3:-1])
     built = prov.build(spec, img_size=img_size)
 
     stack = spec.input_mode != "dict"
