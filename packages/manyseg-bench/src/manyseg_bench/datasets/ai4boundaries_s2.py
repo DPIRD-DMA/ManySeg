@@ -87,6 +87,12 @@ def _read(args):
     return img / 1e4, seq, days, valid, agree
 
 
+def _bounded_map(ex, fn, jobs, chunk: int = 64):
+    """``ex.map`` in chunks: at most ``chunk`` decoded results are held at once."""
+    for s in range(0, len(jobs), chunk):
+        yield from ex.map(fn, jobs[s:s + chunk])
+
+
 def prepare(raw: Path, cache: Path, workers: int = 4, expected: dict | None = EXPECTED,
             **_) -> dict:
     from numpy.lib.format import open_memmap
@@ -109,8 +115,8 @@ def prepare(raw: Path, cache: Path, workers: int = 4, expected: dict | None = EX
         valid = np.empty((n, T), bool)
         agree = []
         with ProcessPoolExecutor(workers) as ex:
-            for j, (im, m, d, v, a) in enumerate(ex.map(
-                    _read, [(src, split, nm) for nm in names], chunksize=8)):
+            jobs = [(src, split, nm) for nm in names]
+            for j, (im, m, d, v, a) in enumerate(_bounded_map(ex, _read, jobs)):
                 if im.shape != (T, SIZE, SIZE, len(BANDS)) or d.shape != (T,):
                     raise RuntimeError(f"integrity: {names[j]} has shape {im.shape}")
                 imgs[j], masks[j], dates[j], valid[j] = im, m, d, v

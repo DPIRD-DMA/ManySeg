@@ -191,3 +191,15 @@ def test_date_dim_must_be_even():
 def test_vector_input_cannot_take_a_series_extra_name():
     with pytest.raises(ValueError, match="reserved"):
         build(extra={"s2_dates": {"kind": "vector", "fields": {"d": {"type": "continuous"}}}})
+
+
+@pytest.mark.parametrize("agg", AGGS)
+def test_entirely_masked_training_batch(agg):
+    model = perturb(build(agg)).train()
+    out = model({"s2": series(t=3), "s2_mask": torch.zeros(2, 3, dtype=torch.bool)})
+    assert out.shape == (2, 3, 64, 64) and torch.isfinite(out).all()
+
+
+def test_series_extra_name_reserved_without_vectors():
+    with pytest.raises(ValueError, match="reserved"):
+        build(extra={"s2_dates": {"kind": "timeseries", "channels": 4}})

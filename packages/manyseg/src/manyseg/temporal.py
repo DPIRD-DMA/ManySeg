@@ -106,10 +106,10 @@ class AttentionAggregation(nn.Module):
         scores = scores.float().masked_fill(~mask[:, :, None, None, None], float("-inf"))
         any_valid = mask.any(1)[:, None, None, None, None]
         weights = torch.where(any_valid, scores, torch.zeros_like(scores)).softmax(1)
-        weights = torch.where(any_valid, weights, torch.zeros_like(weights)).to(f.dtype)
-        g = f.view(b, t, self.heads, c // self.heads, h, w)
+        weights = torch.where(any_valid, weights, torch.zeros_like(weights))
+        g = f.view(b, t, self.heads, c // self.heads, h, w).float()  # weighted sum in fp32
         g = torch.where(mask[:, :, None, None, None, None], g, torch.zeros_like(g))
-        return (g * weights[:, :, :, None]).sum(1).reshape(b, c, h, w)
+        return (g * weights[:, :, :, None]).sum(1).reshape(b, c, h, w).to(f.dtype)
 
 
 class TemporalEncoder(nn.Module):
@@ -148,7 +148,12 @@ class TemporalEncoder(nn.Module):
         if valid is None:
             valid = torch.ones(b, t, dtype=torch.bool, device=x.device)
         frames = x.flatten(0, 1)
-        if self.training and not bool(valid.all()):
+        if self.training and not bool(valid.any()):
+            # Nothing valid: zero features of the right shapes, without an empty backbone batch.
+            h, w = x.shape[-2:]
+            feats = [x.new_zeros(b * t, s.channels, -(-h // s.stride), -(-w // s.stride))
+                     for s in self.feature_specs]
+        elif self.training and not bool(valid.all()):
             # Encode only the valid dates: masked ones must not enter BatchNorm batch
             # statistics. (In eval mode BN uses running statistics, so all dates are encoded
             # and masked ones are dropped by the aggregation; this keeps export static.)
