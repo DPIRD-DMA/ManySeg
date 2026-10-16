@@ -5,7 +5,7 @@ script shows where to switch pretrained weights on). They use a GPU if one is av
 
 | Script | Shows |
 | --- | --- |
-| [`01_single_input.py`](01_single_input.py) | 4-band U-Net on any timm backbone, odd non-square input, one training step, `model.describe()` |
+| [`01_single_input.py`](01_single_input.py) | 4-band U-Net on a timm backbone, odd non-square input, one training step, `model.describe()` |
 | [`02_multispectral.py`](02_multispectral.py) | 13-band Sentinel-2-like input with the `repeat` stem adapter, and when to pick another adapter |
 | [`03_multi_modal.py`](03_multi_modal.py) | The README model: optical + half-resolution SAR (`same_extent`) + metadata via FiLM, `describe(sample)`, a Graphviz PNG |
 | [`04_multi_task.py`](04_multi_task.py) | Segmentation + image-level regression with uncertainty (Gaussian NLL) + a head with its own decoder |

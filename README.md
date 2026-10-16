@@ -6,8 +6,8 @@
 </p>
 
 <p align="center">
-Segmentation and other dense-prediction models for PyTorch, built from any
-<a href="https://github.com/huggingface/pytorch-image-models">timm</a> encoder.<br>
+Segmentation and other dense-prediction models for PyTorch, built from
+<a href="https://github.com/huggingface/pytorch-image-models">timm</a> encoders.<br>
 Any number of bands, several inputs at different resolutions, metadata, and many outputs in one model.
 </p>
 
@@ -42,8 +42,10 @@ logits = model(torch.randn(2, 4, 257, 301))   # (2, 3, 257, 301): any size, odd 
 print(model.describe())                       # what was built, stage by stage
 ```
 
-`backbone` is any timm model name: ResNet, EfficientNet, ConvNeXt, Swin, PVTv2, ViT, DINOv2
-and more. Pretrained weights are downloaded by timm and adapted to your band count.
+`backbone` is a timm model name: ResNet, EfficientNet, ConvNeXt, Swin, PVTv2, ViT, DINOv2 and
+most other timm families that expose multi-scale features. 46 families are tested
+([compatibility table](docs/backbone_compatibility.md)); a few only accept inputs up to a fixed
+size. Pretrained weights are downloaded by timm and adapted to your band count.
 
 ## Common tasks
 
@@ -123,8 +125,9 @@ without it on your data.
 `manyseg.points` (trees, animals: centres, counts) provide the heads, training targets and
 post-processing.
 
-**Deployment.** Models work with `torch.compile(dynamic=True)`, `torch.export` and ONNX at any
-input size, and with int8 quantisation (`manyseg.quantize`). For fast GPU inference use bf16
+**Deployment.** Models work with `torch.compile(dynamic=True)`, `torch.export` and ONNX with
+dynamic input sizes (except Swin-family encoders, a timm limitation), and with int8
+quantisation (`manyseg.quantize`). For fast GPU inference use bf16
 autocast plus `torch.compile`.
 
 Each of these has a runnable script in [`examples/`](examples/); they run on CPU in seconds.

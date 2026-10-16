@@ -1,7 +1,7 @@
 [project]
 name = "manyseg"
 version = "0.1.0.dev0"
-description = "Composable dense-prediction models for PyTorch: any timm backbone, any channel count, multiple inputs and outputs."
+description = "Composable dense-prediction models for PyTorch: timm backbones, any channel count, multiple inputs and outputs."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
