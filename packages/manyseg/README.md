@@ -1,8 +1,8 @@
 # manyseg
 
 Composable dense-prediction models for PyTorch: most [timm](https://github.com/huggingface/pytorch-image-models)
-backbones (46 families tested), any channel count, multiple inputs and outputs. Compile- and export-friendly, and
-checked against an independent benchmark ([`manyseg-bench`](https://pypi.org/project/manyseg-bench/)).
+backbones (46 families tested), any channel count, multiple inputs and outputs. Works with
+`torch.compile` and `torch.export`.
 
 ```bash
 pip install manyseg                 # torch + timm only
