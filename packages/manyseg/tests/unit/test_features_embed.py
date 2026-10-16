@@ -70,3 +70,18 @@ def test_embedder_module_matches_and_exports():
     ep = export_model(emb, x)
     y = torch.randn(1, 3, 97, 131)
     torch.testing.assert_close(ep.module()(y), m.embed(y, pool="mean"), atol=1e-4, rtol=1e-4)
+
+
+def test_late_fusion_features_cropped_per_input_and_embed_uses_the_primary():
+    m = create_model(backbone="resnet18", pretrained=False, num_classes=2,
+                     fusion={"type": "late"},
+                     inputs={"a": {"channels": 3},
+                             "b": {"channels": 2, "alignment": "same_extent"}}).eval()
+    x = {"a": torch.randn(1, 3, 97, 131), "b": torch.randn(1, 2, 33, 33)}
+    feats = m.features(x)
+    (a0, a1), (b0, b1) = m.backbone.groups
+    for f, s in zip(feats[a0:a1], m.feature_specs[a0:a1]):
+        assert f.shape[-2:] == (-(-97 // s.stride), -(-131 // s.stride))
+    for f, s in zip(feats[b0:b1], m.feature_specs[b0:b1]):
+        assert f.shape[-2:] == (-(-33 // s.stride), -(-33 // s.stride))
+    torch.testing.assert_close(m.embed(x, pool="mean"), feats[a1 - 1].mean((-2, -1)))

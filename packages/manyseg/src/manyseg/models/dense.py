@@ -206,11 +206,15 @@ class DenseModel(nn.Module):
 
     def features(self, x: Tensor | dict[str, Tensor]) -> list[Tensor]:
         """The encoder pyramid (fused, for multi-input models) for ``x``, each level cropped to
-        the input's valid region (``ceil(H / stride) x ceil(W / stride)``). Late fusion: the
-        per-input levels side by side, uncropped."""
-        feats, _, _, _, h, w, _ = self._encode(x)
+        the input's valid region (``ceil(H / stride) x ceil(W / stride)``). Late fusion: every
+        input's levels side by side (``backbone.groups``), each cropped to its own input."""
+        feats, _, _, _, h, w, valid = self._encode(x)
         if getattr(self.backbone, "mode", None) == "late":
-            return feats
+            out = []
+            for (a, b), (vh, vw) in zip(self.backbone.groups, valid):
+                out += [crop_to(f, (vh + s.stride - 1) // s.stride, (vw + s.stride - 1) // s.stride)
+                        for f, s in zip(feats[a:b], self.feature_specs[a:b])]
+            return out
         # crop_to (negative padding), not slicing: export-safe for ceil-rounded sizes
         return [crop_to(f, (h + s.stride - 1) // s.stride, (w + s.stride - 1) // s.stride)
                 for f, s in zip(feats, self.feature_specs)]
@@ -223,7 +227,8 @@ class DenseModel(nn.Module):
         Args:
             source: ``"encoder"`` (a level of :meth:`features`; default the deepest) or
                 ``"decoder"`` (the shared decoder's output, metadata FiLM applied).
-            level: Encoder level index (``-1`` = deepest).
+            level: Encoder level index (``-1`` = deepest); with late fusion, an index into the
+                primary input's levels.
             pool: ``None`` (per pixel), ``"mean"`` or ``"max"`` over the valid region.
             normalize: L2-normalise along channels.
         """
@@ -232,7 +237,11 @@ class DenseModel(nn.Module):
         if pool not in (None, "mean", "max"):
             raise ValueError(f"pool must be None, 'mean' or 'max', got {pool!r}")
         if source == "encoder":
-            e = self.features(x)[level]
+            feats = self.features(x)
+            if getattr(self.backbone, "mode", None) == "late":
+                a, b = self.backbone.groups[0]  # the primary input's levels
+                feats = feats[a:b]
+            e = feats[level]
         else:
             if self.decoder is None:
                 raise ValueError("source='decoder' needs a shared decoder (this model has only "

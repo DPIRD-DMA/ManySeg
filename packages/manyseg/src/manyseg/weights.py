@@ -119,6 +119,17 @@ def _download(url: str) -> dict:
     return load_state_dict_from_url(url, map_location="cpu", progress=False, check_hash=True)
 
 
+def _resample_pos_embed(model, key: str, pos, shape):
+    """Resample a ViT's absolute position embedding to the model's patch grid (timm's
+    bicubic resampling, prefix tokens kept)."""
+    from timm.layers import resample_abs_pos_embed
+
+    owner = model.get_submodule(key.rsplit(".", 1)[0]) if "." in key else model
+    grid = owner.patch_embed.grid_size
+    prefix = shape[1] - grid[0] * grid[1]
+    return resample_abs_pos_embed(pos, new_size=list(grid), num_prefix_tokens=prefix)
+
+
 def load_into(model, weights: Weights) -> None:
     """Load ``weights`` into a timm model (``features_only`` or full). Every parameter and
     buffer of ``model`` must come from the checkpoint; unused checkpoint keys may only be the
@@ -128,6 +139,9 @@ def load_into(model, weights: Weights) -> None:
     # timm's feature wrappers for some families (e.g. ViT) prefix the wrapped model's keys
     sd = {k: raw[k] if k in raw else raw.get(k.removeprefix("model.")) for k in own}
     missing = sorted(k for k, v in sd.items() if v is None)
+    for k, v in sd.items():  # a ViT built for another img_size: resample the position table
+        if v is not None and k.endswith("pos_embed") and v.shape != own[k].shape:
+            sd[k] = _resample_pos_embed(model, k, v, own[k].shape)
     if missing:
         raise RuntimeError(f"{weights.key}: checkpoint does not cover {len(missing)} model "
                            f"entries, e.g. {missing[:5]}")

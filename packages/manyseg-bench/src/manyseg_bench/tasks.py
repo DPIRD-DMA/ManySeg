@@ -630,22 +630,21 @@ class MultiLabelSegTask(Task):
 
 class _MultiLabelSegEval:
     def __init__(self, task: MultiLabelSegTask) -> None:
-        self.t, self.loss, self.n = task, 0.0, 0
-        self.tp = self.fp = self.fn = None
+        k = task.num_classes
+        self.t, self.loss, self.n = task, 0.0, 0  # BCE summed over valid class-pixels
+        self.tp, self.fp, self.fn = (torch.zeros(k, dtype=torch.float64) for _ in range(3))
 
     def update(self, out, y) -> None:
         out = _image_out(out).float()
-        self.loss += float(self.t.loss(out, y)) * y.shape[0]
-        self.n += y.shape[0]
         valid, pos = y != self.t.ignore, y == 1
+        bce = F.binary_cross_entropy_with_logits(out, pos.float(), reduction="none")
+        self.loss += float(bce[valid].sum())
+        self.n += int(valid.sum())
         pred = torch.sigmoid(out) > self.t.threshold
         tp = (pred & pos & valid).sum((0, 2, 3)).double().cpu()
         fp = (pred & ~pos & valid).sum((0, 2, 3)).double().cpu()
         fn = (~pred & pos & valid).sum((0, 2, 3)).double().cpu()
-        if self.tp is None:
-            self.tp, self.fp, self.fn = tp, fp, fn
-        else:
-            self.tp, self.fp, self.fn = self.tp + tp, self.fp + fp, self.fn + fn
+        self.tp, self.fp, self.fn = self.tp + tp, self.fp + fp, self.fn + fn
 
     def compute(self) -> dict:
         tp, fp, fn = self.tp, self.fp, self.fn

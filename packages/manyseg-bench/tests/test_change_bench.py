@@ -106,3 +106,18 @@ def test_multilabel_segmentation_task():
     assert torch.isfinite(loss)
     y_all_ignored = torch.full_like(y, 255)
     assert float(t.loss(logits, t.targets(y_all_ignored))) == 0.0
+
+
+def test_multilabel_seg_loss_is_per_valid_pixel_and_empty_evaluator():
+    t = build_task("multilabel_seg", 1)
+    a = torch.zeros(1, 1, 2, 2, dtype=torch.long)
+    b = torch.full((1, 1, 2, 2), 255, dtype=torch.long)
+    b[0, 0, 0, 0] = 1                                   # one valid pixel
+    la, lb = torch.full((1, 1, 2, 2), 2.0), torch.full((1, 1, 2, 2), -2.0)
+    ev = t.evaluator()
+    ev.update(la, a)
+    ev.update(lb, b)
+    bce = torch.nn.functional.binary_cross_entropy_with_logits
+    ref = (bce(la, a.float(), reduction="sum") + bce(lb[0, 0, 0, 0], torch.tensor(1.0))) / 5
+    assert ev.compute()["loss"] == pytest.approx(float(ref))
+    assert t.evaluator().compute()["miou"] == 0.0

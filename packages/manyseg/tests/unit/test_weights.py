@@ -78,3 +78,13 @@ def test_real_weights_load(key):
     m = create_model(backbone=w.model, pretrained=w.tag, in_channels=w.in_chans,
                      num_classes=2).eval()
     assert m(torch.randn(1, w.in_chans, 64, 64)).shape == (1, 2, 64, 64)
+
+
+def test_vit_weights_resample_pos_embed_for_another_img_size(monkeypatch):
+    import timm
+
+    src = timm.create_model("vit_small_patch16_224", in_chans=13)
+    fake_hub(monkeypatch, src.state_dict())
+    m = create_model(backbone="vit_small_patch16_224", pretrained="ssl4eo_s2_moco",
+                     in_channels=13, num_classes=2, backbone_kwargs={"img_size": 320})
+    assert m.eval()(torch.randn(1, 13, 320, 320)).shape == (1, 2, 320, 320)
