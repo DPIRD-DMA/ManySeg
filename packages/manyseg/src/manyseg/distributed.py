@@ -43,14 +43,25 @@ def shard_model(model: nn.Module, *, mesh=None, mp_policy=None, reshard_after_fo
                 **kwargs) -> nn.Module:
     """Shard a ``DenseModel`` with FSDP2 (``fully_shard``), stage by stage, then the root.
 
-    ``mesh`` (a ``DeviceMesh``; default: the global process group), ``mp_policy`` (e.g.
+    ``mesh`` (a ``DeviceMesh``; default: the global process group, on the model's device
+    type, so a CPU model gets a CPU mesh even when a GPU is visible), ``mp_policy`` (e.g.
     ``MixedPrecisionPolicy(param_dtype=torch.bfloat16)``) and ``reshard_after_forward`` are
     passed through, as are other ``fully_shard`` keyword arguments. Call it after
     ``torch.distributed.init_process_group`` and before building the optimizer. The model is
     modified in place and returned. BatchNorm statistics stay per rank, as with DDP.
     """
+    import torch
     from torch.distributed.fsdp import fully_shard
 
+    if mesh is None:
+        # fully_shard's default mesh uses the default accelerator; a CPU model on a machine
+        # with a GPU would get a CUDA mesh (gathering its weights then segfaults in torch).
+        p = next(model.parameters(), None)
+        if p is not None and p.device.type == "cpu" and torch.cuda.is_available():
+            import torch.distributed as dist
+            from torch.distributed.device_mesh import init_device_mesh
+
+            mesh = init_device_mesh("cpu", (dist.get_world_size(),))
     opts = dict(mesh=mesh, reshard_after_forward=reshard_after_forward, **kwargs)
     if mp_policy is not None:
         opts["mp_policy"] = mp_policy

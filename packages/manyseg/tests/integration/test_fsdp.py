@@ -65,10 +65,14 @@ def _worker(rank: int, world: int, port: int, kind: str, out):
     units = [m for m in fsdp.modules() if isinstance(m, FSDPModule)
              and m._get_fsdp_state()._fsdp_param_group is not None]
     sharded = all(type(p).__name__ == "DTensor" for p in fsdp.parameters())
+    # The default mesh follows the model's device (a CPU model on a machine with a GPU must
+    # not get a CUDA mesh: gathering its weights then segfaults inside torch).
+    mesh_types = {p.device_mesh.device_type for p in fsdp.parameters()}
     _step(fsdp, x)
     full = {k: (v.full_tensor() if hasattr(v, "full_tensor") else v).detach().clone()
             for k, v in fsdp.state_dict().items()}
-    out[rank] = {"ref": ref, "fsdp": full, "units": len(units), "sharded": sharded}
+    out[rank] = {"ref": ref, "fsdp": full, "units": len(units), "sharded": sharded,
+                 "mesh_types": mesh_types}
     dist.destroy_process_group()
 
 
@@ -84,6 +88,7 @@ def test_shard_model_matches_ddp(kind):
     for rank in (0, 1):
         r = out[rank]
         assert r["sharded"]  # every parameter is owned by some unit
+        assert r["mesh_types"] == {"cpu"}, r["mesh_types"]
         # backbone (or the weight-sharing multi-encoder), shared + task decoder, 3 heads
         assert r["units"] >= 6, r["units"]
         for k, v in r["ref"].items():
