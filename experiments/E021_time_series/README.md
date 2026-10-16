@@ -1,7 +1,9 @@
 # E021: Time-series inputs (pre-registered)
 
-Status: **planned** (registered 2026-10-16 before any run; timing from 1-epoch smoke runs only,
-outside `runs/`).
+Status: **done** (registered 2026-10-16 before any run; PASTIS run at `7b3a250`, AI4Boundaries at
+`7b3a250` with the cache prepared after the mask-name fix). Result: several dates help a lot on
+both datasets; the time-series input does **not** beat stacking dates as channels on both
+(better on AI4Boundaries, worse on PASTIS); attention does not beat mean.
 
 ## Question
 ManySeg now takes `{"kind": "timeseries"}` inputs: one 2D encoder on every date, aggregated per
@@ -53,3 +55,34 @@ recommending it:
 * **Q2:** `attention` becomes the default aggregation if it beats `mean` by more than 2 pooled SD
   on val on both datasets with test agreeing; otherwise `mean` stays the default.
 * `single` is context only (no decision).
+
+## Results
+
+All 24 runs completed (local 4090, no failures). Final epoch, mean ± SD over seeds 0–2. Full
+tables: `uv run python experiments/E021_time_series/analyse.py`.
+
+| arm | PASTIS val mIoU | PASTIS test | AI4B val PQ | AI4B test | train img/s (PASTIS / AI4B) |
+|---|---|---|---|---|---|
+| single | 0.3261 ± 0.0020 | 0.3251 | 0.0990 ± 0.0047 | 0.1001 | 814 / 302 |
+| stack | **0.4123 ± 0.0035** | **0.3984** | 0.1550 ± 0.0065 | 0.1564 | 488 / 275 |
+| mean | 0.3694 ± 0.0098 | 0.3717 | 0.1713 ± 0.0101 | 0.1738 | 410 / 182 |
+| attention | 0.3759 ± 0.0026 | 0.3786 | **0.1782 ± 0.0023** | **0.1802** | 356 / 153 |
+
+* **Q1 (time series vs dates as channels): not met.** On AI4Boundaries `attention` beats `stack`
+  (+2.33 val PQ, 2 SD 0.97; test +2.38) and `mean` nearly does (+1.64, 2 SD 1.70). On PASTIS
+  `stack` beats both (mean −4.29, 2 SD 1.47; attention −3.65, 2 SD 0.61; test −2.7 / −2.0).
+  The time-series input is not recommended over stacking in general.
+* **Q2 (attention vs mean): not met** (PASTIS +0.65, 2 SD 1.43; AI4B +0.69, 2 SD 1.47). `mean`
+  stays the default aggregation.
+* **Context:** multiple dates help on both datasets (stack − single: PASTIS +8.6 val mIoU,
+  AI4B +5.6 val PQ).
+* **Reading (post hoc):** stacking lets the first convolution compare dates per pixel; the
+  time-series encoder only combines dates after each level. PASTIS crop types depend on
+  spectral change between specific dates (early cross-date cues), field boundaries on
+  AI4Boundaries are spatial structure seen more clearly by encoding each month with
+  pretrained RGB-like filters. Neither explanation was tested.
+* **Docs:** use several dates; stacking dates as channels is the cheaper strong baseline (one
+  encoder pass); the time-series input is worth trying (attention was best on AI4Boundaries)
+  and is the option when dates vary in number, are missing, or come with acquisition dates.
+* **Caveats:** ResNet-34 only; PASTIS uses 8 of 38–61 dates; AI4Boundaries composites are
+  regular monthly, so no missing-date masking was exercised on real data.

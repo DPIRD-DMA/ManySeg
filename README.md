@@ -154,6 +154,11 @@ Each of these has a runnable script in [`examples/`](examples/); they run on CPU
 * **Mixed precision is safe:** bf16, fp16 and int8 weight-only showed no accuracy loss.
 * **Fusion:** stacking all bands into one input was as good as fancier fusion on the datasets
   we tried; start there.
+* **Several dates** beat one by a wide margin. Stacking dates as channels is a strong baseline;
+  the time-series input (`"kind": "timeseries"`) beat it on field delineation but not on crop
+  types, so try both.
+* **Change detection:** a Siamese encoder (shared weights per date) beat stacking the two dates
+  on both datasets we tried.
 
 Every claim here comes from a pre-registered, multi-seed experiment in
 [`experiments/`](experiments/), where negative results are kept too.

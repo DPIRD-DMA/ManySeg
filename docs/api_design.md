@@ -297,7 +297,18 @@ masked dates are ignored.
 Not yet: `shared:` backbones between a time series and another input, and metadata in
 `"channels"` mode targeting a time series.
 
+> **Evidence (E021):** several dates beat one by a wide margin (PASTIS +8.6 mIoU, AI4Boundaries
+> +5.6 PQ). Stacking all dates as channels in one input is a strong, cheaper baseline: it beat
+> the time-series input on PASTIS crop types (by ~4 mIoU), while the time-series input with
+> `"attention"` beat stacking on AI4Boundaries field delineation (+2.3 PQ). Attention vs mean
+> was within noise on both, so `"mean"` stays the default. Try both on your data.
+
 #### Change detection
+
+> **Evidence (E022):** Siamese encoders beat stacking both dates in one input on OSCD and
+> LEVIR-CD. No fusion op beat `concat` on both: `diff` was best on Sentinel-2 OSCD and worst of
+> the Siamese ops on 0.5 m LEVIR-CD; `concat_diff` was never beaten. Start with a Siamese
+> `concat`, and try `diff` / `concat_diff`.
 
 Before / after images are two inputs on the same grid. Binary change: one segmentation head on
 the fused features; `"op": "diff"` (`|f1 - f2|`) or `"concat_diff"` (`[f1, f2, |f1 - f2|]`) are
