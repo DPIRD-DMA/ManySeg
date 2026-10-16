@@ -20,7 +20,10 @@ Aggregations (``"temporal"``: a name or ``{"type": name, **options}``):
   and the model is exactly the masked mean. Options: ``heads`` (default 4, reduced to a divisor
   of each level's channels), ``key_dim`` (16), ``date_dim`` (32), ``max_period`` (10000 days).
 
-A sample whose dates are all masked yields zero features (no NaNs).
+A sample whose dates are all masked yields zero features. Masked dates never affect the
+output, even if they contain NaNs: in training mode only valid dates are encoded (masked ones
+stay out of BatchNorm batch statistics); in eval mode all dates are encoded and the masked ones
+are dropped by the aggregation (static shapes for export).
 """
 
 from __future__ import annotations
@@ -44,19 +47,25 @@ def parse_temporal(name: str, cfg) -> tuple[str, dict]:
     bad = set(cfg) - allowed
     if bad:
         raise ValueError(f"input {name!r}: unknown temporal options {sorted(bad)} for {kind!r}")
+    if "date_dim" in cfg and (int(cfg["date_dim"]) < 2 or int(cfg["date_dim"]) % 2):
+        raise ValueError(f"input {name!r}: date_dim must be an even number >= 2, got "
+                         f"{cfg['date_dim']}")
     return kind, cfg
 
 
-def _valid(mask: Tensor | None, b: int, t: int, device) -> Tensor:
-    if mask is None:
-        return torch.ones(b, t, dtype=torch.bool, device=device)
-    return mask.to(device=device, dtype=torch.bool)
+def _per_date(v: Tensor | None, b: int, t: int, device, what: str, dtype) -> Tensor | None:
+    if v is None:
+        return None
+    if v.ndim != 2 or v.shape[0] != b or v.shape[1] != t:
+        raise ValueError(f"time-series {what} must be (B, T) = {(b, t)}, got {tuple(v.shape)}")
+    return v.to(device=device, dtype=dtype)
 
 
 class MeanAggregation(nn.Module):
     def forward(self, f: Tensor, mask: Tensor, dates: Tensor | None = None) -> Tensor:
-        w = mask.to(f.dtype)[:, :, None, None, None]  # B T 1 1 1
-        return (f * w).sum(1) / w.sum(1).clamp(min=1)
+        m = mask[:, :, None, None, None]  # B T 1 1 1; select (NaN * 0 is NaN), sum in fp32
+        s = torch.where(m, f.float(), torch.zeros((), device=f.device)).sum(1)
+        return (s / mask.sum(1).clamp(min=1)[:, None, None, None]).to(f.dtype)
 
 
 class MaxAggregation(nn.Module):
@@ -99,6 +108,7 @@ class AttentionAggregation(nn.Module):
         weights = torch.where(any_valid, scores, torch.zeros_like(scores)).softmax(1)
         weights = torch.where(any_valid, weights, torch.zeros_like(weights)).to(f.dtype)
         g = f.view(b, t, self.heads, c // self.heads, h, w)
+        g = torch.where(mask[:, :, None, None, None, None], g, torch.zeros_like(g))
         return (g * weights[:, :, :, None]).sum(1).reshape(b, c, h, w)
 
 
@@ -133,7 +143,22 @@ class TemporalEncoder(nn.Module):
             raise ValueError(f"time-series input must be (B, T, C, H, W), got shape "
                              f"{tuple(x.shape)}")
         b, t = x.shape[:2]
-        valid = _valid(mask, b, t, x.device)
-        feats = self.backbone(x.flatten(0, 1))
+        valid = _per_date(mask, b, t, x.device, "mask", torch.bool)
+        dates = _per_date(dates, b, t, x.device, "dates", torch.float32)
+        if valid is None:
+            valid = torch.ones(b, t, dtype=torch.bool, device=x.device)
+        frames = x.flatten(0, 1)
+        if self.training and not bool(valid.all()):
+            # Encode only the valid dates: masked ones must not enter BatchNorm batch
+            # statistics. (In eval mode BN uses running statistics, so all dates are encoded
+            # and masked ones are dropped by the aggregation; this keeps export static.)
+            keep = valid.flatten().nonzero().squeeze(1)
+            enc = self.backbone(frames[keep])
+            feats = []
+            for e in enc:
+                full = e.new_zeros(b * t, *e.shape[1:])
+                feats.append(full.index_copy(0, keep, e))
+        else:
+            feats = self.backbone(frames)
         return [agg(f.view(b, t, *f.shape[1:]), valid, dates)
                 for agg, f in zip(self.temporal_aggregation, feats)]

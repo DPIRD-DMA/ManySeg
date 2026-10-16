@@ -126,3 +126,75 @@ def test_run_training_on_series(tmp_path, dataset, mode, temporal):
     assert rec["spec"]["in_channels"] == expect or rec["spec"]["inputs"] == {"s2": 10}
     assert rec["spec"]["timeseries"] == (["s2"] if mode == "dict" else None)
     assert 0 <= rec["test"]["miou"] <= 1 and rec["img_size"] == [32, 32]
+
+
+def test_augmentation_keeps_labels_aligned_with_every_date():
+    imgs, _ = arrays(n=4, h=32, w=32)
+    imgs["s2"][:] = 0
+    imgs["dem"][:] = 0
+    masks = np.zeros((4, 32, 32), np.uint8)
+    imgs["s2"][:, :, 5:15, 18:28, :] = 1  # a marker in every date ...
+    imgs["dem"][:, 5:15, 18:28, :] = 1    # ... in the other raster ...
+    masks[:, 5:15, 18:28] = 1             # ... and in the labels
+    ld = GPULoader(imgs, masks, 4, {"s2": [0.0, 0.0], "dem": [0.0]},
+                   {"s2": [1.0, 1.0], "dem": [1.0]}, torch.device("cpu"), train=True,
+                   stack=False, out_size=(24, 24), vflip=True, seed=7)
+    (x, y), = list(ld)
+    lab = y == 1
+    assert lab.any()
+    for t in range(3):
+        img = x["s2"][:, t, 0] > 0.5
+        assert (img == lab).float().mean() > 0.97  # nearest vs bilinear edges only
+    assert ((x["dem"][:, 0] > 0.5) == lab).float().mean() > 0.97
+
+
+def fake_a4b(src, names=("AT_1", "FR_2")):
+    import io
+    import zipfile
+
+    h5py = pytest.importorskip("h5py")
+    tifffile = pytest.importorskip("tifffile")
+    src.mkdir(parents=True)
+    rng = np.random.default_rng(0)
+    with zipfile.ZipFile(src / "masks.zip", "w") as zm:
+        for split in ("train", "val", "test"):
+            (src / f"{split}.csv").write_text(
+                "image,country\n" + "".join(f"{n}_S2_10m_256.nc,{n[:2]}\n" for n in names))
+            with zipfile.ZipFile(src / f"{split}.zip", "w") as zi:
+                for n in names:
+                    buf = io.BytesIO()
+                    with h5py.File(buf, "w") as f:
+                        for b in ("B2", "B3", "B4", "B8", "NDVI"):
+                            a = rng.integers(1, 3000, (6, 256, 256)).astype(np.float32)
+                            if b == "B2":
+                                a[5] = 0  # August missing
+                            f[b] = a
+                        f["time"] = np.array([0, 31, 61, 92, 122, 153])
+                    zi.writestr(f"{split}/{n}_S2_10m_256.nc", buf.getvalue())
+                    m = np.zeros((256, 256, 4), np.float32)
+                    m[20:60, 20:60, 3] = 7
+                    m[20:60, 20:60, 0] = 1
+                    m[..., 3][m[..., 3] == 0] = np.nan
+                    t = io.BytesIO()
+                    tifffile.imwrite(t, m)
+                    zm.writestr(f"{split}/{n}_S2label_10m_256.tif", t.getvalue())
+
+
+def test_ai4boundaries_s2_prepare_and_variants(tmp_path):
+    from manyseg_bench.datasets import ai4boundaries_s2, get_dataset, load_split
+    from manyseg_bench.experiments.runner import split_getter
+
+    src = tmp_path / "raw" / "ai4boundaries" / "sentinel2"
+    fake_a4b(src)
+    cache = tmp_path / "cache" / "ai4boundaries_s2"
+    s = ai4boundaries_s2.prepare(tmp_path / "raw" / "ai4boundaries_s2", cache, workers=1,
+                                 expected=None)
+    assert s["train"]["n"] == 2 and s["train"]["extent_agreement"] == 1.0
+    tr = load_split(cache, "train")
+    assert tr.images["s2"].shape == (2, 6, 256, 256, 4) and tr.masks.max() == 1
+    get = split_getter(get_dataset("ai4boundaries_s2"), cache, tmp_path / "raw")
+    sp = get("val")
+    assert sp.vectors["s2_dates"][0].tolist() == [0, 31, 61, 92, 122, 153]
+    assert sp.vectors["s2_mask"][0].tolist() == [1, 1, 1, 1, 1, 0]  # August B2 missing
+    single = split_getter(get_dataset("ai4boundaries_s2_single"), cache, tmp_path / "raw")("val")
+    assert single.images["s2"].shape == (2, 256, 256, 4) and single.vectors is None

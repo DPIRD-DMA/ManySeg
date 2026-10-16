@@ -234,7 +234,11 @@ out = model({"s2": s2, "s2_mask": valid, "s2_dates": doy, "dem": dem})
 
 Time series combine with other rasters (any alignment), metadata vectors and every head type;
 fusion must be intermediate or late (early fusion cannot stack a `T` axis). Exports with
-dynamic `T`, `H` and `W`. The encoder runs once per date, so memory scales with `T`.
+dynamic `T`, `H` and `W`. The encoder runs once per date, so memory scales with `T`. Masked
+dates never affect the output: in training mode only valid dates are encoded (so they stay out
+of BatchNorm batch statistics; a partly masked batch has a data-dependent shape, so
+`torch.compile(fullgraph=True)` of a training step needs fully valid batches), and NaNs in
+masked dates are ignored.
 Not yet: `shared:` backbones between a time series and another input, and metadata in
 `"channels"` mode targeting a time series.
 

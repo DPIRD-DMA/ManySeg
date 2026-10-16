@@ -86,6 +86,11 @@ def build_conditioned_model(create_model: Callable[..., nn.Module], *, inputs, f
     for n in vectors:
         if f"{n}_mask" in inputs:
             raise ValueError(f"input name {n}_mask is reserved for the mask of vector input {n!r}")
+    for n, cfg in rasters.items():
+        for suffix in ("mask", "dates"):
+            if cfg.get("kind") == "timeseries" and f"{n}_{suffix}" in inputs:
+                raise ValueError(f"input name {n}_{suffix} is reserved for the {suffix} of "
+                                 f"time series {n!r}")
 
     makers, modes, opts, targets = {}, {}, {}, {}
     for n, cfg in vectors.items():

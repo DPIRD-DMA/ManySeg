@@ -144,3 +144,50 @@ def test_errors():
     model = build()
     with pytest.raises(ValueError, match=r"\(B, T, C, H, W\)"):
         model({"s2": torch.randn(2, 4, 64, 64)})
+
+
+@pytest.mark.parametrize("agg", AGGS)
+def test_masked_dates_have_no_effect_in_training_mode(agg):
+    """BatchNorm batch statistics must not see masked dates (Codex review)."""
+    model = perturb(build(agg)).train()
+    x = series(t=5)
+    mask = torch.tensor([[1, 1, 0, 1, 0], [1, 0, 0, 0, 1]], dtype=torch.bool)
+    y = x.clone()
+    y[~mask] = torch.randn_like(y[~mask]) * 10
+    torch.manual_seed(0)
+    a = model({"s2": x, "s2_mask": mask})
+    torch.manual_seed(0)
+    b = model({"s2": y, "s2_mask": mask})
+    torch.testing.assert_close(a, b, rtol=1e-5, atol=1e-5)
+
+
+@pytest.mark.parametrize("agg", AGGS)
+@pytest.mark.parametrize("train", [False, True])
+def test_nan_in_masked_dates_does_not_leak(agg, train):
+    model = perturb(build(agg)).train(train)
+    x = series(t=4)
+    mask = torch.tensor([[1, 0, 1, 1], [0, 1, 1, 0]], dtype=torch.bool)
+    x[~mask] = float("nan")
+    assert torch.isfinite(model({"s2": x, "s2_mask": mask})).all()
+
+
+def test_dates_on_another_device_and_bad_shapes():
+    model = build("attention")
+    x = series(t=3)
+    with pytest.raises(ValueError, match=r"\(B, T\)"):
+        model({"s2": x, "s2_dates": torch.ones(2, 4)})
+    with pytest.raises(ValueError, match=r"\(B, T\)"):
+        model({"s2": x, "s2_mask": torch.ones(2, 3, 1).bool()})
+    if torch.cuda.is_available():
+        m = build("attention").cuda()
+        assert m({"s2": x.cuda(), "s2_dates": torch.ones(2, 3)}).is_cuda
+
+
+def test_date_dim_must_be_even():
+    with pytest.raises(ValueError, match="date_dim"):
+        build({"type": "attention", "date_dim": 31})
+
+
+def test_vector_input_cannot_take_a_series_extra_name():
+    with pytest.raises(ValueError, match="reserved"):
+        build(extra={"s2_dates": {"kind": "vector", "fields": {"d": {"type": "continuous"}}}})
