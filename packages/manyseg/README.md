@@ -30,8 +30,8 @@ print(model.describe())                    # what was actually built, stage by s
   `out_stride` and an optional full-resolution `input_cross`.
 * **Heads:** segmentation, regression (with uncertainty) and classification, at pixel or image
   scope and at reduced scale. Includes instance (boundary + distance) and point/density presets.
-* **Deployment:** `torch.compile(dynamic=True)`, `torch.export` and ONNX with dynamic H/W, and
-  int8 quantisation (`manyseg.quantize`).
+* **Deployment:** `torch.compile(dynamic=True)`, `torch.export` and ONNX with dynamic H/W
+  (except Swin-family encoders, a timm limitation), and int8 quantisation (`manyseg.quantize`).
 
 Every design default comes from a pre-registered, multi-seed experiment, and negative results
 are kept. Documentation, examples and experiments are on
