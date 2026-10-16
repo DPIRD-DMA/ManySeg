@@ -15,7 +15,8 @@ Aggregations (``"temporal"``: a name or ``{"type": name, **options}``):
 * ``"max"``: masked per-channel max;
 * ``"concat"`` (option ``dates``, required): order-keeping, the dates' features concatenated in
   date order then 1x1 conv-BN-ReLU; needs exactly ``dates`` dates (export with that fixed T);
-* ``"diff"``: ``|f_2 - f_1|`` of exactly two dates (bitemporal change);
+* ``"diff"``: ``|f_2 - f_1|`` of exactly two dates (bitemporal change); zero where either
+  date is masked (a missing date is not change);
 * ``"attention"``: lightweight temporal attention per pixel, in the spirit of L-TAE (Garnot
   & Landrieu 2020) as used by U-TAE: each of ``heads`` channel groups gets softmax weights over
   the dates from a learned query against keys computed from the features and a sinusoidal
@@ -143,8 +144,10 @@ class DiffAggregation(nn.Module):
     def forward(self, f: Tensor, mask: Tensor, dates: Tensor | None = None) -> Tensor:
         if f.shape[1] != 2:
             raise ValueError(f"'diff' aggregation takes exactly 2 dates, got {f.shape[1]}")
-        f = torch.where(mask[:, :, None, None, None], f, torch.zeros_like(f))
-        return (f[:, 1] - f[:, 0]).abs()
+        # A missing endpoint would look like change: zero unless both dates are valid.
+        both = (mask[:, 0] & mask[:, 1])[:, None, None, None]
+        d = (f[:, 1] - f[:, 0]).abs()
+        return torch.where(both, d, torch.zeros_like(d))
 
 
 class TemporalEncoder(nn.Module):

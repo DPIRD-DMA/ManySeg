@@ -345,8 +345,17 @@ class _Builder:
         m = self.model
         if m.decoder is not None:
             self.dec_out["decoder"] = self._decoder("decoder", "decoder", m.decoder, feats)
+        first = {}
         for h, d in m.task_decoders.items():
-            self.dec_out[f"task_{h}"] = self._decoder(f"task_{h}", f"decoder[{h}]", d, feats)
+            inp = m._head_inputs.get(h)
+            src = self.per_input_nodes[inp] if inp else feats  # per-input heads: own encoder
+            specs = self.bb.encoders[inp].feature_specs if inp else None
+            label = f"decoder[{h}]" + (f" on {inp}" if inp else "")
+            node = self._decoder(f"task_{h}", label, d, src, specs)
+            if id(d) in first:
+                node.attrs.append(("shares", f"decoder and head of {first[id(d)]!r}", True))
+            first.setdefault(id(d), h)
+            self.dec_out[f"task_{h}"] = node
         self._heads(feats)
         self._conditioning_edges()
         return ModelGraph(self.nodes, self.edges, self._summary(), self._stage_params())
@@ -531,6 +540,7 @@ class _Builder:
                 node.shapes.append((f"{pre}padded in", _fmt_shape(got[0][0])))
                 node.shapes.append((f"{pre}out", _fmt_shape(got[1])))
         per_input = {r: enc_nodes[key(bb.encoders[r])] for r in bb.names}
+        self.per_input_nodes = per_input
         if self.late:
             return per_input
 
@@ -589,8 +599,8 @@ class _Builder:
         self._shapes(n, dec, inp=False)
         return n
 
-    def _decoder(self, key: str, name: str, dec: nn.Module, feats) -> Node:
-        specs = self.bb.feature_specs
+    def _decoder(self, key: str, name: str, dec: nn.Module, feats, specs=None) -> Node:
+        specs = self.bb.feature_specs if specs is None else specs
         film = self._film(key)
         if isinstance(dec, self.LateFusionDecoder):
             from .fusion import FUSION_OPS

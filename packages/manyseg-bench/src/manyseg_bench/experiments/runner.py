@@ -163,7 +163,7 @@ def run_training(
     torch.backends.cudnn.benchmark = torch.version.hip is None
     task_name = getattr(ds, "TASK", "semantic")
     task_kwargs = {**getattr(ds, "TASK_KWARGS", {}), **(task_overrides or {})}
-    if task_name in ("semantic", "classification", "seg_multilabel"):
+    if task_name in ("semantic", "classification", "seg_multilabel", "change"):
         task_kwargs.setdefault("label_smoothing", rec.label_smoothing)
     task = build_task(task_name, info.num_classes, info.ignore_index, **task_kwargs)
     if task.image_level:

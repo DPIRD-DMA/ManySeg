@@ -130,3 +130,80 @@ def test_per_input_heads_with_metadata_film():
     assert {"decoder", "task_lc1", "task_lc2"} <= set(model.conditioner.film)
     out = model({**pair(), "meta": torch.tensor([[10.0], [200.0]])})
     assert out["lc2"].shape == (2, 7, 64, 64)
+
+
+def test_shared_heads_share_film_and_head_bias():
+    inputs = {**PAIR,
+              "meta": {"kind": "vector", "fields": {"d": {"type": "continuous"}}},
+              "meta2": {"kind": "vector", "fields": {"e": {"type": "continuous"}},
+                        "conditioning": {"mode": "head", "pixel": True}}}
+    heads = {"change": {"type": "segmentation", "channels": 2},
+             "lc1": {"type": "segmentation", "channels": 7, "input": "t1"},
+             "lc2": {"type": "segmentation", "channels": 7, "input": "t2", "share": "lc1"}}
+    model = create_model(backbone="resnet18", pretrained=False, inputs=inputs, heads=heads,
+                         fusion={"type": "intermediate", "op": "concat_diff"}).eval()
+    c = model.conditioner
+    assert c.film["task_lc2"] is c.film["task_lc1"]
+    assert c.head_bias["lc2"] is c.head_bias["lc1"]
+    with torch.no_grad():  # trained-like conditioning: the swap symmetry must still hold
+        for n, p in c.named_parameters():
+            if n.startswith(("film", "head_bias")):
+                p.normal_(0, 0.3)
+    x, v = pair(), {"meta": torch.tensor([[0.5], [1.0]]), "meta2": torch.tensor([[1.0], [2.0]])}
+    out = model({**x, **v})
+    sw = model({"t1": x["t2"], "t2": x["t1"], **v})
+    torch.testing.assert_close(out["lc2"], sw["lc1"], rtol=1e-5, atol=1e-5)
+
+
+def test_per_input_head_input_rules():
+    with pytest.raises(ValueError, match="same_grid"):
+        create_model(backbone="resnet18", pretrained=False, inputs={
+            "t1": {"channels": 3}, "t2": {"channels": 3, "alignment": "same_extent"}},
+            heads={"lc": {"channels": 3, "input": "t2"}})
+    with pytest.raises(ValueError, match="raw input"):
+        create_model(backbone="resnet18", pretrained=False, inputs=PAIR,
+                     heads={"lc": {"channels": 3, "input": "t1", "decoder": "fastai_unet"}})
+
+
+def test_describe_wires_per_input_decoders_to_their_encoder():
+    from manyseg.describe import model_graph
+
+    g = model_graph(scd_model())
+    dec = g.find("decoder", "decoder[lc2] on t2")
+    srcs = {e.src for e in g.edges if e.dst == dec.id}
+    assert any(g.nodes[s].stage == "encoder" for s in srcs)
+    assert not any(g.nodes[s].stage == "fusion" for s in srcs)
+    assert dec.attr("shares").startswith("decoder and head of 'lc1'")
+
+
+def test_temporal_diff_missing_endpoint_is_no_change():
+    model = create_model(backbone="resnet18", pretrained=False, num_classes=2, inputs={
+        "s2": {"kind": "timeseries", "channels": 4, "temporal": "diff"}}).eval()
+    x = series(2)
+    a = model({"s2": x, "s2_mask": torch.tensor([[1, 0], [0, 1]]).bool()})
+    b = model({"s2": torch.zeros_like(x), "s2_mask": torch.tensor([[1, 1], [1, 1]]).bool()})
+    torch.testing.assert_close(a, b, rtol=1e-5, atol=1e-5)  # same as no change at all
+
+
+def test_shared_heads_checkpoint_round_trip():
+    a, b = scd_model(), scd_model()
+    with torch.no_grad():
+        for p in a.parameters():
+            p.add_(torch.randn_like(p) * 0.01)
+    b.load_state_dict(a.state_dict())
+    assert b.task_decoders["lc2"] is b.task_decoders["lc1"]  # still one module after loading
+    x = pair()
+    for k, v in a(x).items():
+        torch.testing.assert_close(b(x)[k], v, rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("keep", [["lc1"], ["lc2"], ["lc2", "change"]])
+def test_select_heads_either_side_of_a_shared_pair(keep):
+    model = scd_model()
+    x = pair()
+    ref = model(x)
+    model.select_heads(keep)
+    out = model(x)
+    assert set(out) == set(keep)
+    for k in keep:
+        torch.testing.assert_close(out[k], ref[k], rtol=0, atol=0)

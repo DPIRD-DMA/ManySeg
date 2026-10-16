@@ -81,7 +81,7 @@ class GPULoader:
             self.mean[k] = torch.tensor(means[k], device=device).view(shape) * unit
             self.std[k] = torch.tensor(stds[k], device=device).view(shape) * unit
         self.masks = _to_device(masks, device) if device_resident else masks
-        self.pixel_labels = masks.ndim == 3
+        self.pixel_labels = masks.ndim >= 3  # (N, H, W) or a label stack (N, K, H, W)
         self.float_labels = np.issubdtype(np.asarray(masks[:0]).dtype, np.floating)
         self.n = self.masks.shape[0]
         self.bs = batch_size
@@ -140,9 +140,10 @@ class GPULoader:
         x = F.grid_sample(x, grid, mode="bilinear", padding_mode="reflection", align_corners=False)
         if not self.pixel_labels:  # image-level labels do not move with the pixels
             return x, y
-        y = F.grid_sample(y[:, None].float(), grid, mode="nearest", padding_mode="reflection",
-                          align_corners=False)[:, 0].round().long()
-        return x, y
+        stack = y.ndim == 4
+        y = F.grid_sample((y if stack else y[:, None]).float(), grid, mode="nearest",
+                          padding_mode="reflection", align_corners=False).round().long()
+        return x, (y if stack else y[:, 0])
 
     def __iter__(self):
         order = torch.randperm(self.n, generator=self.gen) if self.train else torch.arange(self.n)

@@ -198,6 +198,11 @@ def create_model(
     def build_decoder(dec_cls, dkw, specs=None):
         per_input = specs is not None
         specs = tuple(specs if per_input else bb.feature_specs)
+        if per_input and (dec_cls.wants_input_for(dkw) if hasattr(dec_cls, "wants_input_for")
+                          else getattr(dec_cls, "wants_input", False)):
+            raise ValueError(f"decoder {dec_cls.__name__} reads the raw input image, which "
+                             "per-input heads do not support (e.g. fastai_unet, input_cross); "
+                             "choose a decoder that reads features only")
         if ftype == "late" and not per_input:
             from ..fusion import LateFusionDecoder
 
@@ -235,6 +240,9 @@ def create_model(
             raise ValueError(f"head {n!r}: 'input' heads are pixel heads")
         if getattr(bb.encoders[inp], "temporal", False):
             raise ValueError(f"head {n!r}: 'input' cannot be a time series yet")
+        if bb.alignment[inp] != "same_grid":
+            raise ValueError(f"head {n!r}: 'input' heads need an input on the primary grid "
+                             f"(same_grid); {inp!r} is {bb.alignment[inp]!r}")
     for n, other in shares.items():
         if n not in head_inputs or other not in head_inputs or other in shares:
             raise ValueError(f"head {n!r}: 'share' links two per-input heads ('input' set on "

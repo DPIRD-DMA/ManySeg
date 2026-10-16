@@ -149,11 +149,16 @@ def build_conditioned_model(create_model: Callable[..., nn.Module], *, inputs, f
         in_ch = getattr(model.backbone, "in_channels", None)
         decoders = {"decoder": model.decoder} if model.decoder is not None else {}
         decoders.update({f"task_{h}": d for h, d in model.task_decoders.items()})
+        by_module = {}  # shared per-input decoders share their FiLM too
         for k, d in decoders.items():
+            if id(d) in by_module:
+                film[k] = by_module[id(d)]
+                continue
             inp = model._head_inputs.get(k.removeprefix("task_")) if k.startswith("task_") \
                 else None
             sp = tuple(model.backbone.encoders[inp].feature_specs) if inp else specs
-            film[k] = DecoderFiLM(dim, sp, used_levels(d, sp, in_ch), d.out_spec, on)
+            film[k] = by_module[id(d)] = DecoderFiLM(dim, sp, used_levels(d, sp, in_ch),
+                                                    d.out_spec, on)
         # Image heads that pool the encoder: FiLM on the deepest feature (per-channel affine
         # before the mean pool, i.e. on the pooled vector).
         if any(getattr(h, "scope", "pixel") == "image" and model._head_sources[n] == "encoder"
@@ -165,12 +170,16 @@ def build_conditioned_model(create_model: Callable[..., nn.Module], *, inputs, f
         dim = sum(encoders[n].dim for n in head_names)
         pixel = any(opts[n].get("pixel", False) for n in head_names)
         cfgs = heads if heads is not None else {"logits": {"channels": num_classes}}
+        bias_of = {}  # shared heads share their bias layer
         for name, head in model.heads.items():
             scope = getattr(head, "scope", "pixel")
+            if id(head) in bias_of:
+                head_bias[name] = bias_of[id(head)]
+                continue
             if scope == "image" or (scope == "pixel" and pixel):
                 cfg = cfgs[name]
                 out = cfg["channels"] * (2 if cfg.get("uncertainty", False) else 1)
-                head_bias[name] = nn.Linear(dim, out)
+                head_bias[name] = bias_of[id(head)] = nn.Linear(dim, out)
                 nn.init.zeros_(head_bias[name].weight)
                 nn.init.zeros_(head_bias[name].bias)
         if not head_bias:

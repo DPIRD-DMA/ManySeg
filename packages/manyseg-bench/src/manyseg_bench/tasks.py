@@ -599,6 +599,114 @@ class _SegMultilabelEval:
         return {**self.cls.compute(), "seg": {k: seg[k] for k in ("miou", "iou", "loss")}}
 
 
+# --- change detection --------------------------------------------------------------------------
+
+def _change_scores(mat: torch.Tensor) -> dict:
+    """Precision / recall / F1 / IoU of class 1 ("change") from a 2x2 (rows = target)
+    confusion matrix."""
+    m = mat.double()
+    tp, fp, fn = m[1, 1], m[0, 1], m[1, 0]
+    return {"precision_change": float(tp / (tp + fp).clamp(min=1)),
+            "recall_change": float(tp / (tp + fn).clamp(min=1)),
+            "f1_change": float(2 * tp / (2 * tp + fp + fn).clamp(min=1)),
+            "iou_change": float(tp / (tp + fp + fn).clamp(min=1))}
+
+
+class ChangeTask(SemanticTask):
+    """Binary change detection: a 2-class semantic task (0 no change, 1 change) whose primary
+    metric is the F1 of the change class (precision, recall and IoU of it are reported)."""
+
+    name = "change"
+    primary_metric = "f1_change"
+
+    def evaluator(self):
+        return _ChangeEval(self)
+
+
+class _ChangeEval(_SemanticEval):
+    def compute(self) -> dict:
+        return {**super().compute(), **_change_scores(self.cm.mat)}
+
+
+class SemanticChangeTask(Task):
+    """Semantic change detection (SECOND-style). Labels ``(B, 3, H, W)``: land cover at date 1
+    and date 2 (0 = unchanged, 1..K = class, labelled only where something changed) and the
+    binary change mask. Heads: ``change`` (2 classes) and ``lc1`` / ``lc2`` (K land-cover
+    classes; with ``per_input`` they read each date's own features, ``share`` ties their
+    weights). Losses: CE(change) + CE(lc1) + CE(lc2), the land-cover terms on changed pixels.
+
+    Metrics (Yang et al. 2021): predicted maps are ``argmax(lc) + 1`` where change is
+    predicted, else 0; ``miou_scd`` = mean of the no-change and change IoUs, ``sek`` = Cohen's
+    kappa of the (K+1)-class confusion without its no-change/no-change cell times
+    ``exp(IoU_change - 1)``, primary ``score`` = 0.3 ``miou_scd`` + 0.7 ``sek``.
+    """
+
+    name = "semantic_change"
+    primary_metric = "score"
+
+    def __init__(self, num_classes: int, ignore_index: int | None = None, per_input: bool = True,
+                 share: bool = True) -> None:
+        self.num_classes, self.per_input, self.share = num_classes, per_input, share
+
+    def heads(self):
+        lc = {"type": "segmentation", "channels": self.num_classes}
+        h = {"change": {"type": "segmentation", "channels": 2}, "lc1": dict(lc), "lc2": dict(lc)}
+        if self.per_input:
+            h["lc1"]["input"], h["lc2"]["input"] = "t1", "t2"
+            if self.share:
+                h["lc2"]["share"] = "lc1"
+        return h
+
+    def targets(self, y):
+        lc = (y[:, :2] - 1).masked_fill(y[:, :2] == 0, -100)  # land cover on changed pixels
+        return {"lc1": lc[:, 0], "lc2": lc[:, 1], "change": y[:, 2]}
+
+    def loss(self, out, t):
+        loss = F.cross_entropy(out["change"].float(), t["change"])
+        for k in ("lc1", "lc2"):
+            if bool((t[k] >= 0).any()):  # a batch without change has no land-cover target
+                loss = loss + F.cross_entropy(out[k].float(), t[k], ignore_index=-100)
+        return loss
+
+    def evaluator(self):
+        return _SemanticChangeEval(self)
+
+
+class _SemanticChangeEval:
+    def __init__(self, task: SemanticChangeTask) -> None:
+        k = task.num_classes + 1
+        self.t, self.k, self.loss, self.n = task, k, 0.0, 0
+        self.scd = torch.zeros(k, k, dtype=torch.float64)
+        self.bin = torch.zeros(2, 2, dtype=torch.int64)
+
+    def update(self, out, y) -> None:
+        self.loss += float(self.t.loss(out, self.t.targets(y))) * y.shape[0]
+        self.n += y.shape[0]
+        ch = out["change"].argmax(1)
+        for i, key in ((0, "lc1"), (1, "lc2")):
+            pred = torch.where(ch == 1, out[key].argmax(1) + 1, torch.zeros_like(ch))
+            idx = (y[:, i] * self.k + pred).flatten().cpu()
+            self.scd += torch.bincount(idx, minlength=self.k * self.k).view(self.k, self.k)
+        self.bin += torch.bincount((y[:, 2] * 2 + ch).flatten().cpu(), minlength=4).view(2, 2)
+
+    def compute(self) -> dict:
+        cm = self.scd
+        total = cm.sum()
+        iou_nc = float(cm[0, 0] / (cm[0].sum() + cm[:, 0].sum() - cm[0, 0]).clamp(min=1))
+        iou_c = float(cm[1:, 1:].sum() / (total - cm[0, 0]).clamp(min=1))
+        q = cm.clone()
+        q[0, 0] = 0
+        s = q.sum().clamp(min=1)
+        po = float(torch.trace(q) / s)
+        pe = float((q.sum(0) * q.sum(1)).sum() / s ** 2)
+        kappa = (po - pe) / (1 - pe) if pe < 1 else 0.0
+        sek = kappa * math.exp(iou_c - 1)
+        miou = (iou_nc + iou_c) / 2
+        return {"score": 0.3 * miou + 0.7 * sek, "miou_scd": miou, "sek": sek,
+                "iou_unchanged": iou_nc, "iou_changed": iou_c, **_change_scores(self.bin),
+                "loss": self.loss / max(1, self.n)}
+
+
 def build_task(name: str, num_classes: int, ignore_index: int | None = None, **kwargs) -> Task:
     if name == "semantic":
         return SemanticTask(num_classes, ignore_index, **kwargs)
@@ -614,5 +722,10 @@ def build_task(name: str, num_classes: int, ignore_index: int | None = None, **k
         return RegressionTask(num_classes, **kwargs)
     if name == "seg_multilabel":
         return SegMultilabelTask(num_classes, ignore_index, **kwargs)
+    if name == "change":
+        return ChangeTask(num_classes, ignore_index, **kwargs)
+    if name == "semantic_change":
+        return SemanticChangeTask(num_classes, ignore_index, **kwargs)
     raise ValueError(f"unknown task {name!r}; choose from semantic, instances, points, "
-                     "classification, multilabel, regression, seg_multilabel")
+                     "classification, multilabel, regression, seg_multilabel, change, "
+                     "semantic_change")
