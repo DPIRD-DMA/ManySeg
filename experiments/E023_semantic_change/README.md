@@ -33,10 +33,19 @@ One dataset only: results are single-dataset and reported as such.
   SeK; SeK, mIoU and change F1 reported.
 
 ## Decision rule
-* Per-input heads are recommended for semantic change if the better per-input arm beats the
-  better fused arm (`stack`, `siam-fused`) by more than 2 pooled SD of val Score with test
-  agreeing.
+* Per-input heads are recommended for semantic change if the better per-input arm beats
+  `siam-fused` (same encoder and fusion, land-cover heads on the fused features) by more than
+  2 pooled SD of val Score with test agreeing. `stack` is a separate system-level baseline
+  (early fusion), reported but not part of the head decision.
 * `share` becomes the documented default for per-input change heads if `siam-perinput-shared`
   is within 2 pooled SD of, or better than, `siam-perinput-separate` (fewer parameters, same
   mapping for both dates); otherwise separate heads are documented.
 * Single dataset: any recommendation is marked as resting on SECOND only.
+
+## Amendment (2026-10-16, before any E023 run; Codex review)
+* The head decision originally compared per-input heads with the better of `stack` and
+  `siam-fused`; a `stack` win would then reflect early fusion, not the head source. It now
+  compares against `siam-fused` only (the arms differ only in where the land-cover heads read).
+* `run.sh` defaulted to 30 epochs; it now defaults to the registered 20.
+* "Test agreeing" (here and in every experiment since E015) is a veto only: arms are compared
+  and chosen on validation; test can block an adoption but never select between arms.

@@ -4,7 +4,7 @@ set -u
 export MANYSEG_BENCH_DATA="${MANYSEG_BENCH_DATA:-$MANYSEG_BENCH_DATA}"
 OUT=${OUT_ROOT:-.}/experiments/E023_semantic_change/runs
 SEEDS=${SEEDS:-0,1,2}
-SET="{\"epochs\": ${EPOCHS:-30}, \"batch_size\": 8}"
+SET="{\"epochs\": ${EPOCHS:-20}, \"batch_size\": 8}"  # 20: the pre-registered timing rule
 SIAM='"fusion": {"type": "intermediate", "op": "concat_diff"}, "input_options": {"t2": {"backbone": "shared:t1", "share_norm": true}}'
 fails=0
 run() {  # tag input_mode options task_kwargs

@@ -35,3 +35,10 @@ with `concat` (FC-Siam-conc), the new `diff` (`|f1 - f2|`, FC-Siam-diff) or `con
   the docs say early fusion is as good on these data.
 * `diff` or `concat_diff` is recommended over `siam-concat` only if it beats it by 2 pooled SD
   on both datasets; otherwise the simpler `concat` is the documented Siamese default.
+
+## Notes added during the run (2026-10-16, Codex review; no protocol change)
+* Not compute-matched: Siamese arms run the shared encoder twice (OSCD ~6.8–7.0 GFLOPs/tile vs
+  4.5 for `stack`), so a Siamese win is an architecture result, not a pure fusion-operator one.
+  GFLOPs and parameters are reported per arm. The three Siamese arms are comparable to each
+  other (fusion widths and parameter counts differ slightly).
+* "Test agreeing" is a veto only: arms are compared and chosen on validation.
