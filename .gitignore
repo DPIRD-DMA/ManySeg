@@ -234,3 +234,6 @@ experiments/queue4*.log*
 experiments/queue5*.log*
 experiments/queue3*.log*
 experiments/setonix_watch.log*
+
+# Background-job exit-code markers (written next to ignored *.log files)
+*.log.exit*
