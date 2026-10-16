@@ -80,7 +80,11 @@ def _read(args):
         days = f["time"][()].astype(np.float32)
     img[img == 0] = np.nan
     with zipfile.ZipFile(src / "masks.zip") as z:
-        m = tifffile.imread(io.BytesIO(z.read(f"{split}/{name}_S2label_10m_256.tif")))
+        # masks.zip uses the image's name; the FTP URLs use "_S2label_"
+        names = set(z.namelist())
+        member = next(f"{split}/{name}_{tag}_10m_256.tif" for tag in ("S2", "S2label")
+                      if f"{split}/{name}_{tag}_10m_256.tif" in names)
+        m = tifffile.imread(io.BytesIO(z.read(member)))
     seq = _relabel(m[..., 3])
     agree = float(((m[..., 0] > 0.5) == (seq > 0)).mean())
     valid = np.isfinite(img).mean(axis=(1, 2)).min(axis=1) >= 0.5  # every band half present

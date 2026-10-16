@@ -177,7 +177,7 @@ def fake_a4b(src, names=("AT_1", "FR_2")):
                     m[..., 3][m[..., 3] == 0] = np.nan
                     t = io.BytesIO()
                     tifffile.imwrite(t, m)
-                    zm.writestr(f"{split}/{n}_S2label_10m_256.tif", t.getvalue())
+                    zm.writestr(f"{split}/{n}_S2_10m_256.tif", t.getvalue())  # real naming
 
 
 def test_ai4boundaries_s2_prepare_and_variants(tmp_path):
