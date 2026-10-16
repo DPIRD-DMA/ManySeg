@@ -1,8 +1,9 @@
 # E022: Binary change detection: early fusion vs Siamese fusions (pre-registered)
 
 Status: **done** (registered 2026-10-16 before any run; run at code `fb1d90b`). Result: Siamese
-encoders beat early fusion on both datasets; no difference operator beats plain `concat` on
-both, so `concat` is the documented Siamese default.
+encoders with a difference fusion (`diff`, `concat_diff`) beat early fusion on both datasets;
+Siamese `concat` did on LEVIR-CD only. The two registered rules conflict for this outcome (see
+below), so no single operator is recommended.
 
 ## Question
 ManySeg can build change-detection models from two inputs (`t1`, `t2`). The simplest is early
@@ -64,16 +65,21 @@ F1, final epoch, mean ± SD over seeds 0–2.
 
 * **Siamese vs early fusion (rule 1): met.** `siam-diff` (+20.2 val on OSCD, 2 SD 6.7; +1.15 on
   LEVIR-CD, 2 SD 0.30) and `siam-concat_diff` (+10.48, 2 SD 7.50; +2.00, 2 SD 0.27) beat `stack` on both datasets with test agreeing. `siam-concat` beats it on
-  LEVIR-CD (+1.86, 2 SD 0.27) but not on OSCD (+4.40, 2 SD 5.42; test +13.3). Recommendation:
-  a Siamese encoder (`"backbone": "shared:t1", "share_norm": true`) over stacking the dates.
+  LEVIR-CD (+1.86, 2 SD 0.27) but not on OSCD (+4.40, 2 SD 5.42; test +13.3).
 * **Difference operators vs `concat` (rule 2): not met.** `siam-diff` beats `concat` on OSCD
   (+15.8, 2 SD 4.0) but is significantly worse on LEVIR-CD (−0.71, 2 SD 0.38; test −1.15).
   `siam-concat_diff` beats it on OSCD (+6.1, 2 SD 5.3) and ties on LEVIR-CD (+0.14, 2 SD 0.35;
-  test ±0.00). Per the registered rule, plain `concat` stays the documented Siamese default.
-* **Post hoc (not pre-registered):** `concat_diff` is the only arm that never lost to another
-  arm it was compared with; `diff` is strongest on the small, noisy, 2%-change Sentinel-2 data
-  and weakest of the Siamese arms on 0.5 m RGB. The best operator is data-dependent; the docs
-  present `concat` as the default and the other two as options to try, with these numbers.
+  test ±0.00).
+* **The rules conflict (stated after the run, Codex review).** Rule 1 makes "the best" arm that
+  beats `stack` on both datasets the recommendation, but both `diff` and `concat_diff` qualify
+  and "best" across datasets was not defined; rule 2 makes `concat` the default when no
+  difference op beats it on both, yet `concat` itself fails rule 1 on OSCD. The supported
+  guidance is therefore: use a Siamese encoder (`"backbone": "shared:t1", "share_norm": true`)
+  with `diff` or `concat_diff` (both cleared rule 1); which of the two is better depended on the
+  data, so try both. Not resolved by picking one after the fact.
+* **Post hoc (not pre-registered):** `diff` is strongest on the small, noisy, 2%-change
+  Sentinel-2 data (it also beats `concat_diff` there: +9.7 val, 2 SD 6.5) and weakest of the
+  Siamese arms on 0.5 m RGB; `concat_diff` was never significantly worse than `concat`.
 * **Caveats:** Siamese arms run the encoder twice (~1.5× FLOPs). OSCD is tiny (390 training
   tiles, 3 val cities) and its val/test spreads are large; its val–test gaps (e.g. `siam-concat`
   0.30 vs 0.41) reflect the city split. ResNet-34 only.

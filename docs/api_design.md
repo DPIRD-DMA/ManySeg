@@ -305,10 +305,10 @@ Not yet: `shared:` backbones between a time series and another input, and metada
 
 #### Change detection
 
-> **Evidence (E022):** Siamese encoders beat stacking both dates in one input on OSCD and
-> LEVIR-CD. No fusion op beat `concat` on both: `diff` was best on Sentinel-2 OSCD and worst of
-> the Siamese ops on 0.5 m LEVIR-CD; `concat_diff` was never beaten. Start with a Siamese
-> `concat`, and try `diff` / `concat_diff`.
+> **Evidence (E022):** Siamese encoders with `diff` or `concat_diff` beat stacking both dates in
+> one input on OSCD (Sentinel-2) and LEVIR-CD (0.5 m RGB); Siamese `concat` beat it on LEVIR-CD
+> only. Neither difference op won on both datasets (`diff` was best on OSCD and worst of the
+> Siamese ops on LEVIR-CD), so try both.
 
 Before / after images are two inputs on the same grid. Binary change: one segmentation head on
 the fused features; `"op": "diff"` (`|f1 - f2|`) or `"concat_diff"` (`[f1, f2, |f1 - f2|]`) are
