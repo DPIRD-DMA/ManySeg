@@ -29,6 +29,10 @@ recommending it:
   PASTIS: 30 epochs, batch 16 (as E016). AI4Boundaries: batch 8; epochs = the largest of
   30 / 20 / 15 / 10 for which the 12 AI4Boundaries runs fit in 8 h at the smoke-timed rate
   (decided and recorded here before any AI4Boundaries run).
+  **AI4Boundaries smoke (2026-10-16, idle GPU):** frozen first epoch 25 s (`single`), 27 s
+  (`stack`), 35 s (`mean`), 40 s (`attention`); with ~1.6× for full fine-tuning plus ~25 s of
+  validation (instance post-processing) per epoch, ~76 s per epoch on average, so 30 epochs ×
+  12 runs ≈ 7.7 h: **30 epochs**.
 * Arms per dataset (`--tag e021-<dataset>-<arm>`):
 
 | arm | input |
