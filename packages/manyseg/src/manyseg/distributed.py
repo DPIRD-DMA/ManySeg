@@ -39,29 +39,39 @@ def _stages(model: nn.Module) -> list[nn.Module]:
     return [s for s in stages if any(p.requires_grad for p in s.parameters())]
 
 
+def _cpu_mesh_if_needed(model: nn.Module):
+    """A CPU mesh for an all-CPU model on a gloo (CPU) process group when a GPU is visible:
+    ``fully_shard``'s default mesh would use CUDA, and gathering the weights then segfaults
+    inside torch. Otherwise ``None`` (torch's default: e.g. a CPU model with NCCL is moved to
+    the GPU, mixed / meta-device models are left to FSDP)."""
+    import torch
+    import torch.distributed as dist
+
+    devices = {p.device.type for p in model.parameters()}
+    if devices != {"cpu"} or not torch.cuda.is_available():
+        return None
+    if dist.get_backend() != "gloo":
+        return None
+    from torch.distributed.device_mesh import DeviceMesh
+
+    return DeviceMesh.from_group(dist.group.WORLD, "cpu")
+
+
 def shard_model(model: nn.Module, *, mesh=None, mp_policy=None, reshard_after_forward=True,
                 **kwargs) -> nn.Module:
     """Shard a ``DenseModel`` with FSDP2 (``fully_shard``), stage by stage, then the root.
 
-    ``mesh`` (a ``DeviceMesh``; default: the global process group, on the model's device
-    type, so a CPU model gets a CPU mesh even when a GPU is visible), ``mp_policy`` (e.g.
+    ``mesh`` (a ``DeviceMesh``; default: the global process group; an all-CPU model on a gloo
+    group gets a CPU mesh even when a GPU is visible), ``mp_policy`` (e.g.
     ``MixedPrecisionPolicy(param_dtype=torch.bfloat16)``) and ``reshard_after_forward`` are
     passed through, as are other ``fully_shard`` keyword arguments. Call it after
     ``torch.distributed.init_process_group`` and before building the optimizer. The model is
     modified in place and returned. BatchNorm statistics stay per rank, as with DDP.
     """
-    import torch
     from torch.distributed.fsdp import fully_shard
 
     if mesh is None:
-        # fully_shard's default mesh uses the default accelerator; a CPU model on a machine
-        # with a GPU would get a CUDA mesh (gathering its weights then segfaults in torch).
-        p = next(model.parameters(), None)
-        if p is not None and p.device.type == "cpu" and torch.cuda.is_available():
-            import torch.distributed as dist
-            from torch.distributed.device_mesh import init_device_mesh
-
-            mesh = init_device_mesh("cpu", (dist.get_world_size(),))
+        mesh = _cpu_mesh_if_needed(model)
     opts = dict(mesh=mesh, reshard_after_forward=reshard_after_forward, **kwargs)
     if mp_policy is not None:
         opts["mp_policy"] = mp_policy

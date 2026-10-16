@@ -95,3 +95,33 @@ def test_shard_model_matches_ddp(kind):
             if "running_" in k or "num_batches_tracked" in k:
                 continue  # BN statistics are per rank under both DDP and FSDP
             torch.testing.assert_close(r["fsdp"][k], v, rtol=1e-4, atol=1e-5, msg=k)
+
+
+def _cuda_visible_worker(rank: int, world: int, port: int, out):
+    """A CPU model on gloo must get a CPU mesh, and gathering its weights must work. Only a
+    real visible GPU reproduces the original bug (fully_shard's default CUDA mesh: segfault in
+    ``full_tensor``); on CPU-only machines torch already picks a CPU mesh and this passes
+    trivially. With a GPU visible, this test and ``test_shard_model_matches_ddp`` fail without
+    ``manyseg.distributed._cpu_mesh_if_needed``."""
+    os.environ.update(MASTER_ADDR="127.0.0.1", MASTER_PORT=str(port))
+    dist.init_process_group("gloo", rank=rank, world_size=world)
+    from manyseg import create_model
+    from manyseg.distributed import shard_model
+
+    model = shard_model(create_model(backbone="resnet18", pretrained=False, num_classes=2))
+    out[rank] = {"mesh": {p.device_mesh.device_type for p in model.parameters()},
+                 "gathered": all(p.full_tensor().device.type == "cpu"
+                                 for p in model.parameters())}
+    dist.destroy_process_group()
+
+
+def test_cpu_model_gets_cpu_mesh_when_a_gpu_is_visible():
+    import socket
+
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    out = mp.Manager().dict()
+    mp.spawn(_cuda_visible_worker, args=(2, port, out), nprocs=2, join=True)
+    for rank in (0, 1):
+        assert out[rank] == {"mesh": {"cpu"}, "gathered": True}, out[rank]
