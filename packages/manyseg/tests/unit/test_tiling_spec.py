@@ -48,3 +48,28 @@ def test_multi_input_alignment_time_series_and_vectors():
     }
     assert list(spec["inputs"])[0] == "s2"  # the primary input comes first
     json.dumps(spec)
+
+
+def test_single_output_lists_only_the_returned_head():
+    model = build(in_channels=3, heads={
+        "mask": {"type": "segmentation", "channels": 2},
+        "aux": {"type": "regression", "channels": 1, "scale": 0.25},
+    })
+    model.single_output = "mask"  # as num_classes= models are built
+    assert list(model.tiling_spec()["outputs"]) == ["mask"]
+
+
+def test_pad_to_stride_false_needs_no_padding_multiple():
+    model = build(in_channels=3, num_classes=2, pad_to_stride=False)
+    assert model.tiling_spec()["pad_multiple"] == 1
+
+
+def test_single_time_series_input():
+    spec = build(inputs={"ts": {"kind": "timeseries", "channels": 3}}, num_classes=2).tiling_spec()
+    assert spec["inputs"] == {"ts": {"kind": "timeseries", "scale": 1.0}}
+
+
+def test_fixed_size_backbone():
+    model = create_model(backbone="hiera_tiny_224", pretrained=False, in_channels=3,
+                         num_classes=2, backbone_kwargs={"img_size": (128, 192)})
+    assert model.tiling_spec()["max_size"] == (128, 192)

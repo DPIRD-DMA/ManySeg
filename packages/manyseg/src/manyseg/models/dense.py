@@ -129,8 +129,10 @@ class DenseModel(nn.Module):
           ``same_extent`` input (its ratio is read from its shape). Empty for a model that
           takes a single tensor.
         * ``outputs``: ``{head: {"scope": "pixel" | "image", "kind": ..., "scale": s}}``
-          (``scale`` for pixel heads only).
-        * ``pad_multiple``: the primary input is padded to a multiple of this.
+          (``scale`` for pixel heads only); only ``single_output``'s head when set, as the
+          model then returns that one tensor.
+        * ``pad_multiple``: the primary input is padded to a multiple of this (1 with
+          ``pad_to_stride=False``).
         * ``max_size``: ``(h, w)`` of a fixed-size backbone, else None.
         * ``normalize``: None (models do not store their normalisation yet; TODO once
           ``save_pretrained`` / ``load`` exist).
@@ -152,7 +154,9 @@ class DenseModel(nn.Module):
             for n in self.conditioner.vectors:
                 inputs[n] = {"kind": "vector"}
         outputs: dict[str, dict] = {}
-        for name, head in self.heads.items():
+        returned = [self.single_output] if self.single_output is not None else list(self.heads)
+        for name in returned:
+            head = self.heads[name]
             entry: dict = {"scope": getattr(head, "scope", "pixel"),
                            "kind": getattr(head, "kind", None)}
             if entry["scope"] == "pixel":
@@ -164,7 +168,8 @@ class DenseModel(nn.Module):
         return {
             "inputs": inputs,
             "outputs": outputs,
-            "pad_multiple": int(getattr(backbone, "divisors", {}).get(primary, self.divisor)),
+            "pad_multiple": (int(getattr(backbone, "divisors", {}).get(primary, self.divisor))
+                             if self.pad_to_stride else 1),
             "max_size": tuple(fixed) if fixed is not None else None,
             "normalize": None,
         }
