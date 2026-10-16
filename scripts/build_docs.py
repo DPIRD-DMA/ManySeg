@@ -1,6 +1,7 @@
 """Build the documentation site (MkDocs + Material) from the repo's existing Markdown.
 
-Assembles README.md (home), docs/*.md, examples/README.md and every experiments/E*/README.md
+Assembles README.md (home), docs/*.md, the model builder page (docs/builder), examples/README.md
+and every experiments/E*/README.md
 into build/site_src (gitignored), writes a generated MkDocs config with the nav, and builds
 static HTML into build/site. No new runtime dependency: run with
     uvx --with mkdocs-material mkdocs --version   # once, to check the tool
@@ -40,6 +41,8 @@ def main() -> int:
     shutil.rmtree(SRC, ignore_errors=True)
     (SRC / "experiments").mkdir(parents=True)
     shutil.copytree(ROOT / "docs" / "assets", SRC / "docs" / "assets")
+    # The model builder is a static page (HTML + JS); MkDocs copies it through unchanged.
+    shutil.copytree(ROOT / "docs" / "builder", SRC / "docs" / "builder")
     # README links point at docs/ and examples/ relative to the repo root; keep that layout.
     shutil.copy(ROOT / "README.md", SRC / "index.md")
     for _, name in DOCS:
@@ -54,6 +57,7 @@ def main() -> int:
                      f"experiments/{dst.name}"))
     nav = ["  - Home: index.md", "  - Documentation:"]
     nav += [f"      - {t}: docs/{n}" for t, n in DOCS]
+    nav += ["  - Model builder: docs/builder/index.html"]
     nav += ["  - Examples: examples/index.md", "  - Experiments:"]
     nav += [f"      - {json.dumps(t)}: {p}" for t, p in exps]  # JSON strings are valid YAML
     cfg = ROOT / "build" / "mkdocs.gen.yml"

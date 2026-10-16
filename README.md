@@ -165,6 +165,9 @@ Every claim here comes from a pre-registered, multi-seed experiment in
 
 ## Documentation
 
+* [`docs/builder/`](docs/builder/): the model builder, a page where you pick inputs, encoders,
+  fusion, decoder and heads and get a live diagram plus the `create_model` code. Open
+  `docs/builder/index.html` in a browser; it needs no server.
 * [`examples/`](examples/): runnable scripts for each task above.
 * [`docs/api_design.md`](docs/api_design.md): the full API (inputs, fusion, decoders, heads,
   metadata, resolution, export, quantisation).

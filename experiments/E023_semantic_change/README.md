@@ -71,7 +71,8 @@ Final epoch, mean ± SD over seeds 0–2. SECOND Score = 0.3 mIoU_scd + 0.7 SeK.
 * **System-level context (not part of the head decision):** the Siamese encoder is the larger
   step: `siam-fused` − `stack` = +7.0 val Score (2 SD 0.64), test +8.0, consistent with E022.
 * **Cost:** per-input heads add two land-cover decoders' compute (153 vs 105 GFLOPs per pair;
-  the shared variant shares weights, not compute) and ~46% longer training per epoch.
+  the shared variant shares weights, not compute) and ~67% longer training (15.4 vs 9.2 min
+  per run).
 * **Caveats:** one dataset (SECOND), one encoder (ResNet-34), 20 epochs (scores were still
   rising slowly at the end). Absolute Scores are below published SECOND results, which use
   stronger encoders, longer schedules and test-time augmentation.
