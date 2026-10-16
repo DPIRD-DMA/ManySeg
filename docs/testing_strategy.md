@@ -8,8 +8,9 @@ claims (accuracy, speed) are established by `manyseg-bench` experiments, not by 
 | Tier | Location / marker | Runs | Budget |
 | --- | --- | --- | --- |
 | Unit | `packages/*/tests/unit`, `packages/manyseg-bench/tests` | every commit, CPU | < 2 min with `-n 8` |
-| Slow integration | `-m slow` (`tests/integration`) | pre-merge, nightly | < 5 min |
-| Examples | `-m slow` (`tests/examples`): every `examples/*.py` as a CPU subprocess | pre-merge, nightly | ~30 s with `-n 4` |
+| Slow integration | `-m slow` (`tests/integration`) | push to main, nightly (CI's slow job skips pull requests) | < 5 min |
+| Examples | `-m slow` (`tests/examples`): every `examples/*.py` as a CPU subprocess | push to main, nightly | ~30 s with `-n 4` |
+| Model builder | `-m slow` (`tests/integration/test_model_builder.py`): the page's own logic (`docs/builder/core.js`, under node) generates code for ~90 configurations; valid ones must run with the predicted output shapes, refused ones must also fail in ManySeg; `docs/builder/data.js` must match `scripts/build_model_builder.py`. Fast option-list check: `tests/unit/test_model_builder_data.py` (every commit) | push to main, nightly; skipped without node (preinstalled on GitHub's Ubuntu runners) | ~40 s with `-n 4` |
 | Network | `-m network` | nightly (needs weight cache) | small downloads |
 | Hardware | `device` fixture: `cpu`, `cuda`, `mps` | wherever the device exists | n/a |
 | Benchmark | `manyseg-bench` CLI, never in pytest | on demand, logged under `experiments/` | per experiment budget |

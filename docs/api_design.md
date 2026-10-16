@@ -338,6 +338,11 @@ out = model({"t1": before, "t2": after})   # change, lc1 (date 1), lc2 (date 2)
 `lc1` depends only on `t1` (tested), and with `share` `lc2(t1, t2) == lc1(t2, t1)`. Per-input
 heads need intermediate fusion and raster (not time-series) inputs.
 
+> **Evidence (E023, SECOND only):** per-input land-cover heads beat land cover from the fused
+> features (+1.5 SECOND Score, test +1.5), and sharing them was as good as separate heads with
+> fewer parameters, so `"share"` is the recommended setup. A Siamese encoder over stacked dates
+> was the bigger step (+7.0).
+
 #### Spatial alignment
 
 Inputs with different pixel sizes are **not** assumed to cover the same ground extent. Each
