@@ -70,19 +70,19 @@ const EXAMPLES = {
   },
   change: {
     label: "Change detection",
-    blurb: "Before and after images through one Siamese encoder, fused with concat. Siamese encoders beat stacking both dates on two datasets (E022).",
+    blurb: "Before and after images through one Siamese encoder, fused with concat_diff. Siamese diff and concat_diff beat stacking both dates on two datasets (E022).",
     state: {
       inputs: [
         { name: "before", channels: 3, backbone: "resnet34" },
         { name: "after", channels: 3, backbone: "shared:before", share_norm: true },
       ],
-      fusion: { type: "intermediate", op: "concat" },
+      fusion: { type: "intermediate", op: "concat_diff" },
       heads: [{ name: "change", type: "segmentation", channels: 2 }],
     },
   },
   semantic: {
     label: "Semantic change",
-    blurb: "What changed into what: a change head on the fused features plus a land-cover head per date that shares its weights across dates.",
+    blurb: "What changed into what: a change head on the fused features plus a land-cover head per date, sharing weights across dates. Shared per-input heads beat land cover from the fused features (E023).",
     state: {
       inputs: [
         { name: "t1", channels: 3, backbone: "resnet34" },
@@ -441,7 +441,9 @@ function derive(s) {
   if (!pixelHeads.length && imageHeads.length) issues.push({ level: "tip", text: "No pixel heads, so no decoder is built: this is a classifier. With pixel labels, an auxiliary segmentation head raised mAP by 2.3 in E020; drop it before deployment with model.select_heads([...])." });
   if (s.heads.some((h) => h.uncertainty)) issues.push({ level: "tip", text: "Uncertainty heads return [mean, log_variance] (2x channels), for a Gaussian NLL loss." });
   if (series.length) issues.push({ level: "tip", text: "Stacking all dates as channels of one input is a strong, cheaper baseline: it beat the time-series input on PASTIS crop types, while the time-series input with attention won on AI4Boundaries (E021). Try both." });
-  if (multi && ftype !== "early" && ["diff", "concat_diff"].includes(s.fusion.op)) issues.push({ level: "tip", text: "No fusion op beat concat on both change datasets in E022: diff was best on Sentinel-2 (OSCD) and worst on 0.5 m imagery (LEVIR-CD); concat_diff was never beaten." });
+  if (multi && ftype !== "early" && ["diff", "concat_diff"].includes(s.fusion.op)) issues.push({ level: "tip", text: "Neither difference op won on both change datasets in E022: diff was best on Sentinel-2 (OSCD) and worst of the Siamese ops on 0.5 m imagery (LEVIR-CD). Try both." });
+  if (multi && ftype === "intermediate" && rasters.length === 2 && s.fusion.op === "concat" && rasters[1].backbone === `shared:${rasters[0].name}`)
+    issues.push({ level: "tip", text: "For change detection, Siamese diff or concat_diff beat stacking both dates on both datasets in E022; Siamese concat did on one (LEVIR-CD) only." });
 
   return { rasters, multi, ftype, primary, encoders, fused, shared, task, pixelHeads, imageHeads,
     needsShared, taskDecoders, series, useInputs, issues };
