@@ -5,9 +5,11 @@
   </picture>
 </p>
 
-Composable dense-prediction models for PyTorch: any timm backbone, any channel count, multiple
-inputs and outputs. Compile- and export-friendly, and checked against an independent
-benchmark.
+<p align="center">
+Segmentation and other dense-prediction models for PyTorch, built from any
+<a href="https://github.com/huggingface/pytorch-image-models">timm</a> encoder.<br>
+Any number of bands, several inputs at different resolutions, metadata, and many outputs in one model.
+</p>
 
 <p align="center">
   <picture>
@@ -16,21 +18,18 @@ benchmark.
   </picture>
 </p>
 
-Each stage is configured independently. The row under the line lists the options for each
-stage. The diagram shows the model built by the multi-input example below.
+> **Status: pre-alpha.** The API may still change before the first release.
 
-> Status: pre-alpha. The model library is feature-complete for the original plan (FSDP2 and a
-> ViT metadata-token mode remain); experiments and release preparation are ongoing. APIs may
-> change. See `docs/roadmap.md`.
+## Install
 
-This monorepo holds two independent packages:
+ManySeg is not on PyPI yet. Install it from GitHub (Python ≥ 3.10, PyTorch ≥ 2.9):
 
-| Package | Purpose | Depends on |
-| --- | --- | --- |
-| [`manyseg`](packages/manyseg) | The model library | `torch`, `timm` |
-| [`manyseg-bench`](packages/manyseg-bench) | Implementation-neutral benchmarking of segmentation models (ManySeg, SMP, fastai, ...) | `torch`, `numpy`; model libraries are optional |
+```bash
+pip install "manyseg @ git+https://github.com/DPIRD-DMA/ManySeg#subdirectory=packages/manyseg"
+```
 
-`manyseg` never imports `manyseg-bench`. A test enforces this.
+Optional extras: `[quant]` (int8 quantisation), `[onnx]` (ONNX export), `[instances]`
+(instance post-processing). After the first release this becomes `pip install manyseg`.
 
 ## Quick start
 
@@ -38,157 +37,137 @@ This monorepo holds two independent packages:
 import torch
 from manyseg import create_model
 
-model = create_model(backbone="convnext_tiny", in_channels=4, decoder="unet", num_classes=3)
-model(torch.randn(2, 4, 257, 301)).shape   # (2, 3, 257, 301): odd and non-square sizes are fine
+model = create_model(backbone="convnext_tiny", in_channels=4, num_classes=3)  # U-Net by default
+logits = model(torch.randn(2, 4, 257, 301))   # (2, 3, 257, 301): any size, odd or non-square
+print(model.describe())                       # what was built, stage by stage
 ```
 
-Multiple inputs and outputs:
+`backbone` is any timm model name: ResNet, EfficientNet, ConvNeXt, Swin, PVTv2, ViT, DINOv2
+and more. Pretrained weights are downloaded by timm and adapted to your band count.
+
+## Common tasks
+
+**Multispectral imagery.** Set `in_channels` (e.g. 13 for Sentinel-2). The pretrained RGB stem
+is adapted automatically.
+
+**Pick a speed/accuracy trade-off.** Presets are measured configurations:
 
 ```python
-from manyseg.instances import instance_heads
+from manyseg.presets import preset
 
+model = create_model(**preset("balanced"), in_channels=4, num_classes=2)
+```
+
+| preset | encoder + decoder | relative speed | accuracy |
+|---|---|---|---|
+| `fast` | PVTv2-b0 + SegFormer head | 2.4× | slightly below the default on Pet |
+| `compact` | PVTv2-b0 + quarter-width U-Net | 2.2× | matches or beats the default |
+| `balanced` | PVTv2-b0 + half-width U-Net | 2.1× | matches or beats the default |
+| `accurate` | PVTv2-b0 + U-Net | 1.5× | matches or beats the default |
+
+Relative to the default ResNet-34 U-Net, on an RTX 4090 with bf16 + `torch.compile`; accuracy
+on two datasets. Validate on your own data.
+
+**Several inputs, possibly at different resolutions**, e.g. optical + radar:
+
+```python
 model = create_model(
     inputs={
         "optical": {"channels": 4, "backbone": "convnext_tiny"},
-        "sar": {"channels": 2, "backbone": "resnet18", "alignment": "same_extent"},
-        "meta": {"kind": "vector", "fields": {                   # non-raster conditioning
-            "doy": {"type": "cyclic", "period": 365.25},
-            "sun_elev": {"type": "continuous", "mean": 45.0, "std": 15.0},
-            "latlon": {"type": "coords"},
-        }},
+        "sar": {"channels": 2, "backbone": "resnet18", "alignment": "same_extent"},  # half res OK
     },
-    fusion={"type": "intermediate", "op": "gated"},
-    decoder="unet",
+    fusion={"type": "intermediate", "op": "concat"},
+    num_classes=2,
+)
+out = model({"optical": optical, "sar": sar})
+```
+
+**Several outputs.** Name your heads; the model returns a dict:
+
+```python
+model = create_model(
+    backbone="resnet50", in_channels=4,
     heads={
-        **instance_heads(decoders={"boundary": "fpn"}),  # extent, boundary, distance
-        "water_area": {"type": "regression", "channels": 1, "scope": "image"},
+        "landcover": {"type": "segmentation", "channels": 8},
+        "height":    {"type": "regression", "channels": 1},                  # per pixel
+        "flooded":   {"type": "classification", "channels": 2, "scope": "image"},
     },
 )
-meta = model.conditioner.encoders["meta"].pack({"doy": doy, "sun_elev": sun_elev, "latlon": latlon})
-out = model({"optical": optical, "sar": sar_at_half_resolution, "meta": meta})
-# out["extent"], out["boundary"], out["distance"]: (B, 1, H, W); out["water_area"]: (B, 1)
 ```
 
-Runnable versions of these, and examples for multispectral input, multi-task training,
-instances and points, export and quantisation, are in [`examples/`](examples/). Each runs on
-CPU in a few seconds.
+**Image classification or regression.** Use only image heads: no decoder is built, and the
+model is a classifier that still accepts several inputs, metadata and extra heads.
 
-## What works today
-
-* **Backbones.** timm CNNs (ResNet, EfficientNet, ConvNeXt, MobileNetV3/V4, RegNet,
-  EdgeNeXt), hierarchical transformers and hybrids (Swin, PVTv2, MambaOut, FastViT,
-  CaFormer), and plain ViTs (ViT, DeiT, EVA-02, DINOv2) through a pyramid neck. They are
-  configured by introspection, without allow-lists.
-* **Input channels.** Any channel count, with `repeat` (timm), `mean`, `rgb_plus_zero`,
-  `rgb_plus_random` and `projection` adapters for pretrained stems.
-* **Decoders.** `unet` (parameter- and FLOP-identical to SMP's Unet), `unetplusplus`,
-  `fastai_unet` (identical to fastai's DynamicUnet), `fpn`, `deeplabv3plus`, `upernet`,
-  `segformer`. One decoder can be shared by all heads, or a head can have its own. `unet`'s
-  optional `input_cross` (fastai's full-resolution input stage) recovers most of fastai's
-  gain at +14% FLOPs where labels follow per-pixel input values, as in water mapping
-  (E012). It is not a general gain: it did nothing on Pet or on cloud masking (E013).
-* **Output resolution.** The U-Net-family decoders take `out_stride` 1 (default), 2 or 4. The
-  stages finer than that are not built: `fastai_unet` at stride 2 drops its full-resolution
-  stages, about 40% of its FLOPs. Pixel heads take `"scale"` 1, 1/2, 1/4 or 1/8 and return
-  `ceil(H·s) × ceil(W·s)`. They skip upsampling when the decoder stride already matches.
-  `manyseg.utils` has helpers for targets at head scale (label mode with `ignore_index`, area
-  mean, count-preserving sum), for upsampling predictions and for mapping coordinates.
-* **Fusion.** Early, intermediate (`concat`, `add`, `gated`, `attention`, `cross_attention`)
-  and late, with shared or independent encoders and explicit `same_grid` / `same_extent`
-  alignment.
-* **Metadata.** Non-raster inputs (date, angles, lat/lon, sensor id, tabular floats) as
-  `"kind": "vector"` inputs, encoded by field type, with missing-value handling. They
-  condition the model by FiLM on the features entering each decoder and on the feature image
-  heads pool (default), through image heads, or as extra input channels. Pretrained encoders are not modified.
-* **Heads.** Named heads for pixel or image segmentation, regression and classification,
-  with optional uncertainty (mean + log-variance) for regression.
-* **Image classification and regression.** When every head is an image head, no decoder is
-  built: the model is a timm-style classifier or regressor that still takes multiple inputs at
-  different resolutions, metadata (FiLM on the pooled feature) and extra heads. Pixel and
-  image heads can be mixed. Comparison with plain timm classifiers: E019; BigEarthNet v2
-  study: E020.
-* **Instances and points.** Boundary + distance instance heads (`manyseg.instances`) and
-  centre-heatmap, offset and density heads (`manyseg.points`), with target generation and
-  post-processing to instance labels, points, counts and panoptic labels.
-* **Spatial.** Dynamic, odd and non-square sizes with an explicit pad-and-crop policy.
-  Spatial alignment is tested numerically.
-* **Deployment.** `torch.compile(fullgraph=True, dynamic=True)` (one graph across 10 sizes
-  on CUDA), `torch.export` with dynamic H/W, ONNX with onnxruntime parity, AMP,
-  channels_last. Swin's dynamic export is a known timm limitation. For inference, use bf16
-  autocast plus `torch.compile`: on an idle RTX 4090 this was 1.6× (bf16) × 1.46× (compile)
-  faster than eager fp32 (E014).
-* **Inspection.** `model.describe()` prints what was built, stage by stage (encoders, fusion,
-  FiLM targets, decoders, the decoder feeding each head, params), with real shapes and FLOPs
-  when given a sample. It also emits Mermaid and Graphviz diagrams. See `docs/api_design.md`.
-* **Quantisation.** `manyseg.quantize` (optional `manyseg[quant]` extra, torchao): static int8
-  through PT2E with dynamic H/W, returned as an `ExportedProgram`, and int8 weight-only or
-  dynamic quantisation of the eager model. A ResNet-34 U-Net shrinks to 0.27x. Reports give the
-  serialized size and the agreement with the float model.
-
-## What the experiments found
-
-All experiments are pre-registered, multi-seed and written up in `experiments/`, negative
-results included. Highlights:
-
-* `fastai_unet`'s edge over SMP-style `unet` on Sen1Floods11 comes from reinjecting the raw
-  input at full resolution. `unet` + `input_cross` recovers 81–83% of it at +14% FLOPs, against
-  fastai's 4× (E006, E012). On Oxford Pet the recipe matters more than the decoder (E002, E003).
-* Decoder `out_stride=2` costs no accuracy for `unet` and saves 11–18% memory (E006).
-* Image classification (E019, E020): ManySeg classifiers and regressors match plain timm ones
-  (val parity on EuroSAT-MS, Pet breeds and BigEarthNet v2; ConvNeXt slightly lower on test).
-  On BigEarthNet, a segmentation head on the reference maps next to the classifier raised test
-  macro mAP by +2.3 (one encoder, fixed 12 epochs; post hoc it looks like regularisation); band
-  groups, Sentinel-1 and metadata did not help.
-* Pareto front (E018): PVTv2-b0 with a half-width U-Net is about 2× faster than the ResNet-34
-  U-Net default on a 4090 (bf16, compiled) and more accurate on both Pet and Sen1Floods11. The
-  four front configs ship as opt-in `manyseg.presets` (`fast`, `compact`, `balanced`,
-  `accurate`); `create_model(**preset("balanced"), num_classes=2)`.
-* Boundary + distance heads double instance PQ over extent + connected components (E010).
-  Point detection needs a validation-calibrated peak threshold: F1 0.40 → 0.59 (E011b).
-* Negative results: aligned upsampling (E001b), fusion beyond early stacking on Sen1Floods11
-  (E005), and the `projection` stem adapter (E004). Metadata conditioning showed no benefit on three
-  datasets (E009 flood events, E013 cloud scenes, E016 crop phenology with day of year).
-* CloudSEN12+ cloud masking was negative on all three questions (E013): static S1 backscatter
-  and DEM layers, metadata conditioning on unseen locations, and `input_cross` (it helps
-  where labels follow per-pixel input values, such as water, but not on cloud masking).
-* Sentinel-2 bands split into resolution groups (one shared encoder, per-input BatchNorm) beat
-  the 13-band stack by +1.3 mIoU on Sen1Floods11 (E015); native resolution itself adds
-  nothing. The experiment found and fixed a shared-encoder BatchNorm bug. It did not
-  replicate on PASTIS (E016, +0.1) or CloudSEN12+ (E017, +0.4 against a 0.8 bar), so it stays a
-  single-dataset result.
-* Small batches: freezing the encoder's BatchNorm statistics is the fix (+0.8 / +2.3 mIoU at
-  batch 2); gradient accumulation alone is not (E007, E007b).
-* Precision and size: bf16, fp16 and int8 weight-only cost no measurable accuracy (E008). The
-  same experiment found and fixed an int8 bug on CPUs without VNNI.
-
-## Development
-
-```bash
-uv sync --all-packages            # Python 3.12 workspace
-uv run pytest packages/manyseg -n 4                         # unit
-uv run pytest packages/manyseg -m slow -n 4                 # compile / export / ONNX
-uv run pytest packages/manyseg-bench -n 4
+```python
+model = create_model(backbone="resnet50", in_channels=12, heads={
+    "labels": {"type": "classification", "channels": 19, "scope": "image"}})
 ```
 
-Benchmarks:
+If you also have pixel labels, training with an extra segmentation head can improve the
+classifier. Drop it before deployment with `model.select_heads(["labels"])`.
 
-```bash
-export MANYSEG_BENCH_DATA=/path/to/data
-uv run manyseg-bench prepare oxford_pet   # or sen1floods11, ai4boundaries, oam_tcd, cloudsen12
-uv run manyseg-bench train --provider smp --arch unet --encoder resnet34 --seeds 0,1,2
-uv run manyseg-bench profile --provider manyseg --size 512,512 --compile
-uv run manyseg-bench report experiments/
+**Metadata** (acquisition date, sun angle, location, sensor) as extra inputs:
+
+```python
+inputs = {
+    "image": {"channels": 4},
+    "meta": {"kind": "vector", "fields": {"doy": {"type": "cyclic", "period": 365.25},
+                                          "latlon": {"type": "coords"}}},
+}
 ```
+
+Missing values are handled. In our tests metadata rarely helped, so compare against a model
+without it on your data.
+
+**Objects and counts.** `manyseg.instances` (touching fields, crowns, buildings) and
+`manyseg.points` (trees, animals: centres, counts) provide the heads, training targets and
+post-processing.
+
+**Deployment.** Models work with `torch.compile(dynamic=True)`, `torch.export` and ONNX at any
+input size, and with int8 quantisation (`manyseg.quantize`). For fast GPU inference use bf16
+autocast plus `torch.compile`.
+
+Each of these has a runnable script in [`examples/`](examples/); they run on CPU in seconds.
+
+## Tips from our benchmarks
+
+* **Small batches** (≤ 4 per GPU): keep the encoder's BatchNorm layers in eval mode during
+  training (frozen running statistics; their weights still train).
+* **Memory-bound?** `decoder_kwargs={"out_stride": 2}` costs no accuracy for the U-Net and
+  saves 11–18% memory.
+* **Water and other per-pixel spectral targets:** `decoder_kwargs={"input_cross": True}`
+  feeds the raw bands to the last decoder stage. It did not help pet or cloud segmentation.
+* **Mixed precision is safe:** bf16, fp16 and int8 weight-only showed no accuracy loss.
+* **Fusion:** stacking all bands into one input was as good as fancier fusion on the datasets
+  we tried; start there.
+
+Every claim here comes from a pre-registered, multi-seed experiment in
+[`experiments/`](experiments/), where negative results are kept too.
 
 ## Documentation
 
-* `docs/architecture_review.md`: what we learned from SMP, fastai, timm, MMSeg, TerraTorch,
-  TorchGeo and HF, including why fastai's U-Net differs from SMP's.
-* `docs/api_design.md`, `docs/testing_strategy.md`, `docs/benchmark_design.md`, `docs/roadmap.md`.
-* `experiments/`: one directory per experiment, with hypothesis, method, results and
-  decision. Negative results are kept.
+* [`examples/`](examples/): runnable scripts for each task above.
+* [`docs/api_design.md`](docs/api_design.md): the full API (inputs, fusion, decoders, heads,
+  metadata, resolution, export, quantisation).
+* [`experiments/`](experiments/): the evidence behind the defaults and tips.
+
+## Benchmarking (`manyseg-bench`)
+
+A separate package for comparing segmentation libraries (ManySeg, segmentation_models_pytorch,
+fastai, timm) under identical data, augmentation and training. `manyseg` does not depend on it.
+See [`docs/benchmark_design.md`](docs/benchmark_design.md).
+
+## Contributing
+
+```bash
+uv sync --all-packages
+uv run pytest packages/manyseg -n 4            # fast tests
+uv run pytest packages/manyseg -m slow -n 4    # compile, export, ONNX
+```
+
+See [`docs/roadmap.md`](docs/roadmap.md) and [`docs/testing_strategy.md`](docs/testing_strategy.md).
 
 ## License
 
-MIT. Upstream libraries are acknowledged in `docs/architecture_review.md`. Ported designs
-(e.g. the fastai-style decoder) cite their source in the module docstring.
+MIT. Designs ported from other libraries (e.g. the fastai-style U-Net) cite their source in
+the code; see [`docs/architecture_review.md`](docs/architecture_review.md).
