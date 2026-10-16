@@ -162,8 +162,15 @@ class MultiEncoder(nn.Module):
             valid[n] = (h, w)
         return feats, valid
 
-    def forward(self, inputs: Mapping[str, Tensor]) -> list[Tensor]:
+    def forward(self, inputs: Mapping[str, Tensor], return_inputs: bool = False):
+        """Fused features; with ``return_inputs``, also ``{input: its own features}`` (padded
+        grid), for per-input heads."""
         feats, valid = self._encode(inputs)
+        if return_inputs:
+            return self._fuse(feats, valid), feats
+        return self._fuse(feats, valid)
+
+    def _fuse(self, feats, valid) -> list[Tensor]:
         if self.mode == "late":
             out = []
             for n in self.names:

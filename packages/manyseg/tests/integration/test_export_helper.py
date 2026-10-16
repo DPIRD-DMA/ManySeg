@@ -99,3 +99,19 @@ def test_timeseries_export_dynamic_dates_and_size(agg):
     for t, h, w in ((4, 64, 96), (7, 97, 131), (2, 70, 65), (1, 64, 64)):
         x = ex(t, h, w)
         torch.testing.assert_close(ep.module()(x), model(x), atol=1e-4, rtol=1e-4)
+
+
+def test_semantic_change_model_exports():
+    inputs = {"t1": {"channels": 3},
+              "t2": {"channels": 3, "backbone": "shared:t1", "share_norm": True}}
+    heads = {"change": {"type": "segmentation", "channels": 2},
+             "lc1": {"type": "segmentation", "channels": 7, "input": "t1"},
+             "lc2": {"type": "segmentation", "channels": 7, "input": "t2", "share": "lc1"}}
+    model = create_model(backbone="resnet18", pretrained=False, inputs=inputs, heads=heads,
+                         fusion={"type": "intermediate", "op": "concat_diff"}).eval()
+    ex = {"t1": torch.randn(1, 3, 64, 96), "t2": torch.randn(1, 3, 64, 96)}
+    ep = export_model(model, ex)
+    x = {"t1": torch.randn(1, 3, 97, 131), "t2": torch.randn(1, 3, 97, 131)}
+    got, ref = ep.module()(x), model(x)
+    for k in heads:
+        torch.testing.assert_close(got[k], ref[k], atol=1e-4, rtol=1e-4)

@@ -31,8 +31,9 @@ def _stages(model: nn.Module) -> list[nn.Module]:
         stages.append(bb)
     if model.decoder is not None:
         stages.append(model.decoder)
-    stages += list(model.task_decoders.values())
-    stages += list(model.heads.values())  # a ModuleDict has no forward; shard each head
+    # shared per-input heads reuse one decoder / head module under two names: shard it once
+    stages += list({id(d): d for d in model.task_decoders.values()}.values())
+    stages += list({id(h): h for h in model.heads.values()}.values())  # each head its own unit
     # The conditioner is *not* its own unit: DenseModel calls its FiLM / head-bias methods
     # outside Conditioner.forward, after a separate unit would have resharded them. Its
     # parameters belong to the root unit, which stays gathered for the whole forward.

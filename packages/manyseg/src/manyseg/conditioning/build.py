@@ -150,7 +150,10 @@ def build_conditioned_model(create_model: Callable[..., nn.Module], *, inputs, f
         decoders = {"decoder": model.decoder} if model.decoder is not None else {}
         decoders.update({f"task_{h}": d for h, d in model.task_decoders.items()})
         for k, d in decoders.items():
-            film[k] = DecoderFiLM(dim, specs, used_levels(d, specs, in_ch), d.out_spec, on)
+            inp = model._head_inputs.get(k.removeprefix("task_")) if k.startswith("task_") \
+                else None
+            sp = tuple(model.backbone.encoders[inp].feature_specs) if inp else specs
+            film[k] = DecoderFiLM(dim, sp, used_levels(d, sp, in_ch), d.out_spec, on)
         # Image heads that pool the encoder: FiLM on the deepest feature (per-channel affine
         # before the mean pool, i.e. on the pooled vector).
         if any(getattr(h, "scope", "pixel") == "image" and model._head_sources[n] == "encoder"

@@ -34,6 +34,44 @@ class ConcatFusion(nn.Module):
         return self.fuse(torch.cat(xs, dim=1))
 
 
+def _two(op: str, in_channels: Sequence[int]) -> None:
+    if len(in_channels) != 2:
+        raise ValueError(f"'{op}' fusion compares exactly two inputs (e.g. before / after), got "
+                         f"{len(in_channels)} at a fused level")
+
+
+@FUSION_OPS.register("diff")
+class DiffFusion(nn.Module):
+    """``|a - b|`` of two inputs, each projected to ``out_channels`` (1x1, identity if equal):
+    Siamese change-detection fusion (FC-Siam-diff). Symmetric in the two inputs when their
+    projections are identities (a shared encoder)."""
+
+    def __init__(self, in_channels: Sequence[int], out_channels: int) -> None:
+        super().__init__()
+        _two("diff", in_channels)
+        self.proj = nn.ModuleList(_proj(c, out_channels) for c in in_channels)
+
+    def forward(self, xs: list[Tensor]) -> Tensor:
+        return (self.proj[0](xs[0]) - self.proj[1](xs[1])).abs()
+
+
+@FUSION_OPS.register("concat_diff")
+class ConcatDiffFusion(nn.Module):
+    """``[a, b, |a - b|]`` (inputs projected to ``out_channels``), then 1x1 conv-BN-ReLU to
+    ``out_channels``: keeps both dates and their difference (FC-Siam-conc with a difference)."""
+
+    def __init__(self, in_channels: Sequence[int], out_channels: int) -> None:
+        super().__init__()
+        _two("concat_diff", in_channels)
+        self.proj = nn.ModuleList(_proj(c, out_channels) for c in in_channels)
+        self.fuse = nn.Sequential(nn.Conv2d(3 * out_channels, out_channels, 1, bias=False),
+                                  nn.BatchNorm2d(out_channels), nn.ReLU(inplace=True))
+
+    def forward(self, xs: list[Tensor]) -> Tensor:
+        a, b = self.proj[0](xs[0]), self.proj[1](xs[1])
+        return self.fuse(torch.cat([a, b, (a - b).abs()], dim=1))
+
+
 @FUSION_OPS.register("add")
 class AddFusion(nn.Module):
     """Project each input to ``out_channels`` (1x1, identity if equal) and sum."""

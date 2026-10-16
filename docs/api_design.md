@@ -242,6 +242,36 @@ masked dates are ignored.
 Not yet: `shared:` backbones between a time series and another input, and metadata in
 `"channels"` mode targeting a time series.
 
+#### Change detection
+
+Before / after images are two inputs on the same grid. Binary change: one segmentation head on
+the fused features; `"op": "diff"` (`|f1 - f2|`) or `"concat_diff"` (`[f1, f2, |f1 - f2|]`) are
+the Siamese change fusions, `"share_norm": True` makes the shared encoder fully Siamese, and
+stacking both dates in one input (early fusion) is the simple baseline. For a series of dates,
+the order-keeping temporal aggregations are `{"type": "concat", "dates": T}` and `"diff"`
+(two dates).
+
+**Semantic change** (what changed into what) adds a land-cover head per date. A head with
+`"input": "<name>"` reads that input's own (unfused) features through its own decoder
+(default: the model's decoder type); `"share": "<head>"` reuses another per-input head's
+decoder and head, so both dates are mapped by the same weights:
+
+```python
+model = create_model(
+    backbone="resnet34",
+    inputs={"t1": {"channels": 3},
+            "t2": {"channels": 3, "backbone": "shared:t1", "share_norm": True}},
+    fusion={"type": "intermediate", "op": "concat_diff"},
+    heads={"change": {"type": "segmentation", "channels": 2},          # fused features
+           "lc1": {"type": "segmentation", "channels": 7, "input": "t1"},
+           "lc2": {"type": "segmentation", "channels": 7, "input": "t2", "share": "lc1"}},
+)
+out = model({"t1": before, "t2": after})   # change, lc1 (date 1), lc2 (date 2)
+```
+
+`lc1` depends only on `t1` (tested), and with `share` `lc2(t1, t2) == lc1(t2, t1)`. Per-input
+heads need intermediate fusion and raster (not time-series) inputs.
+
 #### Spatial alignment
 
 Inputs with different pixel sizes are **not** assumed to cover the same ground extent. Each

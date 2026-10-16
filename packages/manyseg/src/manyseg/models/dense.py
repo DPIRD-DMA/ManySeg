@@ -45,6 +45,7 @@ class DenseModel(nn.Module):
         pad_to_stride: bool = True,
         task_decoders: Mapping[str, nn.Module] | None = None,
         conditioner: nn.Module | None = None,
+        head_inputs: Mapping[str, str] | None = None,
     ) -> None:
         super().__init__()
         self.conditioner = conditioner
@@ -54,6 +55,8 @@ class DenseModel(nn.Module):
         self.heads = nn.ModuleDict(heads)
         sources = dict(head_sources or {})
         self._head_sources = {n: sources.get(n, "decoder") for n in self.heads}
+        # per-input heads: their task decoder reads this input's own (unfused) features
+        self._head_inputs = dict(head_inputs or {})
         for n, src in self._head_sources.items():
             if src == "task" and n not in self.task_decoders:
                 raise ValueError(f"head {n!r} uses a task decoder but none was given")
@@ -99,6 +102,7 @@ class DenseModel(nn.Module):
         for n in [n for n in self.heads if n not in names]:
             del self.heads[n]
             self._head_sources.pop(n)
+            self._head_inputs.pop(n, None)
             self._pixel_heads.discard(n)
             if n in self.task_decoders:
                 del self.task_decoders[n]
@@ -139,8 +143,10 @@ class DenseModel(nn.Module):
         return c.output(key, self._decode(decoder, x, c.features(key, feats, cond), valid), cond)
 
     def _run_head(self, name: str, dec, feats: list[Tensor], x, h: int, w: int,
-                  cond=None, valid=None) -> Tensor:
+                  cond=None, valid=None, input_feats=None) -> Tensor:
         src = self._head_sources[name]
+        if name in self._head_inputs:
+            feats = input_feats[self._head_inputs[name]]
         if src == "decoder":
             inp = dec
         elif src == "encoder":
@@ -176,7 +182,7 @@ class DenseModel(nn.Module):
         return F.pad(x, (0, fixed[1] - w, 0, fixed[0] - h))
 
     def forward(self, x: Tensor | dict[str, Tensor]) -> Tensor | dict[str, Tensor]:
-        cond = None
+        cond, input_feats = None, None
         if self.conditioner is not None:  # vector inputs -> (raster inputs, embeddings)
             x, cond = self.conditioner(x)
         primary = getattr(self.backbone, "primary", None)
@@ -187,7 +193,10 @@ class DenseModel(nn.Module):
             h, w = x[primary].shape[-2], x[primary].shape[-1]
             xin = None
             valid = [(x[n].shape[-2], x[n].shape[-1]) for n in self.backbone.names]
-            feats = self.backbone(x)
+            if self._head_inputs:
+                feats, input_feats = self.backbone(x, return_inputs=True)
+            else:
+                feats = self.backbone(x)
         else:
             h, w = x.shape[-2], x.shape[-1]
             xin, valid = self._pad(x), None
@@ -195,6 +204,7 @@ class DenseModel(nn.Module):
         dec = (self._decode_cond("decoder", self.decoder, xin, feats, cond, valid)
                if self.decoder is not None else None)
         if self.single_output is not None:
-            return self._run_head(self.single_output, dec, feats, xin, h, w, cond, valid)
-        return {name: self._run_head(name, dec, feats, xin, h, w, cond, valid)
+            return self._run_head(self.single_output, dec, feats, xin, h, w, cond, valid,
+                                  input_feats)
+        return {name: self._run_head(name, dec, feats, xin, h, w, cond, valid, input_feats)
                 for name in self.heads}

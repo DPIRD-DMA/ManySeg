@@ -195,9 +195,10 @@ def create_model(
     def resolve(d):
         return DECODERS.get_or_raise(d) if isinstance(d, str) else d
 
-    def build_decoder(dec_cls, dkw):
-        specs = tuple(bb.feature_specs)
-        if ftype == "late":
+    def build_decoder(dec_cls, dkw, specs=None):
+        per_input = specs is not None
+        specs = tuple(specs if per_input else bb.feature_specs)
+        if ftype == "late" and not per_input:
             from ..fusion import LateFusionDecoder
 
             return LateFusionDecoder(specs, bb.groups, lambda sp: dec_cls(sp, **dkw),
@@ -216,6 +217,36 @@ def create_model(
         heads = {"logits": {"type": "segmentation", "channels": num_classes}}
         single = "logits"
     heads = {n: dict(cfg) for n, cfg in heads.items()}
+    # Per-input heads ("input": <raster input>) read that input's own encoder features through
+    # their own decoder (default: the `decoder` type), e.g. land cover at each date for semantic
+    # change; "share": <head> reuses another per-input head's decoder and head modules.
+    head_inputs = {n: cfg.pop("input") for n, cfg in heads.items() if "input" in cfg}
+    shares = {n: cfg.pop("share") for n, cfg in heads.items() if "share" in cfg}
+    for n, inp in head_inputs.items():
+        if not hasattr(bb, "encoders"):
+            raise ValueError(f"head {n!r}: 'input' needs a multi-input model (inputs=...)")
+        if ftype != "intermediate":
+            raise ValueError(f"head {n!r}: 'input' heads need intermediate fusion, not {ftype!r} "
+                             "(late fusion already decodes each input)")
+        if inp not in bb.names:
+            raise ValueError(f"head {n!r}: unknown input {inp!r}; raster inputs are "
+                             f"{list(bb.names)}")
+        if heads[n].get("scope", "pixel") != "pixel":
+            raise ValueError(f"head {n!r}: 'input' heads are pixel heads")
+        if getattr(bb.encoders[inp], "temporal", False):
+            raise ValueError(f"head {n!r}: 'input' cannot be a time series yet")
+    for n, other in shares.items():
+        if n not in head_inputs or other not in head_inputs or other in shares:
+            raise ValueError(f"head {n!r}: 'share' links two per-input heads ('input' set on "
+                             f"both); {other!r} must be one that does not share itself")
+        if {k: v for k, v in heads[n].items() if k != "decoder"} != \
+                {k: v for k, v in heads[other].items() if k != "decoder"}:
+            raise ValueError(f"head {n!r}: 'share' needs the same head config as {other!r}")
+        if bb.encoders[head_inputs[n]].feature_specs != \
+                bb.encoders[head_inputs[other]].feature_specs:
+            raise ValueError(f"head {n!r}: 'share' needs inputs with the same feature specs")
+    for n in head_inputs:  # default: the model's decoder type and kwargs, on this input
+        heads[n].setdefault("decoder", {"type": decoder, **dict(decoder_kwargs or {})})
     task_cfgs = {n: cfg.pop("decoder") for n, cfg in heads.items() if "decoder" in cfg}
     for n in task_cfgs:
         if heads[n].get("scope", "pixel") != "pixel":
@@ -225,11 +256,16 @@ def create_model(
     shared = build_decoder(resolve(decoder), dict(decoder_kwargs or {})) if needs_shared else None
     task_decoders = {}
     for n, dcfg in task_cfgs.items():
+        if n in shares:
+            continue
+        specs = bb.encoders[head_inputs[n]].feature_specs if n in head_inputs else None
         if isinstance(dcfg, Mapping):
             dcfg = dict(dcfg)
-            task_decoders[n] = build_decoder(resolve(dcfg.pop("type")), dcfg)
+            task_decoders[n] = build_decoder(resolve(dcfg.pop("type")), dcfg, specs)
         else:
-            task_decoders[n] = build_decoder(resolve(dcfg), {})
+            task_decoders[n] = build_decoder(resolve(dcfg), {}, specs)
+    for n, other in shares.items():
+        task_decoders[n] = task_decoders[other]
 
     enc_specs = bb.feature_specs
     if ftype == "late":
@@ -237,10 +273,16 @@ def create_model(
     deepest = max(enc_specs, key=lambda s: s.stride)
     built, sources = {}, {}
     for name, cfg in heads.items():
+        if name in shares:
+            continue
         dec_for_head = task_decoders.get(name, shared)
         dspec = dec_for_head.out_spec if dec_for_head is not None else deepest
         built[name], sources[name] = create_head(dspec, deepest, cfg)
         if name in task_decoders:
             sources[name] = "task"
+    for name, other in shares.items():
+        built[name], sources[name] = built[other], "task"
+    built = {n: built[n] for n in heads}  # keep the configured head order
     return DenseModel(bb, shared, built, sources, single_output=single,
-                      pad_to_stride=pad_to_stride, task_decoders=task_decoders)
+                      pad_to_stride=pad_to_stride, task_decoders=task_decoders,
+                      head_inputs=head_inputs)

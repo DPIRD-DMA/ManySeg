@@ -13,6 +13,9 @@ Aggregations (``"temporal"``: a name or ``{"type": name, **options}``):
 
 * ``"mean"`` (default): masked mean over the valid dates;
 * ``"max"``: masked per-channel max;
+* ``"concat"`` (option ``dates``, required): order-keeping, the dates' features concatenated in
+  date order then 1x1 conv-BN-ReLU; needs exactly ``dates`` dates (export with that fixed T);
+* ``"diff"``: ``|f_2 - f_1|`` of exactly two dates (bitemporal change);
 * ``"attention"``: lightweight temporal attention per pixel, in the spirit of L-TAE (Garnot
   & Landrieu 2020) as used by U-TAE: each of ``heads`` channel groups gets softmax weights over
   the dates from a learned query against keys computed from the features and a sinusoidal
@@ -34,7 +37,7 @@ from collections.abc import Mapping
 import torch
 from torch import Tensor, nn
 
-AGGREGATIONS = ("mean", "max", "attention")
+AGGREGATIONS = ("mean", "max", "attention", "concat", "diff")
 
 
 def parse_temporal(name: str, cfg) -> tuple[str, dict]:
@@ -43,10 +46,14 @@ def parse_temporal(name: str, cfg) -> tuple[str, dict]:
     if kind not in AGGREGATIONS:
         raise ValueError(f"input {name!r}: temporal aggregation must be one of {AGGREGATIONS}, "
                          f"got {kind!r}")
-    allowed = {"heads", "key_dim", "date_dim", "max_period"} if kind == "attention" else set()
+    allowed = {"attention": {"heads", "key_dim", "date_dim", "max_period"},
+               "concat": {"dates"}}.get(kind, set())
     bad = set(cfg) - allowed
     if bad:
         raise ValueError(f"input {name!r}: unknown temporal options {sorted(bad)} for {kind!r}")
+    if kind == "concat" and int(cfg.get("dates", 0)) < 1:
+        raise ValueError(f"input {name!r}: 'concat' needs the fixed number of dates, e.g. "
+                         "{'type': 'concat', 'dates': 2}")
     if "date_dim" in cfg and (int(cfg["date_dim"]) < 2 or int(cfg["date_dim"]) % 2):
         raise ValueError(f"input {name!r}: date_dim must be an even number >= 2, got "
                          f"{cfg['date_dim']}")
@@ -112,6 +119,34 @@ class AttentionAggregation(nn.Module):
         return (g * weights[:, :, :, None]).sum(1).reshape(b, c, h, w).to(f.dtype)
 
 
+class ConcatAggregation(nn.Module):
+    """Order-keeping: the ``dates`` feature maps concatenated in date order (masked dates
+    zeroed), then 1x1 conv-BN-ReLU back to the level's channels. Needs exactly ``dates``."""
+
+    def __init__(self, channels: int, dates: int) -> None:
+        super().__init__()
+        self.dates = int(dates)
+        self.fuse = nn.Sequential(nn.Conv2d(self.dates * channels, channels, 1, bias=False),
+                                  nn.BatchNorm2d(channels), nn.ReLU(inplace=True))
+
+    def forward(self, f: Tensor, mask: Tensor, dates: Tensor | None = None) -> Tensor:
+        if f.shape[1] != self.dates:
+            raise ValueError(f"'concat' aggregation was built for {self.dates} dates, got "
+                             f"{f.shape[1]}")
+        f = torch.where(mask[:, :, None, None, None], f, torch.zeros_like(f))
+        return self.fuse(f.flatten(1, 2))
+
+
+class DiffAggregation(nn.Module):
+    """``|f_2 - f_1|`` of a two-date series (bitemporal change); masked dates are zeroed."""
+
+    def forward(self, f: Tensor, mask: Tensor, dates: Tensor | None = None) -> Tensor:
+        if f.shape[1] != 2:
+            raise ValueError(f"'diff' aggregation takes exactly 2 dates, got {f.shape[1]}")
+        f = torch.where(mask[:, :, None, None, None], f, torch.zeros_like(f))
+        return (f[:, 1] - f[:, 0]).abs()
+
+
 class TemporalEncoder(nn.Module):
     """A backbone applied to every date of a ``(B, T, C, H, W)`` series, aggregated over time
     per feature level. Behaves like a backbone (``feature_specs``, ``input_divisor``) for
@@ -133,6 +168,10 @@ class TemporalEncoder(nn.Module):
             aggs = [MeanAggregation() for _ in self.feature_specs]
         elif kind == "max":
             aggs = [MaxAggregation() for _ in self.feature_specs]
+        elif kind == "concat":
+            aggs = [ConcatAggregation(s.channels, **opts) for s in self.feature_specs]
+        elif kind == "diff":
+            aggs = [DiffAggregation() for _ in self.feature_specs]
         else:
             aggs = [AttentionAggregation(s.channels, **opts) for s in self.feature_specs]
         self.temporal_aggregation = nn.ModuleList(aggs)
