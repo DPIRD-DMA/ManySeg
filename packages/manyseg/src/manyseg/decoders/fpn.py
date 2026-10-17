@@ -9,6 +9,7 @@ from torch import Tensor, nn
 
 from ..features import FeatureSpec
 from ..layers import ConvNormAct, init_decoder_
+from ..utils.spatial import resize_nearest
 from .base import DECODERS, check_out_stride, pyramid_levels
 
 
@@ -56,7 +57,7 @@ class FPNDecoder(nn.Module):
         p = [None] * len(cs)
         p[-1] = self.lateral[-1](cs[-1])
         for i in range(len(cs) - 2, -1, -1):
-            up = F.interpolate(p[i + 1], size=cs[i].shape[-2:], mode="nearest")
+            up = resize_nearest(p[i + 1], cs[i].shape[-2:])
             p[i] = self.lateral[i](cs[i]) + up
         sizes = [c.shape[-2:] for c in cs]
         out = self.seg[0](p[0], [])

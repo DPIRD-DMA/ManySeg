@@ -10,9 +10,9 @@ import torch.multiprocessing as mp
 pytestmark = pytest.mark.slow
 
 
-HEADS = {"seg": {"type": "segmentation", "channels": 2},
-         "area": {"type": "regression", "channels": 1, "scope": "image"},
-         "edge": {"type": "segmentation", "channels": 1, "decoder": "fpn"}}
+HEADS = {"seg": {"type": "segmentation", "out_channels": 2},
+         "area": {"type": "regression", "out_channels": 1, "scope": "image"},
+         "edge": {"type": "segmentation", "out_channels": 1, "decoder": "fpn"}}
 
 
 def _build(kind):
@@ -26,7 +26,7 @@ def _build(kind):
     return create_model(
         backbone="resnet18", pretrained=False, decoder="unet", heads=HEADS,
         fusion={"type": "intermediate", "op": "gated"},
-        inputs={"a": {"channels": 3}, "b": {"channels": 2, "backbone": "shared:a"},
+        inputs={"a": {"in_channels": 3}, "b": {"in_channels": 2, "backbone": "shared:a"},
                 "meta": {"kind": "vector", "conditioning": "film",
                          "fields": {"doy": {"type": "cyclic", "period": 365.25}}},
                 "meta2": {"kind": "vector", "conditioning": {"mode": "head", "pixel": True},

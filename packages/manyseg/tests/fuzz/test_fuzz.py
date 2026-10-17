@@ -39,3 +39,21 @@ def test_random_config(seed):
 @pytest.mark.parametrize("seed", range(20, 220))
 def test_random_config_with_export(seed):
     _run(seed, export=seed % 4 == 0)
+
+
+@pytest.mark.slow
+@pytest.mark.cuda
+@pytest.mark.parametrize("seed", range(220, 232))
+def test_random_config_on_cuda(seed):
+    """CUDA vs CPU, a bf16 training step, bf16 / channels_last vs fp32; compile on some
+    (see fuzz_gpu.py)."""
+    import torch
+
+    if not torch.cuda.is_available():
+        pytest.skip("needs CUDA")
+    from fuzz_gpu import check_gpu
+
+    try:
+        check_gpu(sample_config(random.Random(seed)), seed, compile_=seed % 4 == 0)
+    except Rejected as e:
+        assert str(e).strip()

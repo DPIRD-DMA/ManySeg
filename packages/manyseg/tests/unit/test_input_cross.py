@@ -58,7 +58,7 @@ def test_in_channels_respected():
 
 def test_multi_input_rejected_clearly():
     with pytest.raises(ValueError, match="input image"):
-        create_model(inputs={"a": {"channels": 3}, "b": {"channels": 2}}, backbone="resnet18",
+        create_model(inputs={"a": {"in_channels": 3}, "b": {"in_channels": 2}}, backbone="resnet18",
                      pretrained=False, num_classes=2, decoder_kwargs={"input_cross": True})
 
 

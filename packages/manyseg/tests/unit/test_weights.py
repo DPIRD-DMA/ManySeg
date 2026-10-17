@@ -66,8 +66,8 @@ def test_pretrained_tag_on_multi_input_encoder(monkeypatch):
 
     fake_hub(monkeypatch, timm.create_model("resnet18", in_chans=13).state_dict())
     m = create_model(backbone="resnet18", num_classes=2, inputs={
-        "s2": {"channels": 13, "pretrained": "ssl4eo_s2_moco"},
-        "dem": {"channels": 1, "pretrained": False}})
+        "s2": {"in_channels": 13, "pretrained": "ssl4eo_s2_moco"},
+        "dem": {"in_channels": 1, "pretrained": False}})
     assert m.backbone.encoders["s2"].weights == "resnet18.ssl4eo_s2_moco"
 
 

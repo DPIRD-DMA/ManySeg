@@ -20,11 +20,11 @@ FIELDS = {
 def build(conditioning="film"):
     return create_model(
         backbone="resnet18", pretrained=False,
-        inputs={"s2": {"channels": 13},
+        inputs={"s2": {"in_channels": 13},
                 "meta": {"kind": "vector", "fields": FIELDS, "dropout": 0.1,
                          "conditioning": conditioning}},
-        heads={"water": {"type": "segmentation", "channels": 2},
-               "flooded_fraction": {"type": "regression", "channels": 1, "scope": "image"}},
+        heads={"water": {"type": "segmentation", "out_channels": 2},
+               "flooded_fraction": {"type": "regression", "out_channels": 1, "scope": "image"}},
     ).eval()
 
 
@@ -32,10 +32,11 @@ def main():
     model = build("film")
     enc = model.conditioner.encoders["meta"]
     b = 2
-    meta = enc.pack({"doy": torch.tensor([200.0, 15.0]),
-                     "sun_elev": torch.tensor([55.0, float("nan")]),  # NaN = missing
-                     "latlon": torch.tensor([[-31.95, 115.86], [52.52, 13.40]]),
-                     "sensor": torch.tensor([0, 2])})
+    meta = model.pack_metadata("meta", {
+        "doy": torch.tensor([200.0, 15.0]),
+        "sun_elev": torch.tensor([55.0, float("nan")]),  # NaN = missing
+        "latlon": torch.tensor([[-31.95, 115.86], [52.52, 13.40]]),
+        "sensor": torch.tensor([0, 2])})
     print(f"packed metadata {tuple(meta.shape)}: columns for fields {list(enc.field_names)}")
     s2 = torch.randn(b, 13, 97, 131)
 

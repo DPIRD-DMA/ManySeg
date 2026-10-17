@@ -109,10 +109,10 @@ def test_multiple_heads_return_dict():
     model = small(
         num_classes=None,
         heads={
-            "seg": {"type": "segmentation", "channels": 5},
-            "depth": {"type": "regression", "channels": 1},
-            "area": {"type": "regression", "channels": 1, "scope": "image"},
-            "scene": {"type": "classification", "channels": 7, "scope": "image"},
+            "seg": {"type": "segmentation", "out_channels": 5},
+            "depth": {"type": "regression", "out_channels": 1},
+            "area": {"type": "regression", "out_channels": 1, "scope": "image"},
+            "scene": {"type": "classification", "out_channels": 7, "scope": "image"},
         },
     ).eval()
     out = model(torch.randn(2, 3, 65, 97))
@@ -125,7 +125,7 @@ def test_multiple_heads_return_dict():
 
 def test_num_classes_and_heads_exclusive():
     with pytest.raises(ValueError):
-        small(num_classes=3, heads={"a": {"type": "segmentation", "channels": 2}})
+        small(num_classes=3, heads={"a": {"type": "segmentation", "out_channels": 2}})
 
 
 def test_unknown_decoder_lists_options():
@@ -177,8 +177,8 @@ def test_channels_last():
 
 def test_regression_head_with_uncertainty_outputs_mean_and_logvar():
     model = small(num_classes=None, heads={
-        "depth": {"type": "regression", "channels": 2, "uncertainty": True},
-        "area": {"type": "regression", "channels": 1, "scope": "image", "uncertainty": True},
+        "depth": {"type": "regression", "out_channels": 2, "uncertainty": True},
+        "area": {"type": "regression", "out_channels": 1, "scope": "image", "uncertainty": True},
     }).eval()
     out = model(torch.randn(2, 3, 65, 97))
     assert out["depth"].shape == (2, 4, 65, 97)  # [mean(2), log_var(2)]
@@ -187,5 +187,5 @@ def test_regression_head_with_uncertainty_outputs_mean_and_logvar():
 
 def test_uncertainty_only_for_regression():
     with pytest.raises(ValueError, match="regression"):
-        small(num_classes=None, heads={"s": {"type": "segmentation", "channels": 2,
+        small(num_classes=None, heads={"s": {"type": "segmentation", "out_channels": 2,
                                              "uncertainty": True}})

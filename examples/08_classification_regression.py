@@ -36,7 +36,7 @@ def main():
 
     print("1. multi-label classifier (no decoder)")
     clf = create_model(backbone="resnet18", pretrained=False, in_channels=12,
-                       heads={"labels": {"type": "classification", "channels": CLASSES,
+                       heads={"labels": {"type": "classification", "out_channels": CLASSES,
                                          "scope": "image"}}).to(device)
     x = torch.randn(4, 12, 120, 120, device=device)
     y = (torch.rand(4, CLASSES, device=device) < 0.2).float()
@@ -46,25 +46,25 @@ def main():
     print("2. multi-resolution, multi-sensor, metadata, mixed heads")
     model = create_model(
         inputs={
-            "s2_10m": {"channels": 4, "backbone": "resnet18"},
-            "s2_20m": {"channels": 6, "backbone": "resnet18", "alignment": "same_extent"},
-            "s1": {"channels": 2, "backbone": "resnet18"},
+            "s2_10m": {"in_channels": 4, "backbone": "resnet18"},
+            "s2_20m": {"in_channels": 6, "backbone": "resnet18", "alignment": "same_extent"},
+            "s1": {"in_channels": 2, "backbone": "resnet18"},
             "meta": {"kind": "vector", "fields": {"doy": {"type": "cyclic", "period": 365.25}}},
         },
         pretrained=False,
         fusion={"type": "intermediate", "op": "concat"},
         heads={
-            "labels": {"type": "classification", "channels": CLASSES, "scope": "image"},
-            "harvest": {"type": "regression", "channels": 1, "scope": "image",
+            "labels": {"type": "classification", "out_channels": CLASSES, "scope": "image"},
+            "harvest": {"type": "regression", "out_channels": 1, "scope": "image",
                         "uncertainty": True},          # [mean, log-variance]
-            "water": {"type": "segmentation", "channels": 2},  # pixel head: builds a decoder
+            "water": {"type": "segmentation", "out_channels": 2},  # pixel head: builds a decoder
         },
     ).to(device)
     doy = torch.tensor([[45.0], [120.0], [200.0], [300.0]], device=device)
     batch = {"s2_10m": torch.randn(4, 4, 120, 120, device=device),
              "s2_20m": torch.randn(4, 6, 60, 60, device=device),   # native 20 m grid
              "s1": torch.randn(4, 2, 120, 120, device=device),
-             "meta": model.conditioner.encoders["meta"].pack({"doy": doy})}
+             "meta": model.pack_metadata("meta", {"doy": doy})}
     harvest = torch.rand(4, 1, device=device) * 8
     water = torch.randint(0, 2, (4, 120, 120), device=device)
 

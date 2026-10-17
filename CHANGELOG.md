@@ -10,6 +10,12 @@ First release. Python 3.10–3.14, PyTorch ≥ 2.9, timm ≥ 1.0.20.
 
 ### Models (`manyseg.create_model`)
 
+* **Config vocabulary:** an input's bands are `in_channels` (also the single-input argument),
+  a head's outputs `out_channels`, a raw metadata vector's width `num_features`. Head
+  `"type"` follows its `"scope"`: `segmentation` per pixel, `classification` per image,
+  `regression` either. `decoder` takes a name plus `decoder_kwargs`, or one
+  `{"type": ..., **kwargs}` dict like per-head decoders.
+
 * **Encoders:** any timm model with multi-scale features: CNNs, hierarchical transformers
   and plain ViTs (through a feature-pyramid neck). 46 families are tested
   (`docs/backbone_compatibility.md`); fixed-size backbones pad smaller inputs and refuse
@@ -42,17 +48,24 @@ First release. Python 3.10–3.14, PyTorch ≥ 2.9, timm ≥ 1.0.20.
 ### Deployment
 
 * `manyseg.save` / `manyseg.load` (safetensors plus the stored configuration, normalisation,
-  activations and class names).
+  activations and class names). Save format 2; format-1 files (development versions, which
+  said `"channels"` for all three) are migrated on load.
 * `torch.compile(dynamic=True)`, `manyseg.export.export_model` (dynamic size, batch and date
   count) and ONNX; int8 quantisation (`manyseg.quantize`, extra `quant`); FSDP2
   (`manyseg.distributed.shard_model`).
 * `model.describe()` shows what was built, with shapes and FLOPs.
+* Decoders upsample to their skip connections with an exact integer nearest rule
+  (`manyseg.utils.spatial.resize_nearest`) because `torch.compile(dynamic=True)` on CUDA
+  miscomputes `F.interpolate(mode="nearest")` (draft upstream report in `docs/upstream/`).
+  With stride padding (the default) this is bit-identical to `F.interpolate`; without it, a
+  few rows can differ from PyTorch's float32 rounding.
 
 ### Testing
 
 * Unit, integration and example tiers in CI on Linux and macOS (MPS), with Windows on pull
   requests and nightly; the slow tier covers compile, export, ONNX and quantisation. Python
-  3.15 (release candidate) passes the unit and slow tiers locally.
+  3.13 and 3.14 pass every tier locally; Python 3.15 (release candidate) passes everything
+  except `torch.compile`, which PyTorch does not support on 3.15 yet.
 * A random-configuration fuzzer (`packages/manyseg/tests/fuzz`) checks thousands of
   `create_model` configurations on CPU and CUDA (bf16, `torch.compile`); about 25 bugs it
   found are regression tests.

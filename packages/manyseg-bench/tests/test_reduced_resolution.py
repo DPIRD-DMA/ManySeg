@@ -24,7 +24,7 @@ def test_provider_head_option_scales_the_logits_head():
 
 def test_provider_head_option_conflicts_with_heads():
     with pytest.raises(ValueError, match="head"):
-        build({"head": {"scale": 0.5}, "heads": {"y": {"type": "segmentation", "channels": 2}}})
+        build({"head": {"scale": 0.5}, "heads": {"y": {"type": "segmentation", "out_channels": 2}}})
 
 
 def test_semantic_loss_at_head_scale_uses_mode_downsampled_labels():
@@ -104,8 +104,8 @@ def test_instance_and_point_tasks_accept_scaled_heads(task):
 def test_profile_handles_dict_outputs():
     from manyseg_bench.profiling import profile_model
 
-    b = build({"heads": {"a": {"type": "segmentation", "channels": 2, "scale": 0.5},
-                         "b": {"type": "regression", "channels": 1}}})
+    b = build({"heads": {"a": {"type": "segmentation", "out_channels": 2, "scale": 0.5},
+                         "b": {"type": "regression", "out_channels": 1}}})
     r = profile_model(b.model, in_channels=3, img_size=(64, 64), device="cpu", batch_sizes=(1,),
                       precision="fp32", warmup=1, iters=2, train_batch_size=2)
     assert r["train"]["images_per_s"] > 0 and r["flops_per_image"] > 0

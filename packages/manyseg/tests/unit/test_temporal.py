@@ -9,7 +9,7 @@ AGGS = ["mean", "max", "attention"]
 
 
 def build(temporal="mean", heads=None, extra=None, **kw):
-    inputs = {"s2": {"kind": "timeseries", "channels": 4, "temporal": temporal}, **(extra or {})}
+    inputs = {"s2": {"kind": "timeseries", "in_channels": 4, "temporal": temporal}, **(extra or {})}
     if heads is None:
         kw.setdefault("num_classes", 3)
     return create_model(backbone="resnet18", pretrained=False, inputs=inputs, heads=heads,
@@ -111,10 +111,11 @@ def test_temporal_options_dict():
 
 
 def test_composes_with_rasters_metadata_and_mixed_heads():
-    heads = {"crop": {"type": "segmentation", "channels": 5},
-             "yield_": {"type": "regression", "channels": 1, "scope": "image"}}
-    extra = {"dem": {"channels": 1, "alignment": "same_extent"},
-             "s1": {"kind": "timeseries", "channels": 2, "temporal": "max", "backbone": "resnet18"},
+    heads = {"crop": {"type": "segmentation", "out_channels": 5},
+             "yield_": {"type": "regression", "out_channels": 1, "scope": "image"}}
+    extra = {"dem": {"in_channels": 1, "alignment": "same_extent"},
+             "s1": {"kind": "timeseries", "in_channels": 2, "temporal": "max",
+                    "backbone": "resnet18"},
              "meta": {"kind": "vector", "fields": {"latlon": {"type": "coords"}}}}
     model = build("attention", heads=heads, extra=extra)
     x = {"s2": series(t=5), "s2_dates": torch.rand(2, 5) * 365,
@@ -138,9 +139,9 @@ def test_errors():
         build("median")
     with pytest.raises(ValueError, match="temporal"):
         create_model(backbone="resnet18", pretrained=False, num_classes=2,
-                     inputs={"a": {"channels": 3, "temporal": "mean"}})
+                     inputs={"a": {"in_channels": 3, "temporal": "mean"}})
     with pytest.raises(ValueError, match="shared"):
-        build(extra={"b": {"kind": "timeseries", "channels": 4, "backbone": "shared:s2"}})
+        build(extra={"b": {"kind": "timeseries", "in_channels": 4, "backbone": "shared:s2"}})
     model = build()
     with pytest.raises(ValueError, match=r"\(B, T, C, H, W\)"):
         model({"s2": torch.randn(2, 4, 64, 64)})
@@ -202,4 +203,4 @@ def test_entirely_masked_training_batch(agg):
 
 def test_series_extra_name_reserved_without_vectors():
     with pytest.raises(ValueError, match="reserved"):
-        build(extra={"s2_dates": {"kind": "timeseries", "channels": 4}})
+        build(extra={"s2_dates": {"kind": "timeseries", "in_channels": 4}})

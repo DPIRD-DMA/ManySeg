@@ -13,8 +13,8 @@ FIELDS = {
     "latlon": {"type": "coords"},
     "sensor": {"type": "categorical", "num": 3},
 }
-HEADS = {"seg": {"type": "segmentation", "channels": 2},
-         "area": {"type": "regression", "channels": 1, "scope": "image"}}
+HEADS = {"seg": {"type": "segmentation", "out_channels": 2},
+         "area": {"type": "regression", "out_channels": 1, "scope": "image"}}
 
 
 def meta(n=2, seed=0):
@@ -32,7 +32,7 @@ def vec(mode="film", **kw):
 def build(mode="film", rasters=None, **kw):
     if "heads" not in kw:
         kw.setdefault("num_classes", 2)
-    rasters = rasters or {"img": {"channels": 3}}
+    rasters = rasters or {"img": {"in_channels": 3}}
     return create_model(backbone="resnet18", pretrained=False,
                         inputs={**rasters, "meta": vec(mode)}, **kw)
 
@@ -74,9 +74,9 @@ def test_head_identity_at_init():
 
 
 def test_film_identity_with_task_decoders_and_fusion():
-    heads = {"seg": {"type": "segmentation", "channels": 2},
-             "depth": {"type": "regression", "channels": 1, "decoder": "fpn"}}
-    rasters = {"a": {"channels": 4}, "b": {"channels": 2}}
+    heads = {"seg": {"type": "segmentation", "out_channels": 2},
+             "depth": {"type": "regression", "out_channels": 1, "decoder": "fpn"}}
+    rasters = {"a": {"in_channels": 4}, "b": {"in_channels": 2}}
     cond = create_model(backbone="resnet18", pretrained=False, heads=heads,
                         inputs={**rasters, "meta": vec()}).eval()
     assert set(cond.conditioner.film) == {"decoder", "task_depth"}
@@ -89,8 +89,8 @@ def test_film_identity_with_task_decoders_and_fusion():
         torch.testing.assert_close(out[k], ref[k], rtol=0, atol=0)
 
 
-IMAGE_HEADS = {"cls": {"type": "classification", "channels": 5, "scope": "image"},
-               "harvest": {"type": "regression", "channels": 1, "scope": "image",
+IMAGE_HEADS = {"cls": {"type": "classification", "out_channels": 5, "scope": "image"},
+               "harvest": {"type": "regression", "out_channels": 1, "scope": "image",
                          "uncertainty": True}}
 
 
@@ -120,14 +120,14 @@ def test_film_mixed_model_conditions_encoder_image_heads():
 
 
 def test_film_image_head_on_decoder_has_no_image_film():
-    heads = {"seg": {"type": "segmentation", "channels": 2},
-             "area": {"type": "regression", "channels": 1, "scope": "image",
+    heads = {"seg": {"type": "segmentation", "out_channels": 2},
+             "area": {"type": "regression", "out_channels": 1, "scope": "image",
                       "source": "decoder"}}
     assert set(build("film", heads=heads).conditioner.film) == {"decoder"}
 
 
 def test_image_only_model_with_fusion_and_film():
-    rasters = {"a": {"channels": 4}, "b": {"channels": 2, "alignment": "same_extent"}}
+    rasters = {"a": {"in_channels": 4}, "b": {"in_channels": 2, "alignment": "same_extent"}}
     model = perturb(build("film", rasters=rasters, heads=IMAGE_HEADS,
                           fusion={"type": "intermediate", "op": "concat"})).eval()
     x = {"a": torch.randn(2, 4, 64, 64), "b": torch.randn(2, 2, 32, 32)}
@@ -143,7 +143,7 @@ MODES = {"film": "film", "head": {"mode": "head", "pixel": True}, "channels": "c
 @pytest.mark.parametrize("mode", sorted(MODES))
 def test_every_decoder_and_mode(decoder, mode):
     """Odd, non-square size; dict outputs (pixel, image and a per-head task decoder)."""
-    heads = {**HEADS, "edges": {"type": "segmentation", "channels": 1, "decoder": "fpn"}}
+    heads = {**HEADS, "edges": {"type": "segmentation", "out_channels": 1, "decoder": "fpn"}}
     model = perturb(build(MODES[mode], decoder=decoder, heads=heads)).eval()
     x = torch.randn(2, 3, 33, 47)
     out = model({"img": x, "meta": meta(seed=0)})
@@ -172,7 +172,7 @@ def test_channels_mode_widens_the_target_input():
     width = model.conditioner.encoders["meta"].width
     assert model.backbone.in_channels == 3 + width
     model = build({"mode": "channels", "target": "b"},
-                  rasters={"a": {"channels": 4}, "b": {"channels": 2}})
+                  rasters={"a": {"in_channels": 4}, "b": {"in_channels": 2}})
     assert model.backbone.encoders["b"].in_channels == 2 + width
     assert model.backbone.encoders["a"].in_channels == 4
     out = model.eval()({"a": torch.randn(1, 4, 64, 64), "b": torch.randn(1, 2, 64, 64),
@@ -182,7 +182,7 @@ def test_channels_mode_widens_the_target_input():
 
 @pytest.mark.parametrize("ftype", ["early", "intermediate", "late"])
 def test_with_raster_fusion(ftype):
-    model = perturb(build("film", rasters={"a": {"channels": 4}, "b": {"channels": 2}},
+    model = perturb(build("film", rasters={"a": {"in_channels": 4}, "b": {"in_channels": 2}},
                           fusion={"type": ftype})).eval()
     x = {"a": torch.randn(1, 4, 65, 97), "b": torch.randn(1, 2, 65, 97)}
     out = model({**x, "meta": meta(1)})
@@ -192,15 +192,15 @@ def test_with_raster_fusion(ftype):
 
 def test_plain_channels_vector_input():
     model = create_model(backbone="resnet18", pretrained=False, num_classes=2, inputs={
-        "img": {"channels": 3}, "meta": {"kind": "vector", "channels": 4}}).eval()
+        "img": {"in_channels": 3}, "meta": {"kind": "vector", "num_features": 4}}).eval()
     assert model({"img": torch.randn(2, 3, 64, 64), "meta": torch.randn(2, 4)}).shape == \
         (2, 2, 64, 64)
 
 
 def test_two_vector_inputs_with_different_modes():
     model = perturb(create_model(backbone="resnet18", pretrained=False, heads=HEADS, inputs={
-        "img": {"channels": 3}, "meta": vec(),
-        "tab": {"kind": "vector", "channels": 3, "conditioning": "head"}})).eval()
+        "img": {"in_channels": 3}, "meta": vec(),
+        "tab": {"kind": "vector", "num_features": 3, "conditioning": "head"}})).eval()
     x = {"img": torch.randn(2, 3, 64, 64), "meta": meta(), "tab": torch.randn(2, 3)}
     out = model(x)
     assert not torch.allclose(out["area"], model({**x, "tab": torch.randn(2, 3)})["area"])
@@ -230,7 +230,7 @@ def test_partial_mask_through_the_model():
 
 def test_field_dropout_in_training_mode():
     model = create_model(backbone="resnet18", pretrained=False, num_classes=2, inputs={
-        "img": {"channels": 3}, "meta": {**vec(), "dropout": 0.5}}).train()
+        "img": {"in_channels": 3}, "meta": {**vec(), "dropout": 0.5}}).train()
     model({"img": torch.randn(2, 3, 64, 64), "meta": meta()}).mean().backward()
 
 
@@ -294,7 +294,7 @@ def test_conditioning_fits_a_metadata_only_task():
               decoder_kwargs={"channels": 32})
     torch.manual_seed(0)
     acc_c = _fit(create_model(backbone=TinyBackbone(), **kw,
-                              inputs={"img": {"channels": 3}, "meta": vec()}))
+                              inputs={"img": {"in_channels": 3}, "meta": vec()}))
     torch.manual_seed(0)
     acc_p = _fit(create_model(backbone=TinyBackbone(), **kw))
     assert acc_c > 0.95, acc_c
@@ -319,10 +319,10 @@ def test_unknown_mode_and_keys():
         build("nope")
     with pytest.raises(ValueError, match="unknown keys"):
         create_model(backbone="resnet18", pretrained=False, num_classes=2, inputs={
-            "img": {"channels": 3}, "meta": {**vec(), "colour": 1}})
+            "img": {"in_channels": 3}, "meta": {**vec(), "colour": 1}})
     with pytest.raises(ValueError, match="kind"):
         create_model(backbone="resnet18", pretrained=False, num_classes=2, inputs={
-            "img": {"channels": 3, "kind": "graph"}})
+            "img": {"in_channels": 3, "kind": "graph"}})
 
 
 def test_head_mode_without_image_heads_needs_pixel():
@@ -351,5 +351,5 @@ def test_missing_vector_input_and_tensor_input():
 
 def test_explicit_raster_kind_without_vectors():
     model = create_model(backbone="resnet18", pretrained=False, num_classes=2, inputs={
-        "a": {"kind": "raster", "channels": 3}, "b": {"channels": 1}})
+        "a": {"kind": "raster", "in_channels": 3}, "b": {"in_channels": 1}})
     assert model.conditioner is None

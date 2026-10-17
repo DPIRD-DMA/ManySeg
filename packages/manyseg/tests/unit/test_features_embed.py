@@ -38,7 +38,7 @@ def test_embed_pooled_and_per_pixel():
 
 
 def test_embed_with_multi_input_and_metadata():
-    inputs = {"a": {"channels": 3}, "b": {"channels": 2},
+    inputs = {"a": {"in_channels": 3}, "b": {"in_channels": 2},
               "meta": {"kind": "vector", "fields": {"d": {"type": "continuous"}}}}
     m = create_model(backbone="resnet18", pretrained=False, inputs=inputs, num_classes=2).eval()
     x = {"a": torch.randn(1, 3, 64, 64), "b": torch.randn(1, 2, 64, 64),
@@ -55,7 +55,7 @@ def test_embed_errors():
     with pytest.raises(ValueError, match="pool"):
         m.embed(x, pool="median")
     image_only = create_model(backbone="resnet18", pretrained=False, heads={
-        "c": {"type": "classification", "channels": 2, "scope": "image"}})
+        "c": {"type": "classification", "out_channels": 2, "scope": "image"}})
     with pytest.raises(ValueError, match="decoder"):
         image_only.eval().embed(x, source="decoder")
 
@@ -75,8 +75,8 @@ def test_embedder_module_matches_and_exports():
 def test_late_fusion_features_cropped_per_input_and_embed_uses_the_primary():
     m = create_model(backbone="resnet18", pretrained=False, num_classes=2,
                      fusion={"type": "late"},
-                     inputs={"a": {"channels": 3},
-                             "b": {"channels": 2, "alignment": "same_extent"}}).eval()
+                     inputs={"a": {"in_channels": 3},
+                             "b": {"in_channels": 2, "alignment": "same_extent"}}).eval()
     x = {"a": torch.randn(1, 3, 97, 131), "b": torch.randn(1, 2, 33, 33)}
     feats = m.features(x)
     (a0, a1), (b0, b1) = m.backbone.groups

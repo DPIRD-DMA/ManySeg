@@ -15,13 +15,13 @@ def main():
         in_channels=4,
         decoder="unet",    # shared by every head without its own "decoder" key
         heads={
-            "landcover": {"type": "segmentation", "channels": 5},
+            "landcover": {"type": "segmentation", "out_channels": 5},
             # image scope: pools the deepest encoder feature -> (B, 2): [mean, log_variance]
-            "water_area": {"type": "regression", "channels": 1, "scope": "image",
+            "water_area": {"type": "regression", "out_channels": 1, "scope": "image",
                            "uncertainty": True},
             # a task-specific decoder for this head only (any registered decoder, or a dict
             # such as {"type": "unet", "out_stride": 2})
-            "height": {"type": "regression", "channels": 1, "decoder": "fpn"},
+            "height": {"type": "regression", "out_channels": 1, "decoder": "fpn"},
         },
     ).to(device)
 

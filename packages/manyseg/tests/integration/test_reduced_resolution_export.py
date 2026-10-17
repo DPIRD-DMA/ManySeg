@@ -11,10 +11,10 @@ from manyseg.export import export_model
 
 pytestmark = pytest.mark.slow
 
-SCALED = {"x1": {"type": "segmentation", "channels": 2},
-          "x2": {"type": "segmentation", "channels": 2, "scale": 0.5},
-          "x4": {"type": "regression", "channels": 1, "scale": 0.25},
-          "x8": {"type": "regression", "channels": 1, "scale": 0.125}}
+SCALED = {"x1": {"type": "segmentation", "out_channels": 2},
+          "x2": {"type": "segmentation", "out_channels": 2, "scale": 0.5},
+          "x4": {"type": "regression", "out_channels": 1, "scale": 0.25},
+          "x8": {"type": "regression", "out_channels": 1, "scale": 0.125}}
 
 CONFIGS = {
     "unet_s2": dict(decoder="unet", decoder_kwargs={"out_stride": 2}, num_classes=3),
@@ -25,10 +25,10 @@ CONFIGS = {
                              heads=SCALED),
     "segformer_scaled": dict(decoder="segformer", heads=SCALED),
     "task_decoders": dict(heads={
-        "seg": {"type": "segmentation", "channels": 2, "scale": 0.25},
-        "edges": {"type": "segmentation", "channels": 1,
+        "seg": {"type": "segmentation", "out_channels": 2, "scale": 0.25},
+        "edges": {"type": "segmentation", "out_channels": 1,
                   "decoder": {"type": "unet", "out_stride": 2}},
-        "density": {"type": "regression", "channels": 1, "scale": 0.125,
+        "density": {"type": "regression", "out_channels": 1, "scale": 0.125,
                     "decoder": {"type": "fastai_unet", "out_stride": 4}}},
         decoder_kwargs={"out_stride": 4}),
 }
@@ -78,7 +78,7 @@ def test_compile_inductor_matches_eager(name):
 
 
 def test_export_multi_input_scaled_follows_primary_grid():
-    inputs = {"optical": {"channels": 4}, "sar": {"channels": 2}}
+    inputs = {"optical": {"in_channels": 4}, "sar": {"in_channels": 2}}
     model = create_model(inputs=inputs, backbone="resnet18", pretrained=False, heads=SCALED,
                          decoder_kwargs={"out_stride": 2}).eval()
     ep = export_model(model, {"optical": torch.randn(1, 4, 64, 96),

@@ -38,6 +38,7 @@ import torch.nn.functional as F
 from torch import Tensor, nn
 
 from ..features import FeatureSpec
+from ..utils.spatial import resize_nearest
 from .base import DECODERS, check_input_spec, check_power_of_two_stride
 
 
@@ -84,7 +85,7 @@ class _Block(nn.Module):
 
     def forward(self, x: Tensor, skip: Tensor) -> Tensor:
         # always (an exact copy when sizes match): a shape test would be frozen by export
-        up = F.interpolate(self.shuf(x), size=skip.shape[-2:], mode="nearest")
+        up = resize_nearest(self.shuf(x), skip.shape[-2:])
         return self.conv2(self.conv1(F.relu(torch.cat([up, self.bn(skip)], dim=1))))
 
 
@@ -149,9 +150,9 @@ class FastaiUNetDecoder(nn.Module):
             if self._resize:
                 s = self.out_stride
                 size = ((inp.shape[-2] + s - 1) // s, (inp.shape[-1] + s - 1) // s)
-                x = F.interpolate(x, size=size, mode="nearest")
+                x = resize_nearest(x, size)
             return x
-        x = F.interpolate(x, size=inp.shape[-2:], mode="nearest")  # always, as above
+        x = resize_nearest(x, inp.shape[-2:])  # always, as above
         if self.last_cross:
             x = self.res(torch.cat([x, inp], dim=1))
         return x

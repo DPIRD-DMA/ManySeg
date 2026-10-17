@@ -11,9 +11,9 @@ def build(**heads):
 
 def test_per_head_decoder_shapes():
     model = build(
-        seg={"type": "segmentation", "channels": 3},
-        depth={"type": "regression", "channels": 1, "decoder": "fpn"},
-        edges={"type": "segmentation", "channels": 1,
+        seg={"type": "segmentation", "out_channels": 3},
+        depth={"type": "regression", "out_channels": 1, "decoder": "fpn"},
+        edges={"type": "segmentation", "out_channels": 1,
                "decoder": {"type": "unet", "upsample": "aligned"}},
     ).eval()
     out = model(torch.randn(2, 3, 65, 97))
@@ -24,15 +24,15 @@ def test_per_head_decoder_shapes():
 
 
 def test_shared_decoder_skipped_when_unused():
-    model = build(a={"type": "segmentation", "channels": 2, "decoder": "fpn"},
-                  b={"type": "regression", "channels": 1, "decoder": "segformer"})
+    model = build(a={"type": "segmentation", "out_channels": 2, "decoder": "fpn"},
+                  b={"type": "regression", "out_channels": 1, "decoder": "segformer"})
     assert model.decoder is None
     assert model(torch.randn(1, 3, 64, 64))["a"].shape == (1, 2, 64, 64)
 
 
 def test_task_decoder_receives_gradient_only_from_its_head():
-    model = build(seg={"type": "segmentation", "channels": 2},
-                  depth={"type": "regression", "channels": 1, "decoder": "fpn"})
+    model = build(seg={"type": "segmentation", "out_channels": 2},
+                  depth={"type": "regression", "out_channels": 1, "decoder": "fpn"})
     model(torch.randn(2, 3, 64, 64))["seg"].mean().backward()
     assert all(p.grad is None for p in model.task_decoders["depth"].parameters())
     assert all(p.grad is not None for p in model.decoder.parameters())
@@ -40,15 +40,15 @@ def test_task_decoder_receives_gradient_only_from_its_head():
 
 def test_image_head_with_decoder_rejected():
     with pytest.raises(ValueError, match="pixel"):
-        build(area={"type": "regression", "channels": 1, "scope": "image", "decoder": "fpn"})
+        build(area={"type": "regression", "out_channels": 1, "scope": "image", "decoder": "fpn"})
 
 
 @pytest.mark.slow
 def test_task_decoders_export():
     from manyseg.export import export_model
 
-    model = build(seg={"type": "segmentation", "channels": 2},
-                  depth={"type": "regression", "channels": 1, "decoder": "fpn"}).eval()
+    model = build(seg={"type": "segmentation", "out_channels": 2},
+                  depth={"type": "regression", "out_channels": 1, "decoder": "fpn"}).eval()
     ep = export_model(model, torch.randn(1, 3, 64, 96))
     x = torch.randn(1, 3, 97, 131)
     for k, v in ep.module()(x).items():

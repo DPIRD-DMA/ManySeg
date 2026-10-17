@@ -1,7 +1,7 @@
 """Time-series inputs: one 2D encoder applied to every date, then a temporal aggregation at each
 feature level, so the rest of the model (fusion, decoders, heads) sees an ordinary pyramid.
 
-An input ``{"kind": "timeseries", "channels": C, "temporal": ...}`` takes ``(B, T, C, H, W)``
+An input ``{"kind": "timeseries", "in_channels": C, "temporal": ...}`` takes ``(B, T, C, H, W)``
 with any ``T``, plus two optional entries in the input dict:
 
 * ``<name>_mask``: ``(B, T)`` bool, False for missing / cloudy / padded dates;

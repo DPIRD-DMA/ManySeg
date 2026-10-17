@@ -11,6 +11,7 @@ from torch import Tensor, nn
 
 from ..features import FeatureSpec
 from ..layers import ConvNormAct, init_decoder_
+from ..utils.spatial import resize_nearest
 from .base import DECODERS, check_power_of_two_stride
 
 UPSAMPLE_MODES = ("nearest", "bilinear", "aligned")
@@ -25,7 +26,7 @@ def upsample2x(x: Tensor, size: Sequence[int], mode: str) -> Tensor:
     geometry (see experiments/E001_upsample_alignment).
     """
     if mode == "nearest":
-        return F.interpolate(x, size=size, mode="nearest")
+        return resize_nearest(x, size)
     if mode == "bilinear":
         return F.interpolate(x, size=size, mode="bilinear", align_corners=False)
     if mode == "aligned":

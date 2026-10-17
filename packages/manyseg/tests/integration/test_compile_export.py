@@ -65,8 +65,8 @@ def test_torch_export_dynamic_hw():
 def test_torch_export_multihead():
     model = create_model(
         backbone="resnet18", pretrained=False,
-        heads={"seg": {"type": "segmentation", "channels": 2},
-               "cls": {"type": "classification", "channels": 4, "scope": "image"}},
+        heads={"seg": {"type": "segmentation", "out_channels": 2},
+               "cls": {"type": "classification", "out_channels": 4, "scope": "image"}},
     ).eval()
     ep = torch.export.export(model, (torch.randn(1, 3, 64, 64),))
     out = ep.module()(torch.randn(1, 3, 64, 64))
@@ -159,8 +159,8 @@ def test_decoder_export_and_compile_dynamic(decoder):
 
 @pytest.mark.parametrize("ftype", ["early", "intermediate", "late"])
 def test_multi_input_export_dynamic(ftype):
-    inputs = {"optical": {"channels": 4, "backbone": "resnet18"},
-              "sar": {"channels": 2, "backbone": "resnet18"}}
+    inputs = {"optical": {"in_channels": 4, "backbone": "resnet18"},
+              "sar": {"in_channels": 2, "backbone": "resnet18"}}
     model = create_model(inputs=inputs, fusion={"type": ftype}, backbone="resnet18",
                          pretrained=False, num_classes=2).eval()
     h = torch.export.Dim("h", min=33, max=1024)

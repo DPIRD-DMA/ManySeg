@@ -6,7 +6,8 @@ import pytest
 import torch
 from manyseg import create_model
 
-PAIR = {"t1": {"channels": 3}, "t2": {"channels": 3, "backbone": "shared:t1", "share_norm": True}}
+PAIR = {"t1": {"in_channels": 3},
+        "t2": {"in_channels": 3, "backbone": "shared:t1", "share_norm": True}}
 
 
 def pair(seed=0, b=2, hw=(64, 64)):
@@ -29,7 +30,7 @@ def test_difference_fusion_ops(op):
 
 
 def test_diff_fusion_needs_two_inputs():
-    inputs = {**PAIR, "t3": {"channels": 3, "backbone": "shared:t1", "share_norm": True}}
+    inputs = {**PAIR, "t3": {"in_channels": 3, "backbone": "shared:t1", "share_norm": True}}
     with pytest.raises(ValueError, match="two inputs"):
         create_model(backbone="resnet18", pretrained=False, inputs=inputs, num_classes=2,
                      fusion={"type": "intermediate", "op": "diff"})
@@ -43,7 +44,7 @@ def series(t=2, seed=0):
 def test_order_keeping_temporal_aggregation(temporal):
     t = 3 if isinstance(temporal, dict) else 2
     model = create_model(backbone="resnet18", pretrained=False, num_classes=2, inputs={
-        "s2": {"kind": "timeseries", "channels": 4, "temporal": temporal}}).eval()
+        "s2": {"kind": "timeseries", "in_channels": 4, "temporal": temporal}}).eval()
     x = series(t)
     out = model({"s2": x})
     assert out.shape == (2, 2, 64, 64)
@@ -57,9 +58,9 @@ def test_order_keeping_temporal_aggregation(temporal):
 
 
 def scd_model(share=True, **kw):
-    heads = {"change": {"type": "segmentation", "channels": 2},
-             "lc1": {"type": "segmentation", "channels": 7, "input": "t1"},
-             "lc2": {"type": "segmentation", "channels": 7, "input": "t2",
+    heads = {"change": {"type": "segmentation", "out_channels": 2},
+             "lc1": {"type": "segmentation", "out_channels": 7, "input": "t1"},
+             "lc2": {"type": "segmentation", "out_channels": 7, "input": "t2",
                      **({"share": "lc1"} if share else {})}}
     return create_model(backbone="resnet18", pretrained=False, inputs=PAIR, heads=heads,
                         fusion={"type": "intermediate", "op": "concat_diff"}, **kw).eval()
@@ -90,8 +91,8 @@ def test_shared_per_input_heads_are_one_module():
 
 
 def test_per_input_head_decoder_type_and_select_heads():
-    heads = {"lc1": {"type": "segmentation", "channels": 3, "input": "t1", "decoder": "fpn"},
-             "change": {"type": "segmentation", "channels": 2}}
+    heads = {"lc1": {"type": "segmentation", "out_channels": 3, "input": "t1", "decoder": "fpn"},
+             "change": {"type": "segmentation", "out_channels": 2}}
     model = create_model(backbone="resnet18", pretrained=False, inputs=PAIR, heads=heads).eval()
     assert type(model.task_decoders["lc1"]).__name__.lower().startswith("fpn")
     model.select_heads(["lc1"])
@@ -106,25 +107,25 @@ def test_per_input_heads_describe():
 def test_per_input_head_errors():
     with pytest.raises(ValueError, match="input"):
         create_model(backbone="resnet18", pretrained=False, num_classes=None,
-                     heads={"lc": {"channels": 3, "input": "t1"}})
+                     heads={"lc": {"out_channels": 3, "input": "t1"}})
     with pytest.raises(ValueError, match="nope"):
         create_model(backbone="resnet18", pretrained=False, inputs=PAIR,
-                     heads={"lc": {"channels": 3, "input": "nope"}})
+                     heads={"lc": {"out_channels": 3, "input": "nope"}})
     with pytest.raises(ValueError, match="share"):
         create_model(backbone="resnet18", pretrained=False, inputs=PAIR, heads={
-            "a": {"channels": 3, "input": "t1"}, "b": {"channels": 4, "input": "t2",
+            "a": {"out_channels": 3, "input": "t1"}, "b": {"out_channels": 4, "input": "t2",
                                                       "share": "a"}})
     with pytest.raises(ValueError, match="late"):
         create_model(backbone="resnet18", pretrained=False, inputs=PAIR,
-                     fusion={"type": "late"}, heads={"a": {"channels": 3, "input": "t1"}})
+                     fusion={"type": "late"}, heads={"a": {"out_channels": 3, "input": "t1"}})
 
 
 def test_per_input_heads_with_metadata_film():
     inputs = {**PAIR, "meta": {"kind": "vector", "fields": {"doy": {"type": "cyclic",
                                                                      "period": 365.25}}}}
-    heads = {"change": {"type": "segmentation", "channels": 2},
-             "lc1": {"type": "segmentation", "channels": 7, "input": "t1"},
-             "lc2": {"type": "segmentation", "channels": 7, "input": "t2", "share": "lc1"}}
+    heads = {"change": {"type": "segmentation", "out_channels": 2},
+             "lc1": {"type": "segmentation", "out_channels": 7, "input": "t1"},
+             "lc2": {"type": "segmentation", "out_channels": 7, "input": "t2", "share": "lc1"}}
     model = create_model(backbone="resnet18", pretrained=False, inputs=inputs, heads=heads,
                          fusion={"type": "intermediate", "op": "concat_diff"}).eval()
     assert {"decoder", "task_lc1", "task_lc2"} <= set(model.conditioner.film)
@@ -137,9 +138,9 @@ def test_shared_heads_share_film_and_head_bias():
               "meta": {"kind": "vector", "fields": {"d": {"type": "continuous"}}},
               "meta2": {"kind": "vector", "fields": {"e": {"type": "continuous"}},
                         "conditioning": {"mode": "head", "pixel": True}}}
-    heads = {"change": {"type": "segmentation", "channels": 2},
-             "lc1": {"type": "segmentation", "channels": 7, "input": "t1"},
-             "lc2": {"type": "segmentation", "channels": 7, "input": "t2", "share": "lc1"}}
+    heads = {"change": {"type": "segmentation", "out_channels": 2},
+             "lc1": {"type": "segmentation", "out_channels": 7, "input": "t1"},
+             "lc2": {"type": "segmentation", "out_channels": 7, "input": "t2", "share": "lc1"}}
     model = create_model(backbone="resnet18", pretrained=False, inputs=inputs, heads=heads,
                          fusion={"type": "intermediate", "op": "concat_diff"}).eval()
     c = model.conditioner
@@ -158,11 +159,11 @@ def test_shared_heads_share_film_and_head_bias():
 def test_per_input_head_input_rules():
     with pytest.raises(ValueError, match="same_grid"):
         create_model(backbone="resnet18", pretrained=False, inputs={
-            "t1": {"channels": 3}, "t2": {"channels": 3, "alignment": "same_extent"}},
-            heads={"lc": {"channels": 3, "input": "t2"}})
+            "t1": {"in_channels": 3}, "t2": {"in_channels": 3, "alignment": "same_extent"}},
+            heads={"lc": {"out_channels": 3, "input": "t2"}})
     with pytest.raises(ValueError, match="raw input"):
         create_model(backbone="resnet18", pretrained=False, inputs=PAIR,
-                     heads={"lc": {"channels": 3, "input": "t1", "decoder": "fastai_unet"}})
+                     heads={"lc": {"out_channels": 3, "input": "t1", "decoder": "fastai_unet"}})
 
 
 def test_describe_wires_per_input_decoders_to_their_encoder():
@@ -178,7 +179,7 @@ def test_describe_wires_per_input_decoders_to_their_encoder():
 
 def test_temporal_diff_missing_endpoint_is_no_change():
     model = create_model(backbone="resnet18", pretrained=False, num_classes=2, inputs={
-        "s2": {"kind": "timeseries", "channels": 4, "temporal": "diff"}}).eval()
+        "s2": {"kind": "timeseries", "in_channels": 4, "temporal": "diff"}}).eval()
     x = series(2)
     a = model({"s2": x, "s2_mask": torch.tensor([[1, 0], [0, 1]]).bool()})
     b = model({"s2": torch.zeros_like(x), "s2_mask": torch.tensor([[1, 1], [1, 1]]).bool()})

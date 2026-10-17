@@ -20,8 +20,8 @@ def main():
     model = create_model(
         pretrained=False,  # True downloads ImageNet weights for every encoder
         inputs={
-            "optical": {"channels": 4, "backbone": "convnext_atto"},  # README: convnext_tiny
-            "sar": {"channels": 2, "backbone": "resnet18", "alignment": "same_extent"},
+            "optical": {"in_channels": 4, "backbone": "convnext_atto"},  # README: convnext_tiny
+            "sar": {"in_channels": 2, "backbone": "resnet18", "alignment": "same_extent"},
             "meta": {"kind": "vector", "fields": {  # non-raster conditioning, FiLM by default
                 "doy": {"type": "cyclic", "period": 365.25},
                 "sun_elev": {"type": "continuous", "mean": 45.0, "std": 15.0},
@@ -32,13 +32,13 @@ def main():
         decoder="unet",
         heads={
             **instance_heads(decoders={"boundary": "fpn"}),  # extent, boundary, distance
-            "water_area": {"type": "regression", "channels": 1, "scope": "image"},
+            "water_area": {"type": "regression", "out_channels": 1, "scope": "image"},
         },
     ).to(device)
 
     b, h, w = 2, 96, 128
     # One packed (B, N) float tensor per vector input; NaN marks a missing value.
-    meta = model.conditioner.encoders["meta"].pack({
+    meta = model.pack_metadata("meta", {
         "doy": torch.tensor([200.0, 15.0]),
         "sun_elev": torch.tensor([55.0, float("nan")]),
         "latlon": torch.tensor([[-31.95, 115.86], [-33.86, 151.21]]),

@@ -12,8 +12,8 @@ from manyseg.models import DenseModel
 
 H, W = 65, 97
 FIELDS = {"doy": {"type": "cyclic", "period": 365.25}, "latlon": {"type": "coords"}}
-TWO = {"optical": {"channels": 4, "backbone": "resnet18"},
-       "sar": {"channels": 2, "backbone": "convnext_atto"}}
+TWO = {"optical": {"in_channels": 4, "backbone": "resnet18"},
+       "sar": {"in_channels": 2, "backbone": "convnext_atto"}}
 
 
 def make(**kw):
@@ -54,7 +54,7 @@ def test_training_flags_restored():
 
 def test_per_head_decoders_feed_their_heads():
     model = make(heads={**instance_heads(decoders={"boundary": "fpn"}),
-                        "area": {"type": "regression", "channels": 1, "scope": "image"}})
+                        "area": {"type": "regression", "out_channels": 1, "scope": "image"}})
     g = model_graph(model)
     assert feeds(g, "boundary").name == "decoder[boundary]"
     assert "fpn" in feeds(g, "boundary").title
@@ -78,8 +78,8 @@ def test_intermediate_fusion(op):
 
 
 def test_early_fusion_records_input_channels():
-    model = make(inputs={"a": {"channels": 4}, "b": {"channels": 2}}, fusion={"type": "early"},
-                 num_classes=2)
+    model = make(inputs={"a": {"in_channels": 4}, "b": {"in_channels": 2}},
+                 fusion={"type": "early"}, num_classes=2)
     g = model_graph(model)
     (fuse,) = g.by_stage("fusion")
     assert fuse.title.startswith("early")
@@ -100,8 +100,8 @@ def test_late_fusion_per_input_decoders():
 
 
 def test_shared_encoder_and_projection_adapter():
-    model = make(inputs={"optical": {"channels": 4, "backbone": "resnet18"},
-                         "sar": {"channels": 2, "backbone": "shared:optical"}},
+    model = make(inputs={"optical": {"in_channels": 4, "backbone": "resnet18"},
+                         "sar": {"in_channels": 2, "backbone": "shared:optical"}},
                  fusion={"type": "intermediate"}, num_classes=2)
     g = model_graph(model, {"optical": torch.randn(1, 4, H, W),
                             "sar": torch.randn(1, 2, H, W)})
@@ -130,11 +130,11 @@ def test_same_extent_shapes_show_resampling():
 @pytest.mark.parametrize("mode", ["film", "head", "channels"])
 def test_metadata_targets(mode):
     cond = {"mode": "head", "pixel": True} if mode == "head" else mode
-    model = make(inputs={"s2": {"channels": 13},
+    model = make(inputs={"s2": {"in_channels": 13},
                          "meta": {"kind": "vector", "fields": FIELDS, "conditioning": cond}},
-                 heads={"seg": {"type": "segmentation", "channels": 2, "decoder": "fpn"},
-                        "dist": {"type": "regression", "channels": 1},
-                        "scene": {"type": "classification", "channels": 3, "scope": "image"}})
+                 heads={"seg": {"type": "segmentation", "out_channels": 2, "decoder": "fpn"},
+                        "dist": {"type": "regression", "out_channels": 1},
+                        "scene": {"type": "classification", "out_channels": 3, "scope": "image"}})
     sample = {"s2": torch.randn(1, 13, H, W), "meta": torch.randn(1, 3)}
     g = model_graph(model, sample)
     meta = g.find("input", "meta")
@@ -154,10 +154,10 @@ def test_metadata_targets(mode):
 
 def test_head_scales_uncertainty_and_out_stride():
     model = make(decoder_kwargs={"out_stride": 4},
-                 heads={"s4": {"type": "segmentation", "channels": 2, "scale": 1 / 4},
-                        "s2": {"type": "segmentation", "channels": 2, "scale": 1 / 2},
-                        "s8": {"type": "regression", "channels": 1, "scale": 1 / 8},
-                        "h": {"type": "regression", "channels": 1, "scope": "image",
+                 heads={"s4": {"type": "segmentation", "out_channels": 2, "scale": 1 / 4},
+                        "s2": {"type": "segmentation", "out_channels": 2, "scale": 1 / 2},
+                        "s8": {"type": "regression", "out_channels": 1, "scale": 1 / 8},
+                        "h": {"type": "regression", "out_channels": 1, "scope": "image",
                               "uncertainty": True}})
     g = model_graph(model, torch.randn(1, 3, H, W))
     assert g.find("decoder", "decoder").title == "unet, out_stride 4, width 64"
@@ -181,8 +181,8 @@ def test_input_cross_and_fastai_image_edges():
 
 
 def test_single_output_marks_unused_heads():
-    full = make(heads={"a": {"type": "segmentation", "channels": 2},
-                       "b": {"type": "regression", "channels": 1}})
+    full = make(heads={"a": {"type": "segmentation", "out_channels": 2},
+                       "b": {"type": "regression", "out_channels": 1}})
     model = DenseModel(full.backbone, full.decoder, dict(full.heads), single_output="a")
     g = model_graph(model, torch.randn(1, 3, H, W))
     assert g.find("head", "a").shape("out") == f"1x2x{H}x{W}"
@@ -202,7 +202,7 @@ def test_transformer_backbones(backbone, layout):
 
 
 def test_formats():
-    model = make(inputs={"s2": {"channels": 4}, "meta": {"kind": "vector", "fields": FIELDS}},
+    model = make(inputs={"s2": {"in_channels": 4}, "meta": {"kind": "vector", "fields": FIELDS}},
                  num_classes=2)
     mm = describe(model, format="mermaid")
     assert mm.startswith("flowchart LR\n")
@@ -262,8 +262,8 @@ heads
 
 def test_text_golden():
     model = make(decoder="fpn", heads={
-        "seg": {"type": "segmentation", "channels": 2},
-        "area": {"type": "regression", "channels": 1, "scope": "image", "uncertainty": True}})
+        "seg": {"type": "segmentation", "out_channels": 2},
+        "area": {"type": "regression", "out_channels": 1, "scope": "image", "uncertainty": True}})
     assert model.describe() == GOLDEN
     assert isinstance(model.heads["seg"], PixelHead)
 
@@ -276,7 +276,7 @@ def test_dot_escapes_quotes_in_user_names(tmp_path):
     from manyseg import create_model
 
     m = create_model(backbone="resnet18", pretrained=False,
-                     heads={'a"b': {"type": "segmentation", "channels": 2}})
+                     heads={'a"b': {"type": "segmentation", "out_channels": 2}})
     m.single_output = 'a"b'  # the summary line names it: returns: Tensor (head 'a"b')
     src = m.describe(format="dot")
     if shutil.which("dot") is None:
@@ -297,18 +297,18 @@ def test_random_init_stem_does_not_claim_adapted_weights():
 def test_intermediate_fusion_image_head_reads_a_fused_level():
     from manyseg import create_model
 
-    m = create_model(inputs={"a": {"channels": 3}, "b": {"channels": 2}}, backbone="resnet18",
+    m = create_model(inputs={"a": {"in_channels": 3}, "b": {"in_channels": 2}}, backbone="resnet18",
                      pretrained=False, fusion={"type": "intermediate"},
-                     heads={"seg": {"type": "segmentation", "channels": 2},
-                            "area": {"type": "regression", "channels": 1, "scope": "image"}})
+                     heads={"seg": {"type": "segmentation", "out_channels": 2},
+                            "area": {"type": "regression", "out_channels": 1, "scope": "image"}})
     assert "from: fused level" in m.describe()
 
 
 def test_weight_shared_encoders_are_one_node_with_per_input_bn():
     """Default `shared:` encoders are weight-sharing copies with their own BatchNorm (E015);
     describe() still shows one encoder and says so, and counts every parameter once."""
-    model = make(inputs={"optical": {"channels": 3, "backbone": "resnet18"},
-                         "sar": {"channels": 3, "backbone": "shared:optical"}},
+    model = make(inputs={"optical": {"in_channels": 3, "backbone": "resnet18"},
+                         "sar": {"in_channels": 3, "backbone": "shared:optical"}},
                  fusion={"type": "intermediate"}, num_classes=2)
     g = model_graph(model)
     (enc,) = g.by_stage("encoder")

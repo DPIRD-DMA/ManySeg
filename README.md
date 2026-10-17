@@ -88,8 +88,8 @@ on two datasets. Validate on your own data.
 ```python
 model = create_model(
     inputs={
-        "optical": {"channels": 4, "backbone": "convnext_tiny"},
-        "sar": {"channels": 2, "backbone": "resnet18", "alignment": "same_extent"},  # half res OK
+        "optical": {"in_channels": 4, "backbone": "convnext_tiny"},
+        "sar": {"in_channels": 2, "backbone": "resnet18", "alignment": "same_extent"},  # half res OK
     },
     fusion={"type": "intermediate", "op": "concat"},
     num_classes=2,
@@ -103,9 +103,9 @@ out = model({"optical": optical, "sar": sar})
 model = create_model(
     backbone="resnet50", in_channels=4,
     heads={
-        "landcover": {"type": "segmentation", "channels": 8},
-        "height":    {"type": "regression", "channels": 1},                  # per pixel
-        "flooded":   {"type": "classification", "channels": 2, "scope": "image"},
+        "landcover": {"type": "segmentation", "out_channels": 8},
+        "height":    {"type": "regression", "out_channels": 1},                  # per pixel
+        "flooded":   {"type": "classification", "out_channels": 2, "scope": "image"},
     },
 )
 ```
@@ -115,17 +115,18 @@ model is a classifier that still accepts several inputs, metadata and extra head
 
 ```python
 model = create_model(backbone="resnet50", in_channels=12, heads={
-    "labels": {"type": "classification", "channels": 19, "scope": "image"}})
+    "labels": {"type": "classification", "out_channels": 19, "scope": "image"}})
 ```
 
 If you also have pixel labels, training with an extra segmentation head can improve the
-classifier. Drop it before deployment with `model.select_heads(["labels"])`.
+classifier. Drop it before deployment with `model.select_heads(["labels"])` (in place: the
+model keeps only that head and its output stays a dict).
 
 **Metadata** (acquisition date, sun angle, location, sensor) as extra inputs:
 
 ```python
 inputs = {
-    "image": {"channels": 4},
+    "image": {"in_channels": 4},
     "meta": {"kind": "vector", "fields": {"doy": {"type": "cyclic", "period": 365.25},
                                           "latlon": {"type": "coords"}}},
 }

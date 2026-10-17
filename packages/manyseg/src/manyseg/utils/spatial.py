@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import torch
 import torch.nn.functional as F
 from torch import Tensor
 
@@ -31,3 +32,25 @@ def pad_to_multiple(x: Tensor, divisor: int, value: float = 0.0) -> Tensor:
         return x
     pad_h, pad_w = padding_for(x.shape[-2], x.shape[-1], divisor)
     return F.pad(x, (0, pad_w, 0, pad_h), value=value)
+
+
+def _nearest_index(n_in, n_out, device) -> Tensor:
+    # the exact nearest rule floor(dst * n_in / n_out), in integers
+    return torch.clamp(torch.arange(n_out, device=device) * n_in // n_out, max=n_in - 1)
+
+
+def resize_nearest(x: Tensor, size) -> Tensor:
+    """Nearest-neighbour resize to ``size``: source row ``floor(i * H / H_out)``, as two index
+    gathers in integer arithmetic.
+
+    Equal to ``F.interpolate(x, size, mode="nearest")`` whenever the output is a multiple of
+    the input (always with stride padding); at other sizes PyTorch's float32 rounding can pick
+    the row before the exact one. Used instead of ``F.interpolate`` because torch.compile
+    (torch 2.14, CUDA, ``dynamic=True``) miscompiles both ``mode="nearest"`` and any float
+    version of this index: wrong outputs at sizes such as 49x66 -> 98x132 after compiling at
+    another size (docs/upstream/torch-inductor-dynamic-nearest.md). The integer form compiles
+    correctly.
+    """
+    h, w = x.shape[-2], x.shape[-1]
+    x = x.index_select(-2, _nearest_index(h, size[0], x.device))
+    return x.index_select(-1, _nearest_index(w, size[1], x.device))

@@ -186,3 +186,15 @@ def test_gradients_reach_mlp_embeddings_and_unknowns():
     for name, p in m.named_parameters():
         assert p.grad is not None and torch.isfinite(p.grad).all(), name
         assert p.grad.abs().sum() > 0, name
+
+
+def test_model_pack_metadata():
+    from manyseg import create_model
+
+    m = create_model(backbone="resnet18", pretrained=False, num_classes=2, inputs={
+        "img": {"in_channels": 3},
+        "meta": {"kind": "vector", "fields": {"doy": {"type": "cyclic", "period": 365}}}})
+    packed = m.pack_metadata("meta", {"doy": torch.tensor([10.0, 200.0])})
+    assert packed.shape == (2, 1)
+    with pytest.raises(ValueError, match="vector input"):
+        m.pack_metadata("img", {"doy": torch.tensor([1.0])})

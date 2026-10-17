@@ -44,7 +44,7 @@ def test_pt2e_agreement_and_size(float_and_int8):
 
 
 def test_pt2e_dict_inputs():
-    model = create_model(inputs={"a": {"channels": 4}, "b": {"channels": 2}},
+    model = create_model(inputs={"a": {"in_channels": 4}, "b": {"in_channels": 2}},
                          backbone="resnet18", pretrained=False, num_classes=2).eval()
 
     def mk(h, w):
@@ -72,9 +72,9 @@ def test_pt2e_backbones_and_decoders(backbone, decoder):
 
 def test_pt2e_multi_head_dict_output():
     model = create_model(backbone="resnet18", pretrained=False, heads={
-        "seg": {"type": "segmentation", "channels": 3},
-        "height": {"type": "regression", "channels": 1},
-        "scene": {"type": "classification", "channels": 4, "scope": "image"}}).eval()
+        "seg": {"type": "segmentation", "out_channels": 3},
+        "height": {"type": "regression", "out_channels": 1},
+        "scene": {"type": "classification", "out_channels": 4, "scope": "image"}}).eval()
     q = quantize_pt2e(model, torch.randn(1, 3, 64, 96), _batches(2))
     out = q.module()(torch.randn(1, 3, 97, 131))
     assert out["seg"].shape == (1, 3, 97, 131) and out["scene"].shape == (1, 4)

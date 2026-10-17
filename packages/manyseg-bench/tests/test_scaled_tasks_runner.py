@@ -56,7 +56,7 @@ def test_point_task_head_scale_end_to_end(tmp_path, monkeypatch, kw):
 def test_user_heads_with_a_task_that_defines_heads_is_an_error(tmp_path):
     instance_cache(tmp_path, "ai4boundaries")
     spec = ModelSpec("unet", "resnet18", weights=None,
-                     options={"heads": {"extent": {"type": "segmentation", "channels": 1,
+                     options={"heads": {"extent": {"type": "segmentation", "out_channels": 1,
                                                    "scale": 0.5}}})
     with pytest.raises(ValueError, match="head_scale"):
         run_training("manyseg", spec, "ai4boundaries", "smoke", device="cpu",

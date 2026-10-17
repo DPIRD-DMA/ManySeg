@@ -166,8 +166,8 @@ def test_relabel_sequential():
 def test_preset_head_configs():
     h = instance_heads()
     assert set(h) == {"extent", "boundary", "distance"}
-    assert h["boundary"]["channels"] == 1 and h["distance"]["type"] == "regression"
-    assert instance_heads(num_classes=3)["extent"]["channels"] == 4  # + background
+    assert h["boundary"]["out_channels"] == 1 and h["distance"]["type"] == "regression"
+    assert instance_heads(num_classes=3)["extent"]["out_channels"] == 4  # + background
 
 
 @pytest.mark.parametrize("decoders", [None, "separate", {"distance": "fpn"}])

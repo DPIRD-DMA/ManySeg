@@ -20,33 +20,33 @@ def test_task_decoder_with_encoder_source_is_rejected():
     """A head reading the encoder directly cannot also have its own decoder (it used to build
     on the encoder's channels and then crash on the decoder's output)."""
     with pytest.raises(ValueError, match="source"):
-        build(heads={"a": {"type": "segmentation", "channels": 2, "source": "encoder",
+        build(heads={"a": {"type": "segmentation", "out_channels": 2, "source": "encoder",
                            "decoder": "fpn"}})
 
 
 def test_per_input_head_with_encoder_source_is_rejected():
     with pytest.raises(ValueError, match="source"):
-        build(inputs={"t1": {"channels": 3}, "t2": {"channels": 3}},
-              heads={"c": {"type": "segmentation", "channels": 2},
-                     "s1": {"type": "segmentation", "channels": 2, "input": "t1",
+        build(inputs={"t1": {"in_channels": 3}, "t2": {"in_channels": 3}},
+              heads={"c": {"type": "segmentation", "out_channels": 2},
+                     "s1": {"type": "segmentation", "out_channels": 2, "input": "t1",
                             "source": "encoder"}})
 
 
 def test_image_head_from_the_decoder_alone_builds_the_decoder():
-    m = build(heads={"c": {"type": "classification", "channels": 3, "scope": "image",
+    m = build(heads={"c": {"type": "classification", "out_channels": 3, "scope": "image",
                            "source": "decoder"}}).eval()
     assert m.decoder is not None
     assert m(torch.randn(1, 3, 64, 64))["c"].shape == (1, 3)
-    m = build(heads={"c": {"type": "classification", "channels": 3, "scope": "image",
+    m = build(heads={"c": {"type": "classification", "out_channels": 3, "scope": "image",
                            "source": "decoder"},
-                     "s": {"type": "segmentation", "channels": 2, "decoder": "fpn"}}).eval()
+                     "s": {"type": "segmentation", "out_channels": 2, "decoder": "fpn"}}).eval()
     out = m(torch.randn(1, 3, 64, 64))
     assert out["c"].shape == (1, 3) and out["s"].shape == (1, 2, 64, 64)
 
 
 def test_early_fusion_with_a_shared_backbone_names_the_conflict():
     with pytest.raises(ValueError, match="early fusion"):
-        build(inputs={"a": {"channels": 4}, "b": {"channels": 2, "backbone": "shared:a"}},
+        build(inputs={"a": {"in_channels": 4}, "b": {"in_channels": 2, "backbone": "shared:a"}},
               fusion={"type": "early"}, num_classes=2)
 
 
@@ -54,7 +54,7 @@ def test_early_fusion_with_a_shared_backbone_names_the_conflict():
                                  {"decoder": "unet", "decoder_kwargs": {"input_cross": True}}])
 def test_late_fusion_rejects_input_image_decoders_clearly(dec):
     with pytest.raises(ValueError, match="input image"):
-        build(inputs={"a": {"channels": 1}, "b": {"channels": 3}}, fusion={"type": "late"},
+        build(inputs={"a": {"in_channels": 1}, "b": {"in_channels": 3}}, fusion={"type": "late"},
               num_classes=2, **dec)
 
 
@@ -62,7 +62,7 @@ def test_late_fusion_rejects_input_image_decoders_clearly(dec):
 def test_export_keeps_a_fixed_date_count_static(temporal, t):
     from manyseg.export import export_model
 
-    m = build(num_classes=2, inputs={"s2": {"kind": "timeseries", "channels": 4,
+    m = build(num_classes=2, inputs={"s2": {"kind": "timeseries", "in_channels": 4,
                                             "temporal": temporal}}).eval()
     ep = export_model(m, {"s2": torch.randn(1, t, 4, 64, 64)})
     y = {"s2": torch.randn(1, t, 4, 96, 64)}
@@ -74,8 +74,8 @@ def test_export_same_extent_input_is_independent_of_example_sizes():
     the two sizes together in the exported program."""
     from manyseg.export import export_model
 
-    m = build(num_classes=2, inputs={"a": {"channels": 3},
-                                     "b": {"channels": 2, "alignment": "same_extent"}}).eval()
+    m = build(num_classes=2, inputs={"a": {"in_channels": 3},
+                                     "b": {"in_channels": 2, "alignment": "same_extent"}}).eval()
     ep = export_model(m, {"a": torch.randn(1, 3, 64, 64), "b": torch.randn(1, 2, 64, 64)})
     y = {"a": torch.randn(1, 3, 96, 128), "b": torch.randn(1, 2, 48, 64)}
     torch.testing.assert_close(ep.module()(y), m(y), atol=1e-4, rtol=1e-4)
@@ -84,7 +84,7 @@ def test_export_same_extent_input_is_independent_of_example_sizes():
 @pytest.mark.parametrize("kw", [{"heads": 8, "dim": 4}, {"heads": 0}])
 def test_cross_attention_rejects_impossible_head_settings(kw):
     with pytest.raises(ValueError, match="heads"):
-        build(num_classes=2, inputs={"a": {"channels": 3}, "b": {"channels": 2}},
+        build(num_classes=2, inputs={"a": {"in_channels": 3}, "b": {"in_channels": 2}},
               fusion={"type": "intermediate", "op": "cross_attention", "op_kwargs": kw})
 
 
@@ -100,7 +100,7 @@ def test_same_grid_inputs_with_different_pad_multiples_fuse():
     (32); its features must still line up with the primary's."""
     m = build(backbone="efficientnet_b0", num_classes=2, fusion={"type": "intermediate",
                                                                  "op": "add"},
-              inputs={"a": {"channels": 4}, "b": {"channels": 1, "out_indices": [2]}}).eval()
+              inputs={"a": {"in_channels": 4}, "b": {"in_channels": 1, "out_indices": [2]}}).eval()
     x = {"a": torch.randn(1, 4, 41, 45), "b": torch.randn(1, 1, 41, 45)}
     y = m(x)
     assert y.shape == (1, 2, 41, 45)
@@ -125,7 +125,7 @@ def test_export_without_stride_padding_uses_a_safe_minimum_size():
 @pytest.mark.parametrize("kw,x", [
     # timm's MobileNetV3 feature model runs every block even when only stride 4 is returned
     ({"backbone": "mobilenetv3_small_100", "out_indices": [1], "pad_to_stride": False,
-      "heads": {"c": {"type": "classification", "channels": 1, "scope": "image"}}},
+      "heads": {"c": {"type": "classification", "out_channels": 1, "scope": "image"}}},
      torch.randn(1, 3, 70, 75)),
 ])
 def test_export_minimum_size_covers_the_whole_network(kw, x):
@@ -154,8 +154,8 @@ def test_fixed_size_backbone_in_a_multi_input_model_pads_like_a_single_input():
     """A fixed-size encoder (MaxViT 224) pads smaller inputs to its size, as single-input
     models do, instead of refusing everything but exactly 224 x 224."""
     m = build(backbone="maxvit_tiny_tf_224", num_classes=2,
-              inputs={"a": {"channels": 3}, "b": {"channels": 3, "alignment": "same_extent"},
-                      "c": {"channels": 1, "backbone": "resnet18"}}).eval()
+              inputs={"a": {"in_channels": 3}, "b": {"in_channels": 3, "alignment": "same_extent"},
+                      "c": {"in_channels": 1, "backbone": "resnet18"}}).eval()
     x = {"a": torch.randn(1, 3, 150, 170), "b": torch.randn(1, 3, 90, 100),
          "c": torch.randn(1, 1, 150, 170)}
     assert m(x).shape == (1, 2, 150, 170)
@@ -191,7 +191,7 @@ def test_negative_out_indices_still_work():
                                 {"dim": -8}, {"dim": 2.5}])
 def test_cross_attention_settings_must_be_positive_integers(kw):
     with pytest.raises(ValueError, match="cross_attention"):
-        build(num_classes=2, inputs={"a": {"channels": 3}, "b": {"channels": 2}},
+        build(num_classes=2, inputs={"a": {"in_channels": 3}, "b": {"in_channels": 2}},
               fusion={"type": "intermediate", "op": "cross_attention", "op_kwargs": kw})
 
 
@@ -200,11 +200,11 @@ def test_fusion_op_with_a_single_raster_input_is_rejected(ftype):
     """With one raster input there is nothing to fuse: an explicit op would be silently
     ignored (intermediate) or meaningless (late)."""
     with pytest.raises(ValueError, match="two raster inputs"):
-        build(num_classes=2, inputs={"a": {"channels": 3}},
+        build(num_classes=2, inputs={"a": {"in_channels": 3}},
               fusion={"type": ftype, "op": "cross_attention"})
     with pytest.raises(ValueError, match="two raster inputs"):
-        build(num_classes=2, inputs={"a": {"channels": 3},
-                                     "m": {"kind": "vector", "channels": 2}},
+        build(num_classes=2, inputs={"a": {"in_channels": 3},
+                                     "m": {"kind": "vector", "num_features": 2}},
               fusion={"type": ftype, "op": "add"})
 
 
@@ -218,7 +218,7 @@ def assert_every_parameter_used(m, x):
     assert not unused, unused
 
 
-TWO = {"a": {"channels": 3}, "b": {"channels": 2}}
+TWO = {"a": {"in_channels": 3}, "b": {"in_channels": 2}}
 
 
 def two(hw=(64, 64)):
@@ -235,8 +235,8 @@ def test_fusion_only_at_levels_something_reads(decoder):
 
 
 def test_unread_levels_with_encoder_heads_only():
-    m = build(heads={"c": {"type": "classification", "channels": 3, "scope": "image"},
-                     "e": {"type": "segmentation", "channels": 2, "source": "encoder"}},
+    m = build(heads={"c": {"type": "classification", "out_channels": 3, "scope": "image"},
+                     "e": {"type": "segmentation", "out_channels": 2, "source": "encoder"}},
               inputs=TWO, fusion={"type": "intermediate", "op": "cross_attention"})
     assert m.decoder is None
     assert_every_parameter_used(m, two())
@@ -245,14 +245,14 @@ def test_unread_levels_with_encoder_heads_only():
 @pytest.mark.parametrize("temporal", ["attention", {"type": "concat", "dates": 2}])
 def test_time_series_aggregation_only_at_read_levels(temporal):
     m = build(num_classes=2, decoder="deeplabv3plus",
-              inputs={"s": {"kind": "timeseries", "channels": 4, "temporal": temporal}})
+              inputs={"s": {"kind": "timeseries", "in_channels": 4, "temporal": temporal}})
     assert_every_parameter_used(m, {"s": torch.randn(2, 2, 4, 64, 64)})
 
 
 @pytest.mark.parametrize("decoder", ["deeplabv3plus", None])
 def test_vit_neck_only_at_read_levels(decoder):
     kw = ({"num_classes": 2, "decoder": decoder} if decoder else
-          {"heads": {"c": {"type": "classification", "channels": 3, "scope": "image"}}})
+          {"heads": {"c": {"type": "classification", "out_channels": 3, "scope": "image"}}})
     m = build(backbone="vit_tiny_patch16_224", **kw)
     assert_every_parameter_used(m, torch.randn(2, 3, 64, 64))
     feats = m.eval().features(torch.randn(1, 3, 64, 64))
@@ -263,11 +263,11 @@ def test_late_fusion_and_per_input_heads_use_every_parameter():
     m = build(decoder="deeplabv3plus", inputs=TWO, fusion={"type": "late", "op": "add"},
               num_classes=2)
     assert_every_parameter_used(m, two())
-    m = build(decoder="fpn", inputs={"t1": {"channels": 3}, "t2": {"channels": 3}},
+    m = build(decoder="fpn", inputs={"t1": {"in_channels": 3}, "t2": {"in_channels": 3}},
               fusion={"type": "intermediate", "op": "diff"},
-              heads={"c": {"type": "segmentation", "channels": 2},
-                     "s1": {"type": "segmentation", "channels": 4, "input": "t1"},
-                     "s2": {"type": "segmentation", "channels": 4, "input": "t2",
+              heads={"c": {"type": "segmentation", "out_channels": 2},
+                     "s1": {"type": "segmentation", "out_channels": 4, "input": "t1"},
+                     "s2": {"type": "segmentation", "out_channels": 4, "input": "t2",
                             "share": "s1"}})
     assert_every_parameter_used(m, {"t1": torch.randn(2, 3, 64, 64),
                                     "t2": torch.randn(2, 3, 64, 64)})
@@ -298,7 +298,7 @@ def test_export_minimum_size_when_inputs_are_padded_less_than_the_network_stride
     from manyseg.export import export_model
 
     m = build(backbone="pvt_v2_b0", num_classes=2,
-              inputs={"r0": {"channels": 2, "out_indices": [0]}}).eval()
+              inputs={"r0": {"in_channels": 2, "out_indices": [0]}}).eval()
     ep = export_model(m, {"r0": torch.randn(1, 2, 70, 75)})
     y = {"r0": torch.randn(1, 2, 97, 131)}
     torch.testing.assert_close(ep.module()(y), m(y), atol=1e-4, rtol=1e-4)
@@ -309,9 +309,9 @@ def test_an_input_nothing_reads_is_rejected():
     input's encoder would be trained for nothing."""
     with pytest.raises(ValueError, match="never be read"):
         build(inputs=TWO, fusion={"type": "late"},
-              heads={"c": {"type": "classification", "channels": 3, "scope": "image"}})
+              heads={"c": {"type": "classification", "out_channels": 3, "scope": "image"}})
     with pytest.raises(ValueError, match="never be read"):  # its only level is unread
-        build(inputs={"a": {"channels": 3}, "b": {"channels": 2, "out_indices": [0]}},
+        build(inputs={"a": {"in_channels": 3}, "b": {"in_channels": 2, "out_indices": [0]}},
               decoder="deeplabv3plus", num_classes=2)
 
 
@@ -319,11 +319,11 @@ def test_an_unread_input_sharing_a_read_encoder_is_allowed():
     """Siamese inputs: the second date's encoder is the first's, so leaving it unread wastes
     compute but leaves no parameter without a gradient."""
     def siamese(share_norm):
-        return build(inputs={"t1": {"channels": 3},
-                             "t2": {"channels": 3, "backbone": "shared:t1",
+        return build(inputs={"t1": {"in_channels": 3},
+                             "t2": {"in_channels": 3, "backbone": "shared:t1",
                                     "share_norm": share_norm}},
                      fusion={"type": "intermediate", "op": "diff"},
-                     heads={"lc1": {"type": "segmentation", "channels": 4, "input": "t1"}})
+                     heads={"lc1": {"type": "segmentation", "out_channels": 4, "input": "t1"}})
 
     assert_every_parameter_used(siamese(True), {"t1": torch.randn(2, 3, 64, 64),
                                                 "t2": torch.randn(2, 3, 64, 64)})
@@ -335,18 +335,18 @@ def test_an_unread_input_with_its_own_channel_adapter_is_rejected():
     """Sharing a read input's encoder is not enough when the input has its own adapter (a
     different band count): the adapter would get no gradient."""
     with pytest.raises(ValueError, match="never be read"):
-        build(inputs={"a": {"channels": 3}, "b": {"channels": 4, "backbone": "shared:a",
+        build(inputs={"a": {"in_channels": 3}, "b": {"in_channels": 4, "backbone": "shared:a",
                                                   "share_norm": True}},
               fusion={"type": "late"},
-              heads={"c": {"type": "classification", "channels": 3, "scope": "image"}})
+              heads={"c": {"type": "classification", "out_channels": 3, "scope": "image"}})
 
 
 def test_shared_per_input_decoders_mark_both_inputs_read():
     """One decoder shared by two per-input heads reads both inputs (Codex review)."""
-    m = build(inputs={"t1": {"channels": 3}, "t2": {"channels": 3}},
+    m = build(inputs={"t1": {"in_channels": 3}, "t2": {"in_channels": 3}},
               fusion={"type": "intermediate"},
-              heads={"s1": {"type": "segmentation", "channels": 4, "input": "t1"},
-                     "s2": {"type": "segmentation", "channels": 4, "input": "t2",
+              heads={"s1": {"type": "segmentation", "out_channels": 4, "input": "t1"},
+                     "s2": {"type": "segmentation", "out_channels": 4, "input": "t2",
                             "share": "s1"}})
     assert_every_parameter_used(m, {"t1": torch.randn(2, 3, 64, 64),
                                     "t2": torch.randn(2, 3, 64, 64)})
@@ -374,8 +374,8 @@ def test_same_grid_padding_uses_the_least_common_multiple():
 
 def test_select_heads_prunes_levels_only_the_dropped_heads_read():
     m = build(decoder="unet", inputs=TWO, fusion={"type": "intermediate", "op": "gated"},
-              heads={"seg": {"type": "segmentation", "channels": 2},
-                     "cls": {"type": "classification", "channels": 3, "scope": "image"}})
+              heads={"seg": {"type": "segmentation", "out_channels": 2},
+                     "cls": {"type": "classification", "out_channels": 3, "scope": "image"}})
     x = two()
     full = m.eval()(x)["cls"]
     m.select_heads(["cls"])
@@ -389,10 +389,10 @@ def test_deeper_levels_of_an_input_that_nothing_reads_are_rejected():
     fused: the blocks computing them would get no gradient. Limiting out_indices fixes it."""
     with pytest.raises(ValueError, match="out_indices"):
         build(backbone="mobilenetv3_small_100", num_classes=2, decoder="unet",
-              inputs={"a": {"channels": 3, "out_indices": [1, 2]}, "b": {"channels": 1}})
+              inputs={"a": {"in_channels": 3, "out_indices": [1, 2]}, "b": {"in_channels": 1}})
     m = build(backbone="mobilenetv3_small_100", num_classes=2, decoder="unet",
-              inputs={"a": {"channels": 3, "out_indices": [1, 2]},
-                      "b": {"channels": 1, "out_indices": [0, 1, 2]}})
+              inputs={"a": {"in_channels": 3, "out_indices": [1, 2]},
+                      "b": {"in_channels": 1, "out_indices": [0, 1, 2]}})
     assert_every_parameter_used(m, {"a": torch.randn(2, 3, 64, 64),
                                     "b": torch.randn(2, 1, 64, 64)})
 
@@ -402,8 +402,8 @@ def test_film_reaches_pixel_heads_that_read_the_encoder():
     the deepest encoder feature, as for image heads (the metadata encoder was unused)."""
     meta = {"kind": "vector", "conditioning": "film",
             "fields": {"d": {"type": "continuous", "mean": 0.0, "std": 1.0}}}
-    m = build(inputs={"img": {"channels": 3}, "meta": meta},
-              heads={"e": {"type": "regression", "channels": 2, "source": "encoder"}})
+    m = build(inputs={"img": {"in_channels": 3}, "meta": meta},
+              heads={"e": {"type": "regression", "out_channels": 2, "source": "encoder"}})
     assert_every_parameter_used(m, {"img": torch.randn(2, 3, 64, 64),
                                     "meta": torch.randn(2, 1)})
 
@@ -412,8 +412,8 @@ def test_select_heads_may_leave_inputs_unread():
     """At deployment the kept heads may ignore some inputs (here: late fusion, keeping only
     an image head drops the decoder that combined them); that is not an error."""
     m = build(decoder="upernet", inputs=TWO, fusion={"type": "late", "op": "add"},
-              heads={"cls": {"type": "classification", "channels": 3, "scope": "image"},
-                     "seg": {"type": "segmentation", "channels": 2}}).eval()
+              heads={"cls": {"type": "classification", "out_channels": 3, "scope": "image"},
+                     "seg": {"type": "segmentation", "out_channels": 2}}).eval()
     x = two()
     full = m(x)["cls"]
     torch.testing.assert_close(m.select_heads(["cls"])(x)["cls"], full)
@@ -424,3 +424,74 @@ def test_early_fusion_with_a_prunable_backbone():
     m = build(backbone="vit_tiny_patch16_224", decoder="deeplabv3plus", num_classes=2,
               inputs=TWO, fusion={"type": "early"})
     assert_every_parameter_used(m, two())
+
+
+@pytest.mark.parametrize("head,right", [
+    ({"type": "segmentation", "out_channels": 2, "scope": "image"}, "classification"),
+    ({"type": "classification", "out_channels": 2}, "segmentation")])
+def test_head_type_must_match_its_scope(head, right):
+    with pytest.raises(ValueError, match=right):
+        build(heads={"h": head})
+
+
+def test_old_channels_keys_name_their_replacement():
+    with pytest.raises(ValueError, match="in_channels"):
+        build(inputs={"a": {"channels": 3}}, num_classes=2)
+    with pytest.raises(ValueError, match="out_channels"):
+        build(heads={"h": {"type": "segmentation", "channels": 2}})
+    with pytest.raises(ValueError, match="num_features"):
+        build(inputs={"a": {"in_channels": 3}, "m": {"kind": "vector", "channels": 2}},
+              num_classes=2)
+
+
+def test_decoder_as_a_dict():
+    a = build(decoder={"type": "unet", "out_stride": 2}, num_classes=2).eval()
+    torch.manual_seed(0)
+    b = build(decoder="unet", decoder_kwargs={"out_stride": 2}, num_classes=2).eval()
+    assert a.decoder.out_spec == b.decoder.out_spec
+    with pytest.raises(ValueError, match="type"):
+        build(decoder={"out_stride": 2}, num_classes=2)
+    with pytest.raises(ValueError, match="out_stride"):
+        build(decoder={"type": "unet", "out_stride": 2}, decoder_kwargs={"out_stride": 1},
+              num_classes=2)
+
+
+def test_resize_nearest_rule():
+    """Exact floor(i * in / out); equal to F.interpolate(mode="nearest") whenever the output
+    is a multiple of the input, which is always the case with stride padding."""
+    from manyseg.utils.spatial import resize_nearest
+
+    torch.manual_seed(0)
+    for h, w in [(1, 1), (3, 5), (41, 33), (49, 66), (97, 131)]:
+        x = torch.randn(2, 3, h, w)
+        for size in [(2 * h - 1, 2 * w), (2 * h + 1, 2 * w - 1), (h // 2 + 1, 3 * w + 1)]:
+            rows = torch.arange(size[0]) * h // size[0]
+            cols = torch.arange(size[1]) * w // size[1]
+            assert torch.equal(resize_nearest(x, size), x[..., rows[:, None], cols[None, :]])
+        for size in [(2 * h, 2 * w), (h, w), (4 * h, 3 * w)]:
+            assert torch.equal(resize_nearest(x, size),
+                               torch.nn.functional.interpolate(x, size=size, mode="nearest"))
+
+
+@pytest.mark.slow
+@pytest.mark.cuda
+def test_nearest_upsampling_compiles_correctly_on_cuda():
+    """torch.compile(dynamic=True) on CUDA (torch 2.14) miscomputes F.interpolate(mode=
+    "nearest") when the output height is 2h - 1 and the width 2w; the decoders avoid it
+    (found by the GPU fuzzer: unet / fastai_unet with pad_to_stride=False)."""
+    if not torch.cuda.is_available():
+        pytest.skip("needs CUDA")
+    from torch import _dynamo
+
+    torch.backends.cudnn.allow_tf32 = False  # compare like with like
+    for decoder in ["unet", "fastai_unet", "fpn"]:
+        torch.manual_seed(0)
+        m = build(backbone="efficientnet_b0", in_channels=1, num_classes=5, decoder=decoder,
+                  pad_to_stride=False).eval().cuda()
+        _dynamo.reset()
+        c = torch.compile(m, dynamic=True)
+        with torch.no_grad():
+            for hw in [(70, 75), (97, 131), (81, 66)]:
+                x = torch.randn(2, 1, *hw, device="cuda")
+                a, b = c(x), m(x)  # the bug gave relative errors of 0.07 to 0.99
+                assert float((a - b).norm() / b.norm()) < 1e-3, (decoder, hw)

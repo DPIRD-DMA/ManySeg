@@ -37,7 +37,7 @@ def test_unet_matches_smp_unet(dkw):
 def test_fastai_unet_matches_fastai_dynamic_unet(dkw):
     ms = create_model(backbone="resnet34", pretrained=False, decoder="fastai_unet",
                       decoder_kwargs=dkw,
-                      heads={"logits": {"type": "segmentation", "channels": 3,
+                      heads={"logits": {"type": "segmentation", "out_channels": 3,
                                         "kernel_size": 1}})
     fa = get_provider("fastai").build(ModelSpec("unet", "resnet34", weights=None,
                                                 num_classes=3), img_size=(128, 128)).model

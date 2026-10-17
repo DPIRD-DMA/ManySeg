@@ -13,7 +13,7 @@ SPECS = (FeatureSpec(8, 4), FeatureSpec(16, 8), FeatureSpec(32, 16))
 
 def cond_model():
     return create_model(backbone="resnet18", pretrained=False, num_classes=2, inputs={
-        "img": {"channels": 3}, "meta": {"kind": "vector", "channels": 3}})
+        "img": {"in_channels": 3}, "meta": {"kind": "vector", "num_features": 3}})
 
 
 def test_probe_leaves_the_global_rng_untouched():

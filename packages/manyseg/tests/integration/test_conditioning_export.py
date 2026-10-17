@@ -13,8 +13,8 @@ FIELDS = {
     "latlon": {"type": "coords", "frequencies": 2},
     "sensor": {"type": "categorical", "num": 3},
 }
-HEADS = {"seg": {"type": "segmentation", "channels": 2},
-         "area": {"type": "regression", "channels": 1, "scope": "image"}}
+HEADS = {"seg": {"type": "segmentation", "out_channels": 2},
+         "area": {"type": "regression", "out_channels": 1, "scope": "image"}}
 MODES = {"film": "film", "head": {"mode": "head", "pixel": True}, "channels": "channels"}
 
 
@@ -29,7 +29,7 @@ def meta(n=1, seed=0, missing=False):
 
 
 def build(mode, rasters=None, heads=None, **kw):
-    rasters = rasters or {"img": {"channels": 3}}
+    rasters = rasters or {"img": {"in_channels": 3}}
     model = create_model(backbone="resnet18", pretrained=False, heads=heads or HEADS,
                          inputs={**rasters, "meta": {"kind": "vector", "fields": FIELDS,
                                                      "conditioning": MODES[mode]}}, **kw)
@@ -59,8 +59,8 @@ def test_dynamic_shapes_give_vectors_no_spatial_dims():
 @pytest.mark.parametrize("mode", ["film", "head"])
 def test_export_image_only_model_with_vector_input(mode):
     """Classification / regression models (no decoder) with metadata export like the rest."""
-    heads = {"cls": {"type": "classification", "channels": 5, "scope": "image"},
-             "harvest": {"type": "regression", "channels": 1, "scope": "image"}}
+    heads = {"cls": {"type": "classification", "out_channels": 5, "scope": "image"},
+             "harvest": {"type": "regression", "out_channels": 1, "scope": "image"}}
     model = build(mode, heads=heads)
     ep = export_model(model, {"img": torch.randn(1, 3, 64, 96), "meta": meta()})
     check(ep.module(), model, [{"img": torch.randn(1, 3, *hw), "meta": meta(seed=s)}
@@ -76,7 +76,7 @@ def test_export_dynamic_hw_with_vector_input(mode):
 
 
 def test_export_with_mask_dynamic_batch_and_fusion():
-    model = build("film", rasters={"a": {"channels": 4}, "b": {"channels": 2}})
+    model = build("film", rasters={"a": {"in_channels": 4}, "b": {"in_channels": 2}})
     ex = {"a": torch.randn(2, 4, 64, 96), "b": torch.randn(2, 2, 64, 96), "meta": meta(2),
           "meta_mask": torch.ones(2, 4)}
     ep = export_model(model, ex, dynamic_batch=True)
@@ -119,7 +119,7 @@ def test_compile_fullgraph_dynamic(mode):
 
 def test_compile_training_step_with_field_dropout():
     model = create_model(backbone="resnet18", pretrained=False, num_classes=2, inputs={
-        "img": {"channels": 3},
+        "img": {"in_channels": 3},
         "meta": {"kind": "vector", "fields": FIELDS, "dropout": 0.3}}).train()
     compiled = torch.compile(model, fullgraph=True, dynamic=True, backend="aot_eager")
     compiled({"img": torch.randn(2, 3, 64, 64), "meta": meta(2)}).mean().backward()

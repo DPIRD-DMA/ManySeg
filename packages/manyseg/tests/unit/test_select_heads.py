@@ -5,9 +5,9 @@ import pytest
 import torch
 from manyseg import create_model
 
-HEADS = {"seg": {"type": "segmentation", "channels": 4},
-         "edges": {"type": "segmentation", "channels": 1, "decoder": "fpn"},
-         "labels": {"type": "classification", "channels": 4, "scope": "image"}}
+HEADS = {"seg": {"type": "segmentation", "out_channels": 4},
+         "edges": {"type": "segmentation", "out_channels": 1, "decoder": "fpn"},
+         "labels": {"type": "classification", "out_channels": 4, "scope": "image"}}
 
 
 def model(**kw):
@@ -41,7 +41,7 @@ def test_keeping_a_pixel_head_keeps_its_decoder():
 
 
 def test_select_heads_with_metadata_conditioning():
-    inputs = {"img": {"channels": 3},
+    inputs = {"img": {"in_channels": 3},
               "meta": {"kind": "vector", "fields": {"doy": {"type": "cyclic",
                                                             "period": 365.25}}}}
     m = create_model(backbone="resnet18", pretrained=False, heads=HEADS, inputs=inputs).eval()

@@ -40,7 +40,7 @@ class MetadataEncoder(nn.Module):
                  channels: int | None = None, dim: int | None = 64, dropout: float = 0.0) -> None:
         super().__init__()
         if (fields is None) == (channels is None):
-            raise ValueError("a vector input takes exactly one of 'fields' or 'channels'")
+            raise ValueError("a vector input takes exactly one of 'fields' or 'num_features'")
         if not 0.0 <= dropout <= 1.0:
             raise ValueError(f"dropout must be in [0, 1], got {dropout}")
         if fields is not None:

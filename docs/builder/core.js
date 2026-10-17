@@ -693,7 +693,7 @@ function generateCode(s, D) {
         if (r.temporal === "concat") c.temporal = { type: "concat", dates: r.dates };
         else if (r.temporal !== "mean") c.temporal = r.temporal;
       }
-      c.channels = r.channels;
+      c.in_channels = r.channels;
       if (perInputWeights) {
         c.backbone = r.backbone;
         if (r.backbone.startsWith("shared:")) { if (r.share_norm) c.share_norm = true; }
@@ -725,7 +725,7 @@ function generateCode(s, D) {
   } else {
     const heads = {};
     for (const h of s.heads) {
-      const c = { type: h.type, channels: h.channels };
+      const c = { type: h.type, out_channels: h.channels };
       if (h.scope === "image") c.scope = "image";
       if (h.scope === "pixel" && h.scale !== 1) c.scale = h.scale;
       if (h.uncertainty && h.type === "regression") c.uncertainty = true;

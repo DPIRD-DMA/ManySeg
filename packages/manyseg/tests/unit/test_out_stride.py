@@ -191,7 +191,7 @@ def test_film_identity_at_init_with_reduced_out_stride(name, out_stride):
     vec = {"kind": "vector", "fields": {"doy": {"type": "cyclic", "period": 365.25}}}
     kw = dict(backbone="resnet18", pretrained=False, num_classes=2, decoder=name,
               decoder_kwargs={"out_stride": out_stride})
-    cond = create_model(inputs={"img": {"channels": 3}, "meta": vec}, **kw).eval()
+    cond = create_model(inputs={"img": {"in_channels": 3}, "meta": vec}, **kw).eval()
     plain = create_model(**kw)
     plain.load_state_dict({k: v for k, v in cond.state_dict().items()
                            if not k.startswith("conditioner.")})
@@ -203,10 +203,10 @@ def test_film_identity_at_init_with_reduced_out_stride(name, out_stride):
 
 
 def test_task_decoders_with_different_out_strides():
-    heads = {"seg": {"type": "segmentation", "channels": 3},
-             "edges": {"type": "segmentation", "channels": 1,
+    heads = {"seg": {"type": "segmentation", "out_channels": 3},
+             "edges": {"type": "segmentation", "out_channels": 1,
                        "decoder": {"type": "unet", "out_stride": 2}},
-             "depth": {"type": "regression", "channels": 1,
+             "depth": {"type": "regression", "out_channels": 1,
                        "decoder": {"type": "fastai_unet", "out_stride": 4}}}
     model = create_model(backbone="resnet18", pretrained=False, heads=heads,
                          decoder_kwargs={"out_stride": 4}).eval()
@@ -219,7 +219,7 @@ def test_task_decoders_with_different_out_strides():
 
 
 def test_multi_input_outputs_follow_the_primary_grid():
-    inputs = {"optical": {"channels": 4}, "sar": {"channels": 2, "alignment": "same_extent"}}
+    inputs = {"optical": {"in_channels": 4}, "sar": {"in_channels": 2, "alignment": "same_extent"}}
     model = create_model(inputs=inputs, backbone="resnet18", pretrained=False, num_classes=2,
                          decoder_kwargs={"out_stride": 2}).eval()
     out = model({"optical": torch.randn(1, 4, 65, 97), "sar": torch.randn(1, 2, 33, 49)})

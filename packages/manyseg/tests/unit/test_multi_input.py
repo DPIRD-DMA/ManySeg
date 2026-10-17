@@ -6,8 +6,8 @@ from manyseg import create_model
 from manyseg.fusion import FUSION_OPS
 
 TWO = {
-    "optical": {"channels": 4, "backbone": "resnet18"},
-    "sar": {"channels": 2, "backbone": "convnext_atto"},
+    "optical": {"in_channels": 4, "backbone": "resnet18"},
+    "sar": {"in_channels": 2, "backbone": "convnext_atto"},
 }
 
 
@@ -47,14 +47,14 @@ def test_primary_only_levels_when_secondary_lacks_stride():
 
 def test_early_fusion_single_backbone():
     model = make(fusion={"type": "early"}, inputs={
-        "optical": {"channels": 4}, "sar": {"channels": 2}}, backbone="resnet18").eval()
+        "optical": {"in_channels": 4}, "sar": {"in_channels": 2}}, backbone="resnet18").eval()
     assert model.backbone.backbone.in_channels == 6
     assert model(batch()).shape == (2, 3, 64, 96)
 
 
 def test_early_fusion_rejects_mismatched_sizes():
     model = make(fusion={"type": "early"}, inputs={
-        "optical": {"channels": 4}, "sar": {"channels": 2}}, backbone="resnet18").eval()
+        "optical": {"in_channels": 4}, "sar": {"in_channels": 2}}, backbone="resnet18").eval()
     with pytest.raises(ValueError, match="same_grid"):
         model(batch(sar_hw=(32, 48)))
 
@@ -73,8 +73,8 @@ def test_same_grid_default_rejects_mismatch():
 
 
 def test_same_extent_lower_resolution_input():
-    inputs = {"optical": {"channels": 4, "backbone": "resnet18"},
-              "sar": {"channels": 2, "backbone": "resnet18", "alignment": "same_extent"}}
+    inputs = {"optical": {"in_channels": 4, "backbone": "resnet18"},
+              "sar": {"in_channels": 2, "backbone": "resnet18", "alignment": "same_extent"}}
     model = make(inputs=inputs).eval()
     assert model(batch(64, 96, sar_hw=(32, 48))).shape == (2, 3, 64, 96)
     assert model(batch(65, 97, sar_hw=(33, 49))).shape == (2, 3, 65, 97)
@@ -90,8 +90,8 @@ def _centroid(grad):
 def test_same_extent_is_spatially_aligned():
     """Output pixel (i, j) depends on the half-resolution input around (i/2, j/2)."""
     torch.manual_seed(0)
-    inputs = {"optical": {"channels": 1, "backbone": "resnet18"},
-              "sar": {"channels": 1, "backbone": "resnet18", "alignment": "same_extent"}}
+    inputs = {"optical": {"in_channels": 1, "backbone": "resnet18"},
+              "sar": {"in_channels": 1, "backbone": "resnet18", "alignment": "same_extent"}}
     model = make(inputs=inputs, fusion={"type": "intermediate", "op": "add"},
                  decoder_kwargs={"upsample": "aligned"}).eval()
     errs = []
@@ -105,8 +105,8 @@ def test_same_extent_is_spatially_aligned():
 
 
 def test_shared_encoder_reuses_weights():
-    inputs = {"t0": {"channels": 3, "backbone": "resnet18"},
-              "t1": {"channels": 3, "backbone": "shared:t0"}}
+    inputs = {"t0": {"in_channels": 3, "backbone": "resnet18"},
+              "t1": {"in_channels": 3, "backbone": "shared:t0"}}
     model = make(inputs=inputs, fusion={"type": "intermediate", "op": "add"})
     enc = model.backbone.encoders
     # Weights are shared (the same Parameter objects); BatchNorm is per input (E015).
@@ -123,8 +123,8 @@ def test_shared_encoder_reuses_weights():
 
 
 def test_shared_encoder_different_channels_uses_projection():
-    inputs = {"a": {"channels": 3, "backbone": "resnet18"},
-              "b": {"channels": 5, "backbone": "shared:a"}}
+    inputs = {"a": {"in_channels": 3, "backbone": "resnet18"},
+              "b": {"in_channels": 5, "backbone": "shared:a"}}
     model = make(inputs=inputs).eval()
     assert model({"a": torch.randn(1, 3, 64, 64), "b": torch.randn(1, 5, 64, 64)}).shape == \
         (1, 3, 64, 64)
@@ -151,8 +151,8 @@ def test_tensor_input_rejected_for_multi_input_model():
 
 def test_multi_input_multi_head():
     model = make(num_classes=None, heads={
-        "seg": {"type": "segmentation", "channels": 2},
-        "area": {"type": "regression", "channels": 1, "scope": "image"}}).eval()
+        "seg": {"type": "segmentation", "out_channels": 2},
+        "area": {"type": "regression", "out_channels": 1, "scope": "image"}}).eval()
     out = model(batch())
     assert out["seg"].shape == (2, 2, 64, 96) and out["area"].shape == (2, 1)
 
@@ -163,7 +163,7 @@ def test_unknown_fusion_type():
 
 
 def test_top_level_backbone_is_default_for_inputs():
-    model = make(inputs={"a": {"channels": 3}, "b": {"channels": 1}}, backbone="resnet18")
+    model = make(inputs={"a": {"in_channels": 3}, "b": {"in_channels": 1}}, backbone="resnet18")
     enc = model.backbone.encoders
     assert enc["a"] is not enc["b"]
     assert enc["a"].name == enc["b"].name == "resnet18"
@@ -173,9 +173,9 @@ def test_top_level_backbone_is_default_for_inputs():
 
 def test_early_fusion_uses_agreeing_per_input_encoder_keys():
     """Regression: per-input encoder keys were silently dropped (resnet18 built instead)."""
-    same = {"channels": 3, "backbone": "convnext_atto"}
+    same = {"in_channels": 3, "backbone": "convnext_atto"}
     model = make(fusion={"type": "early"}, backbone="resnet18",
-                 inputs={"a": dict(same), "b": {**same, "channels": 2}})
+                 inputs={"a": dict(same), "b": {**same, "in_channels": 2}})
     assert model.backbone.backbone.name == "convnext_atto"
 
 
@@ -185,7 +185,7 @@ def test_early_fusion_uses_agreeing_per_input_encoder_keys():
 def test_early_fusion_rejects_conflicting_per_input_encoder_keys(key, va, vb):
     with pytest.raises(ValueError, match="early fusion"):
         make(fusion={"type": "early"}, backbone="resnet18",
-             inputs={"a": {"channels": 3, key: va}, "b": {"channels": 2, key: vb}})
+             inputs={"a": {"in_channels": 3, key: va}, "b": {"in_channels": 2, key: vb}})
 
 
 @pytest.mark.parametrize("key,value", [("rgb_indices", [0, 1, 2]),
@@ -193,17 +193,19 @@ def test_early_fusion_rejects_conflicting_per_input_encoder_keys(key, va, vb):
 def test_early_fusion_rejects_per_input_only_keys(key, value):
     with pytest.raises(ValueError, match="early fusion"):
         make(fusion={"type": "early"}, backbone="resnet18",
-             inputs={"a": {"channels": 3, key: value}, "b": {"channels": 2}})
+             inputs={"a": {"in_channels": 3, key: value}, "b": {"in_channels": 2}})
 
 
 def test_late_fusion_image_head_reads_the_primary_deepest_level():
     """Regression: DenseModel._deepest searched every input's levels, so an image head built
     for the primary's 256-ch /16 level was fed the other input's 512-ch /32 level."""
     model = make(fusion={"type": "late"}, num_classes=None,
-                 inputs={"a": {"channels": 4, "backbone": "resnet18", "out_indices": (0, 1, 2, 3)},
-                         "sar": {"channels": 2, "backbone": "resnet18"}},
-                 heads={"seg": {"type": "segmentation", "channels": 2},
-                        "cls": {"type": "classification", "channels": 4, "scope": "image"}}).eval()
+                 inputs={"a": {"in_channels": 4, "backbone": "resnet18",
+                               "out_indices": (0, 1, 2, 3)},
+                         "sar": {"in_channels": 2, "backbone": "resnet18"}},
+                 heads={"seg": {"type": "segmentation", "out_channels": 2},
+                        "cls": {"type": "classification", "out_channels": 4,
+                                "scope": "image"}}).eval()
     out = model({"a": torch.randn(1, 4, 64, 64), "sar": torch.randn(1, 2, 64, 64)})
     assert out["cls"].shape == (1, 4)
     a, b = model.backbone.groups[0]
@@ -238,8 +240,8 @@ def test_late_fusion_same_extent_maps_valid_region_onto_valid_region():
 def test_late_fusion_same_extent_end_to_end_alignment():
     """Through create_model: a half-resolution same_extent input is aligned by extent."""
     model = make(fusion={"type": "late", "op": "add"},
-                 inputs={"optical": {"channels": 4, "backbone": "resnet18"},
-                         "sar": {"channels": 2, "backbone": "resnet18",
+                 inputs={"optical": {"in_channels": 4, "backbone": "resnet18"},
+                         "sar": {"in_channels": 2, "backbone": "resnet18",
                                  "alignment": "same_extent"}}).eval()
     out = model(batch(257, 301, n=1, sar_hw=(129, 151)))
     assert out.shape == (1, 3, 257, 301)
@@ -250,8 +252,8 @@ def test_shared_encoder_keeps_batchnorm_statistics_per_input():
     """Regression (E015): one BatchNorm shared by inputs with different statistics blends its
     running statistics, so evaluation used the blend for every input and the model collapsed
     (val 0.50-0.65 vs 0.89). Shared encoders now keep BN per input."""
-    inputs = {"t0": {"channels": 3, "backbone": "resnet18"},
-              "t1": {"channels": 3, "backbone": "shared:t0"}}
+    inputs = {"t0": {"in_channels": 3, "backbone": "resnet18"},
+              "t1": {"in_channels": 3, "backbone": "shared:t0"}}
     model = make(inputs=inputs, fusion={"type": "intermediate", "op": "add"}).train()
     for _ in range(3):
         model({"t0": torch.randn(2, 3, 64, 64), "t1": 5 + 3 * torch.randn(2, 3, 64, 64)})
@@ -261,12 +263,12 @@ def test_shared_encoder_keeps_batchnorm_statistics_per_input():
 
 
 def test_share_norm_true_keeps_one_module():
-    inputs = {"t0": {"channels": 3, "backbone": "resnet18"},
-              "t1": {"channels": 3, "backbone": "shared:t0", "share_norm": True}}
+    inputs = {"t0": {"in_channels": 3, "backbone": "resnet18"},
+              "t1": {"in_channels": 3, "backbone": "shared:t0", "share_norm": True}}
     model = make(inputs=inputs, fusion={"type": "intermediate", "op": "add"})
     assert model.backbone.encoders["t0"] is model.backbone.encoders["t1"]
 
 
 def test_share_norm_requires_shared_backbone():
     with pytest.raises(ValueError, match="share_norm"):
-        make(inputs={"a": {"channels": 3}, "b": {"channels": 3, "share_norm": True}})
+        make(inputs={"a": {"in_channels": 3}, "b": {"in_channels": 3, "share_norm": True}})

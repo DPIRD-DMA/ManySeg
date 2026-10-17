@@ -27,7 +27,7 @@ def ceil_size(hw, s):
 
 
 def scaled_heads(channels=2, scales=SCALES):
-    return {f"s{round(1 / s)}": {"type": "segmentation", "channels": channels, "scale": s}
+    return {f"s{round(1 / s)}": {"type": "segmentation", "out_channels": channels, "scale": s}
             for s in scales}
 
 
@@ -58,7 +58,7 @@ def test_default_scale_is_unchanged():
     a = create_model(backbone="resnet18", pretrained=False, num_classes=3).eval()
     torch.manual_seed(0)
     b = create_model(backbone="resnet18", pretrained=False,
-                     heads={"y": {"type": "segmentation", "channels": 3, "scale": 1}}).eval()
+                     heads={"y": {"type": "segmentation", "out_channels": 3, "scale": 1}}).eval()
     x = torch.randn(1, 3, 65, 97)
     torch.testing.assert_close(a(x), b(x)["y"], rtol=0, atol=0)
 
@@ -67,13 +67,13 @@ def test_default_scale_is_unchanged():
 def test_invalid_scale_rejected(bad):
     with pytest.raises(ValueError, match="scale"):
         create_model(backbone="resnet18", pretrained=False,
-                     heads={"y": {"type": "segmentation", "channels": 1, "scale": bad}})
+                     heads={"y": {"type": "segmentation", "out_channels": 1, "scale": bad}})
 
 
 def test_image_heads_reject_scale():
     with pytest.raises(ValueError, match="scale"):
         create_model(backbone="resnet18", pretrained=False,
-                     heads={"y": {"type": "classification", "channels": 3, "scope": "image",
+                     heads={"y": {"type": "classification", "out_channels": 3, "scope": "image",
                                   "scale": 0.5}})
 
 
@@ -210,7 +210,7 @@ def _scaled(decoder="unet", scale=1, **dk):
     torch.manual_seed(1)
     model = create_model(backbone="resnet18", pretrained=False, decoder=decoder,
                          decoder_kwargs=dk,
-                         heads={"y": {"type": "segmentation", "channels": 3, "scale": scale}})
+                         heads={"y": {"type": "segmentation", "out_channels": 3, "scale": scale}})
     model.single_output = "y"
     return model
 
@@ -243,7 +243,7 @@ def test_alignment_default_upsampling_bias_stays_bounded(decoder, out_stride, sc
 # --- multi-input, task decoders, conditioning --------------------------------------------------
 
 def test_multi_input_scaled_heads_follow_the_primary_grid():
-    inputs = {"optical": {"channels": 4}, "sar": {"channels": 2, "alignment": "same_extent"}}
+    inputs = {"optical": {"in_channels": 4}, "sar": {"in_channels": 2, "alignment": "same_extent"}}
     model = create_model(inputs=inputs, backbone="resnet18", pretrained=False,
                          heads=scaled_heads()).eval()
     out = model({"optical": torch.randn(1, 4, 65, 97), "sar": torch.randn(1, 2, 33, 49)})
@@ -252,12 +252,12 @@ def test_multi_input_scaled_heads_follow_the_primary_grid():
 
 
 def test_task_decoders_with_scales_and_out_strides():
-    heads = {"seg": {"type": "segmentation", "channels": 3, "scale": 0.25},
-             "edges": {"type": "segmentation", "channels": 1,
+    heads = {"seg": {"type": "segmentation", "out_channels": 3, "scale": 0.25},
+             "edges": {"type": "segmentation", "out_channels": 1,
                        "decoder": {"type": "unet", "out_stride": 2}},
-             "density": {"type": "regression", "channels": 1, "scale": 0.125,
+             "density": {"type": "regression", "out_channels": 1, "scale": 0.125,
                          "decoder": {"type": "fastai_unet", "out_stride": 4}},
-             "area": {"type": "regression", "channels": 1, "scope": "image"}}
+             "area": {"type": "regression", "out_channels": 1, "scope": "image"}}
     model = create_model(backbone="resnet18", pretrained=False, heads=heads,
                          decoder_kwargs={"out_stride": 4}).eval()
     out = model(torch.randn(2, 3, 65, 97))
@@ -268,10 +268,10 @@ def test_task_decoders_with_scales_and_out_strides():
 
 def test_film_identity_at_init_with_scaled_head():
     vec = {"kind": "vector", "fields": {"doy": {"type": "cyclic", "period": 365.25}}}
-    heads = {"y": {"type": "segmentation", "channels": 2, "scale": 0.25}}
+    heads = {"y": {"type": "segmentation", "out_channels": 2, "scale": 0.25}}
     kw = dict(backbone="resnet18", pretrained=False, heads=heads,
               decoder_kwargs={"out_stride": 4})
-    cond = create_model(inputs={"img": {"channels": 3}, "meta": vec}, **kw).eval()
+    cond = create_model(inputs={"img": {"in_channels": 3}, "meta": vec}, **kw).eval()
     plain = create_model(**kw)
     plain.load_state_dict({k: v for k, v in cond.state_dict().items()
                            if not k.startswith("conditioner.")})
@@ -292,10 +292,10 @@ def test_image_head_init_std():
     """``init_std``: truncated-normal weights and zero bias (timm's ViT/ConvNeXt/PVT classifier
     init); default keeps PyTorch's Linear init."""
     torch.manual_seed(0)
-    heads = {"cls": {"type": "classification", "channels": 37, "scope": "image",
+    heads = {"cls": {"type": "classification", "out_channels": 37, "scope": "image",
                      "init_std": 0.02}}
     fc = create_model(backbone="resnet18", pretrained=False, heads=heads).heads["cls"].fc
     assert torch.all(fc.bias == 0) and abs(float(fc.weight.std()) - 0.02) < 0.002
     plain = create_model(backbone="resnet18", pretrained=False, heads={
-        "cls": {"type": "classification", "channels": 37, "scope": "image"}}).heads["cls"].fc
+        "cls": {"type": "classification", "out_channels": 37, "scope": "image"}}).heads["cls"].fc
     assert float(plain.bias.abs().sum()) > 0

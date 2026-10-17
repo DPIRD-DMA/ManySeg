@@ -19,8 +19,20 @@ from ..registry import check_module_names
 from .dense import DenseModel
 
 FUSION_TYPES = ("early", "intermediate", "late")
-_INPUT_KEYS = {"channels", "backbone", "pretrained", "channel_adapter", "alignment", "share_norm",
-               "backbone_kwargs", "out_indices", "rgb_indices", "kind", "temporal"}
+_INPUT_KEYS = {"in_channels", "backbone", "pretrained", "channel_adapter", "alignment",
+               "share_norm", "backbone_kwargs", "out_indices", "rgb_indices", "kind", "temporal"}
+
+
+def check_input_keys(name: str, cfg: Mapping) -> None:
+    """A raster or time-series input config: known keys, ``in_channels`` given."""
+    if "channels" in cfg:
+        raise ValueError(f"input {name!r}: 'channels' was renamed 'in_channels' (heads: "
+                         "'out_channels'; vector inputs: 'num_features')")
+    unknown = set(cfg) - _INPUT_KEYS
+    if unknown:
+        raise ValueError(f"input {name!r}: unknown keys {sorted(unknown)}")
+    if "in_channels" not in cfg:
+        raise ValueError(f"input {name!r}: 'in_channels' is required")
 
 
 def share_weights(encoder: nn.Module) -> nn.Module:
@@ -44,11 +56,7 @@ def _build_inputs(inputs, fusion, *, backbone, pretrained, channel_adapter, out_
     if ftype not in FUSION_TYPES:
         raise ValueError(f"unknown fusion type {ftype!r}; choose from {FUSION_TYPES}")
     for n, cfg in inputs.items():
-        unknown = set(cfg) - _INPUT_KEYS
-        if unknown:
-            raise ValueError(f"input {n!r}: unknown keys {sorted(unknown)}")
-        if "channels" not in cfg:
-            raise ValueError(f"input {n!r}: 'channels' is required")
+        check_input_keys(n, cfg)
         if cfg.get("kind", "raster") not in ("raster", "timeseries"):
             raise ValueError(f"input {n!r}: kind {cfg['kind']!r} is not a raster kind")
         if "temporal" in cfg and cfg.get("kind") != "timeseries":
@@ -102,8 +110,8 @@ def _build_inputs(inputs, fusion, *, backbone, pretrained, channel_adapter, out_
             if cfg.get("alignment", "same_grid") != "same_grid":
                 raise ValueError(f"early fusion stacks channels, so every input must be "
                                  f"same_grid; input {n!r} is {cfg['alignment']!r}")
-        total = sum(cfg["channels"] for cfg in inputs.values())
-        channels = {n: cfg["channels"] for n, cfg in inputs.items()}
+        total = sum(cfg["in_channels"] for cfg in inputs.values())
+        channels = {n: cfg["in_channels"] for n, cfg in inputs.items()}
         return EarlyFusionEncoder(list(inputs), make_bb(shared_cfg, total), channels), ftype, {}
 
     encoders, adapters = {}, {}
@@ -121,13 +129,13 @@ def _build_inputs(inputs, fusion, *, backbone, pretrained, channel_adapter, out_
             # the blend to every input (E015: val 0.50-0.65 vs 0.89).
             encoders[n] = (encoders[target] if cfg.get("share_norm", False)
                            else share_weights(encoders[target]))
-            if cfg["channels"] != encoders[target].in_channels:
-                adapters[n] = ProjectionAdapter(cfg["channels"], encoders[target].in_channels)
+            if cfg["in_channels"] != encoders[target].in_channels:
+                adapters[n] = ProjectionAdapter(cfg["in_channels"], encoders[target].in_channels)
         else:
             if "share_norm" in cfg:
                 raise ValueError(f"input {n!r}: 'share_norm' only applies to a "
                                  "'shared:<input>' backbone")
-            encoders[n] = make_bb(cfg, cfg["channels"])
+            encoders[n] = make_bb(cfg, cfg["in_channels"])
             if n in series:
                 kind, opts = parse_temporal(n, cfg.get("temporal", "mean"))
                 encoders[n] = TemporalEncoder(encoders[n], kind, opts)
@@ -155,7 +163,7 @@ def create_model(
     channel_adapter: str = "repeat",
     out_indices: Sequence[int] | None = None,
     backbone_kwargs: Mapping[str, Any] | None = None,
-    decoder: str | Callable[..., nn.Module] = "unet",
+    decoder: str | Mapping[str, Any] | Callable[..., nn.Module] = "unet",
     decoder_kwargs: Mapping[str, Any] | None = None,
     num_classes: int | None = None,
     heads: Mapping[str, Mapping[str, Any]] | None = None,
@@ -163,11 +171,23 @@ def create_model(
 ) -> DenseModel:
     """Build a dense prediction model.
 
-    Exactly one of ``num_classes`` (returns a Tensor) or ``heads`` (returns a dict) is required.
+    Exactly one of ``num_classes`` or ``heads`` is required. With ``num_classes`` the model
+    returns a Tensor; with ``heads`` a ``dict[str, Tensor]`` keyed by head name, even for a
+    single head.
     See ``docs/api_design.md``.
     """
     if (num_classes is None) == (heads is None):
         raise ValueError("pass exactly one of num_classes= or heads=")
+    if isinstance(decoder, Mapping):  # {"type": "unet", **kwargs}, as for per-head decoders
+        d = dict(decoder)
+        if "type" not in d:
+            raise ValueError("decoder={...} needs a 'type', e.g. {'type': 'unet', 'out_stride': 2}")
+        both = set(d) & set(decoder_kwargs or {})
+        if both:
+            raise ValueError(f"decoder keys {sorted(both)} given both in decoder={{...}} and "
+                             "decoder_kwargs")
+        decoder = d.pop("type")
+        decoder_kwargs = {**dict(decoder_kwargs or {}), **d}
     if heads is not None:
         check_module_names("head", heads)
     if inputs is not None:
@@ -230,7 +250,7 @@ def create_model(
 
     single = None
     if num_classes is not None:
-        heads = {"logits": {"type": "segmentation", "channels": num_classes}}
+        heads = {"logits": {"type": "segmentation", "out_channels": num_classes}}
         single = "logits"
     heads = {n: dict(cfg) for n, cfg in heads.items()}
     # Per-input heads ("input": <raster input>) read that input's own encoder features through

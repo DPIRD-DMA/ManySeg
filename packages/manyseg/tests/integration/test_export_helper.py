@@ -27,7 +27,7 @@ def test_export_model_dynamic_batch():
 
 
 def test_export_model_dict_inputs():
-    model = create_model(inputs={"a": {"channels": 4}, "b": {"channels": 2}},
+    model = create_model(inputs={"a": {"in_channels": 4}, "b": {"in_channels": 2}},
                          backbone="resnet18", pretrained=False, num_classes=2).eval()
     ex = {"a": torch.randn(1, 4, 64, 96), "b": torch.randn(1, 2, 64, 96)}
     ep = export_model(model, ex)
@@ -82,8 +82,8 @@ def test_presets_export_dynamic_hw(name):
 @pytest.mark.parametrize("agg", ["mean", "attention"])
 def test_timeseries_export_dynamic_dates_and_size(agg):
     """Time series export with dynamic H/W *and* number of dates, alongside a plain raster."""
-    inputs = {"s2": {"kind": "timeseries", "channels": 4, "temporal": agg},
-              "dem": {"channels": 1}}
+    inputs = {"s2": {"kind": "timeseries", "in_channels": 4, "temporal": agg},
+              "dem": {"in_channels": 1}}
     model = create_model(backbone="resnet18", pretrained=False, num_classes=2,
                          inputs=inputs).eval()
     with torch.no_grad():
@@ -102,11 +102,11 @@ def test_timeseries_export_dynamic_dates_and_size(agg):
 
 
 def test_semantic_change_model_exports():
-    inputs = {"t1": {"channels": 3},
-              "t2": {"channels": 3, "backbone": "shared:t1", "share_norm": True}}
-    heads = {"change": {"type": "segmentation", "channels": 2},
-             "lc1": {"type": "segmentation", "channels": 7, "input": "t1"},
-             "lc2": {"type": "segmentation", "channels": 7, "input": "t2", "share": "lc1"}}
+    inputs = {"t1": {"in_channels": 3},
+              "t2": {"in_channels": 3, "backbone": "shared:t1", "share_norm": True}}
+    heads = {"change": {"type": "segmentation", "out_channels": 2},
+             "lc1": {"type": "segmentation", "out_channels": 7, "input": "t1"},
+             "lc2": {"type": "segmentation", "out_channels": 7, "input": "t2", "share": "lc1"}}
     model = create_model(backbone="resnet18", pretrained=False, inputs=inputs, heads=heads,
                          fusion={"type": "intermediate", "op": "concat_diff"}).eval()
     ex = {"t1": torch.randn(1, 3, 64, 96), "t2": torch.randn(1, 3, 64, 96)}

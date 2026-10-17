@@ -62,7 +62,7 @@ def sample_config(rng: random.Random) -> dict:
         n_raster = rng.choice([1, 2, 2, 3])
         for i in range(n_raster):
             name = f"r{i}"
-            c = {"channels": rng.choice([1, 2, 3, 4, 13])}
+            c = {"in_channels": rng.choice([1, 2, 3, 4, 13])}
             if i and _maybe(rng, 0.35):
                 c["alignment"] = rng.choice(["same_extent", "same_grid"])
             if _maybe(rng, 0.2):
@@ -89,7 +89,7 @@ def sample_config(rng: random.Random) -> dict:
                                {"mode": "channels", "target": rng.choice(sorted(inputs))}])
             v = {"kind": "vector", "conditioning": mode}
             if _maybe(rng, 0.3):
-                v["channels"] = rng.choice([1, 3])
+                v["num_features"] = rng.choice([1, 3])
             else:
                 v["fields"] = dict(rng.sample(sorted(FIELDS.items()), rng.randint(1, 4)))
             if _maybe(rng, 0.2):
@@ -132,7 +132,9 @@ def sample_config(rng: random.Random) -> dict:
         name = f"h{j}"
         scope = "image" if _maybe(rng, 0.25) else "pixel"
         t = rng.choice(["segmentation", "segmentation", "regression", "classification"])
-        h: dict = {"type": t, "channels": rng.choice([1, 2, 5])}
+        if t != "regression":  # segmentation is per pixel, classification per image
+            t = "classification" if scope == "image" else "segmentation"
+        h: dict = {"type": t, "out_channels": rng.choice([1, 2, 5])}
         if scope == "image":
             h["scope"] = "image"
             if _maybe(rng, 0.2):
@@ -154,7 +156,7 @@ def sample_config(rng: random.Random) -> dict:
     rasters = [n for n, c in cfg.get("inputs", {}).items() if c.get("kind") != "vector"]
     if len(rasters) > 1 and _maybe(rng, 0.4):  # per-input (semantic change style) heads
         k = rng.choice([1, 2])
-        base = {"type": "segmentation", "channels": rng.choice([2, 4])}
+        base = {"type": "segmentation", "out_channels": rng.choice([2, 4])}
         for i, r in enumerate(rng.sample(rasters, k)):
             hc = dict(base, input=r)
             if i and _maybe(rng, 0.6):
@@ -181,8 +183,8 @@ def make_inputs(cfg: dict, rng: random.Random, batch: int, hw=None,
     x = {}
     for n, c in cfg["inputs"].items():
         if c.get("kind") == "vector":
-            if "channels" in c:
-                x[n] = torch.randn(batch, c["channels"], generator=g)
+            if "num_features" in c:
+                x[n] = torch.randn(batch, c["num_features"], generator=g)
             else:
                 cols = []
                 for spec in c["fields"].values():
@@ -203,7 +205,7 @@ def make_inputs(cfg: dict, rng: random.Random, batch: int, hw=None,
                  else rng.randint(2, 4))
             if like is not None and (agg == "diff" or isinstance(agg, dict)):
                 t = like[n].shape[1]  # fixed date count; others get a new T
-            x[n] = torch.randn(batch, t, c["channels"], hh, ww, generator=g)
+            x[n] = torch.randn(batch, t, c["in_channels"], hh, ww, generator=g)
             if like is not None:
                 if f"{n}_mask" in like:
                     m = torch.rand(batch, t, generator=g) > 0.3
@@ -219,7 +221,7 @@ def make_inputs(cfg: dict, rng: random.Random, batch: int, hw=None,
             if c.get("temporal") == "attention" or _maybe(rng, 0.3):
                 x[f"{n}_dates"] = torch.rand(batch, t, generator=g) * 365
         else:
-            x[n] = torch.randn(batch, c["channels"], hh, ww, generator=g)
+            x[n] = torch.randn(batch, c["in_channels"], hh, ww, generator=g)
     return x
 
 
@@ -258,12 +260,12 @@ def build(cfg: dict, seed: int):
 
 def expected_shapes(cfg, model, batch, hw) -> dict:
     heads = cfg.get("heads") or {"logits": {"type": "segmentation",
-                                            "channels": cfg["num_classes"]}}
+                                            "out_channels": cfg["num_classes"]}}
     out = {}
     for n, h in heads.items():
         if n not in model.heads:
             continue
-        ch = h["channels"] * (2 if h.get("uncertainty") else 1)
+        ch = h["out_channels"] * (2 if h.get("uncertainty") else 1)
         if h.get("scope") == "image":
             out[n] = (batch, ch)
         else:

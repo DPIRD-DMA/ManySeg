@@ -35,41 +35,41 @@ def roundtrip(model, x, tmp_path, **kw):
     return loaded
 
 
-SAR = {"channels": 2, "backbone": "resnet18", "alignment": "same_extent"}
+SAR = {"in_channels": 2, "backbone": "resnet18", "alignment": "same_extent"}
 FIELDS = {"doy": {"type": "cyclic", "period": 365.25}}
 
 CASES = {
     "single": (dict(in_channels=4, num_classes=3), lambda: torch.randn(2, 4, 64, 64)),
     "heads": (dict(in_channels=3, heads={
-        "seg": {"type": "segmentation", "channels": 3},
-        "height": {"type": "regression", "channels": 1, "scale": 0.25, "uncertainty": True},
-        "scene": {"type": "classification", "channels": 5, "scope": "image"}}),
+        "seg": {"type": "segmentation", "out_channels": 3},
+        "height": {"type": "regression", "out_channels": 1, "scale": 0.25, "uncertainty": True},
+        "scene": {"type": "classification", "out_channels": 5, "scope": "image"}}),
         lambda: torch.randn(2, 3, 64, 64)),
-    "two_inputs": (dict(inputs={"s2": {"channels": 4, "backbone": "resnet18"}, "s1": SAR},
+    "two_inputs": (dict(inputs={"s2": {"in_channels": 4, "backbone": "resnet18"}, "s1": SAR},
                         fusion={"type": "intermediate", "op": "gated"}, num_classes=2),
                    lambda: {"s2": torch.randn(2, 4, 64, 64), "s1": torch.randn(2, 2, 32, 32)}),
-    "shared_backbone": (dict(inputs={"t1": {"channels": 3, "backbone": "resnet18"},
-                                     "t2": {"channels": 3, "backbone": "shared:t1"}},
+    "shared_backbone": (dict(inputs={"t1": {"in_channels": 3, "backbone": "resnet18"},
+                                     "t2": {"in_channels": 3, "backbone": "shared:t1"}},
                              fusion={"type": "intermediate", "op": "concat"}, num_classes=2),
                         lambda: {"t1": torch.randn(2, 3, 64, 64),
                                  "t2": torch.randn(2, 3, 64, 64)}),
     # shared modules appear under several names (found by the config fuzzer: safetensors'
     # save_model / load_model chose different names for shared BatchNorm buffers)
-    "shared_heads": (dict(inputs={"t1": {"channels": 3}, "t2": {"channels": 3}},
-                          heads={"c": {"type": "segmentation", "channels": 2},
-                                 "s1": {"type": "segmentation", "channels": 4, "input": "t1"},
-                                 "s2": {"type": "segmentation", "channels": 4, "input": "t2",
+    "shared_heads": (dict(inputs={"t1": {"in_channels": 3}, "t2": {"in_channels": 3}},
+                          heads={"c": {"type": "segmentation", "out_channels": 2},
+                                 "s1": {"type": "segmentation", "out_channels": 4, "input": "t1"},
+                                 "s2": {"type": "segmentation", "out_channels": 4, "input": "t2",
                                         "share": "s1"}}, decoder="unetplusplus"),
                      lambda: {"t1": torch.randn(2, 3, 64, 64), "t2": torch.randn(2, 3, 64, 64)}),
-    "shared_norms": (dict(inputs={"a": {"channels": 1, "backbone": "efficientnet_b0"},
-                                  "b": {"channels": 2, "backbone": "shared:a",
+    "shared_norms": (dict(inputs={"a": {"in_channels": 1, "backbone": "efficientnet_b0"},
+                                  "b": {"in_channels": 2, "backbone": "shared:a",
                                         "share_norm": True}},
                           num_classes=2, decoder="unetplusplus"),
                      lambda: {"a": torch.randn(2, 1, 64, 64), "b": torch.randn(2, 2, 64, 64)}),
-    "time_series": (dict(inputs={"ts": {"kind": "timeseries", "channels": 3,
+    "time_series": (dict(inputs={"ts": {"kind": "timeseries", "in_channels": 3,
                                         "temporal": "attention"}}, num_classes=2),
                     lambda: {"ts": torch.randn(2, 4, 3, 64, 64)}),
-    "metadata": (dict(inputs={"img": {"channels": 3}, "meta": {"kind": "vector",
+    "metadata": (dict(inputs={"img": {"in_channels": 3}, "meta": {"kind": "vector",
                                                                 "fields": FIELDS}},
                       num_classes=2),
                  lambda: {"img": torch.randn(2, 3, 64, 64), "meta": torch.rand(2, 1) * 365}),
@@ -86,8 +86,8 @@ def test_roundtrip_gives_identical_outputs(case, tmp_path):
 
 def test_selected_heads_survive(tmp_path):
     model = create_model(backbone="resnet18", pretrained=False, in_channels=3, heads={
-        "seg": {"type": "segmentation", "channels": 3},
-        "aux": {"type": "regression", "channels": 1}})
+        "seg": {"type": "segmentation", "out_channels": 3},
+        "aux": {"type": "regression", "out_channels": 1}})
     model.select_heads(["seg"])
     loaded = roundtrip(model, torch.randn(1, 3, 64, 64), tmp_path)
     assert list(loaded.heads) == ["seg"]
@@ -95,8 +95,8 @@ def test_selected_heads_survive(tmp_path):
 
 def test_metadata_and_tiling_spec(tmp_path):
     model = create_model(backbone="resnet18", pretrained=False, in_channels=3, heads={
-        "seg": {"type": "segmentation", "channels": 3},
-        "height": {"type": "regression", "channels": 1}})
+        "seg": {"type": "segmentation", "out_channels": 3},
+        "height": {"type": "regression", "out_channels": 1}})
     norm = [{"type": "scale", "value": 10000}, {"type": "zscore", "scope": "tile"}]
     path = manyseg.save(model, tmp_path / "m.safetensors", normalize=norm,
                         activations={"seg": "softmax"}, classes={"seg": ["a", "b", "c"]},
@@ -145,8 +145,8 @@ def test_weights_normalisation_on_request():
 
 def test_no_silent_defaults(tmp_path):
     model = create_model(backbone="resnet18", pretrained=False, in_channels=3, heads={
-        "seg": {"type": "segmentation", "channels": 3},
-        "height": {"type": "regression", "channels": 1}})
+        "seg": {"type": "segmentation", "out_channels": 3},
+        "height": {"type": "regression", "out_channels": 1}})
     with pytest.raises(ValueError, match="'seg'"):  # softmax or sigmoid must be stated
         manyseg.save(model, tmp_path / "a.safetensors", normalize=[])
     with pytest.warns(UserWarning, match="No normalisation"):
@@ -214,3 +214,28 @@ def test_errors(tmp_path):
                   metadata={"manyseg": json.dumps(meta)})
         with pytest.raises(ValueError, match="format|lacks"):
             manyseg.read_metadata(tmp_path / "bad.safetensors")
+
+
+def test_format_1_files_with_the_old_channels_keys_still_load(tmp_path):
+    """Files saved before 0.1.0 (format 1) said "channels" for input bands, head outputs and
+    vector widths; load() migrates their stored config."""
+    from safetensors.torch import load_file, save_file
+
+    model = create_model(backbone="resnet18", pretrained=False,
+                         inputs={"img": {"in_channels": 3},
+                                 "meta": {"kind": "vector", "num_features": 2}},
+                         heads={"seg": {"type": "segmentation", "out_channels": 2}})
+    path = manyseg.save(model.eval(), tmp_path / "new.safetensors",
+                        activations={"seg": "softmax"})
+    with safe_open(str(path), framework="pt") as f:
+        stored = dict(f.metadata())
+    meta = json.loads(stored["manyseg"])
+    meta["format"] = 1
+    cfg = meta["create_model"]
+    cfg["inputs"] = {"img": {"channels": 3}, "meta": {"kind": "vector", "channels": 2}}
+    cfg["heads"] = {"seg": {"type": "segmentation", "channels": 2}}
+    old = tmp_path / "old.safetensors"
+    save_file(load_file(str(path)), str(old), metadata={**stored, "manyseg": json.dumps(meta)})
+    x = {"img": torch.randn(1, 3, 64, 64), "meta": torch.randn(1, 2)}
+    loaded = manyseg.load(old)
+    assert torch.equal(outputs(model, x)["seg"], outputs(loaded, x)["seg"])

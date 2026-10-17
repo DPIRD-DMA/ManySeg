@@ -103,10 +103,10 @@ model = create_model(
     in_channels=4,
     decoder="unet",
     heads={
-        "segmentation": {"type": "segmentation", "channels": 3},
-        "height":       {"type": "regression", "channels": 1},              # per-pixel
-        "water_area":   {"type": "regression", "channels": 1, "scope": "image"},
-        "scene":        {"type": "classification", "channels": 10, "scope": "image"},
+        "segmentation": {"type": "segmentation", "out_channels": 3},
+        "height":       {"type": "regression", "out_channels": 1},              # per-pixel
+        "water_area":   {"type": "regression", "out_channels": 1, "scope": "image"},
+        "scene":        {"type": "classification", "out_channels": 10, "scope": "image"},
     },
 )
 out = model(x)
@@ -114,8 +114,11 @@ out["segmentation"]  # (N, 3, H, W)
 out["water_area"]    # (N, 1)
 ```
 
-Heads return raw logits or values: activations and losses live outside the model. `scope` is
-`"pixel"` (default) or `"image"`. Image heads pool the deepest encoder feature by default
+Heads return raw logits or values: activations and losses live outside the model. Config keys
+name directions: an input's bands are `in_channels`, a head's outputs `out_channels`, and a
+raw metadata vector's width `num_features`. `scope` is `"pixel"` (default) or `"image"`;
+`"segmentation"` heads are pixel heads and `"classification"` heads image heads (the other
+pairing is an error), while `"regression"` works for either. Image heads pool the deepest encoder feature by default
 (`"source": "decoder"` selects the decoder output). `{"type": "regression", "uncertainty": True}`
 returns `2·C` channels, `[mean, log_variance]`, for heteroscedastic losses such as Gaussian NLL.
 
@@ -130,14 +133,14 @@ resolutions, fusion, metadata conditioning (`film` modulates the pooled feature;
 ```python
 model = create_model(
     inputs={
-        "s2_10m": {"channels": 4, "backbone": "resnet50"},
-        "s2_20m": {"channels": 6, "backbone": "resnet50", "alignment": "same_extent"},
+        "s2_10m": {"in_channels": 4, "backbone": "resnet50"},
+        "s2_20m": {"in_channels": 6, "backbone": "resnet50", "alignment": "same_extent"},
         "meta":   {"kind": "vector", "fields": {"doy": {"type": "cyclic", "period": 365.25}}},
     },
     fusion={"type": "intermediate", "op": "concat"},
     heads={
-        "crop":    {"type": "classification", "channels": 10, "scope": "image"},
-        "harvest": {"type": "regression", "channels": 1, "scope": "image", "uncertainty": True},
+        "crop":    {"type": "classification", "out_channels": 10, "scope": "image"},
+        "harvest": {"type": "regression", "out_channels": 1, "scope": "image", "uncertainty": True},
     },
 )
 out = model({"s2_10m": a, "s2_20m": b, "meta": doy})   # crop (N, 10), harvest (N, 2)
@@ -176,7 +179,7 @@ model already returns raw logits:
 
 ```python
 model = create_model(backbone="resnet34", in_channels=13,
-                     heads={"masks": {"type": "segmentation", "channels": 4}})
+                     heads={"masks": {"type": "segmentation", "out_channels": 4}})
 logits = model(x)["masks"]                                  # (N, 4, H, W)
 loss = F.binary_cross_entropy_with_logits(logits, targets)  # targets (N, 4, H, W) in {0, 1}
 present = logits.sigmoid() > 0.5                            # per class, may overlap
@@ -223,7 +226,7 @@ Weights download through `torch.hub` (hash-checked, cached); every model paramet
 the checkpoint. `in_channels` must equal the weights' band count and the bands must be in the
 listed order; normalise with the listed `mean` / `std` (in `units`), and clip to [0, 1] where
 `clip` is set, to match pretraining. Bands your data lacks can be filled with the pretraining
-mean (0 after normalising). Works per input in multi-input models (`inputs={"s2": {"channels":
+mean (0 after normalising). Works per input in multi-input models (`inputs={"s2": {"in_channels":
 13, "pretrained": "ssl4eo_s2_moco"}, ...}`).
 
 **Attribution.** The weights are the authors', under the listed licences (CC BY 4.0, ODC-BY),
@@ -245,8 +248,8 @@ cover them.
 ```python
 model = create_model(
     inputs={
-        "optical": {"channels": 4, "backbone": "convnext_tiny", "pretrained": True},
-        "sar":     {"channels": 2, "backbone": "resnet18",      "pretrained": True,
+        "optical": {"in_channels": 4, "backbone": "convnext_tiny", "pretrained": True},
+        "sar":     {"in_channels": 2, "backbone": "resnet18",      "pretrained": True,
                     "alignment": "same_extent"},       # may be at a different resolution
     },
     fusion={"type": "intermediate", "op": "gated", "strides": [8, 16, 32]},
@@ -288,7 +291,7 @@ out = model({"optical": o, "sar": s})
 
 #### Time series
 
-`{"kind": "timeseries", "channels": C, "temporal": ...}` takes `(B, T, C, H, W)` for any `T`.
+`{"kind": "timeseries", "in_channels": C, "temporal": ...}` takes `(B, T, C, H, W)` for any `T`.
 One 2D encoder (any timm backbone, pretrained weights unchanged) runs on every date, and each
 feature level is aggregated over time, so fusion, decoders and heads see an ordinary pyramid.
 Optional entries in the input dict: `"<name>_mask"` `(B, T)` bool (False = missing, cloudy or
@@ -297,10 +300,10 @@ padded date) and `"<name>_dates"` `(B, T)` days (e.g. day of year).
 ```python
 model = create_model(
     inputs={
-        "s2":  {"kind": "timeseries", "channels": 10, "temporal": "attention"},
-        "dem": {"channels": 1, "alignment": "same_extent"},
+        "s2":  {"kind": "timeseries", "in_channels": 10, "temporal": "attention"},
+        "dem": {"in_channels": 1, "alignment": "same_extent"},
     },
-    heads={"crop": {"type": "segmentation", "channels": 20}},
+    heads={"crop": {"type": "segmentation", "out_channels": 20}},
 )
 out = model({"s2": s2, "s2_mask": valid, "s2_dates": doy, "dem": dem})
 ```
@@ -349,12 +352,12 @@ decoder and head, so both dates are mapped by the same weights:
 ```python
 model = create_model(
     backbone="resnet34",
-    inputs={"t1": {"channels": 3},
-            "t2": {"channels": 3, "backbone": "shared:t1", "share_norm": True}},
+    inputs={"t1": {"in_channels": 3},
+            "t2": {"in_channels": 3, "backbone": "shared:t1", "share_norm": True}},
     fusion={"type": "intermediate", "op": "concat_diff"},
-    heads={"change": {"type": "segmentation", "channels": 2},          # fused features
-           "lc1": {"type": "segmentation", "channels": 7, "input": "t1"},
-           "lc2": {"type": "segmentation", "channels": 7, "input": "t2", "share": "lc1"}},
+    heads={"change": {"type": "segmentation", "out_channels": 2},          # fused features
+           "lc1": {"type": "segmentation", "out_channels": 7, "input": "t1"},
+           "lc2": {"type": "segmentation", "out_channels": 7, "input": "t2", "share": "lc1"}},
 )
 out = model({"t1": before, "t2": after})   # change, lc1 (date 1), lc2 (date 2)
 ```
@@ -391,7 +394,7 @@ Pretrained encoders are not modified.
 model = create_model(
     backbone="resnet34",
     inputs={
-        "s2":   {"channels": 13},
+        "s2":   {"in_channels": 13},
         "meta": {"kind": "vector", "fields": {
             "doy":      {"type": "cyclic", "period": 365.25},
             "sun_elev": {"type": "continuous", "mean": 45.0, "std": 15.0},
@@ -406,7 +409,7 @@ meta = model.conditioner.encoders["meta"].pack(
 out = model({"s2": s2, "meta": meta})                   # optional: "meta_mask": (B, 4)
 ```
 
-`{"kind": "vector", "channels": N}` declares `N` pre-normalised floats instead of `fields`.
+`{"kind": "vector", "num_features": N}` declares `N` pre-normalised floats instead of `fields`.
 
 **Input convention.** A vector input is **one packed float tensor `(B, N)`**. Its columns are
 the fields in declaration order: `coords` takes two columns (lat, then lon), `categorical`
@@ -495,6 +498,9 @@ line up exactly. ManySeg handles this explicitly:
 
 Output resolution can be traded for speed and memory in two independent places.
 
+The decoder can also be given as one dict, like a per-head decoder:
+`decoder={"type": "unet", "out_stride": 2}` is `decoder="unet", decoder_kwargs={"out_stride": 2}`.
+
 **Decoder `out_stride`** (`decoder_kwargs={"out_stride": s}` or a task decoder's config). The
 U-Net family (`unet`, `unetplusplus`, `fastai_unet`) accepts 1 (default), 2, 4, ... (a power of
 two below the deepest stride). Stages finer than `s` are not built, so they cost no parameters
@@ -540,7 +546,7 @@ the last block, followed by fastai's residual block (about +7k parameters). It r
 > spectral threshold or index rule, e.g. water, burnt area, bare soil, snow), and validate it on
 > your data. It is not a general improvement, so the default stays SMP-identical.
 
-**Head `scale`** (`{"type": ..., "channels": ..., "scale": s}`, pixel heads only; image heads
+**Head `scale`** (`{"type": ..., "out_channels": ..., "scale": s}`, pixel heads only; image heads
 reject it). `s` ∈ {1, 1/2, 1/4, 1/8}, default 1. With `f = 1/s`, a primary input of `H × W`
 gives an output of `ceil(H / f) × ceil(W / f)` (ceil, so every input pixel belongs to exactly
 one output pixel; floor would drop the last partial row and column). The head reads a decoder
@@ -718,10 +724,10 @@ vector and an FPN decoder of its own for one head:
 
 ```python
 create_model(backbone="resnet18", inputs={
-    "s2": {"channels": 4},
+    "s2": {"in_channels": 4},
     "meta": {"kind": "vector", "fields": {"doy": {"type": "cyclic", "period": 365.25}}}},
-    heads={"mask": {"type": "segmentation", "channels": 2},
-           "boundary": {"type": "segmentation", "channels": 1, "decoder": "fpn"}})
+    heads={"mask": {"type": "segmentation", "out_channels": 2},
+           "boundary": {"type": "segmentation", "out_channels": 1, "decoder": "fpn"}})
 ```
 
 ```mermaid

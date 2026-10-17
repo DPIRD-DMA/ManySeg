@@ -25,7 +25,7 @@ import torch
 from . import __version__
 from .models import DenseModel
 
-FORMAT = 1
+FORMAT = 2  # 2: in_channels / out_channels / num_features (1: "channels"; migrated on read)
 _KEY = "manyseg"
 ACTIVATIONS = ("softmax", "sigmoid", "none")
 
@@ -226,7 +226,28 @@ def read_metadata(path: str | Path) -> dict:
     missing = {"create_model", "heads", "activations"} - set(meta)
     if missing:
         raise ValueError(f"{path}: metadata lacks {sorted(missing)}.")
+    if fmt < 2:
+        meta["create_model"] = _migrate_v1(meta["create_model"])
     return meta
+
+
+def _migrate_v1(config: dict) -> dict:
+    """Format 1 (before 0.1.0) used ``"channels"`` for input bands, head outputs and raw
+    vector widths; format 2 says ``in_channels`` / ``out_channels`` / ``num_features``."""
+    config = dict(config)
+
+    def rename(cfg, new):
+        cfg = dict(cfg)
+        if "channels" in cfg:
+            cfg[new] = cfg.pop("channels")
+        return cfg
+
+    if config.get("inputs"):
+        config["inputs"] = {n: rename(c, "num_features" if c.get("kind") == "vector"
+                                      else "in_channels") for n, c in config["inputs"].items()}
+    if config.get("heads"):
+        config["heads"] = {n: rename(c, "out_channels") for n, c in config["heads"].items()}
+    return config
 
 
 def _no_download(config: dict) -> dict:

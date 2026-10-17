@@ -83,8 +83,13 @@ def create_head(spec_decoder: FeatureSpec, spec_encoder: FeatureSpec, cfg: dict)
     """Build a head from a config dict; returns (module, source) with source in
     {"decoder", "encoder"}. Image-scope heads default to the deepest encoder feature."""
     cfg = dict(cfg)
-    kind = HEADS.get_or_raise(cfg.pop("type", "segmentation"))
-    channels = cfg.pop("channels")
+    if "channels" in cfg:
+        raise ValueError("head 'channels' was renamed 'out_channels'")
+    if "out_channels" not in cfg:
+        raise ValueError("a head needs 'out_channels'")
+    kind_name = cfg.pop("type", "segmentation")
+    kind = HEADS.get_or_raise(kind_name)
+    channels = cfg.pop("out_channels")
     uncertainty = bool(cfg.pop("uncertainty", False))
     if uncertainty:
         # Heteroscedastic regression: [mean (C), log-variance (C)]; the loss (e.g. Gaussian NLL)
@@ -93,6 +98,11 @@ def create_head(spec_decoder: FeatureSpec, spec_encoder: FeatureSpec, cfg: dict)
             raise ValueError("uncertainty=True is only supported for regression heads")
         channels = 2 * channels
     scope = cfg.pop("scope", "pixel")
+    # segmentation predicts per pixel, classification per image; regression is either
+    if (kind_name, scope) in (("segmentation", "image"), ("classification", "pixel")):
+        right = "classification" if scope == "image" else "segmentation"
+        raise ValueError(f"a {scope}-scope head of type {kind_name!r} is ambiguous: use "
+                         f"'type': {right!r}")
     if scope != "pixel" and "scale" in cfg:
         raise ValueError("'scale' applies to pixel heads only; image-scope heads have no grid")
     if scope == "pixel":

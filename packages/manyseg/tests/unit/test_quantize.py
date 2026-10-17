@@ -41,8 +41,8 @@ def test_compare_outputs_detects_change():
 
 def test_compare_outputs_dict_heads_are_prefixed():
     model = create_model(backbone="resnet18", pretrained=False,
-                         heads={"seg": {"type": "segmentation", "channels": 3},
-                                "height": {"type": "regression", "channels": 1}}).eval()
+                         heads={"seg": {"type": "segmentation", "out_channels": 3},
+                                "height": {"type": "regression", "out_channels": 1}}).eval()
     r = compare_outputs(model, model, _batches(1))
     assert r["seg/argmax_agreement"] == 1.0
     assert r["height/max_abs_diff"] == 0.0

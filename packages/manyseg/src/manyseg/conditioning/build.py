@@ -13,7 +13,7 @@ from torch import nn
 from .encoder import MetadataEncoder
 from .inject import Conditioner, DecoderFiLM, FiLM, used_levels
 
-VECTOR_KEYS = {"kind", "fields", "channels", "dim", "dropout", "conditioning"}
+VECTOR_KEYS = {"kind", "fields", "num_features", "dim", "dropout", "conditioning"}
 MODES = ("film", "head", "channels", "token")
 _MODE_OPTIONS = {"film": {"on"}, "head": {"pixel"}, "channels": {"target"}, "token": set()}
 
@@ -44,6 +44,9 @@ def split_inputs(inputs: Mapping[str, Mapping]) -> tuple[dict, dict]:
 def parse_vector(name: str, cfg: Mapping) -> tuple[Callable[[], MetadataEncoder], str, dict]:
     """``(encoder factory, mode, mode options)``. Encoders are constructed only after the
     raster model, so the raster weights do not depend on the metadata configuration."""
+    if "channels" in cfg:
+        raise ValueError(f"vector input {name!r}: 'channels' was renamed 'num_features' (the "
+                         "number of raw values per sample)")
     unknown = set(cfg) - VECTOR_KEYS
     if unknown:
         raise ValueError(f"vector input {name!r}: unknown keys {sorted(unknown)}")
@@ -63,7 +66,7 @@ def parse_vector(name: str, cfg: Mapping) -> tuple[Callable[[], MetadataEncoder]
     if mode == "channels" and "dim" in cfg:
         raise ValueError(f"vector input {name!r}: 'dim' does not apply to 'channels' mode "
                          "(the field encodings themselves become channels)")
-    make = functools.partial(MetadataEncoder, cfg.get("fields"), channels=cfg.get("channels"),
+    make = functools.partial(MetadataEncoder, cfg.get("fields"), channels=cfg.get("num_features"),
                              dim=None if mode == "channels" else cfg.get("dim", 64),
                              dropout=cfg.get("dropout", 0.0))
     with torch.random.fork_rng(devices=[]):
@@ -74,6 +77,8 @@ def parse_vector(name: str, cfg: Mapping) -> tuple[Callable[[], MetadataEncoder]
 def build_conditioned_model(create_model: Callable[..., nn.Module], *, inputs, fusion, backbone,
                             pretrained, channel_adapter, out_indices, backbone_kwargs,
                             heads, num_classes, **common: Any) -> nn.Module:
+    from ..models.factory import check_input_keys
+
     rasters, vectors = split_inputs(inputs)
     shared = dict(pretrained=pretrained, channel_adapter=channel_adapter,
                   out_indices=out_indices, heads=heads, num_classes=num_classes, **common)
@@ -100,14 +105,13 @@ def build_conditioned_model(create_model: Callable[..., nn.Module], *, inputs, f
             if t not in rasters:
                 raise ValueError(f"vector input {n!r}: channels target {t!r} is not a raster "
                                  f"input; choose from {list(rasters)}")
-            if "channels" not in rasters[t]:
-                raise ValueError(f"input {t!r}: 'channels' is required")
+            check_input_keys(t, rasters[t])
             if rasters[t].get("kind") == "timeseries":
                 raise ValueError(f"vector input {n!r}: 'channels' conditioning cannot target the "
                                  f"time series {t!r}; use 'film' or 'head'")
             with torch.random.fork_rng(devices=[]):
                 width = makers[n]().width
-            rasters[t] = {**rasters[t], "channels": rasters[t]["channels"] + width}
+            rasters[t] = {**rasters[t], "in_channels": rasters[t]["in_channels"] + width}
             targets[n] = t
 
     single = None
@@ -115,19 +119,13 @@ def build_conditioned_model(create_model: Callable[..., nn.Module], *, inputs, f
             next(iter(rasters.values())).get("kind") != "timeseries":
         # One raster: build the ordinary single-input model (plain-tensor backbone), so every
         # decoder (including those that need the input image) and adapter works unchanged.
-        from ..models.factory import _INPUT_KEYS
-
         (single, cfg), = rasters.items()
-        unknown = set(cfg) - _INPUT_KEYS
-        if unknown:
-            raise ValueError(f"input {single!r}: unknown keys {sorted(unknown)}")
-        if "channels" not in cfg:
-            raise ValueError(f"input {single!r}: 'channels' is required")
+        check_input_keys(single, cfg)
         bkw = dict(cfg.get("backbone_kwargs", backbone_kwargs) or {})
         if cfg.get("rgb_indices") is not None:
             bkw["rgb_indices"] = cfg["rgb_indices"]
         model = create_model(
-            backbone=cfg.get("backbone", backbone), in_channels=cfg["channels"],
+            backbone=cfg.get("backbone", backbone), in_channels=cfg["in_channels"],
             backbone_kwargs=bkw,
             **{**shared, **{k: cfg[k] for k in ("pretrained", "channel_adapter", "out_indices")
                             if k in cfg}})
@@ -168,7 +166,7 @@ def build_conditioned_model(create_model: Callable[..., nn.Module], *, inputs, f
     if head_names:
         dim = sum(encoders[n].dim for n in head_names)
         pixel = any(opts[n].get("pixel", False) for n in head_names)
-        cfgs = heads if heads is not None else {"logits": {"channels": num_classes}}
+        cfgs = heads if heads is not None else {"logits": {"out_channels": num_classes}}
         bias_of = {}  # shared heads share their bias layer
         for name, head in model.heads.items():
             scope = getattr(head, "scope", "pixel")
@@ -177,7 +175,7 @@ def build_conditioned_model(create_model: Callable[..., nn.Module], *, inputs, f
                 continue
             if scope == "image" or (scope == "pixel" and pixel):
                 cfg = cfgs[name]
-                out = cfg["channels"] * (2 if cfg.get("uncertainty", False) else 1)
+                out = cfg["out_channels"] * (2 if cfg.get("uncertainty", False) else 1)
                 head_bias[name] = bias_of[id(head)] = nn.Linear(dim, out)
                 nn.init.zeros_(head_bias[name].weight)
                 nn.init.zeros_(head_bias[name].bias)

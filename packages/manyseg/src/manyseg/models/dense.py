@@ -80,6 +80,15 @@ class DenseModel(nn.Module):
     def feature_specs(self):
         return self.backbone.feature_specs
 
+    def pack_metadata(self, name: str, values) -> Tensor:
+        """Per-field values ``{field: (B,) or (B, columns)}`` for the vector input ``name``
+        -> the packed ``(B, N)`` tensor the model takes (NaN marks a missing value)."""
+        encoders = getattr(self.conditioner, "encoders", {})
+        if name not in encoders:
+            raise ValueError(f"{name!r} is not a vector input of this model; vector inputs: "
+                             f"{list(encoders)}")
+        return encoders[name].pack(values)
+
     def select_heads(self, names) -> DenseModel:
         """Keep only the heads ``names`` (in place; returns the model): their decoders stay,
         decoders, FiLM and head-bias layers only the dropped heads used are removed. For

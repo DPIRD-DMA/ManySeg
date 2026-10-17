@@ -20,9 +20,9 @@ def test_single_input_model():
 
 def test_heads_scopes_and_scales():
     spec = build(in_channels=3, heads={
-        "seg": {"type": "segmentation", "channels": 3},
-        "height": {"type": "regression", "channels": 1, "scale": 0.25},
-        "scene": {"type": "classification", "channels": 5, "scope": "image"},
+        "seg": {"type": "segmentation", "out_channels": 3},
+        "height": {"type": "regression", "out_channels": 1, "scale": 0.25},
+        "scene": {"type": "classification", "out_channels": 5, "scope": "image"},
     }).tiling_spec()
     assert spec["outputs"]["seg"] == {"scope": "pixel", "kind": "segmentation", "scale": 1.0}
     assert spec["outputs"]["height"]["scale"] == 0.25
@@ -32,9 +32,9 @@ def test_heads_scopes_and_scales():
 def test_multi_input_alignment_time_series_and_vectors():
     spec = build(
         inputs={
-            "s2": {"channels": 4, "backbone": "resnet18"},
-            "s1": {"channels": 2, "backbone": "resnet18", "alignment": "same_extent"},
-            "ts": {"kind": "timeseries", "channels": 3, "backbone": "resnet18"},
+            "s2": {"in_channels": 4, "backbone": "resnet18"},
+            "s1": {"in_channels": 2, "backbone": "resnet18", "alignment": "same_extent"},
+            "ts": {"kind": "timeseries", "in_channels": 3, "backbone": "resnet18"},
             "meta": {"kind": "vector", "fields": {"doy": {"type": "cyclic", "period": 365.25}}},
         },
         fusion={"type": "intermediate", "op": "concat"},
@@ -52,8 +52,8 @@ def test_multi_input_alignment_time_series_and_vectors():
 
 def test_single_output_lists_only_the_returned_head():
     model = build(in_channels=3, heads={
-        "mask": {"type": "segmentation", "channels": 2},
-        "aux": {"type": "regression", "channels": 1, "scale": 0.25},
+        "mask": {"type": "segmentation", "out_channels": 2},
+        "aux": {"type": "regression", "out_channels": 1, "scale": 0.25},
     })
     model.single_output = "mask"  # as num_classes= models are built
     assert list(model.tiling_spec()["outputs"]) == ["mask"]
@@ -65,7 +65,8 @@ def test_pad_to_stride_false_needs_no_padding_multiple():
 
 
 def test_single_time_series_input():
-    spec = build(inputs={"ts": {"kind": "timeseries", "channels": 3}}, num_classes=2).tiling_spec()
+    spec = build(inputs={"ts": {"kind": "timeseries", "in_channels": 3}},
+                 num_classes=2).tiling_spec()
     assert spec["inputs"] == {"ts": {"kind": "timeseries", "scale": 1.0}}
 
 

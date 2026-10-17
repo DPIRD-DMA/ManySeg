@@ -112,21 +112,21 @@ class ManySegProvider(Provider):
             # (no decoder is built), returned as a single (N, K) tensor.
             if "heads" in opts:
                 raise ValueError("output='image' builds its own head; use 'head' for options")
-            opts["heads"] = {"logits": {"type": "classification", "channels": spec.num_classes,
+            opts["heads"] = {"logits": {"type": "classification", "out_channels": spec.num_classes,
                                         "scope": "image", **(head or {})}}
             n_cls, head = None, head or {}
         elif head is not None:
             if n_cls is None:
                 raise ValueError("'head' configures the single logits head; with 'heads', put "
                                  "the options in each head's config")
-            opts["heads"] = {"logits": {"type": "segmentation", "channels": n_cls, **head}}
+            opts["heads"] = {"logits": {"type": "segmentation", "out_channels": n_cls, **head}}
             n_cls = None
         groups = opts.pop("band_groups", None)
         group_inputs = opts.pop("band_group_inputs", {})
         if groups is not None:
             # One stacked tensor (e.g. 13 S2 bands resampled to 10 m) -> one input per native
             # resolution group, coarse groups block-averaged and aligned by extent (E015).
-            inputs = {n: {"channels": len(g["bands"]),
+            inputs = {n: {"in_channels": len(g["bands"]),
                           "alignment": "same_extent" if g.get("factor", 1) > 1 else "same_grid",
                           **group_inputs.get(n, {})} for n, g in groups.items()}
             opts.setdefault("fusion", {"type": "intermediate"})
@@ -138,7 +138,7 @@ class ManySegProvider(Provider):
             enc, dec = split_params(model, inner.backbone.encoders)
             return BuiltModel(model, enc, dec, fingerprint_module(inner.backbone))
         if spec.input_mode == "dict" and spec.inputs:
-            inputs = {n: {"channels": c} for n, c in spec.inputs.items()}
+            inputs = {n: {"in_channels": c} for n, c in spec.inputs.items()}
             for n in spec.timeseries or []:
                 inputs[n]["kind"] = "timeseries"
             inputs.update({n: {"kind": "vector", **cfg} for n, cfg in (spec.vectors or {}).items()})

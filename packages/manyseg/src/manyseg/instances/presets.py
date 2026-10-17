@@ -28,9 +28,10 @@ def instance_heads(
     if num_classes < 1:
         raise ValueError("num_classes must be >= 1")
     heads = {
-        "extent": {"type": "segmentation", "channels": 1 if num_classes == 1 else num_classes + 1},
-        "boundary": {"type": "segmentation", "channels": 1},
-        "distance": {"type": "regression", "channels": 1},
+        "extent": {"type": "segmentation",
+                   "out_channels": 1 if num_classes == 1 else num_classes + 1},
+        "boundary": {"type": "segmentation", "out_channels": 1},
+        "distance": {"type": "regression", "out_channels": 1},
     }
     if decoders is None:
         return heads

@@ -565,8 +565,8 @@ class SegMultilabelTask(Task):
 
     def heads(self):
         k = self.num_classes
-        return {"seg": {"type": "segmentation", "channels": k},
-                "logits": {"type": "classification", "channels": k, "scope": "image"}}
+        return {"seg": {"type": "segmentation", "out_channels": k},
+                "logits": {"type": "classification", "out_channels": k, "scope": "image"}}
 
     def targets(self, y):
         k = self.num_classes
@@ -706,8 +706,9 @@ class SemanticChangeTask(Task):
         self.num_classes, self.per_input, self.share = num_classes, per_input, share
 
     def heads(self):
-        lc = {"type": "segmentation", "channels": self.num_classes}
-        h = {"change": {"type": "segmentation", "channels": 2}, "lc1": dict(lc), "lc2": dict(lc)}
+        lc = {"type": "segmentation", "out_channels": self.num_classes}
+        h = {"change": {"type": "segmentation", "out_channels": 2},
+             "lc1": dict(lc), "lc2": dict(lc)}
         if self.per_input:
             h["lc1"]["input"], h["lc2"]["input"] = "t1", "t2"
             if self.share:

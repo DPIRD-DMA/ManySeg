@@ -4,7 +4,7 @@ collide with nn.Module attributes ("half", "train", "to", ...): fail early with 
 import pytest
 from manyseg import create_model
 
-HEAD = {"type": "segmentation", "channels": 2}
+HEAD = {"type": "segmentation", "out_channels": 2}
 
 
 @pytest.mark.parametrize("name", ["half", "train", "to", "forward", "keys", "_modules", "a.b", ""])
@@ -17,18 +17,18 @@ def test_head_names_reserved(name):
 def test_raster_input_names_reserved(name):
     with pytest.raises(ValueError, match="input name"):
         create_model(backbone="resnet18", pretrained=False, num_classes=2,
-                     inputs={name: {"channels": 3}, "sar": {"channels": 2}})
+                     inputs={name: {"in_channels": 3}, "sar": {"in_channels": 2}})
 
 
 def test_vector_input_and_field_names_reserved():
     vec = {"kind": "vector", "fields": {"doy": {"type": "cyclic", "period": 365.25}}}
     with pytest.raises(ValueError, match="input name"):
         create_model(backbone="resnet18", pretrained=False, num_classes=2,
-                     inputs={"img": {"channels": 3}, "to": vec})
+                     inputs={"img": {"in_channels": 3}, "to": vec})
     bad = {"kind": "vector", "fields": {"half": {"type": "continuous", "mean": 0, "std": 1}}}
     with pytest.raises(ValueError, match="field name"):
         create_model(backbone="resnet18", pretrained=False, num_classes=2,
-                     inputs={"img": {"channels": 3}, "meta": bad})
+                     inputs={"img": {"in_channels": 3}, "meta": bad})
 
 
 def test_ordinary_names_still_work():
@@ -45,4 +45,4 @@ def test_python_keywords_rejected(name):
         create_model(backbone="resnet18", pretrained=False, heads={name: HEAD})
     with pytest.raises(ValueError, match="keyword"):
         create_model(backbone="resnet18", pretrained=False, num_classes=2,
-                     inputs={name: {"channels": 3}})
+                     inputs={name: {"in_channels": 3}})
