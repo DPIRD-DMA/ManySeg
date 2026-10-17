@@ -182,8 +182,9 @@ def build_conditioned_model(create_model: Callable[..., nn.Module], *, inputs, f
                 nn.init.zeros_(head_bias[name].weight)
                 nn.init.zeros_(head_bias[name].bias)
         if not head_bias:
-            raise ValueError("'head' conditioning: the model has no image-scope heads; use "
-                             "{'mode': 'head', 'pixel': True} to condition pixel heads")
+            raise ValueError("'head' conditioning: the model has no image-scope heads; to "
+                             "condition pixel heads, give the vector input "
+                             "conditioning={'mode': 'head', 'pixel': True}")
 
     model.conditioner = Conditioner(encoders, modes, list(rasters), single=single,
                                     temporal=[n for n, c in rasters.items()

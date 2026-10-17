@@ -216,7 +216,9 @@ def create_model(
                              "choose a decoder that reads features only")
         if wants and inputs is not None:
             raise ValueError(f"decoder {dec_cls.__name__} needs the input image (fastai_unet, "
-                             "input_cross); not supported with multiple inputs")
+                             "input_cross), which models built with inputs= (several inputs, "
+                             "a time series or metadata) don't have; use a decoder that reads "
+                             "features only, e.g. 'unet'")
         if ftype == "late" and not per_input:
             from ..fusion import LateFusionDecoder
 
