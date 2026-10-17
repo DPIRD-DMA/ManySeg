@@ -18,7 +18,14 @@ def outputs(model, x):
     return out if isinstance(out, dict) else {"": out}
 
 
+def activations(model):
+    """softmax for every head that needs one stated (the tests' default)."""
+    return {n: "softmax" for n, h in model.heads.items() if h.kind != "regression"}
+
+
 def roundtrip(model, x, tmp_path, **kw):
+    kw.setdefault("activations", activations(model))
+    kw.setdefault("normalize", [{"type": "scale", "value": 10000}])
     path = manyseg.save(model.eval(), tmp_path / "m.safetensors", **kw)
     loaded = manyseg.load(path)
     a, b = outputs(model, x), outputs(loaded, x)
@@ -95,7 +102,8 @@ def test_metadata_and_tiling_spec(tmp_path):
 def test_pretrained_flags_are_not_used_on_load(tmp_path, monkeypatch):
     model = create_model(backbone="resnet18", pretrained=False, in_channels=3, num_classes=2)
     model.build_config["pretrained"] = True  # as if built with downloaded weights
-    path = manyseg.save(model, tmp_path / "m.safetensors")
+    path = manyseg.save(model, tmp_path / "m.safetensors", activations=activations(model),
+                        normalize=[])
     with safe_open(str(path), framework="pt") as f:
         assert json.loads(f.metadata()["manyseg"])["create_model"]["pretrained"] is True
     import timm
@@ -108,28 +116,77 @@ def test_pretrained_flags_are_not_used_on_load(tmp_path, monkeypatch):
     assert created and not any(created)
 
 
-def test_weights_tag_gives_the_default_normalisation():
-    config = {"backbone": "resnet50", "pretrained": "ssl4eo_s2_moco", "inputs": None}
-    steps = _weights_normalize(config)
-    assert steps[0]["type"] == "zscore" and len(steps[0]["mean"]) == 13
+def test_weights_normalisation_on_request():
+    """SSL4EO-S12 S2 weights: DN / 10000 clipped to [0, 1] (mean 0, std 10000, clip)."""
+    steps = _weights_normalize({"backbone": "resnet50", "pretrained": "ssl4eo_s2_moco"})
+    assert steps == [{"type": "zscore", "mean": [0.0] * 13, "std": [10000.0] * 13},
+                     {"type": "clip", "min": 0.0, "max": 1.0}]
+    from manyseg.weights import WEIGHTS
+
+    for w in WEIGHTS.values():  # every entry maps to (x - mean) / std, then clip if flagged
+        got = _weights_normalize({"backbone": w.model, "pretrained": w.tag})
+        assert got[0] == {"type": "zscore", "mean": list(w.mean), "std": list(w.std)}
+        assert (len(got) == 2) == w.clip
     assert _weights_normalize({"backbone": "resnet18", "pretrained": True}) is None
+
+
+def test_no_silent_defaults(tmp_path):
+    model = create_model(backbone="resnet18", pretrained=False, in_channels=3, heads={
+        "seg": {"type": "segmentation", "channels": 3},
+        "height": {"type": "regression", "channels": 1}})
+    with pytest.raises(ValueError, match="'seg'"):  # softmax or sigmoid must be stated
+        manyseg.save(model, tmp_path / "a.safetensors", normalize=[])
+    with pytest.warns(UserWarning, match="No normalisation"):
+        manyseg.save(model, tmp_path / "a.safetensors", activations={"seg": "softmax"})
+    with pytest.raises(ValueError, match="weights"):  # not built with a weights tag
+        manyseg.save(model, tmp_path / "a.safetensors", activations={"seg": "softmax"},
+                     normalize="weights")
+
+
+def test_load_honours_device_and_dtype(tmp_path):
+    model = create_model(backbone="resnet18", pretrained=False, in_channels=3, num_classes=2)
+    model = model.to(torch.float64)
+    path = manyseg.save(model, tmp_path / "m.safetensors", activations={"logits": "softmax"},
+                        normalize=[])
+    loaded = manyseg.load(path, map_location="cpu")
+    assert next(loaded.parameters()).dtype == torch.float64
+    if torch.cuda.is_available():
+        assert next(manyseg.load(path, map_location="cuda").parameters()).is_cuda
+
+
+def test_models_changed_after_creation_fail_at_save(tmp_path):
+    model = create_model(backbone="resnet18", pretrained=False, in_channels=3, num_classes=2)
+    model.extra = torch.nn.Linear(2, 2)  # added by training code
+    with pytest.raises(ValueError, match="differs from what its create_model"):
+        manyseg.save(model, tmp_path / "a.safetensors", activations={"logits": "softmax"},
+                     normalize=[])
+    with pytest.raises(TypeError, match="DenseModel"):
+        manyseg.save(torch.nn.DataParallel(model), tmp_path / "a.safetensors")
 
 
 def test_errors(tmp_path):
     from manyseg.models import DenseModel
 
     model = create_model(backbone="resnet18", pretrained=False, in_channels=3, num_classes=2)
+    kw = {"normalize": []}
     with pytest.raises(ValueError, match="unknown head"):
-        manyseg.save(model, tmp_path / "a.safetensors", activations={"nope": "softmax"})
+        manyseg.save(model, tmp_path / "a.safetensors", activations={"nope": "softmax"}, **kw)
     with pytest.raises(ValueError, match="one of"):
-        manyseg.save(model, tmp_path / "a.safetensors", activations={"logits": "relu"})
+        manyseg.save(model, tmp_path / "a.safetensors", activations={"logits": "relu"}, **kw)
     with pytest.raises(ValueError, match="plain JSON"):
-        manyseg.save(model, tmp_path / "a.safetensors", extra={"x": object()})
+        manyseg.save(model, tmp_path / "a.safetensors", extra={"x": object()},
+                     activations={"logits": "softmax"}, **kw)
     bare = DenseModel(model.backbone, model.decoder, dict(model.heads))
     with pytest.raises(ValueError, match="build_config"):
-        manyseg.save(bare, tmp_path / "a.safetensors")
+        manyseg.save(bare, tmp_path / "a.safetensors", **kw)
     from safetensors.torch import save_file
 
     save_file({"x": torch.zeros(1)}, str(tmp_path / "other.safetensors"))
     with pytest.raises(ValueError, match="not written by manyseg.save"):
         manyseg.load(tmp_path / "other.safetensors")
+    for meta in ({"format": "1"}, {"format": 99, "create_model": {}, "heads": [],
+                                   "activations": {}}, {"format": 1}):
+        save_file({"x": torch.zeros(1)}, str(tmp_path / "bad.safetensors"),
+                  metadata={"manyseg": json.dumps(meta)})
+        with pytest.raises(ValueError, match="format|lacks"):
+            manyseg.read_metadata(tmp_path / "bad.safetensors")

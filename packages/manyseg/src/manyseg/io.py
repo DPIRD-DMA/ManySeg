@@ -15,6 +15,7 @@ Normalisation is stored as a ManyPred normalisation spec (plain data): a list of
 from __future__ import annotations
 
 import json
+import warnings
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -77,16 +78,24 @@ def save(model: DenseModel, path: str | Path, *, normalize: Any = None,
 
     Args:
         normalize: How inputs must be normalised for this model, as a ManyPred normalisation
-            spec. Default: what the pretrained weights expect, if the model was built with a
-            remote-sensing weights tag (``pretrained="ssl4eo_s2_moco"``); else nothing is
-            stored and whoever runs the model must know. Pass the spec you trained with.
+            spec: pass the normalisation you trained with. ``"weights"`` uses what the
+            remote-sensing pretrained weights the model was built with expect
+            (``pretrained="ssl4eo_s2_moco"``), which is right only if you trained with it too.
+            None stores nothing (with a warning): whoever runs the model must then know.
         activations: ``{head: "softmax" | "sigmoid" | "none"}``: how each head's raw output
             becomes a prediction (softmax for one class per pixel or image, sigmoid for
-            multi-label, none for regression). Regression heads default to "none".
+            multi-label, none for raw values). Required for every segmentation and
+            classification head, as the head type can't tell softmax from sigmoid; regression
+            heads default to "none".
         classes: Class names, per head (``{head: [...]}``) or for a single head.
         bands: Band names, per input (``{input: [...]}``) or for a single input.
         extra: Any other JSON-compatible metadata, stored as is.
     """
+    if not isinstance(model, DenseModel):
+        raise TypeError(
+            f"save takes a manyseg DenseModel, got {type(model).__name__}. Unwrap compiled, "
+            f"DataParallel or quantised models first (e.g. model._orig_mod, model.module)."
+        )
     config = getattr(model, "build_config", None)
     if config is None:
         raise ValueError(
@@ -103,11 +112,29 @@ def save(model: DenseModel, path: str | Path, *, normalize: Any = None,
             raise ValueError(f"Head {name!r}: activation must be one of {ACTIVATIONS}, got "
                              f"{act!r}.")
         acts[name] = act
-    if normalize is None:
+    missing = [n for n in heads if n not in acts]
+    if missing:
+        raise ValueError(
+            f"Say how heads {missing} turn into predictions: activations={{head: 'softmax' "
+            f"(one class), 'sigmoid' (multi-label) or 'none' (raw values)}}."
+        )
+    if normalize == "weights":
         normalize = _weights_normalize(config)
+        if normalize is None:
+            raise ValueError("normalize='weights', but the model was not built with "
+                             "remote-sensing pretrained weights (a weights tag).")
+    elif normalize is None:
+        warnings.warn(
+            "No normalisation stored: whoever runs this model must normalise inputs as in "
+            "training. Pass normalize=<the spec you trained with>.",
+            stacklevel=2,
+        )
+    _check_rebuildable(model, config)
+    first = next(iter(model.parameters()))
     meta = {
         "format": FORMAT,
         "manyseg_version": __version__,
+        "dtype": str(first.dtype).removeprefix("torch."),
         "create_model": config,
         "heads": heads,
         "single_output": model.single_output,
@@ -130,6 +157,27 @@ def save(model: DenseModel, path: str | Path, *, normalize: Any = None,
     return path
 
 
+def _check_rebuildable(model: DenseModel, config: Mapping[str, Any]) -> None:
+    """Rebuild from ``config`` (no downloads) and compare parameters and buffers, so a model
+    changed after create_model (modules added or replaced) fails here, not at load time."""
+    from .models import create_model
+
+    rebuilt = create_model(**_no_download(dict(config)))
+    if model.single_output is not None and rebuilt.single_output is None:
+        rebuilt.select_heads([model.single_output])
+    elif list(rebuilt.heads) != list(model.heads):
+        rebuilt.select_heads(list(model.heads))
+    want = {k: tuple(v.shape) for k, v in model.state_dict().items()}
+    have = {k: tuple(v.shape) for k, v in rebuilt.state_dict().items()}
+    if want != have:
+        diff = sorted(set(want) ^ set(have)) or sorted(k for k in want if want[k] != have[k])
+        raise ValueError(
+            f"This model differs from what its create_model arguments build (e.g. {diff[:3]}), "
+            f"so it could not be loaded back. Save models as create_model built them "
+            f"(select_heads is fine)."
+        )
+
+
 def read_metadata(path: str | Path) -> dict:
     """The metadata stored by :func:`save`, without loading the weights."""
     from safetensors import safe_open
@@ -139,9 +187,15 @@ def read_metadata(path: str | Path) -> dict:
     if stored is None:
         raise ValueError(f"{path} was not written by manyseg.save (no {_KEY!r} metadata).")
     meta = json.loads(stored)
-    if meta.get("format", 0) > FORMAT:
-        raise ValueError(f"{path} uses save format {meta['format']}; this ManySeg reads up to "
-                         f"{FORMAT}. Upgrade ManySeg.")
+    fmt = meta.get("format")
+    if not isinstance(fmt, int) or fmt < 1:
+        raise ValueError(f"{path}: invalid save format {fmt!r}.")
+    if fmt > FORMAT:
+        raise ValueError(f"{path} uses save format {fmt}; this ManySeg reads up to {FORMAT}. "
+                         f"Upgrade ManySeg.")
+    missing = {"create_model", "heads", "activations"} - set(meta)
+    if missing:
+        raise ValueError(f"{path}: metadata lacks {sorted(missing)}.")
     return meta
 
 
@@ -157,9 +211,9 @@ def _no_download(config: dict) -> dict:
 
 
 def load(path: str | Path, map_location: str | torch.device = "cpu") -> DenseModel:
-    """Rebuild and load a model saved with :func:`save`, in eval mode. Its metadata is on
-    ``model.saved_metadata`` and its ``tiling_spec()`` includes the stored normalisation and
-    activations."""
+    """Rebuild and load a model saved with :func:`save`, in eval mode, on ``map_location`` and
+    in the dtype it was saved in. Its metadata is on ``model.saved_metadata`` and its
+    ``tiling_spec()`` includes the stored normalisation and activations."""
     from safetensors.torch import load_model
 
     from .models import create_model
@@ -171,6 +225,8 @@ def load(path: str | Path, map_location: str | torch.device = "cpu") -> DenseMod
         model.single_output = meta["single_output"]
     elif list(model.heads) != meta["heads"]:
         model.select_heads(meta["heads"])
-    load_model(model, str(path), strict=True, device=str(map_location))
+    dtype = getattr(torch, meta.get("dtype", "float32"))
+    model.to(dtype=dtype)
+    load_model(model, str(path), strict=True, device="cpu")
     model.saved_metadata = meta
-    return model.eval()
+    return model.to(device=map_location).eval()
