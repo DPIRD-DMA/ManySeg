@@ -128,9 +128,10 @@ class, a sigmoid per channel and BCE loss.
 pool="mean")` gives vectors for retrieval, clustering or probing.
 
 **Remote-sensing pretrained weights.** `create_model(backbone="resnet50",
-pretrained="ssl4eo_s2_moco", in_channels=13, ...)` loads SSL4EO-S12 or SatlasPretrain weights
+pretrained="ssl4eo_s2_dino", in_channels=13, ...)` loads SSL4EO-S12 or SatlasPretrain weights
 (Sentinel-2 / Sentinel-1); see `manyseg.weights` for the band order and normalisation each
-expects.
+expects. Fed their own pretraining normalisation, SSL4EO DINO weights beat the ImageNet
+baseline on all three Sentinel-2 datasets we tested (ResNet-50, full fine-tuning; E024).
 
 **Objects and counts.** `manyseg.instances` (touching fields, crowns, buildings) and
 `manyseg.points` (trees, animals: centres, counts) provide the heads, training targets and

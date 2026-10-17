@@ -217,10 +217,19 @@ w = WEIGHTS["resnet50.ssl4eo_s2_moco"]       # bands (order!), mean, std, units,
 
 Weights download through `torch.hub` (hash-checked, cached); every model parameter must be in
 the checkpoint. `in_channels` must equal the weights' band count and the bands must be in the
-listed order; normalise with the listed `mean` / `std` (in `units`) to match pretraining.
-Works per input in multi-input models (`inputs={"s2": {"channels": 13, "pretrained":
-"ssl4eo_s2_moco"}, ...}`). Whether these beat ImageNet weights on a given task is not yet
-measured here.
+listed order; normalise with the listed `mean` / `std` (in `units`), and clip to [0, 1] where
+`clip` is set, to match pretraining. Bands your data lacks can be filled with the pretraining
+mean (0 after normalising). Works per input in multi-input models (`inputs={"s2": {"channels":
+13, "pretrained": "ssl4eo_s2_moco"}, ...}`).
+
+> **Evidence (E024; Sen1Floods11, BigEarthNet v2, PASTIS; ResNet-50, full fine-tuning after
+> one frozen epoch):** with each weight fed its own pretraining normalisation (ImageNet: dataset
+> mean / std), `ssl4eo_s2_dino` beat the ImageNet baseline on all three datasets (+2.1 val
+> mIoU, +4.1 val macro mAP, +2.1 val mIoU; test +1.4 / +3.7 / +2.1) and `ssl4eo_s2_moco` did
+> too, by less (+1.8 / +1.3 / +1.2). For similar Sentinel-2 tasks with a ResNet-50 encoder,
+> both are recommended, also on L2A data with missing bands filled. `satlas_s2_si_ms` beat
+> ImageNet on Sen1Floods11 only and was slightly worse on PASTIS: not recommended. Untested:
+> other architectures, frozen encoders, few labels.
 
 ### Multiple inputs
 

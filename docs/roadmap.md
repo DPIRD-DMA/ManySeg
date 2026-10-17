@@ -1,6 +1,6 @@
 # Roadmap
 
-Status as of 2026-10-15, 08:35 AWST. ✅ done · 🔄 in progress · ⏳ planned.
+Status as of 2026-10-17, 10:40 AWST. ✅ done · 🔄 in progress · ⏳ planned.
 
 ## Phase 1: research and architecture ✅
 
@@ -83,10 +83,26 @@ Status as of 2026-10-15, 08:35 AWST. ✅ done · 🔄 in progress · ⏳ planned
     regression, segmentation + multi-label), a plain-timm provider, EuroSAT, Pet breeds and
     BigEarthNet v2 datasets (E019 parity with timm; E020: an auxiliary pixel head helped the
     classifier, +2.3 test mAP).
+16. ✅ **Time-series inputs** (`"kind": "timeseries"`): one encoder per date, masked mean / max /
+    attention / concat / diff aggregation per level, masks and acquisition dates, dynamic T in
+    export (E021).
+17. ✅ **Change detection**: `diff` / `concat_diff` fusion ops, per-input heads (`"input"`) and
+    shared per-input heads (`"share"`) for semantic change (E022, E023).
+18. ✅ **Feature / embedding output**: `features()`, `embed()` (encoder or decoder, per pixel or
+    pooled), exportable `embedder()`; `select_heads()` for deployment.
+19. ✅ **Multi-label pixel segmentation** (sigmoid per class; bench task `multilabel_seg`).
+20. ✅ **Remote-sensing pretrained weights** (`manyseg.weights`): SSL4EO-S12 MoCo / DINO and
+    SatlasPretrain into timm ResNet / ViT, hash-checked, with band order, units and the
+    pretraining normalisation recorded; the bench applies each weights' own normalisation and
+    maps dataset bands onto theirs (E024).
+21. ✅ **Random-configuration fuzzer** (`tests/fuzz`): thousands of `create_model` configurations
+    against shape, gradient, determinism, round-trip and export invariants; about 25 bugs
+    found and fixed (see `testing_strategy.md`), including modules without gradient that broke
+    DDP's default mode.
 
 ## Phase 5: research and optimisation 🔄
 
-Done (see Phase 3 for results and `experiments/` for write-ups): E001b, E002–E006, E009–E012,
+Done (see Phase 3 for results and `experiments/` for write-ups): E024 (remote-sensing weights with their own normalisation, ResNet-50: SSL4EO DINO and MoCo beat ImageNet on Sen1Floods11, BigEarthNet and PASTIS, DINO by +2.1 / +4.1 / +2.1; recommended. Satlas only on Sen1Floods11, not recommended). E001b, E002–E006, E009–E012,
 E011b, E014, E007 (mixed: frozen encoder BN +2.6 val on Sen1Floods11 at batch 2, GroupNorm decoder +0.5 on Pet; neither passes on both). E013 (negative), E008 (all variants safe; found and fixed an int8 bug on CPUs without VNNI). E007b (frozen encoder BN is a real small-batch fix on both datasets; accumulation alone is not). E015 (native resolution adds nothing but halves grouped-model FLOPs; splitting bands into groups helps +0.9 to +1.3; found the shared-encoder BN bug, fixed). E016 (PASTIS: day of year adds nothing even for crop phenology; band grouping does not replicate). E017 (CloudSEN12+: band groups +0.37 val, under the 0.76 bar; grouping stays a single-dataset result). E023 (semantic change on SECOND: per-input land-cover heads beat fused (+1.5 Score); shared = separate, so share; Siamese +7.0 over early fusion). E021 (time series: several dates help a lot; stacking dates as channels beat the time-series input on PASTIS, the reverse on AI4Boundaries; attention ≈ mean). E022 (binary change: Siamese with diff / concat_diff beats early fusion on OSCD and LEVIR-CD, Siamese concat on LEVIR-CD only; no single op wins on both). E020 (BigEarthNet v2: parity with timm for classification and regression; band groups, S1 and metadata do not help; a segmentation head on the reference maps helps the classifier, +2.1 val / +2.3 test macro mAP; post hoc it looks like regularisation). E019/E019b (ManySeg image heads at val parity with timm classifiers in 6/6 cells; test −0.43, mostly ConvNeXt). E018 (Pareto front: four PVTv2-b0 configs are on the front of both datasets and ship as opt-in `manyseg.presets`; three of them (all but the SegFormer-head `fast`, which is 0.34 lower on Pet) dominate the ResNet-34 U-Net default). Remaining candidates; a budget is set before each one starts:
 
 | Id | Question | Budget |
