@@ -164,6 +164,17 @@ def test_models_changed_after_creation_fail_at_save(tmp_path):
         manyseg.save(torch.nn.DataParallel(model), tmp_path / "a.safetensors")
 
 
+def test_save_rejects_replaced_modules_without_weights(tmp_path):
+    """Swapping a parameterless module leaves the state dict alone but changes predictions."""
+    model = create_model(backbone="resnet18", pretrained=False, in_channels=3, num_classes=2)
+    name = next(n for n, m in model.named_modules() if isinstance(m, torch.nn.ReLU))
+    parent, _, child = name.rpartition(".")
+    setattr(model.get_submodule(parent), child, torch.nn.Sigmoid())
+    with pytest.raises(ValueError, match="differs from what its create_model"):
+        manyseg.save(model, tmp_path / "a.safetensors", activations={"logits": "softmax"},
+                     normalize=[])
+
+
 def test_errors(tmp_path):
     from manyseg.models import DenseModel
 

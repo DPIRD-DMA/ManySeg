@@ -157,9 +157,20 @@ def save(model: DenseModel, path: str | Path, *, normalize: Any = None,
     return path
 
 
+def _structure(model: torch.nn.Module) -> dict[str, tuple]:
+    """Every parameter and buffer's shape, and every module's type and settings
+    (``extra_repr``: kernel sizes, activation choices, ...)."""
+    out: dict[str, tuple] = {k: ("tensor", tuple(v.shape)) for k, v in model.state_dict().items()}
+    for name, module in model.named_modules():
+        out[f"module:{name}"] = (type(module).__qualname__, module.extra_repr())
+    return out
+
+
 def _check_rebuildable(model: DenseModel, config: Mapping[str, Any]) -> None:
-    """Rebuild from ``config`` (no downloads) and compare parameters and buffers, so a model
-    changed after create_model (modules added or replaced) fails here, not at load time."""
+    """Rebuild from ``config`` (no downloads) and compare the module tree, parameters and
+    buffers, so a model changed after create_model (modules added or replaced, even by ones
+    without weights such as an activation) fails here, not at load time. Changes that leave
+    the modules alone (a replaced ``forward``) can't be seen."""
     from .models import create_model
 
     rebuilt = create_model(**_no_download(dict(config)))
@@ -167,8 +178,7 @@ def _check_rebuildable(model: DenseModel, config: Mapping[str, Any]) -> None:
         rebuilt.select_heads([model.single_output])
     elif list(rebuilt.heads) != list(model.heads):
         rebuilt.select_heads(list(model.heads))
-    want = {k: tuple(v.shape) for k, v in model.state_dict().items()}
-    have = {k: tuple(v.shape) for k, v in rebuilt.state_dict().items()}
+    want, have = _structure(model), _structure(rebuilt)
     if want != have:
         diff = sorted(set(want) ^ set(have)) or sorted(k for k in want if want[k] != have[k])
         raise ValueError(
