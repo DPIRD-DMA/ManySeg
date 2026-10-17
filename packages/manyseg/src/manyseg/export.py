@@ -10,10 +10,23 @@ from torch import Tensor, nn
 
 def _min_size(model: nn.Module) -> int:
     """Smallest H/W that keeps every feature map larger than 1x1 (torch.export specialises
-    size-1 dimensions)."""
+    size-1 dimensions). Padded to the network's deepest stride, ``stride + 1`` gives two cells
+    at the deepest level; padded less (``pad_to_stride=False``, or a multi-input model whose
+    grid multiple stops at the returned levels), floor-rounding layers such as a 4x4 / stride 4
+    patchify or PVT's spatial-reduction attention need ``2 * stride``. Conservative: some
+    backbones work below it."""
     bb = getattr(model, "backbone", None)
-    specs = getattr(bb, "feature_specs", ())
-    return max((s.stride for s in specs), default=1) + 1
+    # every encoder of a multi-input model, at the deepest stride its network computes
+    mods = list(bb.modules()) if isinstance(bb, nn.Module) else []
+    stride = max([s.stride for s in getattr(bb, "feature_specs", ())]
+                 + [s.stride for m in mods for s in getattr(m, "feature_specs", ())]
+                 + [int(getattr(m, "network_stride", 1)) for m in mods], default=1)
+    core = getattr(model, "model", model)  # Embedder wraps the model
+    if hasattr(bb, "divisors"):  # multi-input: each input padded to its own multiple
+        pad = min(getattr(bb, "grid_divisor", 1), *bb.divisors.values())
+    else:
+        pad = int(getattr(core, "divisor", 1)) if getattr(core, "pad_to_stride", True) else 1
+    return stride + 1 if pad >= stride else 2 * stride
 
 
 def dynamic_shapes(model: nn.Module, example, max_size: int = 4096,
@@ -43,10 +56,17 @@ def dynamic_shapes(model: nn.Module, example, max_size: int = 4096,
 
     if not isinstance(example, Mapping):
         return {"x": dims(example, *hw(example, ""))}
-    # Time series (B, T, C, H, W): T is dynamic too, shared with "<name>_mask" / "<name>_dates".
+    bb = getattr(model, "backbone", None)
+    encoders = getattr(bb, "encoders", {})
+    alignment = getattr(bb, "alignment", {})
+    # Time series (B, T, C, H, W): T is dynamic too, shared with "<name>_mask" / "<name>_dates",
+    # unless the aggregation needs an exact number of dates ("concat", "diff").
     times = {}
     for k, t in example.items():
         if t.ndim == 5:
+            fixed = getattr(encoders[k], "fixed_dates", None) if k in encoders else None
+            if fixed is not None:
+                continue
             if t.shape[1] < 2:
                 raise ValueError(f"example time series {k!r} needs at least 2 dates "
                                  "(torch.export specialises size-1 dimensions)")
@@ -60,7 +80,9 @@ def dynamic_shapes(model: nn.Module, example, max_size: int = 4096,
                 d[0] = batch
             shapes[k] = d or None
             continue
-        grid = tuple(t.shape[-2:])  # same-grid inputs share their H/W symbols
+        # same-grid inputs share their H/W symbols; a same_extent input always has its own,
+        # even when the example happens to match another input's size
+        grid = (k,) if alignment.get(k) == "same_extent" else tuple(t.shape[-2:])
         if grid not in grids:
             grids[grid] = hw(t, f"{k}_")
         shapes[k] = dims(t, *grids[grid], times.get(k))

@@ -168,7 +168,7 @@ class DenseModel(nn.Module):
         return {
             "inputs": inputs,
             "outputs": outputs,
-            "pad_multiple": (int(getattr(backbone, "divisors", {}).get(primary, self.divisor))
+            "pad_multiple": (int(getattr(backbone, "grid_divisor", self.divisor))
                              if self.pad_to_stride else 1),
             "max_size": tuple(fixed) if fixed is not None else None,
             "normalize": None,
@@ -261,17 +261,23 @@ class DenseModel(nn.Module):
     def features(self, x: Tensor | dict[str, Tensor]) -> list[Tensor]:
         """The encoder pyramid (fused, for multi-input models) for ``x``, each level cropped to
         the input's valid region (``ceil(H / stride) x ceil(W / stride)``). Late fusion: every
-        input's levels side by side (``backbone.groups``), each cropped to its own input."""
+        input's levels side by side (``backbone.groups``), each cropped to its own input.
+
+        Levels the model never reads are built minimally: a plain ViT's unread neck levels are
+        ``None``, and a multi-input model does not fuse at unread levels (the primary input's
+        feature passes through)."""
         feats, _, _, _, h, w, valid = self._encode(x)
+
+        def crop(f, s, vh, vw):  # crop_to (negative padding), not slicing: export-safe
+            return None if f is None else crop_to(f, (vh + s.stride - 1) // s.stride,
+                                                  (vw + s.stride - 1) // s.stride)
+
         if getattr(self.backbone, "mode", None) == "late":
             out = []
             for (a, b), (vh, vw) in zip(self.backbone.groups, valid):
-                out += [crop_to(f, (vh + s.stride - 1) // s.stride, (vw + s.stride - 1) // s.stride)
-                        for f, s in zip(feats[a:b], self.feature_specs[a:b])]
+                out += [crop(f, s, vh, vw) for f, s in zip(feats[a:b], self.feature_specs[a:b])]
             return out
-        # crop_to (negative padding), not slicing: export-safe for ceil-rounded sizes
-        return [crop_to(f, (h + s.stride - 1) // s.stride, (w + s.stride - 1) // s.stride)
-                for f, s in zip(feats, self.feature_specs)]
+        return [crop(f, s, h, w) for f, s in zip(feats, self.feature_specs)]
 
     def embed(self, x: Tensor | dict[str, Tensor], source: str = "encoder", level: int = -1,
               pool: str | None = None, normalize: bool = False) -> Tensor:
@@ -296,6 +302,9 @@ class DenseModel(nn.Module):
                 a, b = self.backbone.groups[0]  # the primary input's levels
                 feats = feats[a:b]
             e = feats[level]
+            if e is None:
+                raise ValueError(f"encoder level {level} is not computed by this model (nothing "
+                                 "reads it); choose another level")
         else:
             if self.decoder is None:
                 raise ValueError("source='decoder' needs a shared decoder (this model has only "

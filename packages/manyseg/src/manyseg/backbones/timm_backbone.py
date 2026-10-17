@@ -32,6 +32,12 @@ def _check_name(name: str) -> None:
     raise ValueError(f"unknown timm backbone {name!r}{hint}")
 
 
+def _is_int(v) -> bool:
+    import numbers
+
+    return isinstance(v, numbers.Integral) and not isinstance(v, bool)
+
+
 def introspect(name: str) -> dict:
     """Cheap architecture introspection: build on the meta device (no memory, no weights) and
     read the constructor signature and the full feature_info."""
@@ -222,6 +228,10 @@ class TimmBackbone(nn.Module):
             raise ValueError(f"in_channels must be >= 1, got {in_channels}")
         arch = introspect(name)
         self.is_plain = arch["plain"]
+        # deepest stride the network computes; some timm feature models (e.g. MobileNetV3) run
+        # every block whatever out_indices returns (export's minimum size depends on it)
+        self.network_stride = max((int(f["reduction"]) for f in arch["feature_info"]),
+                                  default=1)
         kwargs = dict(features_only=True, **_size_kwargs(arch["init_params"]))
         kwargs.update(timm_kwargs)
         self.fixed_size: tuple[int, int] | None = None
@@ -235,7 +245,16 @@ class TimmBackbone(nn.Module):
             n = len(arch["feature_info"])
             out_indices = tuple(n * (i + 1) // 4 - 1 for i in range(4))
         if out_indices is not None:
-            kwargs["out_indices"] = tuple(out_indices)
+            n = len(arch["feature_info"])
+            idx = list(out_indices)
+            if not idx or any(not _is_int(i) or not -n <= i < n for i in idx) or \
+                    len({i % n for i in idx}) != len(idx):
+                kind = "blocks" if self.is_plain else "feature levels"
+                raise ValueError(f"{name}: out_indices must be distinct integer indices into "
+                                 f"its {n} {kind} (0..{n - 1}, or negative from the end), got "
+                                 f"{list(out_indices)}")
+            out_indices = tuple(int(i) for i in idx)
+            kwargs["out_indices"] = out_indices
         self.block_indices = tuple(out_indices) if self.is_plain else None
         self.weights: str | None = None
         if isinstance(pretrained, str):  # remote-sensing weights (manyseg.weights)
@@ -250,6 +269,7 @@ class TimmBackbone(nn.Module):
             self.weights = w.key
         else:
             self.model = _timm_create(name, pretrained=pretrained, **kwargs)
+        self._drop_unreturned_blocks()
         self.name = name
         self.pretrained = bool(pretrained)  # recorded for describe(); weights are already set
         self.in_channels = in_channels
@@ -297,6 +317,26 @@ class TimmBackbone(nn.Module):
                                                 channel_adapter)
         self.mean = tuple(cfg.get("mean", (0.485, 0.456, 0.406)))
         self.std = tuple(cfg.get("std", (0.229, 0.224, 0.225)))
+
+    def _drop_unreturned_blocks(self) -> None:
+        """timm's EfficientNet / MobileNetV3 feature models run every block whatever
+        ``out_indices`` returns; drop the blocks after the deepest returned level (their
+        parameters would never get a gradient, which DDP rejects by default)."""
+        stages = getattr(self.model, "_stage_out_idx", None)
+        blocks = getattr(self.model, "blocks", None)
+        if not stages or not isinstance(blocks, nn.Sequential) or \
+                getattr(self.model, "feature_hooks", None) is not None:
+            return
+        last = max(stages)  # block i feeds stage i + 1; stage 0 is the stem
+        if last < len(blocks):
+            self.model.blocks = blocks[:last]
+            self.network_stride = max(self.model.feature_info.reduction())
+
+    def restrict_levels(self, levels) -> None:
+        """Only ``levels`` are read by the model: a plain ViT's neck builds no projection for
+        the others (they come out as ``None``)."""
+        if self.neck is not None:
+            self.neck.restrict(levels)
 
     @property
     def input_divisor(self) -> int:

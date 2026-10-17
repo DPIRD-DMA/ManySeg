@@ -45,9 +45,10 @@ class UNetBlock(nn.Module):
         self.conv1 = ConvNormAct(cin + cskip, cout, norm=norm)
         self.conv2 = ConvNormAct(cout, cout, norm=norm)
 
-    def forward(self, x: Tensor, skip: Tensor | None) -> Tensor:
+    def forward(self, x: Tensor, skip: Tensor | None, size=None) -> Tensor:
         # Resize to the skip's exact size so odd (ceil-rounded) feature maps stay aligned.
-        size = skip.shape[-2:] if skip is not None else (2 * x.shape[-2], 2 * x.shape[-1])
+        if size is None:
+            size = skip.shape[-2:] if skip is not None else (2 * x.shape[-2], 2 * x.shape[-1])
         x = upsample2x(x, size, self.upsample)
         if skip is not None:
             x = torch.cat([x, skip], dim=1)
@@ -144,8 +145,12 @@ class UNetDecoder(nn.Module):
         if self.wants_input:
             image, features = features[0], features[1:]
         x = features[self._deepest_index]
-        for block, idx in zip(self.blocks, self._skip_index):
-            x = block(x, features[idx] if idx >= 0 else None)
+        last = len(self.blocks) - 1
+        for i, (block, idx) in enumerate(zip(self.blocks, self._skip_index)):
+            # input_cross: the final stage lands on the image's grid, which need not be twice
+            # the previous level when the input is not padded to the stride
+            size = image.shape[-2:] if self.wants_input and i == last and idx < 0 else None
+            x = block(x, features[idx] if idx >= 0 else None, size)
         if self.wants_input:
             x = self.cross(torch.cat([x, image], dim=1))
         return x

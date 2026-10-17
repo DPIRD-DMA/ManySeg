@@ -32,12 +32,24 @@ class ViTPyramidNeck(nn.Module):
                           nn.ReLU(inplace=True))
             for c in channels
         )
+        self.active = (True,) * len(self.strides)
         self.feature_specs = tuple(FeatureSpec(c, s, f"neck.{i}")
                                    for i, (c, s) in enumerate(zip(channels, strides)))
 
-    def forward(self, feats: list[Tensor], h: int, w: int) -> list[Tensor]:
+    def restrict(self, levels) -> None:
+        """Drop the projections of levels nothing reads; those come out as ``None``."""
+        self.active = tuple(i in set(levels) for i in range(len(self.strides)))
+        for i, on in enumerate(self.active):
+            if not on:
+                self.proj[i], self.refine[i] = nn.Identity(), nn.Identity()
+
+    def forward(self, feats: list[Tensor], h: int, w: int) -> list[Tensor | None]:
         out = []
-        for f, s, proj, refine in zip(feats, self.strides, self.proj, self.refine):
+        for i, (f, s, proj, refine) in enumerate(zip(feats, self.strides, self.proj,
+                                                     self.refine)):
+            if not self.active[i]:
+                out.append(None)
+                continue
             f = proj(f)
             size = ((h + s - 1) // s, (w + s - 1) // s)
             if s != self.patch_stride:

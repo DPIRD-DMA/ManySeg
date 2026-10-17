@@ -83,9 +83,8 @@ class _Block(nn.Module):
         self.out_channels = nf
 
     def forward(self, x: Tensor, skip: Tensor) -> Tensor:
-        up = self.shuf(x)
-        if up.shape[-2:] != skip.shape[-2:]:
-            up = F.interpolate(up, size=skip.shape[-2:], mode="nearest")
+        # always (an exact copy when sizes match): a shape test would be frozen by export
+        up = F.interpolate(self.shuf(x), size=skip.shape[-2:], mode="nearest")
         return self.conv2(self.conv1(F.relu(torch.cat([up, self.bn(skip)], dim=1))))
 
 
@@ -152,8 +151,7 @@ class FastaiUNetDecoder(nn.Module):
                 size = ((inp.shape[-2] + s - 1) // s, (inp.shape[-1] + s - 1) // s)
                 x = F.interpolate(x, size=size, mode="nearest")
             return x
-        if x.shape[-2:] != inp.shape[-2:]:
-            x = F.interpolate(x, size=inp.shape[-2:], mode="nearest")
+        x = F.interpolate(x, size=inp.shape[-2:], mode="nearest")  # always, as above
         if self.last_cross:
             x = self.res(torch.cat([x, inp], dim=1))
         return x

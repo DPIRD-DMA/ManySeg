@@ -6,6 +6,7 @@ list of tensors of equal spatial size; ``inputs[0]`` is the primary input.
 
 from __future__ import annotations
 
+import numbers
 from collections.abc import Sequence
 
 import torch
@@ -141,7 +142,20 @@ class CrossAttentionFusion(nn.Module):
     def __init__(self, in_channels: Sequence[int], out_channels: int, heads: int = 4,
                  dim: int | None = None) -> None:
         super().__init__()
-        dim = dim or min(256, out_channels)
+        if len(in_channels) < 2:
+            raise ValueError("cross_attention fuses a primary input with at least one other; "
+                             f"got {len(in_channels)} input(s)")
+        def positive_int(v):
+            return isinstance(v, numbers.Integral) and not isinstance(v, bool) and v >= 1
+
+        if not positive_int(heads):
+            raise ValueError(f"cross_attention: heads must be an integer >= 1, got {heads!r}")
+        if dim is not None and not positive_int(dim):
+            raise ValueError(f"cross_attention: dim must be an integer >= 1, got {dim!r}")
+        heads, dim = int(heads), min(256, out_channels) if dim is None else int(dim)
+        if dim < heads:
+            raise ValueError(f"cross_attention: dim {dim} is smaller than heads {heads}; each "
+                             "head needs at least one channel")
         dim -= dim % heads
         self.heads = heads
         self.primary = _proj(in_channels[0], out_channels)

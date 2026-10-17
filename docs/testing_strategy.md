@@ -11,6 +11,7 @@ claims (accuracy, speed) are established by `manyseg-bench` experiments, not by 
 | Slow integration | `-m slow` (`tests/integration`) | push to main, nightly (CI's slow job skips pull requests) | < 5 min |
 | Examples | `-m slow` (`tests/examples`): every `examples/*.py` as a CPU subprocess | push to main, nightly | ~30 s with `-n 4` |
 | Model builder | `-m slow` (`tests/integration/test_model_builder.py`): the page's own logic (`docs/builder/core.js`, under node) generates code for ~90 configurations; valid ones must run with the predicted output shapes, refused ones must also fail in ManySeg; `docs/builder/data.js` must match `scripts/build_model_builder.py`. Fast option-list check: `tests/unit/test_model_builder_data.py` (every commit) | push to main, nightly; skipped without node (preinstalled on GitHub's Ubuntu runners) | ~40 s with `-n 4` |
+| Config fuzzer | `tests/fuzz`: random `create_model` configurations (backbones, single / multi input with every fusion type and op, alignments, time series, metadata in every conditioning mode, decoders and out_strides, pixel / image / per-input / shared / task-decoder heads, scales). Each must build and pass the invariants (shapes at odd sizes, finite values and gradients, every parameter in the graph (DDP's default), eval determinism, batch = per-sample, describe, state-dict round trip, select_heads, features / embed, channels_last; sampled: export at another size) or be refused with `ValueError` / `NotImplementedError`. 20 seeds every commit, with the expected rejections pinned (a refused valid configuration fails); 200 with export under `-m slow`; one-off campaigns: `uv run python packages/manyseg/tests/fuzz/fuzz_configs.py -n 2000 --export-every 5`. Bugs it finds become tests in `tests/unit/test_fuzz_regressions.py` | every commit (20 seeds), push to main / nightly (slow) | ~20 s / ~3 min |
 | Network | `-m network` | nightly (needs weight cache) | small downloads |
 | Hardware | `device` fixture: `cpu`, `cuda`, `mps` | wherever the device exists | n/a |
 | Benchmark | `manyseg-bench` CLI, never in pytest | on demand, logged under `experiments/` | per experiment budget |
@@ -71,6 +72,22 @@ Every bug fix gets a test that fails before the fix. Examples so far:
   division (covered by the compile tests).
 * torch.export could not prove `h <= 32·ceil(h/32)` for slice-cropping, so cropping now uses
   negative padding (covered by `test_torch_export_dynamic_hw`).
+* The config fuzzer (2026-10-17; about 3,000 random configurations plus Codex's list of
+  risky combinations) found these bugs, each now in `test_fuzz_regressions.py`:
+  * crashes deep in forward: a task decoder plus `source="encoder"`, `input_cross` without
+    stride padding, same-grid inputs padded to different multiples;
+  * timm or internal errors instead of clear ones: out-of-range or non-integer
+    `out_indices`, cross-attention head settings or a single input, late fusion with
+    input-image decoders, early fusion with `shared:`;
+  * a valid configuration refused (an image head reading the decoder with no pixel head),
+    and a fixed-size backbone in a multi-input model refusing every other size;
+  * silently ignored settings: a fusion op with one raster input, an input nothing reads;
+  * parameters without a gradient, which DDP rejects by default: fusers, learned temporal
+    aggregations and ViT neck levels at levels nothing reads, and timm EfficientNet /
+    MobileNetV3 blocks past the last requested level;
+  * export failures: concat / diff time series, same_extent examples matching the primary's
+    size or stride-aligned, `fastai_unet` shape branches frozen at the example's parity, and
+    the minimum size when inputs are padded less than the network's stride.
 
 Test isolation: an autouse fixture resets Dynamo after each test. Many tests compile
 different models through the same `DenseModel.forward` code object, and without the reset

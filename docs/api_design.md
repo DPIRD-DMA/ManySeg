@@ -247,7 +247,10 @@ out = model({"optical": o, "sar": s})
   are fused by an op (`concat`, `add`, `gated`, `attention`, `cross_attention`) whose output
   has the primary input's channels. Strides that are not selected, or that exist only in the
   primary, pass the primary feature through unchanged. The first input in `inputs` is the
-  primary.
+  primary. Levels that nothing reads (for example stride 2, which FPN, DeepLabV3+, UPerNet
+  and SegFormer skip) are not fused either, and an input that no read level includes is an
+  error: every parameter gets a gradient. Same-grid inputs are all padded to the largest
+  of their stride multiples, so their features line up level by level.
 * **Late fusion**: `fusion={"type": "late", "op": ...}`. Each input has its own backbone and
   decoder (same type and options). The decoder outputs are fused before the heads. A
   `same_extent` input's decoder output is resampled by its valid region onto the primary's
@@ -464,7 +467,7 @@ line up exactly. ManySeg handles this explicitly:
   window partitions or positional tables baked in) are detected at construction by a
   meta-device probe and marked `fixed_size` at their native size, or at `img_size` when
   `backbone_kwargs={"img_size": ...}` is given. Smaller inputs are padded up to it and the
-  output is cropped back. Larger inputs raise a `ValueError` that names the backbone and the
+  output is cropped back (also for one input of a multi-input model). Larger inputs raise a `ValueError` that names the backbone and the
   `img_size` fix. Nothing is ever silently resized.
 
 ### Reduced output resolution
@@ -733,11 +736,18 @@ flowchart LR
 
 ```python
 from manyseg.export import export_model
-ep = export_model(model, example)            # dynamic H/W in [max_stride + 1, 4096]
+ep = export_model(model, example)            # dynamic H/W in [stride + 1, 4096] (*)
 ep = export_model(model, example, dynamic_batch=True)
 ep = export_model(multi_input_model, {"optical": o, "sar": s})
 ep = export_model(conditioned_model, {"s2": s2, "meta": meta})   # meta: (B, N), no H/W dims
 ```
+
+(*) `stride` is the deepest stride the network computes. When inputs are padded to less than
+that (`pad_to_stride=False`, or a multi-input model using only shallow levels), the range
+starts at `2 * stride` instead: floor-rounding layers (a 4x4 / stride 4 patchify, PVT's
+spatial-reduction attention) need two cells there. A same_extent input always gets its own
+H/W symbols, and a time series whose aggregation needs an exact date count (`concat`, `diff`)
+keeps T static.
 
 `export_model` builds the `dynamic_shapes` spec itself and uses deferred runtime asserts. Some
 timm blocks produce guards that are always true but that the export solver cannot prove.
@@ -749,7 +759,12 @@ parity check needs `onnxruntime`, which the `onnx` extra does not install).
 
 ### Distributed training
 
-DDP needs nothing from ManySeg: wrap the model as usual. For FSDP2,
+DDP needs nothing from ManySeg: wrap the model as usual. Models are built so that every
+parameter gets a gradient (no `find_unused_parameters=True` needed): modules for feature
+levels nothing reads (fusers, learned temporal aggregations, ViT neck levels, and the timm
+EfficientNet / MobileNetV3 blocks past the last requested level) are not built, and the random
+configuration fuzzer checks this. Heads you leave out of the loss still need it, or
+`select_heads`. For FSDP2,
 `manyseg.distributed.shard_model(model, mp_policy=..., mesh=...)` applies `fully_shard` per
 stage (each encoder, the shared decoder, each task decoder, each head, the conditioner), then
 the root. It is tested against DDP on CPU (gloo): parameters after a step match. BatchNorm

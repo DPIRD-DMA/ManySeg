@@ -88,6 +88,10 @@ def _build_inputs(inputs, fusion, *, backbone, pretrained, channel_adapter, out_
             if vals:
                 shared_cfg[key] = next(iter(vals.values()))
         for n, cfg in inputs.items():
+            if str(cfg.get("backbone", "")).startswith("shared:") or "share_norm" in cfg:
+                raise ValueError(f"early fusion stacks all inputs into one encoder, so input "
+                                 f"{n!r} cannot share another input's encoder ('shared:' / "
+                                 "'share_norm'); use intermediate or late fusion")
             if "rgb_indices" in cfg:
                 raise ValueError(f"early fusion: input {n!r} sets 'rgb_indices', which would "
                                  "index the stacked channels; adapt the stem with intermediate "
@@ -125,6 +129,9 @@ def _build_inputs(inputs, fusion, *, backbone, pretrained, channel_adapter, out_
                 kind, opts = parse_temporal(n, cfg.get("temporal", "mean"))
                 encoders[n] = TemporalEncoder(encoders[n], kind, opts)
     alignment = {n: cfg.get("alignment", "same_grid") for n, cfg in inputs.items()}
+    if len(inputs) == 1 and set(fusion) & {"op", "op_kwargs", "strides"}:
+        raise ValueError(f"fusion options {sorted(set(fusion) & {'op', 'op_kwargs', 'strides'})} "
+                         f"need at least two raster inputs; got only {list(inputs)}")
     op = fusion.pop("op", "concat")
     strides = fusion.pop("strides", None)
     op_kwargs = fusion.pop("op_kwargs", None)
@@ -198,22 +205,21 @@ def create_model(
     def build_decoder(dec_cls, dkw, specs=None):
         per_input = specs is not None
         specs = tuple(specs if per_input else bb.feature_specs)
-        if per_input and (dec_cls.wants_input_for(dkw) if hasattr(dec_cls, "wants_input_for")
-                          else getattr(dec_cls, "wants_input", False)):
+        wants = (dec_cls.wants_input_for(dkw) if hasattr(dec_cls, "wants_input_for")
+                 else getattr(dec_cls, "wants_input", False))
+        if per_input and wants:
             raise ValueError(f"decoder {dec_cls.__name__} reads the raw input image, which "
                              "per-input heads do not support (e.g. fastai_unet, input_cross); "
                              "choose a decoder that reads features only")
+        if wants and inputs is not None:
+            raise ValueError(f"decoder {dec_cls.__name__} needs the input image (fastai_unet, "
+                             "input_cross); not supported with multiple inputs")
         if ftype == "late" and not per_input:
             from ..fusion import LateFusionDecoder
 
             return LateFusionDecoder(specs, bb.groups, lambda sp: dec_cls(sp, **dkw),
                                      op=fopts["op"], alignment=[bb.alignment[n] for n in bb.names])
-        wants = (dec_cls.wants_input_for(dkw) if hasattr(dec_cls, "wants_input_for")
-                 else getattr(dec_cls, "wants_input", False))
         if wants:
-            if inputs is not None:
-                raise ValueError(f"decoder {dec_cls.__name__} needs the input image; not "
-                                 "supported with multiple inputs")
             specs = (FeatureSpec(bb.in_channels, 1, "input"), *specs)
         return dec_cls(specs, **dkw)
 
@@ -225,6 +231,10 @@ def create_model(
     # Per-input heads ("input": <raster input>) read that input's own encoder features through
     # their own decoder (default: the `decoder` type), e.g. land cover at each date for semantic
     # change; "share": <head> reuses another per-input head's decoder and head modules.
+    for n, cfg in heads.items():
+        if cfg.get("source") == "encoder" and ("decoder" in cfg or "input" in cfg):
+            raise ValueError(f"head {n!r}: 'source': 'encoder' reads the encoder directly, so it "
+                             "cannot also have its own decoder ('decoder' / 'input')")
     head_inputs = {n: cfg.pop("input") for n, cfg in heads.items() if "input" in cfg}
     shares = {n: cfg.pop("share") for n, cfg in heads.items() if "share" in cfg}
     for n, inp in head_inputs.items():
@@ -259,8 +269,10 @@ def create_model(
     for n in task_cfgs:
         if heads[n].get("scope", "pixel") != "pixel":
             raise ValueError(f"head {n!r}: task-specific decoders are only for pixel heads")
-    needs_shared = any(n not in task_cfgs and heads[n].get("source", "decoder") == "decoder"
-                       and heads[n].get("scope", "pixel") == "pixel" for n in heads)
+    # pixel heads read the decoder by default, image heads only with "source": "decoder"
+    needs_shared = any(n not in task_cfgs and heads[n].get(
+        "source", "decoder" if heads[n].get("scope", "pixel") == "pixel" else "encoder")
+        == "decoder" for n in heads)
     shared = build_decoder(resolve(decoder), dict(decoder_kwargs or {})) if needs_shared else None
     task_decoders = {}
     for n, dcfg in task_cfgs.items():
@@ -291,6 +303,50 @@ def create_model(
     for name, other in shares.items():
         built[name], sources[name] = built[other], "task"
     built = {n: built[n] for n in heads}  # keep the configured head order
-    return DenseModel(bb, shared, built, sources, single_output=single,
-                      pad_to_stride=pad_to_stride, task_decoders=task_decoders,
-                      head_inputs=head_inputs)
+    model = DenseModel(bb, shared, built, sources, single_output=single,
+                       pad_to_stride=pad_to_stride, task_decoders=task_decoders,
+                       head_inputs=head_inputs)
+    _restrict_to_read_levels(model)
+    return model
+
+
+def _prunable(bb: nn.Module) -> bool:
+    from ..backbones.necks import ViTPyramidNeck
+    from ..temporal import TemporalEncoder
+
+    if getattr(bb, "mode", None) in ("intermediate", "late") and len(bb.names) > 1:
+        return True  # also checks that every input is read
+    return any(isinstance(m, (ViTPyramidNeck, TemporalEncoder)) or
+               (hasattr(m, "fusers") and len(m.fusers)) for m in bb.modules())
+
+
+def _restrict_to_read_levels(model: DenseModel) -> None:
+    """Build-time pruning of per-level modules nothing reads (fusers, learned temporal
+    aggregations, ViT neck projections): they would be parameters without a gradient, which
+    DDP rejects by default. Read levels: those each decoder reads (gradient probe), plus the
+    deepest when a head reads the encoder directly."""
+    bb = model.backbone
+    if not hasattr(bb, "restrict_levels") or not _prunable(bb):
+        return
+    from ..conditioning.inject import used_levels
+
+    specs = tuple(bb.feature_specs)
+    in_ch = getattr(bb, "in_channels", None)
+    read, per_input, seen = set(), {}, set()
+    decoders = [(model.decoder, None)] if model.decoder is not None else []
+    decoders += [(d, model._head_inputs.get(h)) for h, d in model.task_decoders.items()]
+    for d, inp in decoders:
+        if id(d) in seen:
+            continue
+        seen.add(id(d))
+        if inp is None:
+            read.update(used_levels(d, specs, in_ch))
+        else:
+            sp = tuple(bb.encoders[inp].feature_specs)
+            per_input.setdefault(inp, set()).update(used_levels(d, sp, in_ch))
+    if any(src == "encoder" for src in model._head_sources.values()):
+        read.add(model._deepest)
+    if per_input:
+        bb.restrict_levels(read, per_input)
+    else:
+        bb.restrict_levels(read)

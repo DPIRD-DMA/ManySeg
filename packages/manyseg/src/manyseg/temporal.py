@@ -178,6 +178,9 @@ class TemporalEncoder(nn.Module):
         else:
             aggs = [AttentionAggregation(s.channels, **opts) for s in self.feature_specs]
         self.temporal_aggregation = nn.ModuleList(aggs)
+        # "concat" and "diff" need an exact number of dates (export keeps T static for them)
+        self.fixed_dates: int | None = {"concat": getattr(aggs[0], "dates", None),
+                                        "diff": 2}.get(kind) if aggs else None
 
     def forward(self, x: Tensor, mask: Tensor | None = None,
                 dates: Tensor | None = None) -> list[Tensor]:
@@ -201,11 +204,18 @@ class TemporalEncoder(nn.Module):
             # and masked ones are dropped by the aggregation; this keeps export static.)
             keep = valid.flatten().nonzero().squeeze(1)
             enc = self.backbone(frames[keep])
-            feats = []
-            for e in enc:
-                full = e.new_zeros(b * t, *e.shape[1:])
-                feats.append(full.index_copy(0, keep, e))
+            feats = [None if e is None else e.new_zeros(b * t, *e.shape[1:])
+                     .index_copy(0, keep, e) for e in enc]
         else:
             feats = self.backbone(frames)
-        return [agg(f.view(b, t, *f.shape[1:]), valid, dates)
+        return [None if f is None else agg(f.view(b, t, *f.shape[1:]), valid, dates)
                 for agg, f in zip(self.temporal_aggregation, feats)]
+
+    def restrict_levels(self, levels) -> None:
+        """Only ``levels`` are read: the others get the parameter-free masked mean (a learned
+        aggregation there would never get a gradient)."""
+        for i, agg in enumerate(self.temporal_aggregation):
+            if i not in set(levels) and any(True for _ in agg.parameters()):
+                self.temporal_aggregation[i] = MeanAggregation()
+        if hasattr(self.backbone, "restrict_levels"):
+            self.backbone.restrict_levels(levels)
