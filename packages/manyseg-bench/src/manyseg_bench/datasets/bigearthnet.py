@@ -62,6 +62,9 @@ S2_BANDS = ("B01", "B02", "B03", "B04", "B05", "B06", "B07", "B08", "B8A", "B09"
 S2_NATIVE = {"B01": 60, "B09": 60, "B02": 10, "B03": 10, "B04": 10, "B08": 10, "B05": 20,
              "B06": 20, "B07": 20, "B8A": 20, "B11": 20, "B12": 20}
 S1_BANDS = ("VV", "VH")
+# Band names / units for remote-sensing weights (manyseg.weights): S2 cached as DN / 1e4 (L2A).
+BAND_NAMES = {"s2": S2_BANDS, "s1": S1_BANDS}
+DN_PER_UNIT = {"s2": 1e4, "s1": 1.0}
 # Resolution groups of the S2 stack for the provider's ``band_groups`` option (E015 style).
 BAND_GROUPS = {"s2_10m": {"bands": [1, 2, 3, 7]},
                "s2_20m": {"bands": [4, 5, 6, 8, 10, 11], "factor": 2},

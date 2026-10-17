@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
 
@@ -31,6 +32,42 @@ class BandGroupModel(nn.Module):
         return self.model(self.split(x, self.groups))
 
 
+class WeightsInput(nn.Module):
+    """Maps a dataset's bands onto remote-sensing weights' band order (``index[j]`` = dataset
+    band for weights band ``j``, -1 = missing: filled with 0, the pretraining mean after
+    normalisation) and clips to [0, 1] where the pretraining did."""
+
+    def __init__(self, index: list[int], clip: bool) -> None:
+        super().__init__()
+        self.register_buffer("index", torch.tensor([max(i, 0) for i in index]), persistent=False)
+        self.register_buffer("present", torch.tensor([i >= 0 for i in index]), persistent=False)
+        self.clip = clip
+
+    def forward(self, x: Tensor) -> Tensor:
+        y = x.index_select(1, self.index) * self.present.view(1, -1, 1, 1).to(x.dtype)
+        return y.clamp(0, 1) if self.clip else y
+
+
+class WeightsInputModel(nn.Module):
+    def __init__(self, model: nn.Module, weights_input: WeightsInput) -> None:
+        super().__init__()
+        self.model, self.weights_input = model, weights_input
+
+    def forward(self, x):
+        return self.model(self.weights_input(x))
+
+
+def registry_weights(spec):
+    """The ``manyseg.weights`` entry for ``spec`` if its ``weights`` is a remote-sensing tag."""
+    if spec.weights is None:
+        return None
+    try:
+        from manyseg.weights import WEIGHTS
+    except ImportError:  # pragma: no cover
+        return None
+    return WEIGHTS.get(f"{spec.encoder}.{spec.weights}")
+
+
 class ManySegProvider(Provider):
     name = "manyseg"
     supports_dict_inputs = True
@@ -41,11 +78,30 @@ class ManySegProvider(Provider):
         return manyseg.__version__
 
     def build(self, spec: ModelSpec, img_size=None) -> BuiltModel:
+        w = registry_weights(spec)
+        if w is None:
+            backbone = spec.encoder
+            if spec.weights is not None:
+                backbone = f"{spec.encoder}.{_TIMM_TAGS.get(spec.weights, spec.weights)}"
+            return self._build(spec, backbone, spec.weights is not None, img_size)
+        # Remote-sensing weights (manyseg.weights): the encoder takes the weights' bands in
+        # their order; the dataset's bands are mapped onto them in front of the model.
+        if not spec.band_names:
+            raise ValueError(f"weights {w.key} need the dataset's band names "
+                             "(ModelSpec.band_names) to map bands")
+        if spec.input_mode == "dict" or spec.options.get("band_groups"):
+            raise NotImplementedError("remote-sensing weights: single stacked input only")
+        index = [spec.band_names.index(b) if b in spec.band_names else -1 for b in w.bands]
+        inner = self._build(ModelSpec(**{**spec.to_dict(), "in_channels": w.in_chans}),
+                            spec.encoder, w.tag, img_size)
+        model = WeightsInputModel(inner.model, WeightsInput(index, w.clip))
+        missing = [b for b, i in zip(w.bands, index) if i < 0]
+        notes = [f"bands filled with the pretraining mean: {', '.join(missing) or '-'}"]
+        return BuiltModel(model, inner.encoder_params, inner.decoder_params, w.key, notes)
+
+    def _build(self, spec: ModelSpec, backbone: str, pretrained, img_size=None) -> BuiltModel:
         from manyseg import create_model
 
-        backbone = spec.encoder
-        if spec.weights is not None:
-            backbone = f"{spec.encoder}.{_TIMM_TAGS.get(spec.weights, spec.weights)}"
         opts = dict(spec.options)
         n_cls = None if "heads" in opts else spec.num_classes
         # "head": options for the single logits head (e.g. {"scale": 0.5}); the model still
@@ -74,7 +130,7 @@ class ManySegProvider(Provider):
                           "alignment": "same_extent" if g.get("factor", 1) > 1 else "same_grid",
                           **group_inputs.get(n, {})} for n, g in groups.items()}
             opts.setdefault("fusion", {"type": "intermediate"})
-            inner = create_model(backbone=backbone, pretrained=spec.weights is not None,
+            inner = create_model(backbone=backbone, pretrained=pretrained,
                                  inputs=inputs, decoder=spec.arch, num_classes=n_cls, **opts)
             if head is not None:
                 inner.single_output = "logits"
@@ -89,13 +145,13 @@ class ManySegProvider(Provider):
             for n, extra in opts.pop("input_options", {}).items():
                 inputs[n].update(extra)
             opts.setdefault("fusion", {"type": "intermediate"})
-            model = create_model(backbone=backbone, pretrained=spec.weights is not None,
+            model = create_model(backbone=backbone, pretrained=pretrained,
                                  inputs=inputs, decoder=spec.arch,
                                  num_classes=n_cls, **opts)
         else:
             model = create_model(
                 backbone=backbone,
-                pretrained=spec.weights is not None,
+                pretrained=pretrained,
                 in_channels=spec.in_channels,
                 decoder=spec.arch,
                 num_classes=n_cls,
@@ -107,3 +163,4 @@ class ManySegProvider(Provider):
         encoder = getattr(model.backbone, "encoders", None) or model.backbone
         enc, dec = split_params(model, encoder)
         return BuiltModel(model, enc, dec, fingerprint_module(model.backbone))
+

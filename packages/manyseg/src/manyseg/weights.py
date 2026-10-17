@@ -43,6 +43,7 @@ class Weights:
     license: str
     source: str
     notes: tuple[str, ...] = field(default_factory=tuple)
+    clip: bool = False  # clip (x - mean) / std to [0, 1] after normalising, as in pretraining
 
     @property
     def in_chans(self) -> int:
@@ -54,17 +55,21 @@ class Weights:
 
 
 def _s2_l1c(model, tag, url, notes=()):
+    # Pretraining (SSL4EO-S12 pretrain_*_s2c.py with --dtype uint8, no --normalize): DN / 10000
+    # -> 8 bit -> ToTensor, i.e. reflectance clipped to [0, 1]; no mean/std step.
     return Weights(model, tag, url, _S2_L1C, (0.0,) * 13, (10000.0,) * 13,
                    "Sentinel-2 L1C digital numbers (reflectance x 10000)", "CC BY 4.0",
-                   _SSL4EO, notes)
+                   _SSL4EO, notes, clip=True)
 
 
 def _satlas_s2(model, tag, url):
-    return Weights(model, tag, url, _SATLAS_S2, (0.0,) * 9, (255.0,) * 3 + (8160.0,) * 6,
-                   "B04/B03/B02 as the 8-bit true-colour product (TCI, 0-255); B05-B12 as "
-                   "Sentinel-2 digital numbers", "ODC-BY", _SATLAS,
-                   ("Satlas used TCI for RGB; with L2A reflectance x 10000 for all bands, "
-                    "use std 3000 for B04/B03/B02 as an approximation",))
+    # Satlas Normalization.md: TCI (RGB, 0-255) / 255 and B05..B12 / 8160, clipped to [0, 1].
+    # ESA's L1C TCI saturates at reflectance 0.2 (DN 2000), so TCI / 255 ~= DN / 2000.
+    return Weights(model, tag, url, _SATLAS_S2, (0.0,) * 9, (2000.0,) * 3 + (8160.0,) * 6,
+                   "Sentinel-2 digital numbers (reflectance x 10000); RGB stands in for the "
+                   "8-bit TCI product (saturating at DN 2000)", "ODC-BY", _SATLAS,
+                   ("Satlas inputs were L1C TCI + bands; DN / 2000 approximates TCI / 255",),
+                   clip=True)
 
 
 _ENTRIES = (

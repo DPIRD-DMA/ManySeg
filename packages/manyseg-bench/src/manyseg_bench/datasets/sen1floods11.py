@@ -40,6 +40,12 @@ SPLIT_FILES = {"train": "flood_train_data.txt", "val": "flood_valid_data.txt",
                "test": "flood_test_data.txt", "bolivia": "flood_bolivia_data.txt"}
 EXPECTED = {"train": 252, "val": 89, "test": 90, "bolivia": 15}
 INPUTS = {"s1": 2, "s2": 13}
+# For remote-sensing weights (manyseg.weights): S2 L1C cached as DN / 1e4 in this order
+# (checked on the cache: index 9 mean 0.032 = B09 water vapour, index 10 mean 0.005 = B10
+# cirrus); S1 in dB.
+BAND_NAMES = {"s2": ("B01", "B02", "B03", "B04", "B05", "B06", "B07", "B08", "B8A", "B09",
+                     "B10", "B11", "B12"), "s1": ("VV", "VH")}
+DN_PER_UNIT = {"s2": 1e4, "s1": 1.0}
 ALL_INPUTS = {"s1": 2, "s2": 13, "dem": 1}
 
 INFO = DatasetInfo(

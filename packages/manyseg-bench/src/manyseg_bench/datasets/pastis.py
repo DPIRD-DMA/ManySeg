@@ -66,6 +66,9 @@ MD5 = "cfc441bf18137ff0bbf4fad58828fb98"
 ZIP_NAME = "PASTIS.zip"
 CACHE_NAME = "pastis"
 BANDS = ("B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8A", "B11", "B12")
+# For remote-sensing weights (manyseg.weights): cached as DN / 1e4 (THEIA L2A).
+BAND_NAMES = {"s2": ("B02", "B03", "B04", "B05", "B06", "B07", "B08", "B8A", "B11", "B12")}
+DN_PER_UNIT = {"s2": 1e4}
 SIZE = 128
 VOID = 19
 IGNORE = 255

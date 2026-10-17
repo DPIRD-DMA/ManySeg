@@ -86,6 +86,22 @@ def split_getter(ds, cache: Path, raw: Path, scheme: str = "official", mmap: boo
     return get
 
 
+def weights_normalisation(w, band_names, dn_per_unit: float) -> tuple[list, list]:
+    """Per dataset band ``(mean, std)`` in the cache's units that reproduce the remote-sensing
+    weights' pretraining normalisation ``(x_dn - w.mean) / w.std``; bands the weights do not
+    use keep (0, 1) (the adapter drops them)."""
+    mean, std = [], []
+    for b in band_names:
+        if b in w.bands:
+            j = w.bands.index(b)
+            mean.append(w.mean[j] / dn_per_unit)
+            std.append(w.std[j] / dn_per_unit)
+        else:
+            mean.append(0.0)
+            std.append(1.0)
+    return mean, std
+
+
 def resolution_info(model) -> dict | None:
     """Output-resolution settings of a ManySeg model (None for other providers): the shared
     decoder's ``out_stride``, per-task-decoder strides and each pixel head's ``scale``."""
@@ -184,6 +200,20 @@ def run_training(
                          "use input_mode='stack'")
     train_split = get_split("train")
     norm_source = "meta.json (official train split)"
+    from ..providers.manyseg_provider import registry_weights
+
+    rw = registry_weights(spec) if provider == "manyseg" else None
+    if rw is not None:  # normalise as the weights were pretrained, not with dataset statistics
+        inputs = list(info.inputs or {})
+        inp = inputs[0] if len(inputs) == 1 else None
+        bands = getattr(ds, "BAND_NAMES", {}).get(inp)
+        if bands is None or spec.input_mode == "dict":
+            raise ValueError(f"weights {rw.key} need a single-input dataset declaring "
+                             "BAND_NAMES and DN_PER_UNIT for that input")
+        m, s = weights_normalisation(rw, bands, ds.DN_PER_UNIT[inp])
+        mean, std = ({inp: m}, {inp: s}) if isinstance(mean, dict) else (m, s)
+        norm_source = f"weights {rw.key} (pretraining normalisation)"
+        spec = ModelSpec(**{**spec.to_dict(), "band_names": list(bands)})
     if split != "official":  # pooled splits: never let held-out chips into the statistics
         imgs = train_split.images
         stats = ({k: channel_stats(v) for k, v in imgs.items()} if isinstance(imgs, dict)
