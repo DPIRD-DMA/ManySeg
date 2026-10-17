@@ -150,7 +150,7 @@ class DenseModel(nn.Module):
                 per_input.setdefault(inp, set()).update(probed[id(d), sp])
         if any(src == "encoder" for src in self._head_sources.values()):
             read.add(self._deepest)
-        kw = {"check_inputs": check_inputs} if hasattr(bb, "names") else {}
+        kw = {"check_inputs": check_inputs} if hasattr(bb, "encoders") else {}
         if per_input:
             kw["per_input"] = per_input
         bb.restrict_levels(read, **kw)

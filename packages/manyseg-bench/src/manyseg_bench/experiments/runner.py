@@ -251,6 +251,7 @@ def run_training(
         "provider_version": prov.version(),
         "spec": spec.to_dict(),
         "weights_fingerprint": built.weights_fingerprint,
+        "model_notes": list(built.notes),
         "params": sum(p.numel() for p in built.model.parameters()),
         "flops_per_image": flops,
         "flops_img_size": flops_size,

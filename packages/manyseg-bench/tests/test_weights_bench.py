@@ -87,3 +87,4 @@ def test_run_training_with_registry_weights(tmp_path, monkeypatch):
     assert rec["norm_stats"]["source"].startswith("weights resnet18.ssl4eo_s2_moco")
     assert rec["norm_stats"]["mean"]["s2"] == [0.0] * 10
     assert rec["spec"]["band_names"] == DS_BANDS
+    assert rec["model_notes"] == ["bands filled with the pretraining mean: B01, B09, B10"]

@@ -434,3 +434,10 @@ def test_select_heads_may_leave_inputs_unread():
     x = two()
     full = m(x)["cls"]
     torch.testing.assert_close(m.select_heads(["cls"])(x)["cls"], full)
+
+
+def test_early_fusion_with_a_prunable_backbone():
+    """Early fusion stacks inputs into one ViT: its unread neck levels are pruned too."""
+    m = build(backbone="vit_tiny_patch16_224", decoder="deeplabv3plus", num_classes=2,
+              inputs=TWO, fusion={"type": "early"})
+    assert_every_parameter_used(m, two())
