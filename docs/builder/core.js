@@ -261,6 +261,7 @@ function derive(s) {
   const taskDecoders = pixelHeads.filter((h) => h.decoder || h.input).map((h) => h.name);
   const series = rasters.filter((r) => r.kind === "timeseries");
   const useInputs = multi || !!s.meta || series.length > 0;   // otherwise in_channels=
+  const rawImageBlocked = multi || series.length > 0;          // fastai_unet / input_cross
   const issues = [];   // {level: "error"|"warn"|"tip", text}
 
   // encoders: early fusion -> one encoder on stacked channels; shared -> reuse
@@ -278,13 +279,6 @@ function derive(s) {
     }
   }
 
-  // fused strides (intermediate): primary strides present in another input
-  let fused = [];
-  if (ftype === "intermediate") {
-    const others = new Set(encoders.slice(1).flatMap((e) => e.info.strides));
-    fused = primary.strides.filter((st) => others.has(st));
-    if (s.fusion.op === "cross_attention") fused = fused.filter((st) => st >= 16);
-  }
 
   // decoder output specs
   function decKey(type, os, width) {
@@ -295,7 +289,7 @@ function derive(s) {
   function decSpec(info, type, os, width) {
     const v = info.dec[decKey(type, os, width)];
     if (typeof v === "string") return { error: v };
-    return { channels: v[0], stride: v[1], params_m: v[2] };
+    return { channels: v[0], stride: v[1], params_m: v[2], read: v[3] || [] };
   }
   const d = s.decoder;
   let shared = null;
@@ -303,17 +297,18 @@ function derive(s) {
     shared = { type: d.type, ...decSpec(primary, d.type, d.out_stride, d.width) };
     if (shared.error) issues.push({ level: "error", text: `${d.type} on ${primary.name}: ${shared.error}` });
     if (d.type === "unet" && d.input_cross) shared.params_m += 0.007;
-    if (d.type === "fastai_unet" && multi)
-      issues.push({ level: "error", text: "fastai_unet needs the input image, which is not supported with several raster inputs." });
-    if (d.input_cross && multi)
-      issues.push({ level: "error", text: "input_cross needs a single raster input." });
+    // decoders that read the raw image need one plain image (metadata alongside is fine)
+    if (d.type === "fastai_unet" && rawImageBlocked)
+      issues.push({ level: "error", text: "fastai_unet reads the raw input image, which models with several images or a time series don't have. Use a decoder that reads features only, e.g. unet." });
+    if (d.type === "unet" && d.input_cross && rawImageBlocked)
+      issues.push({ level: "error", text: "input_cross reads the raw input image, which models with several images or a time series don't have." });
   }
   const task = {};
   for (const h of pixelHeads.filter((h) => h.decoder && !h.input)) {
     task[h.name] = { type: h.decoder, ...decSpec(primary, h.decoder, 1, "full") };
     if (task[h.name].error) issues.push({ level: "error", text: `${h.decoder} on ${primary.name}: ${task[h.name].error}` });
-    if (h.decoder === "fastai_unet" && multi)
-      issues.push({ level: "error", text: "fastai_unet needs the input image, which is not supported with several raster inputs." });
+    if (h.decoder === "fastai_unet" && rawImageBlocked)
+      issues.push({ level: "error", text: `head '${h.name}': fastai_unet reads the raw input image, which models with several images or a time series don't have.` });
   }
   // per-input heads ("input": <raster>): their own decoder on that input's unfused features,
   // by default the model's decoder type and options; "share" reuses another one's decoder + head
@@ -344,6 +339,47 @@ function derive(s) {
     const a = encOf(h.input), b = encOf(o.input);
     if (a && b && (a.info.strides.join() !== b.info.strides.join() || a.info.channels.join() !== b.info.channels.join())) { err(`'share' needs inputs with the same encoder levels ('${h.input}' and '${o.input}' differ).`); continue; }
     if (task[o.name]) task[h.name] = { ...task[o.name], input: h.input, sharesWith: o.name };
+  }
+
+  // which levels are read, as in DenseModel.restrict_to_read_levels: each decoder's read levels
+  // (ManySeg's gradient probe, exported in data.js) plus the deepest when a head pools the
+  // encoder. Only read levels are fused, and an input (or the deepest levels of one) that nothing
+  // reads is an error in create_model, since its parameters would never get a gradient.
+  let fused = [];
+  const okSpec = (t) => t && !t.error;
+  const deepestOf = (info) => info.strides[info.strides.length - 1];
+  if (multi && ftype !== "early") {
+    const need = new Map(encoders.map((e) => [e.input, new Set()]));
+    const fusedDecs = [shared, ...Object.values(task).filter((t) => !t.input)].filter(okSpec);
+    if (ftype === "intermediate") {
+      const read = new Set(fusedDecs.flatMap((t) => t.read));
+      if (imageHeads.length) read.add(deepestOf(primary));
+      const others = new Set(encoders.slice(1).flatMap((e) => e.info.strides));
+      fused = primary.strides.filter((st) => read.has(st) && others.has(st) &&
+        (s.fusion.op !== "cross_attention" || st >= 16));
+      for (const st of read) if (primary.strides.includes(st)) need.get(encoders[0].input).add(st);
+      for (const e of encoders.slice(1)) for (const st of fused) if (e.info.strides.includes(st)) need.get(e.input).add(st);
+      for (const t of Object.values(task).filter((t) => t.input && okSpec(t))) {
+        const e = encOf(t.input);
+        if (e) for (const st of t.read) need.get(e.input).add(st);
+      }
+    } else {   // late: every input runs every fused decoder on its own levels
+      for (const e of encoders) for (const t of fusedDecs) {
+        const v = e.info.dec[t === shared ? decKey(t.type, d.out_stride, d.width) : decKey(t.type, 1, "full")];
+        if (Array.isArray(v)) for (const st of v[3] || []) need.get(e.input).add(st);
+      }
+      if (imageHeads.length) need.get(encoders[0].input).add(deepestOf(primary));
+    }
+    const allOk = !issues.some((i) => i.level === "error");
+    for (const e of encoders) {
+      const n = need.get(e.input);
+      if (!n.size && !e.shared && allOk)
+        issues.push({ level: "error", text: ftype === "late"
+          ? `input '${e.input}' would never be read: late fusion combines inputs in the decoder, and no head reads a decoder. Add a pixel head, use intermediate fusion, or drop the input.`
+          : `input '${e.input}' would never be read: no fused level that a decoder or head reads includes it. Add a head that reads a decoder, change the fusion, or drop the input.` });
+      else if (n.size && Math.max(...n) < deepestOf(e.info) && allOk)
+        issues.push({ level: "error", text: `input '${e.input}': its levels deeper than /${Math.max(...n)} are never read (nothing fuses or decodes them), so ManySeg refuses it. Use an encoder whose deepest level matches the primary's.` });
+    }
   }
 
   // validation
@@ -422,7 +458,12 @@ function derive(s) {
     const w = (DATA.weights || {})[`${r.backbone.split(".")[0]}.${r.weights}`];
     if (!w) issues.push({ level: "error", text: `input '${r.name}': there are no '${r.weights}' weights for ${r.backbone}.` });
     else if (w.bands !== ch) issues.push({ level: "error", text: `input '${r.name}': '${r.weights}' weights expect ${w.bands} channels in a fixed band order, not ${ch}.` });
-    else issues.push({ level: "tip", text: `'${r.weights}' weights expect ${w.units}. Normalise with the mean and std in manyseg.weights.WEIGHTS["${r.backbone.split(".")[0]}.${r.weights}"].` });
+    else issues.push({ level: "tip", text: `'${r.weights}' weights expect ${w.units}. Normalise with the mean and std in manyseg.weights.WEIGHTS["${r.backbone.split(".")[0]}.${r.weights}"] (clipped to [0, 1] where clip is set); bands your data lacks can be filled with the pretraining mean.` });
+  }
+  for (const { r, ch } of weighed) {
+    const tags = weightTags(r.backbone).filter((w) => w.bands === ch && w.tag.startsWith("ssl4eo"));
+    if (r.weights === "imagenet" && tags.length)
+      issues.push({ level: "tip", text: `input '${r.name}': ${tags.map((w) => w.tag).join(" and ")} pretraining exists for ${r.backbone} with ${ch} bands. On three Sentinel-2 datasets ssl4eo_s2_dino beat ImageNet weights with a ResNet-50 (E024); pick it under Weights.` });
   }
 
   // advice from the experiments
@@ -729,6 +770,21 @@ function generateCode(s, D) {
   if (single) lines.push(`# out: (${shapes[0].shape.join(", ")})`);
   else for (const o of shapes) lines.push(`# out[${py(o.name)}]: (${o.shape.join(", ")})`);
   lines.push("print(model.describe(x))  # what was built, with shapes and FLOPs");
+  // after training: manyseg.save stores the weights plus what inference needs; activations are
+  // required for segmentation and classification heads (softmax, or sigmoid for one channel)
+  const acts = {};
+  for (const h of s.heads) if (h.type !== "regression") acts[single ? "logits" : h.name] = h.channels === 1 ? "sigmoid" : "softmax";
+  const rs = s.inputs.filter((r) => !r.backbone.startsWith("shared:") && !(D.ftype === "early" && r !== s.inputs[0]));
+  const rsWeights = rs.length && rs.every((r) => !["imagenet", "none"].includes(r.weights));
+  lines.push("");
+  lines.push("# After training: one file with the weights and what inference needs.");
+  if (!rsWeights) lines.push("# Add normalize=[...] (the normalisation you trained with); see help(manyseg.save).");
+  lines.push("# import manyseg");
+  const saveArgs = [`"model.safetensors"`];
+  if (Object.keys(acts).length) saveArgs.push(`activations=${py(acts)}`);
+  if (rsWeights) saveArgs.push(`normalize="weights"`);
+  lines.push(`# manyseg.save(model, ${saveArgs.join(", ")})`);
+  lines.push("# model = manyseg.load(\"model.safetensors\")  # model.tiling_spec(): sizes for tiled inference");
   if (s.meta) lines.push(`# real metadata: model.conditioner.encoders[${py(s.meta.name)}].pack({...})`);
   return lines.join("\n");
 }

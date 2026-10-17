@@ -8,7 +8,8 @@
 <p align="center">
 Segmentation and other dense-prediction models for PyTorch, built from
 <a href="https://github.com/huggingface/pytorch-image-models">timm</a> encoders.<br>
-Any number of bands, several inputs at different resolutions, metadata, and many outputs in one model.
+Any number of bands, several inputs at different resolutions, metadata, and many outputs in one model.<br>
+<a href="docs/builder/">Model builder</a>: design a model in your browser and copy the code.
 </p>
 
 <p align="center">
@@ -46,6 +47,17 @@ print(model.describe())                       # what was built, stage by stage
 most other timm families that expose multi-scale features. 46 families are tested
 ([compatibility table](docs/backbone_compatibility.md)); a few only accept inputs up to a fixed
 size. Pretrained weights are downloaded by timm and adapted to your band count.
+
+## Model builder
+
+Not sure how to combine inputs, fusion and heads? The [model builder](docs/builder/) draws the
+model as you pick options and writes the `create_model` call, refusing combinations ManySeg would
+reject. Open `docs/builder/index.html` in a browser; it needs no server.
+
+<a href="docs/builder/"><picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/builder-dark.png">
+  <img alt="The model builder's live diagram of a two-input model: encoders, gated fusion, a U-Net decoder and two heads, with parameter counts" src="docs/assets/builder-light.png" width="720">
+</picture></a>
 
 ## Common tasks
 

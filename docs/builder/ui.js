@@ -155,7 +155,7 @@ function renderForm() {
     if (d.type === "unet") {
       h += `<div class="row"><label class="f">${lab("Width", "")}
           ${segmented("decoder.width", d.width, [["full", "full"], ["half", "\u00bd"], ["quarter", "\u00bc"]], () => false, "dec.w")}</label>
-        <label class="check" data-tipk="dec.ic"><input type="checkbox" id="dec-ic" data-path="decoder.input_cross" data-type="bool"${d.input_cross ? " checked" : ""}${d.out_stride !== 1 || multi ? " disabled" : ""}> input_cross</label></div>`;
+        <label class="check" data-tipk="dec.ic"><input type="checkbox" id="dec-ic" data-path="decoder.input_cross" data-type="bool"${d.input_cross ? " checked" : ""}${d.out_stride !== 1 || multi || s.inputs.some((r) => r.kind === "timeseries") ? " disabled" : ""}> input_cross</label></div>`;
     }
     if (!unetFam) h += `<p class="hint">${d.type} outputs at the encoder's finest level${D.shared && !D.shared.error ? ` (/${D.shared.stride} for ${D.primary.name})` : ""}; pixel heads upsample.</p>`;
   }

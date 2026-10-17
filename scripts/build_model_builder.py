@@ -22,6 +22,7 @@ from pathlib import Path
 import torch
 from manyseg.backbones import create_backbone
 from manyseg.conditioning import FIELD_TYPES
+from manyseg.conditioning.inject import used_levels
 from manyseg.decoders import DECODERS
 from manyseg.features import FeatureSpec
 from manyseg.fusion.ops import FUSION_OPS
@@ -65,21 +66,27 @@ def _decoder_configs(specs):
 
 
 def _decoders(strides, channels) -> dict:
+    """{config: [out channels, out stride, params (M), strides it reads] or an error string}.
+    The read strides come from ManySeg's own gradient probe (``used_levels``): create_model only
+    fuses, and only requires, the levels some decoder reads."""
     specs = [FeatureSpec(c, s) for c, s in zip(channels, strides)]
     out = {}
     for key, name, kw in _decoder_configs(specs):
         cls = DECODERS[name]
         sp = [FeatureSpec(3, 1, "input"), *specs] if getattr(cls, "wants_input", False) else specs
         try:
-            with torch.device("meta"):
-                d = cls(sp, **kw)
-            out[key] = [d.out_spec.channels, d.out_spec.stride, _params(d)]
+            torch.manual_seed(0)
+            d = cls(sp, **kw)
         except (ValueError, AssertionError) as e:  # recorded: the page shows it as unbuildable
             out[key] = str(e)[:160]
+            continue
+        read = sorted(specs[i].stride for i in used_levels(d, specs, 3))
+        out[key] = [d.out_spec.channels, d.out_spec.stride, _params(d), read]
     return out
 
 
-def build() -> dict:
+def build(only: set[str] | None = None) -> dict:
+    """The page's data; ``only``: rebuild just these backbones (a quick partial check)."""
     compat = json.loads((ROOT / "docs" / "backbone_compatibility.json").read_text())
     rows = [(x["name"], x["size_support"], x["export_dynamic"].split(":")[0], x["plain_vit"])
             for x in compat if x["buildable"]]
@@ -87,6 +94,8 @@ def build() -> dict:
     rows = [(n, "any", "ok", False) for n in EXTRA if n not in known] + rows
     backbones = []
     for name, size, export, vit in rows:
+        if only is not None and name not in only:
+            continue
         strides, channels, params = _encoder(name)
         backbones.append({"name": name, "strides": strides, "channels": channels,
                           "params_m": params, "size": size, "export": export, "vit": vit,

@@ -97,7 +97,18 @@ for (const agg of ["mean", "max", "attention", "concat", "diff"]) {
 { const st = state(ex("semantic")); st.heads = st.heads.filter((h) => h.name === "lc1"); ok("one-per-input-head-returns-dict", small(st)); }
 
 // configurations the page must refuse (and ManySeg must reject too)
+// levels: only levels a decoder reads are fused (DeepLabV3+ reads /4 and /32)
+{ const st = state({ ...ex("fusion"), decoder: { type: "deeplabv3plus" } }); ok("fusion-deeplab-reads-4-32", small(st)); }
+{ const st = state({ ...ex("fusion"), decoder: { type: "fpn" } }); ok("fusion-fpn-skips-2", small(st)); }
+{ const st = state({ ...ex("classifier") }); st.inputs.push({ name: "sar", channels: 2, backbone: "resnet18", alignment: "same_grid", gsd: 1, res: 1, kind: "raster", temporal: "mean", dates: 6, weights: "none", share_norm: false });
+  st.heads = st.heads.filter((h) => h.scope === "image"); ok("intermediate-image-heads-only", small(st)); }
+
 { const st = metaBase(); st.meta.fields[0].name = "train"; bad("err-field-reserved", small(st)); }
+{ const st = state({ ...ex("fusion"), fusion: { type: "late", op: "concat" } }); st.heads = st.heads.filter((h) => h.scope === "image"); bad("err-late-unread-input", small(st)); }
+{ const st = state({ ...ex("metadata"), decoder: { type: "fastai_unet" } }); ok("fastai-with-metadata", small(st)); }
+{ const st = state({ ...ex("metadata"), decoder: { type: "unet", input_cross: true } }); ok("input-cross-with-metadata", small(st)); }
+{ const st = state({ inputs: [{ name: "s2", channels: 4, backbone: "resnet18", kind: "timeseries", dates: 3 }], decoder: { type: "fastai_unet" }, heads: [{ name: "m", channels: 2 }] }); bad("err-fastai-with-timeseries", small(st)); }
+{ const st = state({ inputs: [{ name: "a", channels: 3, backbone: "pvt_v2_b0.in1k" }, { name: "b", channels: 3, backbone: "levit_128s" }], heads: [{ name: "m", channels: 2 }] }); bad("err-trailing-levels", small(st, [224, 224])); }
 { const st = metaBase(); st.meta.fields[1].name = "doy"; bad("err-field-dup", small(st)); }
 { const st = metaBase(); st.meta.fields[1].std = 0; bad("err-std0", small(st)); }
 { const st = metaBase(); st.meta.fields[0].period = -1; bad("err-period", small(st)); }
