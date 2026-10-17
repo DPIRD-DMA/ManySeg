@@ -10,7 +10,8 @@ decoders and out_strides, pixel / image / per-input / shared / task-decoder head
 * training forward at odd sizes gives the expected keys and shapes, finite values and finite
   gradients;
 * eval is deterministic and per sample (a batch of two equals each sample alone);
-* ``describe()``, a state-dict round trip into a freshly built twin, ``select_heads``,
+* ``describe()``, a state-dict round trip into a freshly built twin, ``manyseg.save`` /
+  ``load``, ``select_heads``,
   ``features`` / ``embed``, ``channels_last``;
 * optionally ``torch.export`` with a dynamic shape, evaluated at another size.
 
@@ -328,6 +329,20 @@ def check(cfg: dict, seed: int, export: bool = False) -> str:
         xcl = _cast(x, lambda t: t.contiguous(memory_format=torch.channels_last)
                     if t.ndim == 4 else t)
         close(e1, cl(xcl), 1e-3)
+
+        # manyseg.save / load: rebuilt from the stored config, identical outputs
+        import tempfile
+        import warnings
+
+        import manyseg
+
+        heads = cfg.get("heads") or {"logits": {"type": "segmentation"}}
+        acts = {n: "none" if h.get("type") == "regression" else "softmax"
+                for n, h in heads.items()}
+        with tempfile.TemporaryDirectory() as d, warnings.catch_warnings():
+            warnings.simplefilter("ignore")  # no normalisation stored: expected here
+            loaded = manyseg.load(manyseg.save(model, f"{d}/m.safetensors", activations=acts))
+        close(e1, loaded(x), 0)
 
         names = list(_outs(e1))
         if len(names) > 1:

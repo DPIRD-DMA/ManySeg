@@ -148,13 +148,33 @@ def save(model: DenseModel, path: str | Path, *, normalize: Any = None,
         meta = _plain(meta)
     except TypeError as e:
         raise ValueError(f"save metadata must be plain JSON-compatible data: {e}") from None
-    from safetensors.torch import save_model
+    from safetensors.torch import save_file
 
+    tensors, aliases = _dedup_state(model)
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    # save_model, not save_file: it handles tied weights (shared backbones, shared heads)
-    save_model(model, str(path), metadata={_KEY: json.dumps(meta)})
+    save_file(tensors, str(path), metadata={_KEY: json.dumps(meta),
+                                            _ALIASES: json.dumps(aliases)})
     return path
+
+
+_ALIASES = "manyseg_aliases"
+
+
+def _dedup_state(model: torch.nn.Module) -> tuple[dict, dict]:
+    """Shared modules (shared backbones, shared per-input heads, shared norms) put one tensor
+    under several state-dict names. Each is stored once, under its first name in state-dict
+    order; ``aliases`` maps every other name to it. (safetensors' save_model / load_model
+    deduplicate too, but could pick different names for shared buffers at save and at load.)"""
+    first: dict[int, str] = {}
+    tensors, aliases = {}, {}
+    for name, t in model.state_dict(keep_vars=True).items():
+        if id(t) in first:
+            aliases[name] = first[id(t)]
+            continue
+        first[id(t)] = name
+        tensors[name] = t.detach().contiguous().clone()
+    return tensors, aliases
 
 
 def _structure(model: torch.nn.Module) -> dict[str, tuple]:
@@ -224,7 +244,7 @@ def load(path: str | Path, map_location: str | torch.device = "cpu") -> DenseMod
     """Rebuild and load a model saved with :func:`save`, in eval mode, on ``map_location`` and
     in the dtype it was saved in. Its metadata is on ``model.saved_metadata`` and its
     ``tiling_spec()`` includes the stored normalisation and activations."""
-    from safetensors.torch import load_model
+    from safetensors.torch import load_file
 
     from .models import create_model
 
@@ -237,6 +257,12 @@ def load(path: str | Path, map_location: str | torch.device = "cpu") -> DenseMod
         model.select_heads(meta["heads"])
     dtype = getattr(torch, meta.get("dtype", "float32"))
     model.to(dtype=dtype)
-    load_model(model, str(path), strict=True, device="cpu")
+    from safetensors import safe_open
+
+    with safe_open(str(path), framework="pt") as f:
+        aliases = json.loads((f.metadata() or {}).get(_ALIASES, "{}"))
+    state = load_file(str(path), device="cpu")
+    state.update({alias: state[name] for alias, name in aliases.items()})
+    model.load_state_dict(state, strict=True)
     model.saved_metadata = meta
     return model.to(device=map_location).eval()
