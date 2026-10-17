@@ -9,12 +9,12 @@ from torch import Tensor, nn
 
 
 def _min_size(model: nn.Module) -> int:
-    """Smallest H/W that keeps every feature map larger than 1x1 (torch.export specialises
-    size-1 dimensions). Padded to the network's deepest stride, ``stride + 1`` gives two cells
-    at the deepest level; padded less (``pad_to_stride=False``, or a multi-input model whose
-    grid multiple stops at the returned levels), floor-rounding layers such as a 4x4 / stride 4
-    patchify or PVT's spatial-reduction attention need ``2 * stride``. Conservative: some
-    backbones work below it."""
+    """A safe lower bound on H/W that keeps every feature map larger than 1x1 (torch.export
+    specialises size-1 dimensions). Padded to the network's deepest stride, ``stride + 1``
+    gives two cells at the deepest level; padded less (``pad_to_stride=False``, or a
+    multi-input model whose grid multiple stops at the returned levels), floor-rounding layers
+    such as a 4x4 / stride 4 patchify or PVT's spatial-reduction attention need
+    ``2 * stride``. Conservative: some backbones work below it."""
     bb = getattr(model, "backbone", None)
     # every encoder of a multi-input model, at the deepest stride its network computes
     mods = list(bb.modules()) if isinstance(bb, nn.Module) else []

@@ -159,10 +159,9 @@ def build_conditioned_model(create_model: Callable[..., nn.Module], *, inputs, f
             sp = tuple(model.backbone.encoders[inp].feature_specs) if inp else specs
             film[k] = by_module[id(d)] = DecoderFiLM(dim, sp, used_levels(d, sp, in_ch),
                                                     d.out_spec, on)
-        # Image heads that pool the encoder: FiLM on the deepest feature (per-channel affine
-        # before the mean pool, i.e. on the pooled vector).
-        if any(getattr(h, "scope", "pixel") == "image" and model._head_sources[n] == "encoder"
-               for n, h in model.heads.items()):
+        # Heads that read the encoder directly: FiLM on the deepest feature (for image heads, a
+        # per-channel affine before the mean pool, i.e. on the pooled vector).
+        if any(model._head_sources[n] == "encoder" for n in model.heads):
             film["image"] = FiLM(dim, specs[model._deepest].channels)
 
     head_bias = {}

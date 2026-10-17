@@ -713,11 +713,10 @@ class _Builder:
             mode = c.modes[v]
             if mode == "film":
                 for key in c.film:
-                    if key == "image":  # FiLM on the encoder feature image heads pool
+                    if key == "image":  # FiLM on the encoder feature heads read directly
                         m = self.model
-                        for h, head in m.heads.items():
-                            if (getattr(head, "scope", "pixel") == "image"
-                                    and m._head_sources[h] == "encoder"):
+                        for h in m.heads:
+                            if m._head_sources[h] == "encoder":
                                 self.edge(src, self.nodes[f"head_{h}"], "FiLM",
                                           kind="condition")
                     else:

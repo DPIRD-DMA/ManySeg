@@ -248,9 +248,12 @@ out = model({"optical": o, "sar": s})
   has the primary input's channels. Strides that are not selected, or that exist only in the
   primary, pass the primary feature through unchanged. The first input in `inputs` is the
   primary. Levels that nothing reads (for example stride 2, which FPN, DeepLabV3+, UPerNet
-  and SegFormer skip) are not fused either, and an input that no read level includes is an
-  error: every parameter gets a gradient. Same-grid inputs are all padded to the largest
-  of their stride multiples, so their features line up level by level.
+  and SegFormer skip) are not fused either, so every parameter gets a gradient. For the same
+  reason it is an error at construction if an input is never read (for example late fusion
+  with only encoder-reading heads), or if an input's deepest levels are (its primary has no
+  level there to fuse with; limit that input with `out_indices`). An input that only shares
+  a read input's encoder is allowed. Same-grid inputs are all padded to a common multiple
+  of their strides, so their features line up level by level.
 * **Late fusion**: `fusion={"type": "late", "op": ...}`. Each input has its own backbone and
   decoder (same type and options). The decoder outputs are fused before the heads. A
   `same_extent` input's decoder output is resampled by its valid region onto the primary's
@@ -419,7 +422,7 @@ input):
 
 | mode | what it does | init |
 | --- | --- | --- |
-| `film` (default) | FiLM `x·(1+γ(e)) + β(e)` per channel on every encoder feature level the decoder reads (just before it enters the decoder) and on the decoder output. Applied around every decoder: the shared one, per-head task decoders and the late-fusion decoder. `{"on": ["output"]}` limits it to the output. Image-scope heads that pool the encoder (classification / regression, including models with no decoder) get one FiLM on the deepest encoder feature, i.e. on the pooled vector. | exact identity |
+| `film` (default) | FiLM `x·(1+γ(e)) + β(e)` per channel on every encoder feature level the decoder reads (just before it enters the decoder) and on the decoder output. Applied around every decoder: the shared one, per-head task decoders and the late-fusion decoder. `{"on": ["output"]}` limits it to the output. Heads that read the encoder directly (image heads that pool it, including models with no decoder, and pixel heads with `"source": "encoder"`) get one FiLM on the deepest encoder feature; for image heads that is the pooled vector. | exact identity |
 | `head` | Image heads: `Linear([pool(f), e])`, implemented as `Linear(pool(f)) + Linear_e(e)`. With `{"pixel": True}`, pixel heads also get the same per-sample term broadcast over space (a 1×1 kernel on the broadcast embedding). | exact identity |
 | `channels` | The field encodings (no MLP) are broadcast as extra input channels of one raster input (`{"target": name}`, default the first raster) and go through that input's channel adapter. This is an early-fusion baseline. | depends on the adapter |
 | `token` | Metadata as extra ViT tokens. Raises `NotImplementedError`. | n/a |
@@ -764,7 +767,10 @@ parameter gets a gradient (no `find_unused_parameters=True` needed): modules for
 levels nothing reads (fusers, learned temporal aggregations, ViT neck levels, and the timm
 EfficientNet / MobileNetV3 blocks past the last requested level) are not built, and the random
 configuration fuzzer checks this. Heads you leave out of the loss still need it, or
-`select_heads`. For FSDP2,
+`select_heads` (which prunes again what only the dropped heads read). Checkpoints saved before
+this pruning (before 2026-10-17) carry the extra modules' weights: load them with
+`model.load_pruned_state_dict(sd)`, which accepts exactly those keys and is otherwise strict.
+For FSDP2,
 `manyseg.distributed.shard_model(model, mp_policy=..., mesh=...)` applies `fully_shard` per
 stage (each encoder, the shared decoder, each task decoder, each head, the conditioner), then
 the root. It is tested against DDP on CPU (gloo): parameters after a step match. BatchNorm

@@ -306,47 +306,5 @@ def create_model(
     model = DenseModel(bb, shared, built, sources, single_output=single,
                        pad_to_stride=pad_to_stride, task_decoders=task_decoders,
                        head_inputs=head_inputs)
-    _restrict_to_read_levels(model)
+    model.restrict_to_read_levels()
     return model
-
-
-def _prunable(bb: nn.Module) -> bool:
-    from ..backbones.necks import ViTPyramidNeck
-    from ..temporal import TemporalEncoder
-
-    if getattr(bb, "mode", None) in ("intermediate", "late") and len(bb.names) > 1:
-        return True  # also checks that every input is read
-    return any(isinstance(m, (ViTPyramidNeck, TemporalEncoder)) or
-               (hasattr(m, "fusers") and len(m.fusers)) for m in bb.modules())
-
-
-def _restrict_to_read_levels(model: DenseModel) -> None:
-    """Build-time pruning of per-level modules nothing reads (fusers, learned temporal
-    aggregations, ViT neck projections): they would be parameters without a gradient, which
-    DDP rejects by default. Read levels: those each decoder reads (gradient probe), plus the
-    deepest when a head reads the encoder directly."""
-    bb = model.backbone
-    if not hasattr(bb, "restrict_levels") or not _prunable(bb):
-        return
-    from ..conditioning.inject import used_levels
-
-    specs = tuple(bb.feature_specs)
-    in_ch = getattr(bb, "in_channels", None)
-    read, per_input, seen = set(), {}, set()
-    decoders = [(model.decoder, None)] if model.decoder is not None else []
-    decoders += [(d, model._head_inputs.get(h)) for h, d in model.task_decoders.items()]
-    for d, inp in decoders:
-        if id(d) in seen:
-            continue
-        seen.add(id(d))
-        if inp is None:
-            read.update(used_levels(d, specs, in_ch))
-        else:
-            sp = tuple(bb.encoders[inp].feature_specs)
-            per_input.setdefault(inp, set()).update(used_levels(d, sp, in_ch))
-    if any(src == "encoder" for src in model._head_sources.values()):
-        read.add(model._deepest)
-    if per_input:
-        bb.restrict_levels(read, per_input)
-    else:
-        bb.restrict_levels(read)

@@ -3,6 +3,7 @@ but take a ``dict[str, Tensor]``; padding to each encoder's divisor happens insi
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 
 import torch
@@ -106,10 +107,10 @@ class MultiEncoder(nn.Module):
         self.divisors = {n: int(encoders[n].input_divisor) for n in self.names}
         self.fixed_sizes = {n: fs for n in self.names if (fs := getattr(
             getattr(encoders[n], "backbone", encoders[n]), "fixed_size", None)) is not None}
-        # same-grid inputs are all padded to the largest of their multiples, so their features
+        # same-grid inputs are all padded to a common multiple of their divisors, so features
         # line up level by level (as if encoded on one padded grid)
-        self.grid_divisor = max(d for n, d in self.divisors.items()
-                                if self.alignment[n] == "same_grid")
+        self.grid_divisor = math.lcm(*(d for n, d in self.divisors.items()
+                                       if self.alignment[n] == "same_grid"))
         self.input_divisor = 1  # padding is handled per input here
         pspecs = encoders[self.primary].feature_specs
 
@@ -149,7 +150,7 @@ class MultiEncoder(nn.Module):
         self.fusers = nn.ModuleDict(ops)
         self.feature_specs = tuple(pspecs)
 
-    def restrict_levels(self, levels, per_input=None) -> None:
+    def restrict_levels(self, levels, per_input=None, check_inputs: bool = True) -> None:
         """Only the fused ``levels`` (and ``per_input``: ``{input: its own levels}``, for
         per-input heads) are read. Unread levels are not fused (the primary's feature passes
         through, as with ``fusion["strides"]``), and each encoder learns which of its levels
@@ -172,15 +173,29 @@ class MultiEncoder(nn.Module):
                                        for li, m in enumerate(self._plan) if len(m) > 1)
         # an input nothing reads is an error when it has parameters of its own (they would
         # never get a gradient); one sharing a read input's encoder only costs compute
-        shared = {id(p) for n in self.names if need[n] for p in self.encoders[n].parameters()}
+        def params(n):  # the input's encoder and its channel adapter, if any
+            mods = [self.encoders[n]] + ([self.adapters[n]] if n in self.adapters else [])
+            return [p for m in mods for p in m.parameters()]
+
+        shared = {id(p) for n in self.names if need[n] for p in params(n)}
         unread = [n for n in self.names if not need[n] and
-                  any(id(p) not in shared for p in self.encoders[n].parameters())]
-        if unread:
+                  any(id(p) not in shared for p in params(n))]
+        if unread and check_inputs:
             how = ("late fusion combines inputs in the decoder, and no head reads one" if
                    self.mode == "late" else "no fused level that a decoder or head reads "
                    "includes it")
             raise ValueError(f"input(s) {unread} would never be read: {how}. Add a head that "
                              "reads a decoder, change the fusion, or drop the input")
+        for n in self.names:  # trailing unread levels: their blocks would get no gradient
+            specs = self.encoders[n].feature_specs
+            if check_inputs and need[n] and max(need[n]) < len(specs) - 1:
+                last = max(need[n])
+                raise ValueError(
+                    f"input {n!r}: its levels at strides "
+                    f"{[s.stride for s in specs[last + 1:]]} are never read (nothing fuses or "
+                    f"decodes them, e.g. the primary {self.primary!r} has no level there), so "
+                    "the blocks computing them would get no gradient. Limit the input with "
+                    f"'out_indices' so its deepest level is stride {specs[last].stride}")
         for n in self.names:
             if hasattr(self.encoders[n], "restrict_levels"):
                 self.encoders[n].restrict_levels(sorted(need[n]))

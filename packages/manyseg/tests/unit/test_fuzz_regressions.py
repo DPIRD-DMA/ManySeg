@@ -96,11 +96,11 @@ def test_input_cross_without_stride_padding(backbone):
 
 
 def test_same_grid_inputs_with_different_pad_multiples_fuse():
-    """An input using only shallow levels pads to a smaller multiple than the others; its
-    features must still line up with theirs."""
+    """An input using only shallow levels pads to a smaller multiple (8) than the primary
+    (32); its features must still line up with the primary's."""
     m = build(backbone="efficientnet_b0", num_classes=2, fusion={"type": "intermediate",
                                                                  "op": "add"},
-              inputs={"a": {"channels": 4, "out_indices": [2]}, "b": {"channels": 1}}).eval()
+              inputs={"a": {"channels": 4}, "b": {"channels": 1, "out_indices": [2]}}).eval()
     x = {"a": torch.randn(1, 4, 41, 45), "b": torch.randn(1, 1, 41, 45)}
     y = m(x)
     assert y.shape == (1, 2, 41, 45)
@@ -127,10 +127,6 @@ def test_export_without_stride_padding_uses_a_safe_minimum_size():
     ({"backbone": "mobilenetv3_small_100", "out_indices": [1], "pad_to_stride": False,
       "heads": {"c": {"type": "classification", "channels": 1, "scope": "image"}}},
      torch.randn(1, 3, 70, 75)),
-    # the fused pyramid stops at stride 4, the second input's encoder goes to stride 32
-    ({"backbone": "efficientnet_b0", "num_classes": 2,
-      "inputs": {"a": {"channels": 3, "out_indices": [0, 1]}, "b": {"channels": 2}}},
-     {"a": torch.randn(1, 3, 70, 75), "b": torch.randn(1, 2, 70, 75)}),
 ])
 def test_export_minimum_size_covers_the_whole_network(kw, x):
     from manyseg.export import export_model
@@ -333,3 +329,108 @@ def test_an_unread_input_sharing_a_read_encoder_is_allowed():
                                                 "t2": torch.randn(2, 3, 64, 64)})
     with pytest.raises(ValueError, match="never be read"):  # its own norms: no gradient
         siamese(False)
+
+
+def test_an_unread_input_with_its_own_channel_adapter_is_rejected():
+    """Sharing a read input's encoder is not enough when the input has its own adapter (a
+    different band count): the adapter would get no gradient."""
+    with pytest.raises(ValueError, match="never be read"):
+        build(inputs={"a": {"channels": 3}, "b": {"channels": 4, "backbone": "shared:a",
+                                                  "share_norm": True}},
+              fusion={"type": "late"},
+              heads={"c": {"type": "classification", "channels": 3, "scope": "image"}})
+
+
+def test_shared_per_input_decoders_mark_both_inputs_read():
+    """One decoder shared by two per-input heads reads both inputs (Codex review)."""
+    m = build(inputs={"t1": {"channels": 3}, "t2": {"channels": 3}},
+              fusion={"type": "intermediate"},
+              heads={"s1": {"type": "segmentation", "channels": 4, "input": "t1"},
+                     "s2": {"type": "segmentation", "channels": 4, "input": "t2",
+                            "share": "s1"}})
+    assert_every_parameter_used(m, {"t1": torch.randn(2, 3, 64, 64),
+                                    "t2": torch.randn(2, 3, 64, 64)})
+
+
+def test_same_grid_padding_uses_the_least_common_multiple():
+    from manyseg.features import FeatureSpec
+
+    class Enc(torch.nn.Module):  # custom encoder with a stride that is not a power of two
+        def __init__(self, stride):
+            super().__init__()
+            self.conv = torch.nn.Conv2d(3, 8, stride, stride)
+            self.feature_specs = (FeatureSpec(8, stride, "c"),)
+            self.input_divisor = stride
+            self.in_channels = 3
+
+        def forward(self, x):
+            return [self.conv(x)]
+
+    from manyseg.fusion.encoders import MultiEncoder
+
+    enc = MultiEncoder({"a": Enc(6), "b": Enc(10)}, mode="intermediate", op="add")
+    assert enc.grid_divisor == 30
+
+
+def test_select_heads_prunes_levels_only_the_dropped_heads_read():
+    m = build(decoder="unet", inputs=TWO, fusion={"type": "intermediate", "op": "gated"},
+              heads={"seg": {"type": "segmentation", "channels": 2},
+                     "cls": {"type": "classification", "channels": 3, "scope": "image"}})
+    x = two()
+    full = m.eval()(x)["cls"]
+    m.select_heads(["cls"])
+    torch.testing.assert_close(m.eval()(x)["cls"], full)  # outputs unchanged
+    assert_every_parameter_used(m, two())
+
+
+def test_loading_a_checkpoint_saved_before_unread_levels_were_pruned():
+    """Checkpoints of models built before pruning carry fusers for unread levels:
+    load_pruned_state_dict accepts exactly those extra keys and nothing else."""
+    m = build(decoder="fpn", inputs=TWO, fusion={"type": "intermediate", "op": "gated"},
+              num_classes=2)
+    old = dict(m.state_dict())
+    old["backbone.fusers.0.gate.weight"] = torch.zeros(1)  # a pruned stride-2 fuser
+    with pytest.raises(RuntimeError):
+        m.load_state_dict(old)
+    m.load_pruned_state_dict(old)
+    with pytest.raises(RuntimeError, match="decoder"):
+        m.load_pruned_state_dict({**old, "decoder.extra.weight": torch.zeros(1)})
+    missing = dict(old)
+    missing.pop(next(k for k in old if k.startswith("decoder.")))
+    with pytest.raises(RuntimeError, match="missing"):
+        m.load_pruned_state_dict(missing)
+
+
+def test_deeper_levels_of_an_input_that_nothing_reads_are_rejected():
+    """The primary stops at stride 8, so the second input's stride 16 / 32 levels are never
+    fused: the blocks computing them would get no gradient. Limiting out_indices fixes it."""
+    with pytest.raises(ValueError, match="out_indices"):
+        build(backbone="mobilenetv3_small_100", num_classes=2, decoder="unet",
+              inputs={"a": {"channels": 3, "out_indices": [1, 2]}, "b": {"channels": 1}})
+    m = build(backbone="mobilenetv3_small_100", num_classes=2, decoder="unet",
+              inputs={"a": {"channels": 3, "out_indices": [1, 2]},
+                      "b": {"channels": 1, "out_indices": [0, 1, 2]}})
+    assert_every_parameter_used(m, {"a": torch.randn(2, 3, 64, 64),
+                                    "b": torch.randn(2, 1, 64, 64)})
+
+
+def test_film_reaches_pixel_heads_that_read_the_encoder():
+    """With only an encoder-reading pixel head there is no decoder to modulate: FiLM goes on
+    the deepest encoder feature, as for image heads (the metadata encoder was unused)."""
+    meta = {"kind": "vector", "conditioning": "film",
+            "fields": {"d": {"type": "continuous", "mean": 0.0, "std": 1.0}}}
+    m = build(inputs={"img": {"channels": 3}, "meta": meta},
+              heads={"e": {"type": "regression", "channels": 2, "source": "encoder"}})
+    assert_every_parameter_used(m, {"img": torch.randn(2, 3, 64, 64),
+                                    "meta": torch.randn(2, 1)})
+
+
+def test_select_heads_may_leave_inputs_unread():
+    """At deployment the kept heads may ignore some inputs (here: late fusion, keeping only
+    an image head drops the decoder that combined them); that is not an error."""
+    m = build(decoder="upernet", inputs=TWO, fusion={"type": "late", "op": "add"},
+              heads={"cls": {"type": "classification", "channels": 3, "scope": "image"},
+                     "seg": {"type": "segmentation", "channels": 2}}).eval()
+    x = two()
+    full = m(x)["cls"]
+    torch.testing.assert_close(m.select_heads(["cls"])(x)["cls"], full)

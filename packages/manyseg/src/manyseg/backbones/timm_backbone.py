@@ -322,6 +322,11 @@ class TimmBackbone(nn.Module):
         """timm's EfficientNet / MobileNetV3 feature models run every block whatever
         ``out_indices`` returns; drop the blocks after the deepest returned level (their
         parameters would never get a gradient, which DDP rejects by default)."""
+        from timm.models.efficientnet import EfficientNetFeatures
+        from timm.models.mobilenetv3 import MobileNetV3Features
+
+        if not isinstance(self.model, (EfficientNetFeatures, MobileNetV3Features)):
+            return  # only the classes whose block / stage layout is known
         stages = getattr(self.model, "_stage_out_idx", None)
         blocks = getattr(self.model, "blocks", None)
         if not stages or not isinstance(blocks, nn.Sequential) or \

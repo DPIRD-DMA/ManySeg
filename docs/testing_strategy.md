@@ -81,10 +81,13 @@ Every bug fix gets a test that fails before the fix. Examples so far:
     input-image decoders, early fusion with `shared:`;
   * a valid configuration refused (an image head reading the decoder with no pixel head),
     and a fixed-size backbone in a multi-input model refusing every other size;
-  * silently ignored settings: a fusion op with one raster input, an input nothing reads;
+  * silently ignored settings: a fusion op with one raster input, an input (or its deepest
+    levels) nothing reads, metadata FiLM with only an encoder-reading pixel head;
   * parameters without a gradient, which DDP rejects by default: fusers, learned temporal
     aggregations and ViT neck levels at levels nothing reads, and timm EfficientNet /
-    MobileNetV3 blocks past the last requested level;
+    MobileNetV3 blocks past the last requested level (Codex's review of the fix added:
+    decoders shared by per-input heads, adapters of unread inputs, `select_heads`, an LCM
+    for the common pad multiple, and `load_pruned_state_dict` for older checkpoints);
   * export failures: concat / diff time series, same_extent examples matching the primary's
     size or stride-aligned, `fastai_unet` shape branches frozen at the example's parity, and
     the minimum size when inputs are padded less than the network's stride.

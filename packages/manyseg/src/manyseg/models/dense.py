@@ -115,10 +115,62 @@ class DenseModel(nn.Module):
             if cond is not None and "decoder" in cond.film:
                 del cond.film["decoder"]
         if cond is not None and "image" in cond.film and not any(
-                self._head_sources[n] == "encoder" and n not in self._pixel_heads
-                for n in self.heads):
+                self._head_sources[n] == "encoder" for n in self.heads):
             del cond.film["image"]
+        # levels only the dropped heads read; inputs the kept heads ignore are fine here
+        self.restrict_to_read_levels(check_inputs=False)
         return self
+
+    def restrict_to_read_levels(self, check_inputs: bool = True) -> None:
+        """Remove per-level modules nothing reads (fusers, learned temporal aggregations, ViT
+        neck projections): they would be parameters without a gradient, which DDP rejects by
+        default. Read levels: those each decoder reads (gradient probe, see
+        ``conditioning.inject.used_levels``), plus the deepest when a head reads the encoder
+        directly. Called by ``create_model`` (``check_inputs``: an input, or trailing levels of
+        one, that nothing reads is an error) and ``select_heads``; idempotent."""
+        bb = self.backbone
+        if not hasattr(bb, "restrict_levels") or not _prunable(bb):
+            return
+        from ..conditioning.inject import used_levels
+
+        specs = tuple(bb.feature_specs)
+        in_ch = getattr(bb, "in_channels", None)
+        read, per_input, probed = set(), {}, {}
+        decoders = [(self.decoder, None)] if self.decoder is not None else []
+        decoders += [(d, self._head_inputs.get(h)) for h, d in self.task_decoders.items()]
+        for d, inp in decoders:
+            # a decoder shared by per-input heads reads each of their inputs: probe it once,
+            # apply its levels to every input
+            sp = specs if inp is None else tuple(bb.encoders[inp].feature_specs)
+            if (id(d), sp) not in probed:
+                probed[id(d), sp] = used_levels(d, sp, in_ch)
+            if inp is None:
+                read.update(probed[id(d), sp])
+            else:
+                per_input.setdefault(inp, set()).update(probed[id(d), sp])
+        if any(src == "encoder" for src in self._head_sources.values()):
+            read.add(self._deepest)
+        kw = {"check_inputs": check_inputs} if hasattr(bb, "names") else {}
+        if per_input:
+            kw["per_input"] = per_input
+        bb.restrict_levels(read, **kw)
+
+    def load_pruned_state_dict(self, state_dict) -> None:
+        """Strict loading that also accepts a checkpoint saved before unread levels were
+        pruned (ManySeg before 2026-10-17): its extra keys may only belong to modules that
+        are pruned now (fusers, temporal aggregations, ViT neck levels, trailing timm
+        blocks). Missing keys and any other unexpected key are errors."""
+        import re
+
+        own = self.state_dict()
+        pruned = re.compile(r"(^|\.)(fusers\.\d+|temporal_aggregation\.\d+|neck\.(proj|refine)"
+                            r"\.\d+|model\.blocks\.\d+)\.")
+        missing = sorted(set(own) - set(state_dict))
+        extra = sorted(k for k in set(state_dict) - set(own) if not pruned.search(k))
+        if missing or extra:
+            raise RuntimeError(f"checkpoint does not match: missing {missing[:5]}, unexpected "
+                               f"{extra[:5]}")
+        self.load_state_dict({k: state_dict[k] for k in own}, strict=True)
 
     def tiling_spec(self) -> dict:
         """How to tile this model for inference (read by ManyPred, which ManySeg does not
@@ -205,7 +257,7 @@ class DenseModel(nn.Module):
             inp = dec
         elif src == "encoder":
             inp = feats[self._deepest]
-            if cond is not None and name not in self._pixel_heads:
+            if cond is not None:  # FiLM on the deepest feature, if built
                 inp = self.conditioner.image(inp, cond)
         else:
             inp = self._decode_cond(f"task_{name}", self.task_decoders[name], x, feats, cond,
@@ -258,7 +310,7 @@ class DenseModel(nn.Module):
             feats = self.backbone(xin)
         return feats, input_feats, cond, xin, h, w, valid
 
-    def features(self, x: Tensor | dict[str, Tensor]) -> list[Tensor]:
+    def features(self, x: Tensor | dict[str, Tensor]) -> list[Tensor | None]:
         """The encoder pyramid (fused, for multi-input models) for ``x``, each level cropped to
         the input's valid region (``ceil(H / stride) x ceil(W / stride)``). Late fusion: every
         input's levels side by side (``backbone.groups``), each cropped to its own input.
@@ -348,3 +400,13 @@ class Embedder(nn.Module):
 
     def forward(self, x):
         return self.model.embed(x, **self.kwargs)
+
+
+def _prunable(bb: nn.Module) -> bool:
+    from ..backbones.necks import ViTPyramidNeck
+    from ..temporal import TemporalEncoder
+
+    if getattr(bb, "mode", None) in ("intermediate", "late") and len(bb.names) > 1:
+        return True  # also checks that every input is read
+    return any(isinstance(m, (ViTPyramidNeck, TemporalEncoder)) or
+               (hasattr(m, "fusers") and len(m.fusers)) for m in bb.modules())
