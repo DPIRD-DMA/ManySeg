@@ -1785,6 +1785,7 @@ name = "manyseg"
 version = "0.1.0.dev0"
 source = { editable = "packages/manyseg" }
 dependencies = [
+    { name = "safetensors" },
     { name = "timm" },
     { name = "torch" },
 ]
@@ -1828,6 +1829,7 @@ requires-dist = [
     { name = "onnxscript", marker = "extra == 'test'", specifier = ">=0.1" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8" },
     { name = "pytest-xdist", marker = "extra == 'test'", specifier = ">=3" },
+    { name = "safetensors", specifier = ">=0.4" },
     { name = "scikit-image", marker = "extra == 'instances'", specifier = ">=0.22" },
     { name = "scikit-image", marker = "extra == 'test'", specifier = ">=0.22" },
     { name = "scipy", marker = "extra == 'instances'", specifier = ">=1.10" },

@@ -123,6 +123,7 @@ def instance_distance(m: Tensor, normalized: bool = True) -> Tensor:
 @torch.no_grad()
 def instance_targets(
     instance_mask: Tensor,
+    *,
     boundary_width: float = 1,
     boundary_mode: str = "inner",
     distance: str = "normalized",

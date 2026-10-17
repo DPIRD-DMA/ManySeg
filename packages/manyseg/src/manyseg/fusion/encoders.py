@@ -56,9 +56,9 @@ class EarlyFusionEncoder(nn.Module):
         self.input_divisor = backbone.input_divisor
         self.primary = self.names[0]
 
-    def restrict_levels(self, levels) -> None:
-        if hasattr(self.backbone, "restrict_levels"):
-            self.backbone.restrict_levels(levels)
+    def _restrict_levels(self, levels) -> None:
+        if hasattr(self.backbone, "_restrict_levels"):
+            self.backbone._restrict_levels(levels)
 
     def forward(self, inputs: Mapping[str, Tensor]) -> list[Tensor]:
         _check_inputs(inputs, self.names)
@@ -150,7 +150,7 @@ class MultiEncoder(nn.Module):
         self.fusers = nn.ModuleDict(ops)
         self.feature_specs = tuple(pspecs)
 
-    def restrict_levels(self, levels, per_input=None, check_inputs: bool = True) -> None:
+    def _restrict_levels(self, levels, per_input=None, check_inputs: bool = True) -> None:
         """Only the fused ``levels`` (and ``per_input``: ``{input: its own levels}``, for
         per-input heads) are read. Unread levels are not fused (the primary's feature passes
         through, as with ``fusion["strides"]``), and each encoder learns which of its levels
@@ -197,8 +197,8 @@ class MultiEncoder(nn.Module):
                     "the blocks computing them would get no gradient. Limit the input with "
                     f"'out_indices' so its deepest level is stride {specs[last].stride}")
         for n in self.names:
-            if hasattr(self.encoders[n], "restrict_levels"):
-                self.encoders[n].restrict_levels(sorted(need[n]))
+            if hasattr(self.encoders[n], "_restrict_levels"):
+                self.encoders[n]._restrict_levels(sorted(need[n]))
 
     def _pad(self, n: str, x: Tensor) -> Tensor:
         """Pad to the encoder's stride multiple, or up to a fixed-size backbone's size."""

@@ -211,11 +211,11 @@ class TemporalEncoder(nn.Module):
         return [None if f is None else agg(f.view(b, t, *f.shape[1:]), valid, dates)
                 for agg, f in zip(self.temporal_aggregation, feats)]
 
-    def restrict_levels(self, levels) -> None:
+    def _restrict_levels(self, levels) -> None:
         """Only ``levels`` are read: the others get the parameter-free masked mean (a learned
         aggregation there would never get a gradient)."""
         for i, agg in enumerate(self.temporal_aggregation):
             if i not in set(levels) and any(True for _ in agg.parameters()):
                 self.temporal_aggregation[i] = MeanAggregation()
-        if hasattr(self.backbone, "restrict_levels"):
-            self.backbone.restrict_levels(levels)
+        if hasattr(self.backbone, "_restrict_levels"):
+            self.backbone._restrict_levels(levels)

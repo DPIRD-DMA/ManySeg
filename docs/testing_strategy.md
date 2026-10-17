@@ -87,7 +87,7 @@ Every bug fix gets a test that fails before the fix. Examples so far:
     aggregations and ViT neck levels at levels nothing reads, and timm EfficientNet /
     MobileNetV3 blocks past the last requested level (Codex's review of the fix added:
     decoders shared by per-input heads, adapters of unread inputs, `select_heads`, an LCM
-    for the common pad multiple, and `load_pruned_state_dict` for older checkpoints);
+    for the common pad multiple);
   * export failures: concat / diff time series, same_extent examples matching the primary's
     size or stride-aligned, `fastai_unet` shape branches frozen at the example's parity, and
     the minimum size when inputs are padded less than the network's stride.

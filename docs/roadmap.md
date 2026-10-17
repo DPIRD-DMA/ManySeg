@@ -116,7 +116,7 @@ Negative results are written up in `experiments/` like positive ones.
 ## Phase 6: release preparation 🔄
 
 * ✅ Runnable examples (`examples/`): single input, multispectral, multi-modal, multi-task,
-  instances/points, export, quantisation. Each runs on CPU in seconds; the slow tier runs them all.
+  instances/points, export, quantisation. Each runs on CPU (seconds; the training walkthroughs 10–20 s); the slow tier runs them all.
 * ✅ Docs site (MkDocs Material, `scripts/build_docs.py` → `build/site`): home, design docs, examples and every experiment write-up. Built locally and ready for **Read the Docs** (`.readthedocs.yaml`; the RTD-style pip build is tested). It goes live when the project is imported on RTD at release: RTD Community needs a public repo.
 * ⏳ README status line (currently "pre-alpha").
 * ✅ PyPI packaging for `manyseg` and `manyseg-bench` independently: metadata, licence and

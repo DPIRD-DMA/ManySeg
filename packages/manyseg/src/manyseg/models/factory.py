@@ -150,7 +150,7 @@ def create_model(
     *,
     inputs: Mapping[str, Mapping[str, Any]] | None = None,
     fusion: Mapping[str, Any] | None = None,
-    pretrained: bool = True,
+    pretrained: bool | str = True,
     in_channels: int = 3,
     channel_adapter: str = "repeat",
     out_indices: Sequence[int] | None = None,
@@ -311,7 +311,7 @@ def create_model(
     model = DenseModel(bb, shared, built, sources, single_output=single,
                        pad_to_stride=pad_to_stride, task_decoders=task_decoders,
                        head_inputs=head_inputs)
-    model.restrict_to_read_levels()
+    model._restrict_to_read_levels()
     return model
 
 

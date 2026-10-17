@@ -13,6 +13,7 @@ def test_registry_entries_are_complete():
         assert key == f"{w.model}.{w.tag}"
         assert len(w.bands) == w.in_chans == len(w.mean) == len(w.std), key
         assert w.url.startswith("https://") and w.license and w.source, key
+        assert w.citation and "20" in w.citation, f"{key}: CC BY / ODC-BY need attribution"
         assert "-" in w.url.rsplit("/", 1)[-1], f"{key}: torch.hub needs a hash suffix"
 
 

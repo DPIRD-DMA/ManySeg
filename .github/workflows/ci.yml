@@ -23,11 +23,15 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest]
-        python: ["3.10", "3.12"]
-        # macos-14 (arm64) exercises the MPS device tests. macOS minutes bill
-        # at 10x, so it runs on PRs, nightly and on demand, not on every push.
+        python: ["3.10", "3.14"]  # oldest and newest supported (3.15rc1 passes locally)
+        # macos-14 (arm64) exercises the MPS device tests; windows-latest the paths and
+        # process handling. macOS bills at 10x and Windows at 2x, so both run on PRs, nightly
+        # and on demand, not on every push.
         include: >-
-          ${{ fromJSON(github.event_name == 'push' && '[]' || '[{"os": "macos-14", "python": "3.12"}]') }}
+          ${{ fromJSON(github.event_name == 'push' && '[]' || '[{"os": "macos-14", "python": "3.12"}, {"os": "windows-latest", "python": "3.12"}]') }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -40,7 +44,8 @@ jobs:
         run: |
           uv venv --python ${{ matrix.python }} /tmp/libonly
           VIRTUAL_ENV=/tmp/libonly uv pip install --torch-backend auto -e packages/manyseg
-          /tmp/libonly/bin/python -c "import manyseg, sys; assert 'manyseg_bench' not in sys.modules"
+          PY=/tmp/libonly/bin/python; [ -f "$PY" ] || PY=/tmp/libonly/Scripts/python.exe  # Windows
+          "$PY" -c "import manyseg, sys; assert 'manyseg_bench' not in sys.modules"
       - name: manyseg unit tests
         run: uv run --no-sync pytest packages/manyseg -n 2 -q
       - name: manyseg-bench tests

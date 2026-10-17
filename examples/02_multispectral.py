@@ -1,8 +1,10 @@
 """13-band Sentinel-2-like input on an RGB-pretrained backbone.
 
-`channel_adapter` decides how the pretrained 3-channel stem becomes a 13-channel one. It only
-rewrites pretrained weights, so it matters with `pretrained=True`. `repeat` (default, timm's
-rule) cycles the RGB filters and rescales by 3/C; in E004 (13-band S2) nothing beat it.
+`channel_adapter` decides how the backbone's 3-channel stem becomes a 13-channel one. The stem
+is always built for 3 channels and then adapted, so the choice sets the initial weights with
+`pretrained=False` too; with `pretrained=True` it decides how the pretrained RGB filters are
+reused. `repeat` (default, timm's rule) cycles the RGB filters and rescales by 3/C; in E004
+(13-band S2) nothing beat it.
 
 * "mean": every band gets the mean RGB filter.
 * "rgb_plus_zero": bands 4+ start at zero, so the model starts identical to the RGB model.

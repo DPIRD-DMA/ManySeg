@@ -118,10 +118,10 @@ class DenseModel(nn.Module):
                 self._head_sources[n] == "encoder" for n in self.heads):
             del cond.film["image"]
         # levels only the dropped heads read; inputs the kept heads ignore are fine here
-        self.restrict_to_read_levels(check_inputs=False)
+        self._restrict_to_read_levels(check_inputs=False)
         return self
 
-    def restrict_to_read_levels(self, check_inputs: bool = True) -> None:
+    def _restrict_to_read_levels(self, check_inputs: bool = True) -> None:
         """Remove per-level modules nothing reads (fusers, learned temporal aggregations, ViT
         neck projections): they would be parameters without a gradient, which DDP rejects by
         default. Read levels: those each decoder reads (gradient probe, see
@@ -129,7 +129,7 @@ class DenseModel(nn.Module):
         directly. Called by ``create_model`` (``check_inputs``: an input, or trailing levels of
         one, that nothing reads is an error) and ``select_heads``; idempotent."""
         bb = self.backbone
-        if not hasattr(bb, "restrict_levels") or not _prunable(bb):
+        if not hasattr(bb, "_restrict_levels") or not _prunable(bb):
             return
         from ..conditioning.inject import used_levels
 
@@ -153,24 +153,7 @@ class DenseModel(nn.Module):
         kw = {"check_inputs": check_inputs} if hasattr(bb, "encoders") else {}
         if per_input:
             kw["per_input"] = per_input
-        bb.restrict_levels(read, **kw)
-
-    def load_pruned_state_dict(self, state_dict) -> None:
-        """Strict loading that also accepts a checkpoint saved before unread levels were
-        pruned (ManySeg before 2026-10-17): its extra keys may only belong to modules that
-        are pruned now (fusers, temporal aggregations, ViT neck levels, trailing timm
-        blocks). Missing keys and any other unexpected key are errors."""
-        import re
-
-        own = self.state_dict()
-        pruned = re.compile(r"(^|\.)(fusers\.\d+|temporal_aggregation\.\d+|neck\.(proj|refine)"
-                            r"\.\d+|model\.blocks\.\d+)\.")
-        missing = sorted(set(own) - set(state_dict))
-        extra = sorted(k for k in set(state_dict) - set(own) if not pruned.search(k))
-        if missing or extra:
-            raise RuntimeError(f"checkpoint does not match: missing {missing[:5]}, unexpected "
-                               f"{extra[:5]}")
-        self.load_state_dict({k: state_dict[k] for k in own}, strict=True)
+        bb._restrict_levels(read, **kw)
 
     def tiling_spec(self) -> dict:
         """How to tile this model for inference (read by ManyPred, which ManySeg does not

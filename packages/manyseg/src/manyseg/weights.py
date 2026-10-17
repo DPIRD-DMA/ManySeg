@@ -29,6 +29,13 @@ _SATLAS_S2 = ("B04", "B03", "B02", "B05", "B06", "B07", "B08", "B11", "B12")
 _HF = "https://hf.co/torchgeo"
 _SSL4EO = "https://github.com/zhu-xlab/SSL4EO-S12"
 _SATLAS = "https://github.com/allenai/satlaspretrain_models"
+_SSL4EO_CITE = ("Wang, Y., Braham, N. A. A., Xiong, Z., Liu, C., Albrecht, C. M., Zhu, X. X. "
+                "(2023). SSL4EO-S12: A large-scale multimodal, multitemporal dataset for "
+                "self-supervised learning in Earth observation. IEEE Geoscience and Remote "
+                "Sensing Magazine, 11(3), 98-106.")
+_SATLAS_CITE = ("Bastani, F., Wolters, P., Gupta, R., Ferdinando, J., Kembhavi, A. (2023). "
+                "SatlasPretrain: A large-scale dataset for remote sensing image understanding. "
+                "ICCV 2023.")
 
 
 @dataclass(frozen=True)
@@ -44,6 +51,7 @@ class Weights:
     source: str
     notes: tuple[str, ...] = field(default_factory=tuple)
     clip: bool = False  # clip (x - mean) / std to [0, 1] after normalising, as in pretraining
+    citation: str = ""  # cite this when you publish work using the weights (licence: attribution)
 
     @property
     def in_chans(self) -> int:
@@ -59,7 +67,7 @@ def _s2_l1c(model, tag, url, notes=()):
     # -> 8 bit -> ToTensor, i.e. reflectance clipped to [0, 1]; no mean/std step.
     return Weights(model, tag, url, _S2_L1C, (0.0,) * 13, (10000.0,) * 13,
                    "Sentinel-2 L1C digital numbers (reflectance x 10000)", "CC BY 4.0",
-                   _SSL4EO, notes, clip=True)
+                   _SSL4EO, notes, clip=True, citation=_SSL4EO_CITE)
 
 
 def _satlas_s2(model, tag, url):
@@ -69,7 +77,7 @@ def _satlas_s2(model, tag, url):
                    "Sentinel-2 digital numbers (reflectance x 10000); RGB stands in for the "
                    "8-bit TCI product (saturating at DN 2000)", "ODC-BY", _SATLAS,
                    ("Satlas inputs were L1C TCI + bands; DN / 2000 approximates TCI / 255",),
-                   clip=True)
+                   clip=True, citation=_SATLAS_CITE)
 
 
 _ENTRIES = (
@@ -90,7 +98,7 @@ _ENTRIES = (
     Weights("resnet50", "ssl4eo_s1_moco", f"{_HF}/resnet50_sentinel1_all_moco/resolve/"
             "e79862c667853c10a709bdd77ea8ffbad0e0f1cf/resnet50_sentinel1_all_moco-906e4356.pth",
             ("VV", "VH"), (-12.59, -20.26), (5.26, 5.91), "Sentinel-1 GRD backscatter in dB",
-            "CC BY 4.0", _SSL4EO),
+            "CC BY 4.0", _SSL4EO, citation=_SSL4EO_CITE),
     _satlas_s2("resnet50", "satlas_s2_si_ms", f"{_HF}/satlas/resolve/"
                "081d6607431bf36bdb59c223777cbb267131b8f2/sentinel2_resnet50_si_ms-1f454cc6.pth"),
     _satlas_s2("resnet50", "satlas_s2_mi_ms", f"{_HF}/satlas/resolve/"

@@ -337,11 +337,11 @@ class TimmBackbone(nn.Module):
             self.model.blocks = blocks[:last]
             self.network_stride = max(self.model.feature_info.reduction())
 
-    def restrict_levels(self, levels) -> None:
+    def _restrict_levels(self, levels) -> None:
         """Only ``levels`` are read by the model: a plain ViT's neck builds no projection for
         the others (they come out as ``None``)."""
         if self.neck is not None:
-            self.neck.restrict(levels)
+            self.neck._restrict(levels)
 
     @property
     def input_divisor(self) -> int:

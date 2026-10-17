@@ -23,6 +23,7 @@ def adapt_conv_weight(
     weight: Tensor,
     in_channels: int,
     method: str = "repeat",
+    *,
     generator: torch.Generator | None = None,
     rgb_indices=None,
 ) -> Tensor:

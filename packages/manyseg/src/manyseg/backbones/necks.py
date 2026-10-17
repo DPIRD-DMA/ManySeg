@@ -36,7 +36,7 @@ class ViTPyramidNeck(nn.Module):
         self.feature_specs = tuple(FeatureSpec(c, s, f"neck.{i}")
                                    for i, (c, s) in enumerate(zip(channels, strides)))
 
-    def restrict(self, levels) -> None:
+    def _restrict(self, levels) -> None:
         """Drop the projections of levels nothing reads; those come out as ``None``."""
         self.active = tuple(i in set(levels) for i in range(len(self.strides)))
         for i, on in enumerate(self.active):

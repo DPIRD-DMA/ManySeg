@@ -383,23 +383,6 @@ def test_select_heads_prunes_levels_only_the_dropped_heads_read():
     assert_every_parameter_used(m, two())
 
 
-def test_loading_a_checkpoint_saved_before_unread_levels_were_pruned():
-    """Checkpoints of models built before pruning carry fusers for unread levels:
-    load_pruned_state_dict accepts exactly those extra keys and nothing else."""
-    m = build(decoder="fpn", inputs=TWO, fusion={"type": "intermediate", "op": "gated"},
-              num_classes=2)
-    old = dict(m.state_dict())
-    old["backbone.fusers.0.gate.weight"] = torch.zeros(1)  # a pruned stride-2 fuser
-    with pytest.raises(RuntimeError):
-        m.load_state_dict(old)
-    m.load_pruned_state_dict(old)
-    with pytest.raises(RuntimeError, match="decoder"):
-        m.load_pruned_state_dict({**old, "decoder.extra.weight": torch.zeros(1)})
-    missing = dict(old)
-    missing.pop(next(k for k in old if k.startswith("decoder.")))
-    with pytest.raises(RuntimeError, match="missing"):
-        m.load_pruned_state_dict(missing)
-
 
 def test_deeper_levels_of_an_input_that_nothing_reads_are_rejected():
     """The primary stops at stride 8, so the second input's stride 16 / 32 levels are never

@@ -1,6 +1,7 @@
 # ManySeg public API design
 
-Status: v0.2 (2026-10-14). Everything below is implemented and tested unless marked *(planned)*.
+Status: API for the first release, 0.1.0 (2026-10-17). Everything below is implemented and
+tested unless marked *(planned)*.
 
 ## Goals
 
@@ -196,7 +197,10 @@ ep = export_model(model.embedder(pool="mean"), example)   # exportable module
 ```
 
 For retrieval, clustering, few-shot learning and linear probing. A regression head with `C`
-channels is also a (trainable) embedding head.
+channels is also a (trainable) embedding head. `features()` returns `list[Tensor | None]`:
+levels the model never reads are not computed in full. A plain ViT's unread neck levels come
+out as `None`, and a multi-input model's unread levels are the primary input's unfused feature.
+`embed()` raises a clear error for a `None` level. The deepest level is always computed.
 
 ### Remote-sensing pretrained weights
 
@@ -221,6 +225,11 @@ listed order; normalise with the listed `mean` / `std` (in `units`), and clip to
 `clip` is set, to match pretraining. Bands your data lacks can be filled with the pretraining
 mean (0 after normalising). Works per input in multi-input models (`inputs={"s2": {"channels":
 13, "pretrained": "ssl4eo_s2_moco"}, ...}`).
+
+**Attribution.** The weights are the authors', under the listed licences (CC BY 4.0, ODC-BY),
+which require attribution: cite `WEIGHTS[key].citation` (SSL4EO-S12: Wang et al. 2023;
+SatlasPretrain: Bastani et al. 2023) in work that uses them. ManySeg's MIT licence does not
+cover them.
 
 > **Evidence (E024; Sen1Floods11, BigEarthNet v2, PASTIS; ResNet-50, full fine-tuning after
 > one frozen epoch):** with each weight fed its own pretraining normalisation (ImageNet: dataset
@@ -610,17 +619,18 @@ benchmarks in Phase 5 decide whether the default should change.
 ```python
 from manyseg.backbones import create_backbone
 from manyseg.decoders import UNetDecoder
-from manyseg.heads import SegmentationHead
+from manyseg.heads import PixelHead
 from manyseg.models import DenseModel
 
 bb = create_backbone("resnet34", pretrained=True, in_channels=4)
 dec = UNetDecoder(bb.feature_specs)
-model = DenseModel({"image": bb}, dec, {"mask": SegmentationHead(dec.out_spec, 3)},
-                   single_output="mask")
+model = DenseModel(bb, dec, {"mask": PixelHead(dec.out_spec, 3)}, single_output="mask")
 ```
 
-`create_model` is a thin layer of argument parsing over this composition. Every component
-can be swapped by passing a module instead of a string.
+`create_model` is argument parsing over this composition (plus fusion, conditioning and the
+pruning of unread levels). In `create_model`, `backbone` also accepts a module (with
+`feature_specs` and `input_divisor`) and `decoder` a decoder class or callable; heads, fusion
+and conditioning are configured by dicts only.
 
 ### Instance and point outputs
 
@@ -776,10 +786,7 @@ parameter gets a gradient (no `find_unused_parameters=True` needed): modules for
 levels nothing reads (fusers, learned temporal aggregations, ViT neck levels, and the timm
 EfficientNet / MobileNetV3 blocks past the last requested level) are not built, and the random
 configuration fuzzer checks this. Heads you leave out of the loss still need it, or
-`select_heads` (which prunes again what only the dropped heads read). Checkpoints saved before
-this pruning (before 2026-10-17) carry the extra modules' weights: load them with
-`model.load_pruned_state_dict(sd)`, which accepts exactly those keys and is otherwise strict.
-For FSDP2,
+`select_heads` (which prunes again what only the dropped heads read). For FSDP2,
 `manyseg.distributed.shard_model(model, mp_policy=..., mesh=...)` applies `fully_shard` per
 stage (each encoder, the shared decoder, each task decoder, each head, the conditioner), then
 the root. It is tested against DDP on CPU (gloo): parameters after a step match. BatchNorm

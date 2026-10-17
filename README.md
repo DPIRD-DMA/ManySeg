@@ -46,7 +46,8 @@ print(model.describe())                       # what was built, stage by stage
 `backbone` is a timm model name: ResNet, EfficientNet, ConvNeXt, Swin, PVTv2, ViT, DINOv2 and
 most other timm families that expose multi-scale features. 46 families are tested
 ([compatibility table](docs/backbone_compatibility.md)); a few only accept inputs up to a fixed
-size. Pretrained weights are downloaded by timm and adapted to your band count.
+size. Pretrained weights are the default (`pretrained=True`): timm downloads them on first use
+and they are adapted to your band count. Pass `pretrained=False` to skip the download.
 
 ## Model builder
 
@@ -154,7 +155,8 @@ dynamic input sizes (except Swin-family encoders, a timm limitation), and with i
 quantisation (`manyseg.quantize`). For fast GPU inference use bf16
 autocast plus `torch.compile`.
 
-Each of these has a runnable script in [`examples/`](examples/); they run on CPU in seconds.
+Each of these has a runnable script in [`examples/`](examples/) that runs on CPU: the numbered
+scripts in a few seconds, the walkthroughs that train briefly in 10–20 s.
 
 ## Tips from our benchmarks
 
@@ -185,6 +187,7 @@ Every claim here comes from a pre-registered, multi-seed experiment in
 * [`docs/api_design.md`](docs/api_design.md): the full API (inputs, fusion, decoders, heads,
   metadata, resolution, export, quantisation).
 * [`experiments/`](experiments/): the evidence behind the defaults and tips.
+* [`CHANGELOG.md`](CHANGELOG.md): what each release contains and what changed.
 
 ## Benchmarking (`manyseg-bench`)
 

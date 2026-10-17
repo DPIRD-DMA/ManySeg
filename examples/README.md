@@ -1,6 +1,8 @@
 # Examples
 
-Short scripts that run on CPU in a few seconds with random weights (`pretrained=False`; each
+Short scripts that run on CPU with random weights: the numbered ones in a few seconds, the
+walkthroughs that train briefly (`instance_fields`, `point_counting`) in 10–20 s
+(`pretrained=False`; each
 script shows where to switch pretrained weights on). They use a GPU if one is available.
 
 | Script | Shows |

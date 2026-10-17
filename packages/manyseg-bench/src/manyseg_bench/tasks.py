@@ -208,7 +208,7 @@ class InstanceTask(Task):
     def targets(self, y):
         from manyseg.instances import instance_targets
 
-        t = instance_targets(y, self.boundary_width, distance=self.distance)
+        t = instance_targets(y, boundary_width=self.boundary_width, distance=self.distance)
         t["instances"] = y
         return t
 

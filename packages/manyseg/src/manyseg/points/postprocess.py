@@ -22,7 +22,7 @@ from ..utils.resolution import scale_factor, to_input_coords
 
 
 @torch.no_grad()
-def find_peaks(heatmap: Tensor, threshold: float = 0.5, kernel: int = 3,
+def find_peaks(heatmap: Tensor, threshold: float = 0.5, *, kernel: int = 3,
                max_points: int | None = None, scale: float = 1) -> list[tuple[Tensor, Tensor]]:
     """Local maxima via max-pool NMS. Returns per image ``(points (K, 2) (y, x), scores)``,
     sorted by score descending. Pass probabilities (apply ``sigmoid`` to logits first).
