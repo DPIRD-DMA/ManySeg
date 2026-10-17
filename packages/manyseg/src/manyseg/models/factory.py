@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import functools
+import inspect
+import json
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
@@ -307,4 +310,21 @@ def create_model(
                        pad_to_stride=pad_to_stride, task_decoders=task_decoders,
                        head_inputs=head_inputs)
     model.restrict_to_read_levels()
+    return model
+
+
+_build = create_model
+
+
+@functools.wraps(_build)
+def create_model(*args: Any, **kwargs: Any) -> DenseModel:  # noqa: F811
+    model = _build(*args, **kwargs)
+    # Record the arguments, so manyseg.save can rebuild the model. Only plain data can be
+    # stored: models built from modules or callables get build_config None.
+    bound = inspect.signature(_build).bind(*args, **kwargs)
+    bound.apply_defaults()
+    try:
+        model.build_config = json.loads(json.dumps(dict(bound.arguments)))
+    except TypeError:
+        model.build_config = None
     return model

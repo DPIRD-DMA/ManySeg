@@ -180,15 +180,17 @@ class DenseModel(nn.Module):
           ``r`` the resolution ratio to the primary input: 1 on a shared grid, None for a
           ``same_extent`` input (its ratio is read from its shape). Empty for a model that
           takes a single tensor.
-        * ``outputs``: ``{head: {"scope": "pixel" | "image", "kind": ..., "scale": s}}``
-          (``scale`` for pixel heads only); only ``single_output``'s head when set, as the
-          model then returns that one tensor.
+        * ``outputs``: ``{head: {"scope": "pixel" | "image", "kind": ..., "scale": s,
+          "activation": a}}`` (``scale`` for pixel heads only; ``activation`` when the model
+          was saved with one, see :func:`manyseg.save`); only ``single_output``'s head when
+          set, as the model then returns that one tensor.
         * ``pad_multiple``: the primary input is padded to a multiple of this (1 with
           ``pad_to_stride=False``).
         * ``max_size``: ``(h, w)`` of a fixed-size backbone, else None.
-        * ``normalize``: None (models do not store their normalisation yet; TODO once
-          ``save_pretrained`` / ``load`` exist).
+        * ``normalize``: the normalisation stored by :func:`manyseg.save` (a ManyPred
+          normalisation spec), or None.
         """
+        saved = getattr(self, "saved_metadata", None) or {}
         backbone = self.backbone
         names = getattr(backbone, "names", None)
         primary = getattr(backbone, "primary", None)
@@ -213,6 +215,8 @@ class DenseModel(nn.Module):
                            "kind": getattr(head, "kind", None)}
             if entry["scope"] == "pixel":
                 entry["scale"] = 1 / getattr(head, "factor", 1)
+            if name in saved.get("activations", {}):
+                entry["activation"] = saved["activations"][name]
             outputs[name] = entry
         main = dict(encoders).get(primary, backbone)  # ModuleDict has no .get
         fixed = getattr(main, "fixed_size", None) or getattr(
@@ -223,7 +227,7 @@ class DenseModel(nn.Module):
             "pad_multiple": (int(getattr(backbone, "grid_divisor", self.divisor))
                              if self.pad_to_stride else 1),
             "max_size": tuple(fixed) if fixed is not None else None,
-            "normalize": None,
+            "normalize": saved.get("normalize"),
         }
 
     def describe(self, sample: Tensor | Mapping[str, Tensor] | None = None,

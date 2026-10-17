@@ -1,7 +1,10 @@
 """ManySeg: composable dense-prediction models for PyTorch."""
 
-from .features import FeatureSpec
-from .models import DenseModel, create_model
-
 __version__ = "0.1.0.dev0"
-__all__ = ["DenseModel", "FeatureSpec", "create_model", "__version__"]
+
+from .features import FeatureSpec  # noqa: E402
+from .io import load, read_metadata, save  # noqa: E402
+from .models import DenseModel, create_model  # noqa: E402
+
+__all__ = ["DenseModel", "FeatureSpec", "create_model", "load", "read_metadata", "save",
+           "__version__"]
