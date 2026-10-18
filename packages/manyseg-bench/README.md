@@ -5,7 +5,8 @@ ManySeg, SMP (segmentation-models-pytorch), fastai and plain timm models under o
 the same data, recipes and metrics.
 
 ```bash
-pip install "manyseg-bench[manyseg,smp]"
+# not on PyPI: from a clone of the repository (uv sync installs every extra), or
+pip install -e "packages/manyseg-bench[manyseg,smp,geo]"   # geo: readers for the RS datasets
 export MANYSEG_BENCH_DATA=/path/to/data
 manyseg-bench prepare oxford_pet          # or sen1floods11, ai4boundaries, oam_tcd, cloudsen12
 manyseg-bench train --provider smp --arch unet --encoder resnet34 --seeds 0,1,2 --evaluate-test

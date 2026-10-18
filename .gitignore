@@ -237,3 +237,6 @@ experiments/setonix_watch.log*
 
 # Background-job exit-code markers (written next to ignored *.log files)
 *.log.exit*
+
+# Promo video build (local only)
+/promo/

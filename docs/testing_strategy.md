@@ -7,12 +7,12 @@ claims (accuracy, speed) are established by `manyseg-bench` experiments, not by 
 
 | Tier | Location / marker | Runs | Budget |
 | --- | --- | --- | --- |
-| Unit | `packages/*/tests/unit`, `packages/manyseg-bench/tests` | every commit, CPU | < 2 min with `-n 8` |
+| Unit | `packages/*/tests/unit`, `packages/manyseg-bench/tests` | every commit, CPU | < 2 min with `-n 8` locally (CI uses `-n 2`) |
 | Slow integration | `-m slow` (`tests/integration`) | push to main, nightly (CI's slow job skips pull requests) | < 5 min |
 | Examples | `-m slow` (`tests/examples`): every `examples/*.py` as a CPU subprocess | push to main, nightly | ~30 s with `-n 4` |
-| Model builder | `-m slow` (`tests/integration/test_model_builder.py`): the page's own logic (`docs/builder/core.js`, under node) generates code for ~90 configurations; valid ones must run with the predicted output shapes, refused ones must also fail in ManySeg; `docs/builder/data.js` must match `scripts/build_model_builder.py`. Fast option-list check: `tests/unit/test_model_builder_data.py` (every commit) | push to main, nightly; skipped without node (preinstalled on GitHub's Ubuntu runners) | ~40 s with `-n 4` |
+| Model builder | `-m slow` (`tests/integration/test_model_builder.py`): the page's own logic (`docs/builder/core.js`, under node) generates code for ~90 configurations; valid ones must run with the predicted output shapes, refused ones must also fail in ManySeg; `docs/builder/data.js` must match `scripts/build_model_builder.py`. Fast option-list check: `tests/unit/test_model_builder_data.py` (every commit) | push to main, nightly; skipped without node. CI ignores `docs/**`, so a commit that only touches `docs/builder/` is first tested nightly: run these locally (preinstalled on GitHub's Ubuntu runners) | ~40 s with `-n 4` |
 | Config fuzzer | `tests/fuzz`: random `create_model` configurations (backbones, single / multi input with every fusion type and op, alignments, time series, metadata in every conditioning mode, decoders and out_strides, pixel / image / per-input / shared / task-decoder heads, scales). Each must build and pass the invariants (shapes at odd sizes, finite values and gradients, every parameter in the graph (DDP's default), eval determinism, batch = per-sample, describe, state-dict round trip, select_heads, features / embed, channels_last; sampled: export at another size) or be refused with `ValueError` / `NotImplementedError`. 20 seeds every commit, with the expected rejections pinned (a refused valid configuration fails); 200 with export under `-m slow`; one-off campaigns: `uv run python packages/manyseg/tests/fuzz/fuzz_configs.py -n 2000 --export-every 5`. On CUDA (`fuzz_gpu.py`; 12 seeds under `-m "slow and cuda"`): CUDA vs CPU fp32 (TF32 off), a bf16 training step (finite, every parameter in the graph), bf16 and channels_last vs fp32 within 10% relative L2, `torch.compile(dynamic=True)` vs eager. Bugs it finds become tests in `tests/unit/test_fuzz_regressions.py` | every commit (20 seeds), push to main / nightly (slow) | ~20 s / ~3 min |
-| Network | `-m network` | nightly (needs weight cache) | small downloads |
+| Network | `-m network` | locally, on demand (not in CI) | small downloads |
 | Hardware | `device` fixture: `cpu`, `cuda`, `mps` | wherever the device exists | n/a |
 | Benchmark | `manyseg-bench` CLI, never in pytest | on demand, logged under `experiments/` | per experiment budget |
 
@@ -29,7 +29,8 @@ The `device` fixture parametrises over `cpu`, `cuda` and `mps`. A device counts 
 can actually allocate. An unavailable or unusable device is **skipped and reported**, never
 replaced by another device.
 
-* CI runs CPU on Linux (Python 3.10 and 3.12) and on macOS-arm64.
+* CI runs CPU on Linux (Python 3.10 and 3.14) on every run, and on macOS-arm64 and Windows
+  (Python 3.12) on pull requests, nightly and on demand. The slow tier runs on Linux only.
 * GitHub's macOS VMs report MPS as available, but every allocation fails, so **MPS tests need
   a physical Apple Silicon machine** (`uv run pytest packages/manyseg -k mps`).
 * CUDA tests run on the development workstation (RTX 4090).
@@ -106,5 +107,6 @@ the per-code-object cache hits Dynamo's recompile limit.
 Backbone families are parametrised with the smallest timm variant of each family
 (`resnet18`, `efficientnet_b0`, `convnext_atto`, `mobilenetv3_small_100`, `regnetx_002`),
 using `pretrained=False`. Unit tests therefore need no network access and stay fast. The
-backbone capability registry (Phase 4) adds a generated compatibility matrix over the wider
-timm zoo, run under `-m slow`.
+wider timm zoo is covered by the generated compatibility matrix
+(`docs/backbone_compatibility.md`), which `scripts/backbone_compat.py` regenerates by hand; it
+is not part of pytest.

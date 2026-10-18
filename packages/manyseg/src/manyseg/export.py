@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Mapping
 
 import torch
@@ -29,6 +30,19 @@ def _min_size(model: nn.Module) -> int:
     return stride + 1 if pad >= stride else 2 * stride
 
 
+@contextlib.contextmanager
+def eval_mode(model: nn.Module):
+    """Run the block with ``model`` in eval mode, then restore every submodule's own
+    train/eval flag (so e.g. BatchNorm frozen with ``.eval()`` during training stays frozen)."""
+    modes = [(m, m.training) for m in model.modules()]
+    model.eval()
+    try:
+        yield model
+    finally:
+        for m, training in modes:
+            m.training = training
+
+
 def dynamic_shapes(model: nn.Module, example, max_size: int = 4096,
                    dynamic_batch: bool = False):
     """``dynamic_shapes`` for ``torch.export``: H and W dynamic in [min, max_size] (all inputs
@@ -38,6 +52,11 @@ def dynamic_shapes(model: nn.Module, example, max_size: int = 4096,
     batch dimension is dynamic (with ``dynamic_batch``); ``N`` is fixed by the model."""
     lo = _min_size(model)
     batch = torch.export.Dim("batch", min=1, max=1024) if dynamic_batch else None
+    if batch is not None:
+        b = next(iter(example.values())) if isinstance(example, Mapping) else example
+        if b.shape[0] < 2:
+            raise ValueError("dynamic_batch=True needs an example with batch size >= 2 "
+                             "(torch.export specialises size-1 dimensions); got batch 1")
 
     def hw(t: Tensor, prefix: str):
         if min(t.shape[-2:]) < lo:
@@ -91,14 +110,15 @@ def dynamic_shapes(model: nn.Module, example, max_size: int = 4096,
 
 def export_model(model: nn.Module, example, *, max_size: int = 4096,
                  dynamic_batch: bool = False) -> torch.export.ExportedProgram:
-    """``torch.export`` with dynamic H/W (and optionally batch).
+    """``torch.export`` with dynamic H/W (and optionally batch; ``dynamic_batch`` needs an
+    example with batch size >= 2). ``model`` is exported in eval mode and then returned to
+    its previous mode.
 
     Uses deferred runtime asserts: some timm blocks (ConvNeXt/MetaFormer layer norms, Conv2dSame)
     produce guards that are always true but that export's solver cannot prove, e.g.
     ``1 % (512 * ceil(w / 32)) != 0``.
     """
-    model = model.eval()
-    return torch.export.export(
-        model, (example,), dynamic_shapes=dynamic_shapes(model, example, max_size, dynamic_batch),
-        prefer_deferred_runtime_asserts_over_guards=True,
-    )
+    shapes = dynamic_shapes(model, example, max_size, dynamic_batch)
+    with eval_mode(model):
+        return torch.export.export(model, (example,), dynamic_shapes=shapes,
+                                   prefer_deferred_runtime_asserts_over_guards=True)

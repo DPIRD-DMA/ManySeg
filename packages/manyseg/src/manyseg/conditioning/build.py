@@ -14,8 +14,8 @@ from .encoder import MetadataEncoder
 from .inject import Conditioner, DecoderFiLM, FiLM, used_levels
 
 VECTOR_KEYS = {"kind", "fields", "num_features", "dim", "dropout", "conditioning"}
-MODES = ("film", "head", "channels", "token")
-_MODE_OPTIONS = {"film": {"on"}, "head": {"pixel"}, "channels": {"target"}, "token": set()}
+MODES = ("film", "head", "channels")
+_MODE_OPTIONS = {"film": {"on"}, "head": {"pixel"}, "channels": {"target"}}
 
 
 def has_kinds(inputs: Mapping[str, Mapping]) -> bool:
@@ -53,20 +53,21 @@ def parse_vector(name: str, cfg: Mapping) -> tuple[Callable[[], MetadataEncoder]
     cond = cfg.get("conditioning", "film")
     cond = {"mode": cond} if isinstance(cond, str) else dict(cond)
     mode = cond.pop("mode", "film")
-    if mode not in MODES:
-        raise ValueError(f"vector input {name!r}: conditioning mode must be one of {MODES}, "
-                         f"got {mode!r}")
     if mode == "token":
         raise NotImplementedError(
             "'token' conditioning (metadata as extra ViT tokens) is not implemented yet; "
             "use 'film', 'head' or 'channels'")
+    if mode not in MODES:
+        raise ValueError(f"vector input {name!r}: conditioning mode must be one of {MODES}, "
+                         f"got {mode!r}")
     bad = set(cond) - _MODE_OPTIONS[mode]
     if bad:
         raise ValueError(f"vector input {name!r}: unknown {mode!r} options {sorted(bad)}")
     if mode == "channels" and "dim" in cfg:
         raise ValueError(f"vector input {name!r}: 'dim' does not apply to 'channels' mode "
                          "(the field encodings themselves become channels)")
-    make = functools.partial(MetadataEncoder, cfg.get("fields"), channels=cfg.get("num_features"),
+    make = functools.partial(MetadataEncoder, cfg.get("fields"),
+                             num_features=cfg.get("num_features"),
                              dim=None if mode == "channels" else cfg.get("dim", 64),
                              dropout=cfg.get("dropout", 0.0))
     with torch.random.fork_rng(devices=[]):

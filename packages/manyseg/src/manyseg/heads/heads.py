@@ -95,7 +95,9 @@ def create_head(spec_decoder: FeatureSpec, spec_encoder: FeatureSpec, cfg: dict)
     kind_name = cfg.pop("type", "segmentation")
     kind = HEADS.get_or_raise(kind_name)
     channels = cfg.pop("out_channels")
-    uncertainty = bool(cfg.pop("uncertainty", False))
+    uncertainty = cfg.pop("uncertainty", False)
+    if not isinstance(uncertainty, bool):
+        raise ValueError(f"'uncertainty' must be True or False, got {uncertainty!r}")
     if uncertainty:
         # Heteroscedastic regression: [mean (C), log-variance (C)]; the loss (e.g. Gaussian NLL)
         # lives outside the model.
@@ -106,8 +108,10 @@ def create_head(spec_decoder: FeatureSpec, spec_encoder: FeatureSpec, cfg: dict)
     # segmentation predicts per pixel, classification per image; regression is either
     if (kind_name, scope) in (("segmentation", "image"), ("classification", "pixel")):
         right = "classification" if scope == "image" else "segmentation"
-        raise ValueError(f"a {scope}-scope head of type {kind_name!r} is ambiguous: use "
-                         f"'type': {right!r}")
+        other = "pixel" if scope == "image" else "image"
+        raise ValueError(f"{kind_name!r} heads are {other}-scope: set 'scope': {other!r}, or use "
+                         f"'type': {right!r} for a {scope}-scope head (scope defaults to "
+                         "'pixel')")
     if scope != "pixel" and "scale" in cfg:
         raise ValueError("'scale' applies to pixel heads only; image-scope heads have no grid")
     if scope == "pixel":

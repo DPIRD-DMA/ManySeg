@@ -6,9 +6,10 @@ is always built for 3 channels and then adapted, so the choice sets the initial 
 reused. `repeat` (default, timm's rule) cycles the RGB filters and rescales by 3/C; in E004
 (13-band S2) nothing beat it.
 
-* "mean": every band gets the mean RGB filter.
-* "rgb_plus_zero": bands 4+ start at zero, so the model starts identical to the RGB model.
-  Useful when the first three bands are RGB and you fine-tune an RGB checkpoint.
+* "mean": every band gets the mean RGB filter (scaled by 3/C).
+* "rgb_plus_zero": the R, G, B bands keep the RGB filters and the others start at zero, so the
+  model starts identical to the RGB model. In Sentinel-2 order R, G, B are bands 3, 2, 1:
+  pass backbone_kwargs={"rgb_indices": (3, 2, 1)} (per input: "rgb_indices" in its config).
 * "rgb_plus_random": RGB filters kept, other bands small random.
 * "projection": a learned 1x1 conv C -> 3 in front of the stem. Harmful in E004.
 """

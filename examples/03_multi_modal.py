@@ -1,4 +1,5 @@
-"""Multi-modal input: optical + half-resolution SAR + a metadata vector (the README example).
+"""Multi-modal input: optical + half-resolution SAR + a metadata vector (an expanded version of
+the README's multi-input example: gated fusion, metadata and more heads).
 
 Each raster has its own encoder; features are fused per stride by a gated op. SAR covers the
 same ground at half the resolution (`same_extent`), so its features are resampled onto the
@@ -20,7 +21,7 @@ def main():
     model = create_model(
         pretrained=False,  # True downloads ImageNet weights for every encoder
         inputs={
-            "optical": {"in_channels": 4, "backbone": "convnext_atto"},  # README: convnext_tiny
+            "optical": {"in_channels": 4, "backbone": "convnext_atto"},  # small, for CPU
             "sar": {"in_channels": 2, "backbone": "resnet18", "alignment": "same_extent"},
             "meta": {"kind": "vector", "fields": {  # non-raster conditioning, FiLM by default
                 "doy": {"type": "cyclic", "period": 365.25},

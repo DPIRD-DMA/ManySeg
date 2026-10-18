@@ -30,16 +30,17 @@ class MetadataEncoder(nn.Module):
 
     Args:
         fields: ``{name: {"type": ..., **options}}`` (see ``FIELD_TYPES``), or
-        channels: ``N`` pre-normalised floats (``N`` continuous fields named ``"0"``...).
+        num_features: ``N`` pre-normalised floats (``N`` continuous fields named ``"0"``...).
         dim: Output embedding size ``D``; ``None`` skips the MLP and returns the field
             encodings (``D = width``), as used by the ``channels`` injection mode.
         dropout: Training-time probability of dropping each field (per sample) to unknown.
     """
 
     def __init__(self, fields: Mapping[str, Mapping] | None = None, *,
-                 channels: int | None = None, dim: int | None = 64, dropout: float = 0.0) -> None:
+                 num_features: int | None = None, dim: int | None = 64,
+                 dropout: float = 0.0) -> None:
         super().__init__()
-        if (fields is None) == (channels is None):
+        if (fields is None) == (num_features is None):
             raise ValueError("a vector input takes exactly one of 'fields' or 'num_features'")
         if not 0.0 <= dropout <= 1.0:
             raise ValueError(f"dropout must be in [0, 1], got {dropout}")
@@ -49,9 +50,9 @@ class MetadataEncoder(nn.Module):
             check_module_names("field", fields)
             built = {n: build_field(cfg) for n, cfg in fields.items()}
         else:
-            if channels < 1:
-                raise ValueError(f"channels must be >= 1, got {channels}")
-            built = {str(i): ContinuousField() for i in range(channels)}
+            if num_features < 1:
+                raise ValueError(f"num_features must be >= 1, got {num_features}")
+            built = {str(i): ContinuousField() for i in range(num_features)}
         self.fields = nn.ModuleDict(built)
         self.field_names = tuple(built)
         self.unknown = nn.ParameterDict({n: nn.Parameter(torch.zeros(f.width))

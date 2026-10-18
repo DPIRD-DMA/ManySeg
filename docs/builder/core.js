@@ -348,6 +348,7 @@ function derive(s) {
   let fused = [];
   const okSpec = (t) => t && !t.error;
   const deepestOf = (info) => info.strides[info.strides.length - 1];
+  let readLevels = null;   // input name -> Set of the strides ManySeg reads from its encoder (for the diagram)
   if (multi && ftype !== "early") {
     const need = new Map(encoders.map((e) => [e.input, new Set()]));
     const fusedDecs = [shared, ...Object.values(task).filter((t) => !t.input)].filter(okSpec);
@@ -370,6 +371,7 @@ function derive(s) {
       }
       if (imageHeads.length) need.get(encoders[0].input).add(deepestOf(primary));
     }
+    if (fusedDecs.every((t) => t.read.length) && Object.values(task).every((t) => !okSpec(t) || t.read.length)) readLevels = need;
     const allOk = !issues.some((i) => i.level === "error");
     for (const e of encoders) {
       const n = need.get(e.input);
@@ -379,6 +381,15 @@ function derive(s) {
           : `input '${e.input}' would never be read: no fused level that a decoder or head reads includes it. Add a head that reads a decoder, change the fusion, or drop the input.` });
       else if (n.size && Math.max(...n) < deepestOf(e.info) && allOk)
         issues.push({ level: "error", text: `input '${e.input}': its levels deeper than /${Math.max(...n)} are never read (nothing fuses or decodes them), so ManySeg refuses it. Use an encoder whose deepest level matches the primary's.` });
+    }
+  }
+
+  if (!multi || ftype === "early") {
+    const decs = [shared, ...Object.values(task)].filter(okSpec);
+    if (decs.every((t) => t.read.length) && (decs.length || imageHeads.length)) {
+      const n = new Set(decs.flatMap((t) => t.read));
+      if (imageHeads.length) n.add(deepestOf(primary));
+      readLevels = new Map([[encoders[0].input, n]]);
     }
   }
 
@@ -411,6 +422,9 @@ function derive(s) {
   if (!s.heads.length) issues.push({ level: "error", text: "Add at least one head." });
   for (const r of rasters) if (!(r.channels >= 1)) issues.push({ level: "error", text: `input '${r.name}' needs at least 1 channel.` });
   for (const h of s.heads) if (!(h.channels >= 1)) issues.push({ level: "error", text: `head '${h.name}' needs at least 1 channel.` });
+  for (const h of s.heads)  // the type follows the scope (regression is either)
+    if ((h.type === "segmentation" && h.scope === "image") || (h.type === "classification" && h.scope === "pixel"))
+      issues.push({ level: "error", text: `head '${h.name}': ${h.type} heads are per ${h.type === "segmentation" ? "pixel" : "image"}. Change Per, or use ${h.type === "segmentation" ? "classification" : "segmentation"} (or regression).` });
   for (const r of rasters) if (!(r.gsd > 0)) issues.push({ level: "error", text: `input '${r.name}' needs a relative pixel size above 0.` });
   {
     const [H0, W0] = s.size;
@@ -487,7 +501,7 @@ function derive(s) {
     issues.push({ level: "tip", text: "For change detection, Siamese diff or concat_diff beat stacking both dates on both datasets in E022; Siamese concat did on one (LEVIR-CD) only." });
 
   return { rasters, multi, ftype, primary, encoders, fused, shared, task, pixelHeads, imageHeads,
-    needsShared, taskDecoders, series, useInputs, issues };
+    needsShared, taskDecoders, series, useInputs, issues, readLevels };
 }
 
 // ---------- parameter estimate ----------

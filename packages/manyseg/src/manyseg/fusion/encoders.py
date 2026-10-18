@@ -19,12 +19,17 @@ from .ops import FUSION_OPS
 ALIGNMENTS = ("same_grid", "same_extent")
 
 
-def _check_inputs(inputs: Mapping[str, Tensor], names: Sequence[str]) -> None:
+def _check_inputs(inputs: Mapping[str, Tensor], names: Sequence[str],
+                  optional: Sequence[str] = ()) -> None:
     if not isinstance(inputs, Mapping):
         raise TypeError(f"this model takes a dict of inputs with keys {list(names)}")
     for n in names:
         if n not in inputs:
             raise KeyError(f"missing input {n!r}; expected keys {list(names)}")
+    unknown = [k for k in inputs if k not in names and k not in optional]
+    if unknown:  # a misspelt "<name>_mask" would otherwise be ignored silently
+        raise ValueError(f"unknown input keys {unknown}; this model takes {list(names)}"
+                         + (f" and optionally {list(optional)}" if optional else ""))
 
 
 def _resize_valid(f: Tensor, valid: tuple, target_valid: tuple, target_full: tuple) -> Tensor:
@@ -216,7 +221,9 @@ class MultiEncoder(nn.Module):
         return F.pad(x, (0, fixed[1] - w, 0, fixed[0] - h))
 
     def _encode(self, inputs: Mapping[str, Tensor]):
-        _check_inputs(inputs, self.names)
+        _check_inputs(inputs, self.names, [f"{n}_{s}" for n in self.names
+                                           if getattr(self.encoders[n], "temporal", False)
+                                           for s in ("mask", "dates")])
         ph, pw = inputs[self.primary].shape[-2:]
         feats, valid = {}, {}
         for n in self.names:

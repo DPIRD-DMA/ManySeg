@@ -44,10 +44,14 @@ print(model.describe())                       # what was built, stage by stage
 ```
 
 `backbone` is a timm model name: ResNet, EfficientNet, ConvNeXt, Swin, PVTv2, ViT, DINOv2 and
-most other timm families that expose multi-scale features. 46 families are tested
+most other timm families that expose multi-scale features. 46 models are tested
 ([compatibility table](docs/backbone_compatibility.md)); a few only accept inputs up to a fixed
 size. Pretrained weights are the default (`pretrained=True`): timm downloads them on first use
 and they are adapted to your band count. Pass `pretrained=False` to skip the download.
+
+The model does not normalise its input: scale or standardise your bands as you would for any
+timm model (the ImageNet weights saw `(x - mean) / std` RGB). With `num_classes=` the output is
+one tensor of raw logits; with `heads=` it is a dict of raw logits keyed by head name.
 
 ## Model builder
 
@@ -128,11 +132,16 @@ model keeps only that head and its output stays a dict).
 inputs = {
     "image": {"in_channels": 4},
     "meta": {"kind": "vector", "fields": {"doy": {"type": "cyclic", "period": 365.25},
-                                          "latlon": {"type": "coords"}}},
+                                          "latlon": {"type": "coords"}}},  # degrees, lat first
 }
+model = create_model(inputs=inputs, num_classes=2)
+meta = model.pack_metadata("meta", {"doy": torch.tensor([45.0, float("nan")]),  # NaN = missing
+                                    "latlon": torch.tensor([[-31.9, 115.9], [-33.9, 18.4]])})
+out = model({"image": torch.randn(2, 4, 128, 128), "meta": meta})
 ```
 
-Missing values are handled. In our tests metadata rarely helped, so compare against a model
+The model takes the packed `(B, N)` tensor; `pack_metadata` builds it from per-field values,
+and NaN marks a missing value. In our tests metadata rarely helped, so compare against a model
 without it on your data.
 
 **Time series.** One encoder runs on every date and the dates are combined per level (mean,
@@ -164,8 +173,9 @@ class, a sigmoid per channel and BCE loss.
 pool="mean")` gives vectors for retrieval, clustering or probing.
 
 **Remote-sensing pretrained weights.** `create_model(backbone="resnet50",
-pretrained="ssl4eo_s2_dino", in_channels=13, ...)` loads SSL4EO-S12 or SatlasPretrain weights
-(Sentinel-2 / Sentinel-1); see `manyseg.weights` for the band order and normalisation each
+pretrained="ssl4eo_s2_dino", in_channels=13, ...)` loads SSL4EO-S12 weights
+(Sentinel-2 MoCo: ResNet-18/50, ViT-S/16; DINO: ResNet-50, ViT-S/16; Sentinel-1 MoCo:
+ResNet-50) or SatlasPretrain Sentinel-2 weights (ResNet-50/152); `manyseg.weights.WEIGHTS` lists the band order and normalisation each
 expects. Fed their own pretraining normalisation, SSL4EO DINO weights beat the ImageNet
 baseline on all three Sentinel-2 datasets we tested (ResNet-50, full fine-tuning; E024).
 
@@ -173,8 +183,9 @@ baseline on all three Sentinel-2 datasets we tested (ResNet-50, full fine-tuning
 `manyseg.points` (trees, animals: centres, counts) provide the heads, training targets and
 post-processing.
 
-**Save and load.** `manyseg.save` stores the weights with the configuration and what inference
-needs; `manyseg.load` rebuilds the model without downloading anything:
+**Save and load.** `manyseg.save` stores the weights with the configuration and, as metadata
+for inference code, the input normalisation, output activations and class names; `manyseg.load`
+rebuilds the model without downloading anything:
 
 ```python
 import manyseg
@@ -185,12 +196,17 @@ manyseg.save(model, "model.safetensors",
              normalize=[{"type": "scale", "value": 10000}],  # the input scaling you trained with
              classes=["background", "water"])
 model = manyseg.load("model.safetensors")
+meta = manyseg.read_metadata("model.safetensors")  # the stored normalize / activations / classes
 ```
+
+The loaded model still takes the raw-scale input you trained on and returns logits: applying
+the stored normalisation and activations is up to the inference code. The default head of a
+`num_classes=` model is named `"logits"`.
 
 **Deployment.** Models work with `torch.compile(dynamic=True)`, `torch.export` and ONNX with
 dynamic input sizes (a few encoder families only run at a fixed size or cannot export
 dynamically; see the [compatibility table](docs/backbone_compatibility.md)), and with int8
-quantisation (`manyseg.quantize`). For fast GPU inference use bf16
+quantisation (`import manyseg.quantize`). For fast GPU inference use bf16
 autocast plus `torch.compile`.
 
 Most of these have a runnable script in [`examples/`](examples/) that runs on CPU: the numbered
@@ -199,14 +215,16 @@ scripts in a few seconds, the walkthroughs that train briefly in 10–20 s.
 ## Tips from our benchmarks
 
 * **Small batches** (≤ 4 per GPU): keep the encoder's BatchNorm layers in eval mode during
-  training (frozen running statistics; their weights still train).
+  training (frozen running statistics; their weights still train;
+  [recipe](docs/api_design.md#small-batches)).
 * **Memory-bound?** `decoder_kwargs={"out_stride": 2}` costs no accuracy for the U-Net and
   saves 11–18% memory.
 * **Water and other per-pixel spectral targets:** `decoder_kwargs={"input_cross": True}`
   feeds the raw bands to the last decoder stage. It did not help pet or cloud segmentation.
 * **Mixed precision is safe:** bf16, fp16 and int8 weight-only showed no accuracy loss.
-* **Fusion:** stacking all bands into one input was as good as fancier fusion on the datasets
-  we tried; start there.
+* **Fusion:** stacking all bands (optical and SAR) into one input matched the fancier fusion
+  options on Sen1Floods11 (E005); start there. Splitting Sentinel-2 bands into resolution groups
+  helped on one dataset (E015) and not on another (E016).
 * **Several dates** beat one by a wide margin. Stacking dates as channels is a strong baseline;
   the time-series input (`"kind": "timeseries"`) beat it on field delineation but not on crop
   types, so try both.
@@ -221,7 +239,7 @@ Every claim here comes from a pre-registered, multi-seed experiment in
 * [`docs/builder/`](docs/builder/): the model builder, a page where you pick inputs, encoders,
   fusion, decoder and heads and get a live diagram plus the `create_model` code. Open
   `docs/builder/index.html` in a browser; it needs no server.
-* [`examples/`](examples/): runnable scripts for each task above.
+* [`examples/`](examples/): runnable scripts for most of the tasks above.
 * [`docs/api_design.md`](docs/api_design.md): the full API (inputs, fusion, decoders, heads,
   metadata, resolution, export, quantisation).
 * [`experiments/`](experiments/): the evidence behind the defaults and tips.
@@ -231,6 +249,7 @@ Every claim here comes from a pre-registered, multi-seed experiment in
 
 A separate package for comparing segmentation libraries (ManySeg, segmentation_models_pytorch,
 fastai, timm) under identical data, augmentation and training.
+It is not published; it installs only from the uv workspace in this repository (`uv sync`).
 See [`docs/benchmark_design.md`](docs/benchmark_design.md).
 
 ## Contributing

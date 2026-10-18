@@ -128,7 +128,8 @@ def test_round_trip_recovers_instances(backend, width):
         pytest.importorskip("skimage")
     m = two_fields()
     t = instance_targets(m, boundary_width=width)
-    labels = instances_from_outputs(t["extent"], t["boundary"], t["distance"], backend=backend)
+    labels = instances_from_outputs(t["extent"], t["boundary"], t["distance"], logits=False,
+                                    backend=backend)
     assert labels.shape == (1, 40, 50)
     assert same_partition(labels[0], m)
 
@@ -143,7 +144,8 @@ def test_round_trip_random_blobs():
             m[y:y + h, x:x + w] = k
             k += 1
     t = instance_targets(m)
-    labels = instances_from_outputs(t["extent"], t["boundary"], t["distance"], backend="torch")
+    labels = instances_from_outputs(t["extent"], t["boundary"], t["distance"], logits=False,
+                                    backend="torch")
     assert same_partition(labels[0], m)
 
 
@@ -196,7 +198,8 @@ def test_round_trip_keeps_instances_inside_boundary_band(backend):
     m[8, 2:15] = 2              # thin line
     m[12:18, 12:18] = 3         # normal block
     t = instance_targets(m, boundary_width=2)
-    labels = instances_from_outputs(t["extent"], t["boundary"], t["distance"], backend=backend)
+    labels = instances_from_outputs(t["extent"], t["boundary"], t["distance"], logits=False,
+                                    backend=backend)
     assert same_partition(labels[0], m)
 
 
@@ -205,7 +208,8 @@ def test_full_tile_instance_has_distance_and_round_trips():
     t = instance_targets(m)
     d = t["distance"][0, 0]
     assert torch.isfinite(d).all() and d.max() == 1.0 and d.min() > 0
-    labels = instances_from_outputs(t["extent"], t["boundary"], t["distance"], backend="torch")
+    labels = instances_from_outputs(t["extent"], t["boundary"], t["distance"], logits=False,
+                                    backend="torch")
     assert same_partition(labels[0], m[0])
 
 

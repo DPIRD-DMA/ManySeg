@@ -227,6 +227,9 @@ class TimmBackbone(nn.Module):
             )
         if in_channels < 1:
             raise ValueError(f"in_channels must be >= 1, got {in_channels}")
+        if rgb_indices is not None and channel_adapter in ("repeat", "mean"):
+            raise ValueError(f"rgb_indices applies to the rgb_plus_* and projection adapters, "
+                             f"not {channel_adapter!r}")
         arch = introspect(name)
         self.is_plain = arch["plain"]
         # deepest stride the network computes; some timm feature models (e.g. MobileNetV3) run
@@ -262,10 +265,12 @@ class TimmBackbone(nn.Module):
             from ..weights import get_weights, load_into
 
             w = get_weights(name, pretrained)
-            if in_channels != w.in_chans:
-                raise ValueError(f"{w.key} expects {w.in_chans} bands ({', '.join(w.bands)}), in "
-                                 f"that order; got in_channels={in_channels}")
-            self.model = _timm_create(name, pretrained=False, **{**kwargs, "in_chans": w.in_chans})
+            if in_channels != w.in_channels:
+                raise ValueError(f"{w.key} expects {w.in_channels} bands "
+                                 f"({', '.join(w.bands)}), in that order; got "
+                                 f"in_channels={in_channels}")
+            self.model = _timm_create(name, pretrained=False,
+                                      **{**kwargs, "in_chans": w.in_channels})
             load_into(self.model, w)
             self.weights = w.key
         else:
@@ -282,6 +287,9 @@ class TimmBackbone(nn.Module):
         self.stem_conv_names = [n for n, _ in stems]
         self._stem_name = self.stem_conv_names[0]
         self.input_adapter: nn.Module = nn.Identity()
+        if rgb_indices is not None and in_channels == stems[0][1].in_channels:
+            raise ValueError(f"rgb_indices has no effect: a {in_channels}-channel input needs no "
+                             "stem adaptation")
         if in_channels != stems[0][1].in_channels:
             if channel_adapter == "projection":
                 self.input_adapter = ProjectionAdapter(in_channels, stems[0][1].in_channels,
@@ -372,7 +380,7 @@ class TimmBackbone(nn.Module):
         return feats
 
 
-def create_backbone(name: str, pretrained: bool = True, **kwargs) -> TimmBackbone:
+def create_backbone(name: str, pretrained: bool | str = True, **kwargs) -> TimmBackbone:
     return TimmBackbone(name, pretrained=pretrained, **kwargs)
 
 

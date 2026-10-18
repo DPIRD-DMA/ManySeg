@@ -92,7 +92,7 @@ def test_encoder_widths_and_output_shape():
 
 
 def test_plain_channels_vector():
-    m = MetadataEncoder(channels=5, dim=8).eval()
+    m = MetadataEncoder(num_features=5, dim=8).eval()
     assert m.columns == m.width == 5 and len(m.field_names) == 5
     x = torch.randn(3, 5)
     torch.testing.assert_close(m.encode_fields(x), x)
@@ -100,7 +100,7 @@ def test_plain_channels_vector():
 
 def test_fields_xor_channels():
     with pytest.raises(ValueError, match="exactly one"):
-        MetadataEncoder(fields=FIELDS, channels=3)
+        MetadataEncoder(fields=FIELDS, num_features=3)
     with pytest.raises(ValueError, match="exactly one"):
         MetadataEncoder()
 

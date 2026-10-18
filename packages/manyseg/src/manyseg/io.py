@@ -255,6 +255,8 @@ def _no_download(config: dict) -> dict:
     file)."""
     config = json.loads(json.dumps(config))
     config["pretrained"] = False
+    if config.get("inputs") is not None and config.get("in_channels") == 3:
+        config["in_channels"] = None  # files saved before in_channels defaulted to None
     for cfg in (config.get("inputs") or {}).values():
         if "pretrained" in cfg:
             cfg["pretrained"] = False

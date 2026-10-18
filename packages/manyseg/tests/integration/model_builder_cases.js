@@ -104,6 +104,8 @@ for (const agg of ["mean", "max", "attention", "concat", "diff"]) {
   st.heads = st.heads.filter((h) => h.scope === "image"); ok("intermediate-image-heads-only", small(st)); }
 
 { const st = metaBase(); st.meta.fields[0].name = "train"; bad("err-field-reserved", small(st)); }
+{ const st = state(ex("segmentation")); st.heads.push(head({ name: "x", channels: 2, scope: "image" })); bad("err-segmentation-per-image", small(st)); }
+{ const st = state(ex("segmentation")); st.heads.push(head({ name: "x", type: "classification", channels: 2 })); bad("err-classification-per-pixel", small(st)); }
 { const st = state({ ...ex("fusion"), fusion: { type: "late", op: "concat" } }); st.heads = st.heads.filter((h) => h.scope === "image"); bad("err-late-unread-input", small(st)); }
 { const st = state({ ...ex("metadata"), decoder: { type: "fastai_unet" } }); ok("fastai-with-metadata", small(st)); }
 { const st = state({ ...ex("metadata"), decoder: { type: "unet", input_cross: true } }); ok("input-cross-with-metadata", small(st)); }

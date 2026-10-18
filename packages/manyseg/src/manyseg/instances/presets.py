@@ -19,7 +19,7 @@ def instance_heads(
         distance: ``"normalized"`` or ``"absolute"``; must match the targets
             (:func:`manyseg.instances.instance_targets`). Heads output raw values either way.
         decoders: ``None`` -> all heads share the model decoder; ``"separate"`` -> each head
-            gets its own decoder of the model's default type (``"unet"``); a decoder name ->
+            gets its own ``"unet"`` decoder (whatever the model's ``decoder=``); a decoder name ->
             each head gets its own decoder of that type; a mapping ``{head: decoder}`` ->
             only those heads get their own decoder (name or ``{"type": ..., **kwargs}``).
     """

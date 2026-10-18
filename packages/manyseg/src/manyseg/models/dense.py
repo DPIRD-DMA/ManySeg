@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any
 
 import torch.nn.functional as F
 from torch import Tensor, nn
 
 from ..utils.spatial import crop_to, pad_to_multiple
+
+if TYPE_CHECKING:
+    from ..features import FeatureSpec
 
 
 class DenseModel(nn.Module):
@@ -27,6 +31,8 @@ class DenseModel(nn.Module):
             (metadata) inputs: it splits them off the input dict and modulates the decoders
             (keyed ``"decoder"`` / ``"task_<head>"``) and heads.
         single_output: If set, ``forward`` returns only this head's tensor.
+        head_inputs: ``{head: input name}`` for per-input heads, whose task decoder reads that
+            input's own (unfused) features.
         pad_to_stride: Zero-pad bottom/right to ``backbone.input_divisor`` and crop outputs
             back, which keeps outputs pixel-aligned with inputs. If False, pixel outputs are
             resized to the input size instead.
@@ -35,6 +41,10 @@ class DenseModel(nn.Module):
     with ``scale = 1/f`` (output pixel ``(i, j)`` covers input pixels ``[i*f, (i+1)*f) x
     [j*f, (j+1)*f)``; see :mod:`manyseg.utils.resolution`).
     """
+
+    # set by manyseg.create_model (the arguments, for manyseg.save) and by manyseg.load
+    build_config: dict[str, Any] | None = None
+    saved_metadata: dict[str, Any] | None = None
 
     def __init__(
         self,
@@ -78,7 +88,7 @@ class DenseModel(nn.Module):
         self._deepest = max(levels, key=lambda i: backbone.feature_specs[i].stride)
 
     @property
-    def feature_specs(self):
+    def feature_specs(self) -> tuple[FeatureSpec, ...]:
         return self.backbone.feature_specs
 
     def pack_metadata(self, name: str, values) -> Tensor:
@@ -98,7 +108,7 @@ class DenseModel(nn.Module):
         dropout in removed modules no longer consumes random numbers, so masks differ). The
         output stays a dict. Removed modules leave the state dict: to load a pruned
         checkpoint, rebuild the model, call ``select_heads`` with the same names, then load."""
-        names = list(names)
+        names = [names] if isinstance(names, str) else list(names)
         if self.single_output is not None:
             if names != [self.single_output]:
                 raise ValueError(f"single-output model: its only head is {self.single_output!r}")
@@ -302,6 +312,9 @@ class DenseModel(nn.Module):
             else:
                 feats = self.backbone(x)
         else:
+            if isinstance(x, Mapping):
+                raise TypeError("this model takes a single tensor, not a dict (build it with "
+                                "inputs={...} to name its inputs)")
             h, w = x.shape[-2], x.shape[-1]
             xin, valid = self._pad(x), None
             feats = self.backbone(xin)

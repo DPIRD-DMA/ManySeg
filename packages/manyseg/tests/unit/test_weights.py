@@ -11,7 +11,7 @@ def test_registry_entries_are_complete():
     assert len(WEIGHTS) >= 8
     for key, w in WEIGHTS.items():
         assert key == f"{w.model}.{w.tag}"
-        assert len(w.bands) == w.in_chans == len(w.mean) == len(w.std), key
+        assert len(w.bands) == w.in_channels == len(w.mean) == len(w.std), key
         assert w.url.startswith("https://") and w.license and w.source, key
         assert w.citation and "20" in w.citation, f"{key}: CC BY / ODC-BY need attribution"
         assert "-" in w.url.rsplit("/", 1)[-1], f"{key}: torch.hub needs a hash suffix"
@@ -19,7 +19,7 @@ def test_registry_entries_are_complete():
 
 def test_lookup_and_errors():
     w = get_weights("resnet50", "ssl4eo_s2_moco")
-    assert w.in_chans == 13 and w.bands[0] == "B01"
+    assert w.in_channels == 13 and w.bands[0] == "B01"
     with pytest.raises(ValueError, match="ssl4eo_s2_moco"):
         get_weights("resnet50", "nope")
     with pytest.raises(ValueError, match="resnet50"):
@@ -76,9 +76,9 @@ def test_pretrained_tag_on_multi_input_encoder(monkeypatch):
                                  "vit_small_patch16_224.ssl4eo_s2_dino"])
 def test_real_weights_load(key):
     w = WEIGHTS[key]
-    m = create_model(backbone=w.model, pretrained=w.tag, in_channels=w.in_chans,
+    m = create_model(backbone=w.model, pretrained=w.tag, in_channels=w.in_channels,
                      num_classes=2).eval()
-    assert m(torch.randn(1, w.in_chans, 64, 64)).shape == (1, 2, 64, 64)
+    assert m(torch.randn(1, w.in_channels, 64, 64)).shape == (1, 2, 64, 64)
 
 
 def test_vit_weights_resample_pos_embed_for_another_img_size(monkeypatch):

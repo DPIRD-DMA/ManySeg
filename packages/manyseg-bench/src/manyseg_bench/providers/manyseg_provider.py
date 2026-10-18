@@ -10,6 +10,12 @@ from .base import BuiltModel, ModelSpec, Provider, fingerprint_module, split_par
 _TIMM_TAGS = {"tv_in1k": "tv_in1k"}
 
 
+def _decoder(spec: ModelSpec) -> str:
+    # arch "none" names image-level models, which build no decoder: ManySeg still checks the
+    # decoder name, so pass its default
+    return "unet" if spec.arch == "none" else spec.arch
+
+
 class BandGroupModel(nn.Module):
     """Splits a stacked (B, C, H, W) tensor into named band groups, block-averaging each group
     by its integer ``factor`` (ceil, so every pixel belongs to one coarse cell; partial edge
@@ -92,7 +98,7 @@ class ManySegProvider(Provider):
         if spec.input_mode == "dict" or spec.options.get("band_groups"):
             raise NotImplementedError("remote-sensing weights: single stacked input only")
         index = [spec.band_names.index(b) if b in spec.band_names else -1 for b in w.bands]
-        inner = self._build(ModelSpec(**{**spec.to_dict(), "in_channels": w.in_chans}),
+        inner = self._build(ModelSpec(**{**spec.to_dict(), "in_channels": w.in_channels}),
                             spec.encoder, w.tag, img_size)
         model = WeightsInputModel(inner.model, WeightsInput(index, w.clip))
         missing = [b for b, i in zip(w.bands, index) if i < 0]
@@ -131,7 +137,7 @@ class ManySegProvider(Provider):
                           **group_inputs.get(n, {})} for n, g in groups.items()}
             opts.setdefault("fusion", {"type": "intermediate"})
             inner = create_model(backbone=backbone, pretrained=pretrained,
-                                 inputs=inputs, decoder=spec.arch, num_classes=n_cls, **opts)
+                                 inputs=inputs, decoder=_decoder(spec), num_classes=n_cls, **opts)
             if head is not None:
                 inner.single_output = "logits"
             model = BandGroupModel(inner, groups)
@@ -146,14 +152,14 @@ class ManySegProvider(Provider):
                 inputs[n].update(extra)
             opts.setdefault("fusion", {"type": "intermediate"})
             model = create_model(backbone=backbone, pretrained=pretrained,
-                                 inputs=inputs, decoder=spec.arch,
+                                 inputs=inputs, decoder=_decoder(spec),
                                  num_classes=n_cls, **opts)
         else:
             model = create_model(
                 backbone=backbone,
                 pretrained=pretrained,
                 in_channels=spec.in_channels,
-                decoder=spec.arch,
+                decoder=_decoder(spec),
                 num_classes=n_cls,
                 **opts,
             )

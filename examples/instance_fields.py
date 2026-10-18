@@ -1,7 +1,8 @@
 """Field delineation with boundary + distance heads (runs on CPU with random weights).
 
 extent / boundary / distance heads -> targets from an instance-ID mask -> a few training steps ->
-instances via seeded growth (or watershed with `pip install manyseg[instances]`).
+instances via seeded growth in torch (`backend="torch"` here; the default `"auto"` uses
+scikit-image's watershed when `manyseg[instances]` is installed).
 Losses here are plain torch; manyseg-bench has Dice+BCE etc. (`manyseg_bench.losses`).
 """
 
@@ -53,7 +54,8 @@ def main():
     print("predicted (30 steps, not converged):", [int(lab.max()) for lab in labels])
     print("true instances per image:           ", true)
     # Perfect outputs (the targets) round-trip to the true instances:
-    exact = instances_from_outputs(t["extent"], t["boundary"], t["distance"], backend="torch")
+    exact = instances_from_outputs(t["extent"], t["boundary"], t["distance"], logits=False,
+                                   backend="torch")
     print("round-trip from targets:", [int(exact[i].max()) for i in range(len(exact))])
 
 

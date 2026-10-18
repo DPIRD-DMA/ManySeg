@@ -52,6 +52,7 @@ def test_dynamic_shapes_give_vectors_no_spatial_dims():
     ex = {"img": torch.randn(1, 3, 64, 96), "meta": meta(), "meta_mask": torch.ones(1, 4)}
     spec = dynamic_shapes(model, ex)["x"]
     assert spec["meta"] is None and spec["meta_mask"] is None and set(spec["img"]) == {2, 3}
+    ex = {"img": torch.randn(2, 3, 64, 96), "meta": meta(2), "meta_mask": torch.ones(2, 4)}
     spec = dynamic_shapes(model, ex, dynamic_batch=True)["x"]
     assert spec["meta"] == {0: spec["img"][0]}
 

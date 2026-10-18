@@ -1,22 +1,25 @@
 # manyseg
 
 Composable dense-prediction models for PyTorch: most [timm](https://github.com/huggingface/pytorch-image-models)
-backbones (46 families tested), any channel count, multiple inputs and outputs. Works with
+backbones (46 models tested), any channel count, multiple inputs and outputs. Works with
 `torch.compile` and `torch.export`.
 
+Not on PyPI yet; install from GitHub (torch, timm and safetensors come with it):
+
 ```bash
-pip install manyseg                 # torch, timm and safetensors
-pip install "manyseg[quant]"        # + torchao int8 quantisation
-pip install "manyseg[onnx]"         # + ONNX export (add onnxruntime to check parity)
-pip install "manyseg[instances]"    # + scipy / scikit-image post-processing
+pip install "manyseg @ git+https://github.com/DPIRD-DMA/ManySeg#subdirectory=packages/manyseg"
 ```
+
+Extras: `[quant]` (torchao int8 quantisation), `[onnx]` (ONNX export; add onnxruntime to check
+parity), `[instances]` (scipy / scikit-image post-processing), e.g.
+`pip install "manyseg[quant] @ git+https://..."`. After the first release: `pip install manyseg`.
 
 ```python
 import torch
 from manyseg import create_model
 
 model = create_model(backbone="convnext_tiny", in_channels=4, decoder="unet", num_classes=3)
-model(torch.randn(2, 4, 257, 301)).shape   # (2, 3, 257, 301): odd and non-square sizes are fine
+print(model(torch.randn(2, 4, 257, 301)).shape)  # (2, 3, 257, 301): odd/non-square sizes are fine
 print(model.describe())                    # what was actually built, stage by stage
 ```
 
@@ -26,9 +29,10 @@ print(model.describe())                    # what was actually built, stage by s
   intermediate or late fusion and explicit `same_grid` / `same_extent` alignment, time series
   (masks, acquisition dates), change detection (Siamese encoders, difference fusion,
   per-date heads) and non-raster metadata (date, angles, lat/lon) through FiLM.
-* **Remote-sensing weights:** SSL4EO-S12 and SatlasPretrain Sentinel-2 / Sentinel-1 weights
-  for timm ResNets and ViTs (`pretrained="ssl4eo_s2_dino"`), with their band order and
-  normalisation.
+* **Remote-sensing weights:** SSL4EO-S12 Sentinel-2 MoCo (ResNet-18/50, ViT-S/16) and DINO
+  (ResNet-50, ViT-S/16), Sentinel-1 MoCo (ResNet-50), and SatlasPretrain Sentinel-2
+  (ResNet-50/152), selected with e.g.
+  `pretrained="ssl4eo_s2_dino"` and recorded with their band order and normalisation.
 * **Decoders:** `unet` (identical to SMP's), `unetplusplus`, `fastai_unet` (identical to
   fastai's), `fpn`, `deeplabv3plus`, `upernet` and `segformer`, shared or per head;
   reduced output resolution (`out_stride` for `unet`, `unetplusplus` and `fastai_unet`) and an

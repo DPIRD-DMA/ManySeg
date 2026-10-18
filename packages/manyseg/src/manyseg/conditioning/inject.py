@@ -173,10 +173,16 @@ class Conditioner(nn.Module):
         if not isinstance(x, Mapping):
             raise TypeError(f"this model takes a dict of inputs with keys "
                             f"{list(self.rasters) + list(self.vectors)}")
-        for n in self.vectors:
+        expected = list(self.rasters) + list(self.vectors)
+        for n in expected:
             if n not in x:
-                raise KeyError(f"missing vector input {n!r}; expected keys "
-                               f"{list(self.rasters) + list(self.vectors)}")
+                kind = "vector" if n in self.vectors else "raster"
+                raise KeyError(f"missing {kind} input {n!r}; expected keys {expected}")
+        optional = [f"{n}_mask" for n in self.vectors] + list(getattr(self, "temporal_extras", ()))
+        unknown = [k for k in x if k not in expected and k not in optional]
+        if unknown:  # a misspelt "<name>_mask" would otherwise be ignored silently
+            raise ValueError(f"unknown input keys {unknown}; this model takes {expected} and "
+                             f"optionally {optional}")
         rasters = {n: x[n] for n in self.rasters}
         rasters.update({k: x[k] for k in getattr(self, "temporal_extras", ()) if k in x})
         for n in self._by_mode["channels"]:

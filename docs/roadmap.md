@@ -18,7 +18,7 @@ Status as of 2026-10-18, 09:00 AWST. ✅ done · 🔄 in progress · ⏳ planned
 * ✅ `torch.compile` fullgraph+dynamic (1 graph for 10 sizes on CUDA), `torch.export`
   dynamic H/W, ONNX with onnxruntime parity.
 
-## Phase 3: independent benchmark 🔄
+## Phase 3: independent benchmark ✅
 
 * ✅ Provider interface; ManySeg, SMP and fastai providers; weight fingerprints.
 * ✅ Oxford Pet preparation with integrity checks; GPU-resident seeded loader and augmentation.
@@ -41,9 +41,9 @@ Status as of 2026-10-18, 09:00 AWST. ✅ done · 🔄 in progress · ⏳ planned
 * ✅ CloudSEN12+ high (clouds/shadows, S2 L1C; CC0 labels + Copernicus Sentinel notice): `cloudsen12` (S2), `cloudsen12_s2_aux` (+ static S1GBM backscatter + DEM) and `cloudsen12_meta` (+ lat/lon, date, sun angles) on ROI-disjoint splits; 2048² samples tiled to 512².
 * ✅ E013 (CloudSEN12+; Setonix): negative on all three questions. S1GBM/DEM layers, metadata (FiLM, lat/lon on unseen locations) and `input_cross` give no gain; `input_cross` stays a targeted option for tasks whose labels follow per-pixel input values. 5,126 Pawsey units.
 * ✅ E014 (profiling sweep on an idle 4090): bf16 1.61× over fp32; compile 1.46× more for inference in bf16 (10/10 pairs), only 1.17× for training; cold compile 8–15 s (inference) / 28–54 s (train) per shape.
-* ✅ CI workflow (Linux unit tests on every push; macOS/MPS on PRs and nightly; slow tier nightly).
+* ✅ CI workflow (Linux unit tests on every push; macOS/MPS on PRs and nightly; slow tier on push to main and nightly).
 
-## Phase 4: expanded architecture support 🔄
+## Phase 4: expanded architecture support ✅
 
 1. ✅ **Capability probe** (`manyseg.backbones.capabilities`) and generated
    `docs/backbone_compatibility.md` (46 timm models; 41 any-size; 38 export dynamically).
@@ -52,7 +52,7 @@ Status as of 2026-10-18, 09:00 AWST. ✅ done · 🔄 in progress · ⏳ planned
    and fixed-size models with `img_size` plus clear errors.
 3. ✅ **Decoders**: U-Net, U-Net++, FPN, DeepLabV3+, UPerNet, SegFormer-MLP, fastai-style
    Dynamic U-Net (parameter- and FLOP-identical to fastai).
-4. ✅ **Multi-input fusion**: early, intermediate and late; five ops; shared encoders;
+4. ✅ **Multi-input fusion**: early, intermediate and late; seven ops; shared encoders;
    `same_grid` / `same_extent`.
 5. ✅ **Multi-task**: named heads, uncertainty heads, per-head task-specific decoders (`"decoder"` key in a head config).
 6. ✅ **Export helper** `manyseg.export.export_model`. ✅ Quantisation entry points `manyseg.quantize` (`manyseg[quant]`, torchao): PT2E static int8 with dynamic H/W, int8 weight-only / dynamic, size and agreement reports.
@@ -138,8 +138,8 @@ Negative results are written up in `experiments/` like positive ones.
 
 | Risk | Mitigation |
 | --- | --- |
-| Swin dynamic export hangs inside timm | Probe in a subprocess with a timeout. Document it. Offer fixed-size export. |
+| Swin dynamic export fails inside timm (it used to hang) | Probe in a subprocess with a timeout. Document it. Offer fixed-size export. |
 | The configuration surface grows with fusion × decoder × head combinations | Keep composition over configuration. `create_model` only parses into modules, and new options need an experiment or a test. |
 | Benchmark results on a shared GPU | Contention is recorded with each result. Timing claims are re-measured on an idle GPU. |
 | Leakage in remote-sensing splits | Official geographic splits, or grid-cell assignment. Document the protocol for each dataset. |
-| Upstream API drift (timm, SMP, fastai) | Pin tested versions in results; network and slow tests run nightly. |
+| Upstream API drift (timm, SMP, fastai) | Pin tested versions in results; slow tests and a torch/timm floor leg run nightly; network tests run locally. |

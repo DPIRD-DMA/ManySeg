@@ -73,6 +73,8 @@ class UNetDecoder(nn.Module):
         out_stride: Stride of the decoder output: 1 (input resolution, default), 2, 4, ...
         norm: ``"batch"``, ``"group"`` or ``None``.
         upsample: ``"nearest"`` (SMP-equivalent default), ``"bilinear"`` or ``"aligned"``.
+        input_cross: Add fastai's full-resolution stage: the raw input image is concatenated
+            to the stride-1 output, followed by a residual block (needs ``out_stride=1``).
     """
 
     def __init__(

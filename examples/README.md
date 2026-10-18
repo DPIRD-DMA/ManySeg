@@ -3,13 +3,14 @@
 Short scripts that run on CPU with random weights: the numbered ones in a few seconds, the
 walkthroughs that train briefly (`instance_fields`, `point_counting`) in 10–20 s
 (`pretrained=False`; each
-script shows where to switch pretrained weights on). They use a GPU if one is available.
+script shows where to switch pretrained weights on). 01–04 and 08 use a GPU if one is
+available; the others run on CPU.
 
 | Script | Shows |
 | --- | --- |
 | [`01_single_input.py`](01_single_input.py) | 4-band U-Net on a timm backbone, odd non-square input, one training step, `model.describe()` |
 | [`02_multispectral.py`](02_multispectral.py) | 13-band Sentinel-2-like input with the `repeat` stem adapter, and when to pick another adapter |
-| [`03_multi_modal.py`](03_multi_modal.py) | The README model: optical + half-resolution SAR (`same_extent`) + metadata via FiLM, `describe(sample)`, a Graphviz PNG |
+| [`03_multi_modal.py`](03_multi_modal.py) | An expanded version of the README's multi-input model: optical + half-resolution SAR (`same_extent`, gated fusion) + metadata via FiLM + instance and image heads, `describe(sample)`, a Graphviz PNG |
 | [`04_multi_task.py`](04_multi_task.py) | Segmentation + image-level regression with uncertainty (Gaussian NLL) + a head with its own decoder |
 | [`05_instances_points.py`](05_instances_points.py) | Boundary + distance instance heads and centre-heatmap + density heads: targets, labels, peaks, counts |
 | [`06_export.py`](06_export.py) | `torch.export` with dynamic H/W, ONNX checked with onnxruntime, a `torch.compile` note |

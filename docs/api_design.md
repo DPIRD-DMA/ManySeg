@@ -1,6 +1,6 @@
 # ManySeg public API design
 
-Status: API for the first release, 0.1.0 (2026-10-17). Everything below is implemented and
+Status: API for the first release, 0.1.0 (unreleased). Everything below is implemented and
 tested unless marked *(planned)*.
 
 ## Goals
@@ -167,8 +167,9 @@ stem adaptation, pool + linear head. Exception: families whose timm head has a p
 > cost: the decoder's parameters and ~37% lower training throughput. Mix image and pixel heads freely: the decoder is built only when a pixel
 head needs it. After training with auxiliary heads, `model.select_heads(["crop"])` keeps only
 the heads you deploy and removes decoders (and FiLM / head-bias layers) only the dropped heads
-used; the kept outputs are unchanged in eval mode. To load such a checkpoint, rebuild the model
-and call `select_heads` with the same names first. Head and input names must not be Python keywords (`yield`, `class`, ...):
+used; the kept outputs are unchanged in eval mode. `manyseg.save` records the selection and
+`manyseg.load` re-applies it; to load a bare state dict instead, rebuild the model and call
+`select_heads` with the same names first. Head and input names must not be Python keywords (`yield`, `class`, ...):
 `torch.export` reads modules as attributes.
 
 ### Multi-label pixel segmentation
@@ -213,12 +214,13 @@ out as `None`, and a multi-input model's unread levels are the primary input's u
 from manyseg.weights import WEIGHTS
 model = create_model(backbone="resnet50", pretrained="ssl4eo_s2_moco", in_channels=13,
                      num_classes=2)
-w = WEIGHTS["resnet50.ssl4eo_s2_moco"]       # bands (order!), mean, std, units, licence, source
+w = WEIGHTS["resnet50.ssl4eo_s2_moco"]       # bands (order!), mean, std, units, license, source
 ```
 
 | tags | architectures | input | licence |
 |---|---|---|---|
-| `ssl4eo_s2_moco`, `ssl4eo_s2_dino` | ResNet-18 / 50, ViT-S/16 | Sentinel-2 L1C, 13 bands, DN / 10000 | CC BY 4.0 |
+| `ssl4eo_s2_moco` | ResNet-18 / 50, ViT-S/16 | Sentinel-2 L1C, 13 bands, DN / 10000 | CC BY 4.0 |
+| `ssl4eo_s2_dino` | ResNet-50, ViT-S/16 | Sentinel-2 L1C, 13 bands, DN / 10000 | CC BY 4.0 |
 | `ssl4eo_s1_moco` | ResNet-50 | Sentinel-1 VV/VH dB, band statistics | CC BY 4.0 |
 | `satlas_s2_si_ms`, `satlas_s2_mi_ms` | ResNet-50 / 152 | Sentinel-2, 9 bands (RGB as TCI 0–255) | ODC-BY |
 
@@ -265,9 +267,9 @@ out = model({"optical": o, "sar": s})
   `backbone_kwargs`) must agree across inputs, and they then override the top-level arguments.
   Conflicting values, and a per-input `rgb_indices`, are errors.
 * **Intermediate fusion**: each input has its own backbone. Features with the same stride
-  are fused by an op (`concat`, `add`, `gated`, `attention`, `cross_attention`) whose output
-  has the primary input's channels. Strides that are not selected, or that exist only in the
-  primary, pass the primary feature through unchanged. The first input in `inputs` is the
+  are fused by an op (`concat`, `add`, `gated`, `attention`, `cross_attention`, and for
+  change detection `diff`, `concat_diff`) whose output has the primary input's channels. Strides that are not selected, or that exist only in the
+  primary, pass the primary feature through unchanged. The first raster input in `inputs` is the
   primary. Levels that nothing reads (for example stride 2, which FPN, DeepLabV3+, UPerNet
   and SegFormer skip) are not fused either, so every parameter gets a gradient. For the same
   reason it is an error at construction if an input is never read (for example late fusion
@@ -485,8 +487,10 @@ line up exactly. ManySeg handles this explicitly:
   required divisor, the network runs, and outputs are cropped back to `(H, W)`. Pixels keep
   their positions, so pixel `(i, j)` of the output corresponds to pixel `(i, j)` of the input.
   The pad value is 0 (applied after the user's normalisation, so 0 is the per-channel mean).
-  Models built with `inputs=` always pad each input inside the multi-input encoder; there
-  `pad_to_stride=False` only switches the outputs from cropping to resizing.
+  Models built with several raster inputs always pad each input inside the multi-input
+  encoder; there `pad_to_stride=False` only switches the outputs from cropping to resizing.
+  (One raster plus vector inputs builds the ordinary single-input model, where
+  `pad_to_stride=False` turns padding off.)
 * Decoders resize the upsampled feature to each skip's exact size rather than assuming
   `2×`, so they also work when padding is disabled and a backbone rounds feature sizes up.
 * Backbones that only run at one size (MaxViT, CoAtNet, LeViT, EfficientFormerV2, Hiera:
@@ -614,9 +618,9 @@ create_model(backbone="resnet34", pretrained=True, in_channels=13, channel_adapt
 
 | `channel_adapter` | Behaviour on the pretrained stem conv `W ∈ R^{O×3×k×k}` |
 | --- | --- |
-| `"repeat"` (default; timm-compatible) | Cycle the RGB filters to `C` channels and scale by `3/C`, so a constant input gives the same response as before. |
-| `"mean"` | Every channel gets `mean_c(W)·3/C`. |
-| `"rgb_plus_random"` | The first 3 channels keep `W` unchanged. The others are kaiming-initialised at a small scale. |
+| `"repeat"` (default; timm-compatible) | Cycle the RGB filters to `C` channels and scale by `3/C` (`C = 1` sums them). A constant input keeps its response only when `C` is 1 or a multiple of 3; use `"mean"` for that at any `C`. |
+| `"mean"` | Every channel gets `mean_c(W)·3/C`, so a constant input keeps its response. |
+| `"rgb_plus_random"` | The first 3 channels keep `W` unchanged. The others are drawn from `N(0, (std(W)/2)²)`. |
 | `"rgb_plus_zero"` | The first 3 channels keep `W`. The others are zero, so the model is initially identical to RGB-only. |
 | `"projection"` | A learned 1×1 conv `C→3` in front of the unchanged stem. RGB-identity initialisation when `C ≥ 3`. |
 
@@ -678,9 +682,9 @@ count = count_from_density(out["density"])
 
 | Preset | Heads | Targets (`manyseg.*.targets`) | Post-processing |
 | --- | --- | --- | --- |
-| `instance_heads(num_classes=1, distance="normalized", decoders=None)` | `extent` (1 ch, or C+1 with background), `boundary` (1), `distance` (1, regression) | `instance_targets(ids, boundary_width=1, boundary_mode="inner"/"outer"/"both")`: exact EDT; distance is 1 + distance to the instance's edge, normalised per instance; tile borders are not boundaries | seeds = extent ∧ ¬boundary ∧ distance > t; every component gets at least one seed; growth in torch (default) or skimage watershed (`manyseg[instances]`) |
-| `point_heads(heatmap="regression"/"segmentation", offsets=False)` | `heatmap` (1), `offset` (2: dy, dx) | `gaussian_heatmap(points, sigma)`, `heatmap_from_instances` (centroids rounded to pixels; fixed or size-scaled σ), `offset_targets` (to exact centroids) | `find_peaks` (max-pool NMS), `group_by_offsets` → instance ids, `panoptic_labels` |
-| `density_head()` | `density` (1) | `density_map(points, sigma)`: each point's Gaussian sums to exactly 1 inside the image | `count_from_density` |
+| `instance_heads(num_classes=1, distance="normalized", decoders=None)` | `extent` (1 ch, or C+1 with background), `boundary` (1), `distance` (1, regression) | `instance_targets(ids, boundary_width=1, boundary_mode="inner"/"outer"/"both")`: exact EDT; distance is 1 + distance to the instance's edge, normalised per instance; tile borders are not boundaries | seeds = extent ∧ ¬boundary ∧ distance > t; every component gets at least one seed; `backend="auto"` (default): skimage watershed when scikit-image is installed (`manyseg[instances]`), else seeded growth in torch |
+| `point_heads(heatmap="regression"/"segmentation", offsets=False)` | `heatmap` (1), `offset` (2: dy, dx) | `gaussian_heatmap(points, size, sigma)`, `heatmap_from_instances` (centroids rounded to pixels; fixed or size-scaled σ), `offset_targets` (to exact centroids) | `find_peaks` (max-pool NMS), `group_by_offsets` → instance ids, `panoptic_labels` |
+| `density_head()` | `density` (1) | `density_map(points, size, sigma)`: each point's Gaussian sums to exactly 1 inside the image | `count_from_density` |
 
 `decoders=None` shares the model decoder. `"separate"` gives each head its own `unet`. A name or
 `{head: decoder}` mapping chooses decoders per head. Post-processing (peak picking, seeded
@@ -730,7 +734,7 @@ strings and need no extra dependencies. This model has a 4-channel raster, a FiL
 vector and an FPN decoder of its own for one head:
 
 ```python
-create_model(backbone="resnet18", inputs={
+create_model(backbone="resnet18", pretrained=False, inputs={
     "s2": {"in_channels": 4},
     "meta": {"kind": "vector", "fields": {"doy": {"type": "cyclic", "period": 365.25}}}},
     heads={"mask": {"type": "segmentation", "out_channels": 2},
@@ -741,7 +745,7 @@ create_model(backbone="resnet18", inputs={
 flowchart LR
   in_s2(["<b>input: s2</b><br/>raster, 4 ch"])
   in_meta(["<b>input: meta</b><br/>vector, 1 col, film<br/>fields: doy (cyclic)<br/>encoding: width 2, MLP → 64<br/>4.35k params"])
-  enc["<b>encoder</b><br/>resnet18 (random init)<br/>stem: 4 ch, 'repeat' weights from 3 ch<br/>levels: 64@/2, 64@/4, 128@/8, 256@/16, 512@/32<br/>11.18M params"]
+  enc["<b>encoder</b><br/>resnet18 (random init)<br/>stem: 4 ch,<br/>random init (no pretrained weights to adapt)<br/>levels: 64@/2, 64@/4, 128@/8, 256@/16, 512@/32<br/>11.18M params"]
   dec_decoder["<b>decoder</b><br/>unet, out_stride 1, width 16<br/>reads: /2, /4, /8, /16, /32<br/>input_cross: False<br/>FiLM: levels /2, /4, /8, /16, /32; output yes<br/>3.15M params"]
   dec_task_boundary["<b>decoder[boundary]</b><br/>fpn, out_stride 4, width 128<br/>reads: /4, /8, /16, /32<br/>FiLM: levels /4, /8, /16, /32; output yes<br/>1.87M params"]
   head_mask("<b>head: mask</b><br/>segmentation, pixel, 2 ch<br/>from: decoder<br/>scale: 1<br/>resample: /1 feature, none<br/>290 params")
@@ -772,7 +776,7 @@ flowchart LR
 ```python
 from manyseg.export import export_model
 ep = export_model(model, example)            # dynamic H/W in [stride + 1, 4096] (*)
-ep = export_model(model, example, dynamic_batch=True)
+ep = export_model(model, example, dynamic_batch=True)   # example batch must be >= 2
 ep = export_model(multi_input_model, {"optical": o, "sar": s})
 ep = export_model(conditioned_model, {"s2": s2, "meta": meta})   # meta: (B, N), no H/W dims
 ```
@@ -818,9 +822,12 @@ When memory forces batches of about 1–4, freeze the encoder's BN statistics af
 
 ```python
 model.train()
-for m in model.backbone.modules():          # model.backbone.encoders for multi-input models
-    if isinstance(m, torch.nn.modules.batchnorm._BatchNorm):
-        m.eval()                            # running stats fixed; weights and biases still train
+bb = model.backbone
+timm_models = [e.model for e in bb.encoders.values()] if hasattr(bb, "encoders") else [bb.model]
+for enc in timm_models:                     # the pretrained timm networks only: a ViT's neck and
+    for m in enc.modules():                 # the fusion layers are randomly initialised
+        if isinstance(m, torch.nn.modules.batchnorm._BatchNorm):
+            m.eval()                        # running stats fixed; weights and biases still train
 ```
 
 ### Speed: compile and precision

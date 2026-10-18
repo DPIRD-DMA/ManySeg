@@ -67,7 +67,8 @@ recipe. Built-in recipes:
 Model selection uses the **final epoch**, with no early stopping, so every model gets the
 same budget. The best validation epoch is recorded for information only.
 
-Recipe options added by experiments, all off by default and recorded in every run:
+Recipe options added by experiments, all off by default and recorded in every run (plus one
+task option, `calibrate`, below):
 
 * `freeze_encoder_bn`: the encoder's BatchNorm layers (found by module path, so non-affine BN
   is included) stay in eval mode, keeping their running statistics at the pretrained values.
@@ -75,8 +76,8 @@ Recipe options added by experiments, all off by default and recorded in every ru
 * `grad_accum_steps = k`: one optimiser step per k micro-batches of `batch_size`. Each
   micro-batch's loss is weighted by its image count, and the lr schedule counts optimiser
   steps. BatchNorm still sees micro-batches (E007b).
-* `calibrate` (point tasks; on by default since E011b): the peak threshold is chosen on
-  validation, and test is scored once at it.
+* `calibrate` (a point-task option, set with `--task-kwargs`, not a recipe field; on by default
+  since E011b): the peak threshold is chosen on validation, and test is scored once at it.
 
 ## Data protocol
 
@@ -150,22 +151,29 @@ forecast before submission.
 * Accuracy is compared against FLOPs, latency and parameters as Pareto fronts
   (`reporting.pareto_front`), not as one aggregate score.
 
-## Datasets (selection)
+## Datasets
 
-| Tier | Dataset | Why |
+Implemented (`manyseg-bench prepare <name>`; variants such as `sen1floods11_s2` or
+`pastis_meta` reuse a base cache):
+
+| Dataset (`name`) | Task | Why |
 | --- | --- | --- |
-| Smoke / core | Oxford-IIIT Pet (3-class trimap, 256²) | Cheap natural images; boundary class. |
-| Smoke / core | Sen1Floods11 hand-labelled (S1 + S2) | Multi-input SAR + optical; binary; has an event-level holdout (Bolivia). |
-| Core | CloudSEN12+ high (S2 L1C, 4 classes) | Clouds, thin cloud and shadows; 13 bands; ROI-disjoint (geographic) splits; static auxiliary layers and acquisition metadata for fusion and conditioning. |
-| Core | PASTIS single-date (S2 L2A, 10 bands, 19 classes, 128²) | Crop types from one acquisition; the date carries real signal (phenology), so metadata conditioning can be tested where it should matter; official folds. |
-| Core | CamVid (11 classes, 480×360) | Small and thin objects; video sequences split. |
-| Core | WHU Building aerial (binary, 512², 0.3 m) | Sharp boundaries, small buildings; official geographic split. |
-| Core | MADOS (Sentinel-2, 15 classes) | Multispectral (11 bands), rare and small objects; sparse labels. |
-| Core | LoveDA (7 classes, 1024²) | Domain shift between urban and rural; split by district. Test labels are hidden, so the official val serves as test. |
-| Optional | ISPRS Vaihingen (IRRG + DSM) | Multimodal with complex boundaries. Download needs a password and redistribution is restricted. |
+| Oxford-IIIT Pet (`oxford_pet`, `oxford_pet_breeds`) | 3-class trimap, 256²; 37-breed classification | Cheap natural images; boundary class. |
+| Sen1Floods11 hand-labelled (`sen1floods11`) | Binary water, S1 + S2 | Multi-input SAR + optical; has an event-level holdout (Bolivia). |
+| CloudSEN12+ high (`cloudsen12`) | S2 L1C, 4 classes | Clouds, thin cloud and shadows; 13 bands; ROI-disjoint (geographic) splits; static auxiliary layers and acquisition metadata for fusion and conditioning. |
+| PASTIS (`pastis`, `pastis_ts`) | S2 L2A, 10 bands, 19 crop classes, 128²; single date or 8-date series | The date carries real signal (phenology), so metadata conditioning and time series can be tested where they should matter; official folds. |
+| AI4Boundaries (`ai4boundaries`, `ai4boundaries_s2`) | Field instances (boundary + distance); 1 m orthophoto or S2 series | Instance segmentation of touching objects. |
+| OAM-TCD (`oam_tcd`) | Tree points | Point detection and counting. |
+| EuroSAT (`eurosat`) | 10-class image classification, S2 13 bands | Image-level heads without a decoder. |
+| BigEarthNet v2 (`bigearthnet`) | 19-class multi-label, S2 + S1 | Multi-label image heads, class fractions, metadata. |
+| LEVIR-CD, SECOND, OSCD (`levircd`, `second`, `oscd`) | Binary and semantic change | Siamese encoders and difference fusion. |
+
+Installing `manyseg-bench[geo]` adds the readers (tifffile, pyarrow, ...) that the remote-sensing
+datasets need. Considered but not implemented: CamVid, WHU Building, MADOS, LoveDA and ISPRS
+Vaihingen.
 
 Licenses and access details are in `datasets/*.py` docstrings and in
-`docs/architecture_review.md` §6.
+`docs/architecture_review.md` §7.
 
 ### CloudSEN12+ high (`cloudsen12`, `cloudsen12_s2_aux`, `cloudsen12_meta`)
 

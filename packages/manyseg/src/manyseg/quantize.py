@@ -26,7 +26,7 @@ from collections.abc import Iterable, Mapping
 import torch
 from torch import Tensor, nn
 
-from .export import dynamic_shapes
+from .export import dynamic_shapes, eval_mode
 
 WEIGHT_MODES = ("int8_weight_only", "int8_dynamic")
 
@@ -137,7 +137,9 @@ def quantize_pt2e(model: nn.Module, example, calibration: Iterable, *, quantizer
     ``reduce_range`` (default: on when *this* CPU lacks VNNI) uses 7-bit activations, which
     is needed for correct compiled int8 on such CPUs; set it for the CPU you deploy on.
 
-    H/W stay dynamic as in ``export_model`` (and the batch too with ``dynamic_batch``).
+    H/W stay dynamic as in ``export_model`` (and the batch too with ``dynamic_batch``, which
+    needs an example with batch size >= 2). ``model`` is exported in eval mode and then
+    returned to its previous mode.
     Window-attention backbones (Swin, DaViT) cannot export dynamically and need
     ``dynamic=False``: the result then only accepts the example's size.
 
@@ -151,9 +153,9 @@ def quantize_pt2e(model: nn.Module, example, calibration: Iterable, *, quantizer
     _require_torchao()
     from torchao.quantization.pt2e.quantize_pt2e import convert_pt2e, prepare_pt2e
 
-    model.eval()
     shapes = _shapes(model, example, dynamic, max_size, dynamic_batch)
-    gm = _export(model, example, shapes).module()
+    with eval_mode(model):
+        gm = _export(model, example, shapes).module()
     rr = None  # unknown with a custom quantizer
     if quantizer is None:
         rr = (not _has_vnni()) if reduce_range is None else bool(reduce_range)

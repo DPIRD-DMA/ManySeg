@@ -54,7 +54,7 @@ class Weights:
     citation: str = ""  # cite this when you publish work using the weights (licence: attribution)
 
     @property
-    def in_chans(self) -> int:
+    def in_channels(self) -> int:
         return len(self.bands)
 
     @property

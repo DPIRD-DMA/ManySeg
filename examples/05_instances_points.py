@@ -67,7 +67,8 @@ def main():
     print("  density counts:", [round(c, 1) for c in count_from_density(out["density"]).tolist()])
 
     # Perfect predictions (the targets) recover the objects exactly:
-    exact = instances_from_outputs(t["extent"], t["boundary"], t["distance"], backend="torch")
+    exact = instances_from_outputs(t["extent"], t["boundary"], t["distance"], logits=False,
+                                   backend="torch")
     print("round trip from targets: instances", [int(e.max()) for e in exact],
           "| peaks", [len(p) for p, _ in find_peaks(hm, threshold=0.5)],
           "| density", [round(c, 2) for c in count_from_density(den).tolist()])

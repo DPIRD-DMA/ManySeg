@@ -1,4 +1,4 @@
-"""Command-line entry point: ``manyseg-bench {prepare,train,profile,report}``."""
+"""Command-line entry point: ``manyseg-bench {prepare,train,profile,evaluate,report}``."""
 
 from __future__ import annotations
 

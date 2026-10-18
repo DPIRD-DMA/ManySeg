@@ -6,7 +6,7 @@ import functools
 import inspect
 import json
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from torch import nn
 
@@ -51,6 +51,8 @@ def share_weights(encoder: nn.Module) -> nn.Module:
 
 def _build_inputs(inputs, fusion, *, backbone, pretrained, channel_adapter, out_indices,
                   backbone_kwargs):
+    if isinstance(fusion, str):
+        raise TypeError(f"fusion takes a dict, e.g. fusion={{'type': {fusion!r}}}")
     fusion = dict(fusion or {"type": "intermediate"})
     ftype = fusion.pop("type", "intermediate")
     if ftype not in FUSION_TYPES:
@@ -159,7 +161,7 @@ def create_model(
     inputs: Mapping[str, Mapping[str, Any]] | None = None,
     fusion: Mapping[str, Any] | None = None,
     pretrained: bool | str = True,
-    in_channels: int = 3,
+    in_channels: int | None = None,
     channel_adapter: str = "repeat",
     out_indices: Sequence[int] | None = None,
     backbone_kwargs: Mapping[str, Any] | None = None,
@@ -190,10 +192,12 @@ def create_model(
             "strides": [...]}`` for several raster inputs.
         pretrained: ``True`` (timm weights), ``False``, or a ``manyseg.weights`` tag such as
             ``"ssl4eo_s2_dino"``.
-        in_channels: Input bands of a single-input model.
+        in_channels: Input bands of a single-input model (default 3; with ``inputs=``, set it
+            per input instead).
         channel_adapter: How the RGB stem is adapted to ``in_channels``.
         out_indices: Encoder levels to return (timm ``out_indices``).
-        backbone_kwargs: Passed to ``timm.create_model``.
+        backbone_kwargs: Passed to ``timm.create_model``; also takes ``rgb_indices`` (input
+            channels carrying R, G, B for the ``rgb_plus_*`` / ``projection`` adapters).
         decoder: A decoder name, a decoder class or callable, or one dict
             ``{"type": name, **options}``.
         decoder_kwargs: Options for the decoder (not together with the same keys in a dict
@@ -210,6 +214,9 @@ def create_model(
     """
     if (num_classes is None) == (heads is None):
         raise ValueError("pass exactly one of num_classes= or heads=")
+    if num_classes is not None and (isinstance(num_classes, bool)
+                                    or not isinstance(num_classes, int) or num_classes < 1):
+        raise ValueError(f"num_classes must be a positive int, got {num_classes!r}")
     if isinstance(decoder, Mapping):  # {"type": "unet", **kwargs}, as for per-head decoders
         d = dict(decoder)
         if "type" not in d:
@@ -224,6 +231,9 @@ def create_model(
         check_module_names("head", heads)
     if inputs is not None:
         check_module_names("input", inputs)
+        if in_channels is not None:
+            raise ValueError("in_channels= is for a single-input model; with inputs= give each "
+                             "input its own 'in_channels'")
     if inputs is not None:
         from ..conditioning.build import build_conditioned_model, has_kinds
 
@@ -246,7 +256,7 @@ def create_model(
         bb = TimmBackbone(
             backbone,
             pretrained=pretrained,
-            in_channels=in_channels,
+            in_channels=3 if in_channels is None else in_channels,
             channel_adapter=channel_adapter,
             out_indices=out_indices,
             **dict(backbone_kwargs or {}),
@@ -320,6 +330,7 @@ def create_model(
         if bb.encoders[head_inputs[n]].feature_specs != \
                 bb.encoders[head_inputs[other]].feature_specs:
             raise ValueError(f"head {n!r}: 'share' needs inputs with the same feature specs")
+    reads_kwargs = any("decoder" not in heads[n] for n in head_inputs)
     for n in head_inputs:  # default: the model's decoder type and kwargs, on this input
         heads[n].setdefault("decoder", {"type": decoder, **dict(decoder_kwargs or {})})
     task_cfgs = {n: cfg.pop("decoder") for n, cfg in heads.items() if "decoder" in cfg}
@@ -331,6 +342,12 @@ def create_model(
         "source", "decoder" if heads[n].get("scope", "pixel") == "pixel" else "encoder")
         == "decoder" for n in heads)
     shared = build_decoder(resolve(decoder), dict(decoder_kwargs or {})) if needs_shared else None
+    if not needs_shared:
+        resolve(decoder)  # an unknown name is an error even when no shared decoder is built
+        if decoder_kwargs and not reads_kwargs:
+            raise ValueError("decoder_kwargs given but no head reads the shared decoder (image "
+                             "heads, or every pixel head has its own 'decoder'), so they would "
+                             "be ignored")
     task_decoders = {}
     for n, dcfg in task_cfgs.items():
         if n in shares:
@@ -338,6 +355,9 @@ def create_model(
         specs = bb.encoders[head_inputs[n]].feature_specs if n in head_inputs else None
         if isinstance(dcfg, Mapping):
             dcfg = dict(dcfg)
+            if "type" not in dcfg:
+                raise ValueError(f"head {n!r}: 'decoder': {{...}} needs a 'type', e.g. "
+                                 "{'type': 'fpn'}")
             task_decoders[n] = build_decoder(resolve(dcfg.pop("type")), dcfg, specs)
         else:
             task_decoders[n] = build_decoder(resolve(dcfg), {}, specs)
@@ -371,7 +391,7 @@ _build = create_model
 
 
 @functools.wraps(_build)
-def create_model(*args: Any, **kwargs: Any) -> DenseModel:  # noqa: F811
+def _create_and_record(*args: Any, **kwargs: Any) -> DenseModel:
     model = _build(*args, **kwargs)
     # Record the arguments, so manyseg.save can rebuild the model. Only plain data can be
     # stored: models built from modules or callables get build_config None.
@@ -382,3 +402,9 @@ def create_model(*args: Any, **kwargs: Any) -> DenseModel:  # noqa: F811
     except TypeError:
         model.build_config = None
     return model
+
+
+if TYPE_CHECKING:  # type checkers see the full signature
+    create_model = _build
+else:
+    create_model = _create_and_record

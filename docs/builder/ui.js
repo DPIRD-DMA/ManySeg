@@ -427,6 +427,14 @@ function curve(x1, y1, x2, y2, cls = "edge", extra = "") {
   return `<path class="${cls}" d="M${x1},${y1} C${x1 + dx},${y1} ${x2 - dx},${y2} ${x2},${y2}"${extra}/>`;
 }
 
+function curveYAt(x1, y1, x2, y2, x) {   // y where a curve() edge crosses x (its x is monotonic in t)
+  const dx = Math.max(24, (x2 - x1) * 0.5);
+  const bez = (t, a, b, c, d) => (1 - t) ** 3 * a + 3 * (1 - t) ** 2 * t * b + 3 * (1 - t) * t * t * c + t ** 3 * d;
+  let lo = 0, hi = 1;
+  for (let i = 0; i < 30; i++) { const t = (lo + hi) / 2; if (bez(t, x1, x1 + dx, x2 - dx, x2) < x) lo = t; else hi = t; }
+  return bez(lo, y1, y1, y2, y2);
+}
+
 function decoderStages(type, spec, info, width) {
   // bars from the output (finest) down to the deepest stage the decoder builds
   if (spec.error) return [];
@@ -526,6 +534,8 @@ function drawDiagram(s, D) {
       P.push(`<rect x="${cx - sz / 2 + k * 5}" y="${top - k * 5}" width="${sz}" height="${sz}" rx="4" fill="${col}" opacity="${k ? (isTs ? 0.85 - k * 0.12 : 0.22) : 1}" stroke="var(--surface)" stroke-width="1.5"/>`);
     }
     R.inX = cx + sz / 2 + (layers - 1) * 5 + 6;
+    R.inL = cx - sz / 2;
+    R.name = r.name;
     P.push(`<text class="nm" x="${cx}" y="${R.cy + 46}" text-anchor="middle">${esc(r.name)}</text>`);
     P.push(`<text class="sub" x="${cx}" y="${R.cy + 60}" text-anchor="middle">${r.channels} ch${isTs ? ` \u00d7 ${r.dates} dates` : ` \u00b7 ${i === 0 ? "primary grid" : r.alignment === "same_grid" ? "same grid" : resLabel(r.res)}`}</text>`);
     if (isTs) P.push(`<text class="sub" x="${cx}" y="${R.cy + 73}" text-anchor="middle">${i === 0 ? "primary grid" : r.alignment === "same_grid" ? "same grid" : resLabel(r.res)}</text>`);
@@ -550,15 +560,19 @@ function drawDiagram(s, D) {
     const ports = [];
     const railX = bx + barWidth(2) + 8;   // every edge leaves from here, so the curves fan out evenly
     const primStrides = encNodes[0].enc.info.strides;
+    // a level ManySeg never reads (no decoder or fusion op takes it: UPerNet, FPN and SegFormer skip /2,
+    // DeepLabV3+ reads /4 and the deepest) is dimmed, with no edge
+    const lv = D.readLevels ? D.readLevels.get(enc.input) : null;
     info.strides.forEach((st, k) => {
       const w = barWidth(st), yy = top + k * LEVEL;
       // a level of a secondary input that no fusion op reads is drawn dimmed, with no edge
-      const unused = ftype === "intermediate" && i > 0 && !(primStrides.includes(st) && D.fused.includes(st));
+      const unused = lv ? !lv.has(st) : ftype === "intermediate" && i > 0 && !(primStrides.includes(st) && D.fused.includes(st));
+      const unfused = unused && ftype === "intermediate" && i > 0;
       P.push(`<rect x="${bx}" y="${yy}" width="${w}" height="${BAR_H}" rx="3" fill="${color}" opacity="${unused ? 0.25 : enc.shared ? 0.55 : 1}"/>`);
       P.push(`<text class="mono" x="${bx - 6}" y="${yy + 8.5}" text-anchor="end"${unused ? ' opacity="0.5"' : ""}>${info.channels[k]}\u00b7/${st}</text>`);
-      if (unused) P.push(`<text class="mono" x="${bx + w + 6}" y="${yy + 8.5}" opacity="0.7">not fused</text>`);
+      if (unused) P.push(`<text class="mono" x="${bx + w + 6}" y="${yy + 8.5}" opacity="0.7">${unfused ? "not fused" : "not read"}</text>`);
       if (!unused) E.push(`<line class="edge" x1="${bx + w}" y1="${yy + BAR_H / 2}" x2="${railX}" y2="${yy + BAR_H / 2}" style="stroke:${color};opacity:.75"/>`);
-      ports.push({ stride: st, ch: info.channels[k], x: railX - 3, y: yy + BAR_H / 2 });
+      ports.push({ stride: st, ch: info.channels[k], x: railX - 3, y: yy + BAR_H / 2, unused });
     });
     encPorts.push(ports);
     if (ftype !== "early") E.push(`<line class="edge" x1="${rows[i].inX}" y1="${cy}" x2="${X.enc - 4}" y2="${cy}" marker-end="url(#arr)"/>`);
@@ -583,7 +597,7 @@ function drawDiagram(s, D) {
     feed = prim.map((p, k) => ({ stride: p.stride, x: fuseX + 104, y: portY(k) }));
     encPorts.forEach((ports, i) => ports.forEach((p) => {
       const k = prim.findIndex((q) => q.stride === p.stride);
-      if (k < 0) return;
+      if (k < 0 || p.unused) return;
       const fusedHere = D.fused.includes(p.stride);
       if (i > 0 && !fusedHere) return;
       E.push(curve(p.x + 3, p.y, fuseX, portY(k), `edge${i > 0 || fusedHere ? "" : " faint"}`, ` style="stroke:${INPUT_COLORS[i % 4]};opacity:${fusedHere ? 0.75 : 0.35}"`));
@@ -611,10 +625,16 @@ function drawDiagram(s, D) {
     });
   }
   let decBottom = TOP;
+  const labelBottom = new Map();   // stack (late fusion: row) -> bottom of the last decoder's label
   decNodes.forEach((dn, k) => {
     const stages = decoderStages(dn.type, dn.spec, D.primary, dn.width);
     const n = Math.max(1, stages.length);
     const bx = decX + 24;
+    // the main decoder's label sits below its lowest incoming edge, which can reach past the slot the
+    // layout gave it: push the decoders stacked under it down to clear that label
+    const grp = ftype === "late" ? dn.row : 0;
+    const isMain = ftype === "late" ? dn.entry === 0 : k === 0;
+    if (!isMain && labelBottom.has(grp)) dn.cy += Math.max(0, labelBottom.get(grp) + 12 - (dn.cy - (n * LEVEL - BAR_GAP) / 2));
     // per-input heads' decoders read their own input's (unfused) encoder levels
     const ownIdx = dn.input ? rasters.findIndex((r) => r.name === dn.input) : -1;
     const src = ftype === "late" ? encPorts[dn.row] : ownIdx >= 0 && encPorts[ownIdx] ? encPorts[ownIdx] : feed;
@@ -642,14 +662,17 @@ function drawDiagram(s, D) {
       if (j === 0) dn.outX = bx + w, dn.outY = ys[j];
     });
     if (!stages.length) { dn.outX = bx + 96; dn.outY = top + 7; }
-    const label = dn.key ? `${dn.type} \u00b7 ${dn.key}${dn.sharesWith ? ` = ${dn.sharesWith}` : ""}` : dn.type;
+    // long labels stop before the heads column (about 23 monospace characters fit)
+    const full = dn.key ? `${dn.type} \u00b7 ${dn.key}${dn.sharesWith ? ` = ${dn.sharesWith}` : ""}` : dn.type;
+    const label = full.length > 23 ? full.slice(0, 22) + "\u2026" : full;
     const out = dn.spec.error ? "" : `\u2192 ${dn.spec.channels} ch at /${dn.spec.stride}`;
     // label below the bars and below the lowest feature edge coming in, so no edge crosses it
     const lowestIn = main && src.length ? Math.max(...src.map((p) => p.y)) + 4 : bottom;
     const ly = Math.max(bottom, lowestIn, dn.spec.error ? top + 18 : bottom) + 13;
-    P.push(`<text class="nm" x="${bx}" y="${ly}" style="font-family: var(--f-mono); font-size: 11.5px">${esc(label)}</text>`);
-    P.push(`<text class="mono" x="${bx}" y="${ly + 13}">${out}</text>`);
+    P.push(`<text class="nm halo" x="${bx}" y="${ly}" style="font-family: var(--f-mono); font-size: 11.5px">${esc(label)}</text>`);
+    P.push(`<text class="mono halo" x="${bx}" y="${ly + 13}">${out}</text>`);
     decBottom = Math.max(decBottom, ly + 18);
+    labelBottom.set(grp, ly + 18);
     // edges: each feature goes to the stage of its stride; deeper features feed the deepest stage
     const deepest = stages.length ? stages[stages.length - 1].stride : 0;
     dn.portY = src.map((p) => {
@@ -660,7 +683,18 @@ function drawDiagram(s, D) {
       const st = stages.some((x) => x.stride === p.stride) ? p.stride : (p.stride > deepest ? deepest : stages[0].stride);
       return barY(st);
     });
+    // only the levels this decoder reads (UPerNet, FPN, SegFormer skip /2; DeepLabV3+ reads /4 and the deepest)
+    let reads = dn.spec.read && dn.spec.read.length ? dn.spec.read : null;
+    if (ftype === "late") {   // every input runs the decoder on its own encoder's levels
+      const d0 = s.decoder, own = !dn.key;
+      const key = FIXED_DECODERS.includes(dn.type) ? dn.type : dn.type === "unet" ? (own ? `unet/${d0.out_stride}/${d0.width}` : "unet/1/full") : `${dn.type}/${own ? d0.out_stride : 1}`;
+      const v = encs[dn.row].info.dec[key];
+      reads = Array.isArray(v) && v[3] && v[3].length ? v[3] : null;
+    }
+    dn.inEdges = [];
     src.forEach((p, j) => {
+      if (reads && !reads.includes(p.stride)) return;
+      dn.inEdges.push({ x1: p.x + 3, y1: p.y, x2: bx - 4, y2: dn.portY[j] });
       const col = ftype === "late" ? INPUT_COLORS[dn.row % 4] : ownIdx >= 0 ? INPUT_COLORS[ownIdx % 4] : ftype === "intermediate" ? "var(--edge)" : (ftype === "early" ? "var(--ink-2)" : INPUT_COLORS[0]);
       E.push(curve(p.x + 3, p.y, bx - 4, dn.portY[j], "edge", ` style="stroke:${col};opacity:${main ? 0.7 : 0.35}"`));
     });
@@ -676,7 +710,7 @@ function drawDiagram(s, D) {
     pool = { x: decX + 24 + 14, y: py };
     P.push(`<circle cx="${pool.x}" cy="${pool.y}" r="13" fill="var(--surface)" stroke="var(--line-strong)"/>`);
     P.push(`<text x="${pool.x}" y="${pool.y + 3.5}" text-anchor="middle" style="font: 600 9px var(--f-mono); fill: var(--muted)">GAP</text>`);
-    P.push(`<text class="sub" x="${pool.x}" y="${pool.y + 27}" text-anchor="middle">global pool of /${dp.stride}</text>`);
+    P.push(`<text class="sub halo" x="${pool.x}" y="${pool.y + 27}" text-anchor="middle">global pool of /${dp.stride}</text>`);
     E.push(curve(dp.x + 3, dp.y, pool.x - 13, pool.y, "edge", ` style="stroke-dasharray:3 3"`));
     decBottom = Math.max(decBottom, pool.y + 32);
   }
@@ -748,13 +782,22 @@ function drawDiagram(s, D) {
     P.push(`<text class="sub" x="${mx + 27}" y="${midY + 28}" text-anchor="middle">embedding</text>`);
     const ex = mx + 54;
     if (m.mode === "film" && decNodes.length) {
-      // a vertical amber rail just left of the decoder column with FiLM squares on each edge into it
-      const railX = X.dec - 18;
-      const targets = decNodes.flatMap((dn) => dn.portY.map((py) => py));
+      // a vertical amber rail with a FiLM square on each feature edge a decoder reads. U-Net edges run
+      // straight into their stages, so the rail sits by the decoder; other decoders merge their inputs
+      // into one port, so the rail sits near the feature ports, where those edges are still apart
+      const edges = decNodes.flatMap((dn) => dn.inEdges);
+      const straight = decNodes.every((dn) => UNET_FAMILY.includes(dn.type));
+      const railX = straight || !edges.length ? X.dec - 18 : Math.min(X.dec - 18, Math.max(...edges.map((e) => e.x1)) + 42);
+      const targets = [];
+      for (const y of edges.map((e) => curveYAt(e.x1, e.y1, e.x2, e.y2, railX)).sort((a, b) => a - b))
+        if (!targets.length || y - targets[targets.length - 1] > 3) targets.push(y);
       const topY = Math.min(...targets);
       E.push(`<path class="meta-edge" d="M${ex},${midY} L${railX - 8},${midY} Q${railX},${midY} ${railX},${midY - 8} L${railX},${topY}"/>`);
       for (const ty of targets) P.push(`<rect x="${railX - 4}" y="${ty - 4}" width="8" height="8" rx="1.5" fill="var(--meta)"/>`);
-      P.push(`<text x="${railX}" y="${topY - 10}" text-anchor="middle" style="font: 700 10px var(--f-ui); fill: var(--meta)">FiLM</text>`);
+      // by the encoder the space above the rail can hold a dimmed level's label: name the rail beside its riser
+      const botY = Math.max(...targets);
+      if (straight || midY - botY < 30) P.push(`<text x="${railX}" y="${topY - 10}" text-anchor="middle" style="font: 700 10px var(--f-ui); fill: var(--meta)">FiLM</text>`);
+      else P.push(`<text x="${railX + 7}" y="${(botY + midY) / 2 + 4}" style="font: 700 10px var(--f-ui); fill: var(--meta)">FiLM</text>`);
       if (pool) P.push(`<rect x="${pool.x - 4 - 16}" y="${pool.y - 4}" width="8" height="8" rx="1.5" fill="var(--meta)"/>`);
     } else if (m.mode === "film" || m.mode === "head") {
       const anyImage = s.heads.some((h) => h.scope === "image");
@@ -762,8 +805,14 @@ function drawDiagram(s, D) {
       for (const { i } of tgt) E.push(curve(ex, midY, hx - 4, gys[i] + 30, "meta-edge", ` style="stroke-dasharray:4 3"`));
     } else if (m.mode === "channels") {
       const R = rows[0];
-      E.push(`<path class="meta-edge" d="M${X.in + 50},${fy0 - 4} L${X.in + 50},${R.cy + 68}" stroke-dasharray="4 3"/>`);
-      P.push(`<text class="sub" x="${X.in + 56}" y="${(fy0 + R.cy + 64) / 2}" style="fill:var(--meta)">as channels</text>`);
+      if (rows.length === 1) {
+        E.push(`<path class="meta-edge" d="M${X.in + 50},${fy0 - 4} L${X.in + 50},${R.cy + 68}" stroke-dasharray="4 3"/>`);
+        P.push(`<text class="sub" x="${X.in + 56}" y="${(fy0 + R.cy + 64) / 2}" style="fill:var(--meta)">as channels</text>`);
+      } else {   // the primary input is at the top: go up the left margin, clear of the other inputs
+        const lx = X.in - 8, boxL = R.inL - 4;
+        E.push(`<path class="meta-edge" d="M${X.in + 4},${fy0 + 9} L${lx},${fy0 + 9} L${lx},${R.cy} L${boxL},${R.cy}" stroke-dasharray="4 3" marker-end="url(#arr)"/>`);
+        P.push(`<text class="sub" x="${X.in + 50}" y="${fy0 + m.fields.length * 24 + 26}" text-anchor="middle" style="fill:var(--meta)">as channels of ${esc(R.name)}</text>`);
+      }
     }
   }
 

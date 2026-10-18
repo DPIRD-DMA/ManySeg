@@ -106,7 +106,7 @@ def instances_from_outputs(
     boundary: Tensor,
     distance: Tensor,
     *,
-    logits: bool = False,
+    logits: bool,
     extent_threshold: float = 0.5,
     boundary_threshold: float = 0.5,
     seed_threshold: float = 0.25,
@@ -120,6 +120,12 @@ def instances_from_outputs(
             background at index 0, or integer labels.
         boundary: ``(B, 1, H, W)`` probabilities (or logits with ``logits=True``).
         distance: ``(B, 1, H, W)`` predicted (normalised) distance.
+        logits: ``True`` if ``extent`` / ``boundary`` are raw model outputs (logits, as heads
+            return them), ``False`` if they are already probabilities.
+        extent_threshold: Foreground threshold on the extent probability.
+        boundary_threshold: Pixels with a boundary probability at or above this are not seeds.
+        seed_threshold: Seeds need a predicted distance above this.
+        min_size: Instances smaller than this many pixels are removed (0 keeps all).
         backend: ``"skimage"`` (watershed), ``"torch"`` or ``"auto"`` (skimage if installed).
     """
     fg = _foreground(extent, logits, extent_threshold)
