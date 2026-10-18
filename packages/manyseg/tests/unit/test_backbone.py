@@ -118,3 +118,14 @@ def test_odd_sizes_produce_ceil_feature_maps(hw):
     feats = bb(torch.randn(1, 3, *hw))
     for f, s in zip(feats, bb.feature_specs):
         assert f.shape[-2:] == (math.ceil(hw[0] / s.stride), math.ceil(hw[1] / s.stride))
+
+
+@pytest.mark.slow  # MaxViT on CPU
+def test_capability_probe_reports_fixed_size_backbones():
+    """Fixed-size backbones run the small probe sizes (padded up), but are not 'any size'."""
+    from manyseg.backbones.capabilities import probe_backbone
+
+    caps = probe_backbone("maxvit_tiny_tf_224")
+    assert caps.size_support == "fixed"
+    assert "224" in caps.error
+    assert probe_backbone("resnet18").size_support == "any"

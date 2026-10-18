@@ -1,7 +1,8 @@
 """Decoder interface.
 
 A decoder is an ``nn.Module`` constructed as ``Decoder(in_specs, **options)`` that maps the
-encoder's ``list[Tensor]`` (ordered as ``in_specs``) to a single tensor described by
+encoder's ``list[Tensor]`` (ordered as ``in_specs``; levels the decoder does not read may be
+``None``) to a single tensor described by
 ``self.out_spec``. Decoders that need the (padded, normalised) input image set the class
 attribute ``wants_input = True``; they then receive ``[input, *features]`` and
 ``in_specs[0]`` is a stride-1 spec for the input.

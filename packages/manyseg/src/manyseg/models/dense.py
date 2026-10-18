@@ -14,7 +14,8 @@ class DenseModel(nn.Module):
     """Dense prediction model: encoder -> (shared and/or task-specific) decoders -> named heads.
 
     Args:
-        backbone: Module returning ``list[Tensor]`` with ``feature_specs`` and ``input_divisor``
+        backbone: Module returning ``list[Tensor | None]`` (``None`` for levels nothing
+            reads, e.g. a pruned ViT neck level) with ``feature_specs`` and ``input_divisor``
             (a single-input backbone, or a multi-input encoder taking a dict).
         decoder: Shared decoder mapping the feature list to one tensor, or ``None`` if every
             pixel head has its own decoder.

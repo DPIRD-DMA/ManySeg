@@ -81,7 +81,12 @@ def create_head(spec_decoder: FeatureSpec, spec_encoder: FeatureSpec, cfg: dict)
     nn.Module, str
 ]:
     """Build a head from a config dict; returns (module, source) with source in
-    {"decoder", "encoder"}. Image-scope heads default to the deepest encoder feature."""
+    {"decoder", "encoder"}. Image-scope heads default to the deepest encoder feature.
+
+    ``cfg``: ``type`` (``"segmentation"`` for pixel heads, ``"classification"`` for image
+    heads, ``"regression"`` for either), ``out_channels`` (required), ``scope``, ``source``,
+    ``uncertainty`` (regression: ``2 * out_channels`` outputs, mean and log-variance),
+    ``scale`` (pixel heads) and the head module's options."""
     cfg = dict(cfg)
     if "channels" in cfg:
         raise ValueError("head 'channels' was renamed 'out_channels'")

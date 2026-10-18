@@ -1,6 +1,6 @@
 # Roadmap
 
-Status as of 2026-10-17, 10:40 AWST. ✅ done · 🔄 in progress · ⏳ planned.
+Status as of 2026-10-18, 09:00 AWST. ✅ done · 🔄 in progress · ⏳ planned.
 
 ## Phase 1: research and architecture ✅
 
@@ -116,8 +116,17 @@ Negative results are written up in `experiments/` like positive ones.
 ## Phase 6: release preparation 🔄
 
 * ✅ Runnable examples (`examples/`): single input, multispectral, multi-modal, multi-task,
-  instances/points, export, quantisation. Each runs on CPU (seconds; the training walkthroughs 10–20 s); the slow tier runs them all.
+  instances/points, export, quantisation, classification / regression, plus walkthroughs
+  (metadata conditioning, instance fields, point counting). Each runs on CPU (seconds; the training walkthroughs 10–20 s); the slow tier runs them all.
 * ✅ Docs site (MkDocs Material, `scripts/build_docs.py` → `build/site`): home, design docs, examples and every experiment write-up. Built locally and ready for **Read the Docs** (`.readthedocs.yaml`; the RTD-style pip build is tested). It goes live when the project is imported on RTD at release: RTD Community needs a public repo.
+* ✅ API review before 0.1.0 (Codex as a new user): config vocabulary (`in_channels` /
+  `out_channels` / `num_features`, head type follows scope, `decoder` as a dict), internal
+  hooks private, keyword-only tuning arguments, `pack_metadata`, save format 2 with migration,
+  weights citations; `CHANGELOG.md`.
+* ✅ Python 3.13 and 3.14 pass every tier; 3.15rc1 everything except `torch.compile` (not yet
+  supported by PyTorch). CI: Linux 3.10 / 3.14, Windows on PRs and nightly.
+* ✅ GPU fuzzer (CUDA vs CPU, bf16, `torch.compile`): found a PyTorch Inductor bug in dynamic
+  nearest upsampling, worked around (`docs/upstream/`).
 * ⏳ README status line (currently "pre-alpha").
 * ✅ PyPI packaging for `manyseg` and `manyseg-bench` independently: metadata, licence and
   `py.typed` in each wheel, PyPI READMEs, `twine check` clean, and the `manyseg` wheel installs and

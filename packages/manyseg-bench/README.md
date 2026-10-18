@@ -1,8 +1,8 @@
 # manyseg-bench
 
-Implementation-neutral benchmarking of PyTorch segmentation models. It compares ManySeg, SMP
-(segmentation-models-pytorch) and fastai models under one protocol, on the same data, recipes
-and metrics.
+Implementation-neutral benchmarking of PyTorch segmentation and image models. It compares
+ManySeg, SMP (segmentation-models-pytorch), fastai and plain timm models under one protocol, on
+the same data, recipes and metrics.
 
 ```bash
 pip install "manyseg-bench[manyseg,smp]"
@@ -13,10 +13,13 @@ manyseg-bench profile --provider manyseg --size 512,512 --compile
 manyseg-bench evaluate runs/<run>.json --variants fp32,bf16,int8_weight_only
 ```
 
-* **Providers:** ManySeg, SMP and fastai behind one interface, with weight fingerprints.
-* **Tasks:** semantic segmentation, instances (PQ, object F1) and points (point F1, count MAE).
-  Datasets include Oxford Pet, Sen1Floods11, AI4Boundaries, OAM-TCD and CloudSEN12+, with
-  licence checks and leakage-safe splits.
+* **Providers:** ManySeg, SMP, fastai and timm behind one interface, with weight
+  fingerprints; remote-sensing weights fed their own pretraining normalisation.
+* **Tasks:** semantic and multi-label segmentation, instances (PQ, object F1), points (point
+  F1, count MAE), image classification, multi-label classification and regression, binary
+  and semantic change detection, and time series. Datasets include Oxford Pet, Sen1Floods11,
+  CloudSEN12+, AI4Boundaries, OAM-TCD, PASTIS, EuroSAT, BigEarthNet v2, OSCD, LEVIR-CD and
+  SECOND, with licence checks and leakage-safe splits.
 * **Provenance:** every result JSON records the environment, code version, GPU contention,
   FLOPs, throughput and peak memory.
 

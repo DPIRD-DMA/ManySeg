@@ -64,6 +64,11 @@ def probe_backbone(name: str, sizes=PROBE_SIZES, export: bool = False,
         (caps.sizes_ok if ok else caps.sizes_failed).append(list(hw))
     caps.size_support = ("any" if not caps.sizes_failed else
                          "fixed" if not caps.sizes_ok else "partial")
+    fixed = getattr(bb, "fixed_size", None)
+    if fixed is not None:  # small probe sizes pass because they are padded up to it
+        caps.size_support = "fixed"
+        caps.error = caps.error or (f"fixed input size {fixed[0]}x{fixed[1]}: smaller inputs are "
+                                    "padded, larger need backbone_kwargs={'img_size': ...}")
     if export and caps.size_support == "any":
         from ..export import export_model
 

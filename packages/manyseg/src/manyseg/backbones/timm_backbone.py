@@ -193,7 +193,8 @@ def find_stem_conv(model: nn.Module, first_conv=None) -> tuple[str, nn.Conv2d]:
 
 
 class TimmBackbone(nn.Module):
-    """A timm model wrapped to return ``list[Tensor]`` (NCHW) with static ``feature_specs``.
+    """A timm model wrapped to return ``list[Tensor]`` (NCHW) with static ``feature_specs``
+    (a plain ViT's neck levels that the model never reads come out as ``None``).
 
     Args:
         name: timm model name, optionally with a pretrained tag (``"resnet50.a1_in1k"``).

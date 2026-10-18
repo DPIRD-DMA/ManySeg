@@ -71,7 +71,13 @@ def render(rows: list[dict]) -> str:
             f"{r['export_dynamic']} | {r['params_m']} | "
             f"{r['error'][:120] if r['size_support'] != 'any' else ''} |")
     n_any = sum(1 for r in rows if r.get("size_support") == "any")
-    out += ["", f"{n_any}/{len(rows)} models support arbitrary input sizes end to end.", ""]
+    out += ["", f"{n_any}/{len(rows)} models support arbitrary input sizes end to end."]
+    n_fixed = sum(1 for r in rows if r.get("size_support") == "fixed")
+    if n_fixed:
+        out += [f"The {n_fixed} `fixed` models are detected at construction "
+                "(`TimmBackbone.fixed_size` = native size), so inputs up to that size work via "
+                "padding; for larger inputs rebuild with `backbone_kwargs={\"img_size\": (H, W)}`."]
+    out += [""]
     return "\n".join(out)
 
 

@@ -1,5 +1,7 @@
-"""Multi-input encoders. They behave like a backbone (``feature_specs``, ``list[Tensor]``)
-but take a ``dict[str, Tensor]``; padding to each encoder's divisor happens inside."""
+"""Multi-input encoders. They behave like a backbone (``feature_specs``, ``list[Tensor]``,
+``None`` at levels nothing reads) but take a ``dict[str, Tensor]``; padding happens inside
+(same-grid inputs to a common multiple, same-extent inputs to their own, fixed-size
+backbones to their size)."""
 
 from __future__ import annotations
 

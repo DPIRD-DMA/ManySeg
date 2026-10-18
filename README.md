@@ -135,6 +135,28 @@ inputs = {
 Missing values are handled. In our tests metadata rarely helped, so compare against a model
 without it on your data.
 
+**Time series.** One encoder runs on every date and the dates are combined per level (mean,
+max, attention, ...); pass `(B, T, C, H, W)` plus optional `"s2_mask"` / `"s2_dates"`:
+
+```python
+model = create_model(inputs={"s2": {"kind": "timeseries", "in_channels": 10}}, num_classes=20)
+out = model({"s2": torch.randn(2, 6, 10, 128, 128)})        # any number of dates
+```
+
+**Change detection.** Two dates through one shared (Siamese) encoder, a difference fusion,
+and optionally a land-cover head per date (semantic change):
+
+```python
+model = create_model(
+    inputs={"t1": {"in_channels": 3},
+            "t2": {"in_channels": 3, "backbone": "shared:t1", "share_norm": True}},
+    fusion={"type": "intermediate", "op": "diff"},
+    heads={"change": {"type": "segmentation", "out_channels": 2},
+           "lc1": {"type": "segmentation", "out_channels": 7, "input": "t1"},
+           "lc2": {"type": "segmentation", "out_channels": 7, "input": "t2", "share": "lc1"}},
+)
+```
+
 **Overlapping classes** (e.g. cloud and shadow): one segmentation head with a channel per
 class, a sigmoid per channel and BCE loss.
 
@@ -151,12 +173,27 @@ baseline on all three Sentinel-2 datasets we tested (ResNet-50, full fine-tuning
 `manyseg.points` (trees, animals: centres, counts) provide the heads, training targets and
 post-processing.
 
+**Save and load.** `manyseg.save` stores the weights with the configuration and what inference
+needs; `manyseg.load` rebuilds the model without downloading anything:
+
+```python
+import manyseg
+
+model = manyseg.create_model(in_channels=4, num_classes=2)  # ... then train it
+manyseg.save(model, "model.safetensors",
+             activations={"logits": "softmax"},             # how each head becomes a prediction
+             normalize=[{"type": "scale", "value": 10000}],  # the input scaling you trained with
+             classes=["background", "water"])
+model = manyseg.load("model.safetensors")
+```
+
 **Deployment.** Models work with `torch.compile(dynamic=True)`, `torch.export` and ONNX with
-dynamic input sizes (except Swin-family encoders, a timm limitation), and with int8
+dynamic input sizes (a few encoder families only run at a fixed size or cannot export
+dynamically; see the [compatibility table](docs/backbone_compatibility.md)), and with int8
 quantisation (`manyseg.quantize`). For fast GPU inference use bf16
 autocast plus `torch.compile`.
 
-Each of these has a runnable script in [`examples/`](examples/) that runs on CPU: the numbered
+Most of these have a runnable script in [`examples/`](examples/) that runs on CPU: the numbered
 scripts in a few seconds, the walkthroughs that train briefly in 10–20 s.
 
 ## Tips from our benchmarks

@@ -19,7 +19,7 @@ imports the benchmark; a test enforces this.
 
 If a provider cannot meet the contract exactly (for example, fastai's `DynamicUnet` needs
 `img_size` at construction), the difference is handled in the provider and recorded in
-`BuiltModel.notes`.
+`BuiltModel.notes` (saved with each run as `model_notes`).
 
 ## Provider contract
 

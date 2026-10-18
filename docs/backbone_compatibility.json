@@ -37,7 +37,7 @@
   "sizes_failed": [],
   "params_m": 14.33,
   "export_dynamic": "ok",
-  "probe_seconds": 3.3
+  "probe_seconds": 1.6
  },
  {
   "name": "resnet50",
@@ -77,7 +77,7 @@
   "sizes_failed": [],
   "params_m": 32.52,
   "export_dynamic": "ok",
-  "probe_seconds": 4.3
+  "probe_seconds": 2.4
  },
  {
   "name": "resnet50d",
@@ -117,7 +117,7 @@
   "sizes_failed": [],
   "params_m": 32.54,
   "export_dynamic": "ok",
-  "probe_seconds": 5.3
+  "probe_seconds": 2.3
  },
  {
   "name": "resnext50_32x4d",
@@ -157,7 +157,7 @@
   "sizes_failed": [],
   "params_m": 31.99,
   "export_dynamic": "ok",
-  "probe_seconds": 3.5
+  "probe_seconds": 2.3
  },
  {
   "name": "seresnext26d_32x4d",
@@ -197,7 +197,7 @@
   "sizes_failed": [],
   "params_m": 23.77,
   "export_dynamic": "ok",
-  "probe_seconds": 3.4
+  "probe_seconds": 1.9
  },
  {
   "name": "efficientnet_b0",
@@ -237,7 +237,7 @@
   "sizes_failed": [],
   "params_m": 5.83,
   "export_dynamic": "ok",
-  "probe_seconds": 3.7
+  "probe_seconds": 2.4
  },
  {
   "name": "efficientnet_b3",
@@ -277,7 +277,7 @@
   "sizes_failed": [],
   "params_m": 12.56,
   "export_dynamic": "ok",
-  "probe_seconds": 3.9
+  "probe_seconds": 3.3
  },
  {
   "name": "tf_efficientnetv2_s",
@@ -317,7 +317,7 @@
   "sizes_failed": [],
   "params_m": 22.09,
   "export_dynamic": "ok",
-  "probe_seconds": 139.4
+  "probe_seconds": 119.9
  },
  {
   "name": "convnext_tiny",
@@ -355,7 +355,7 @@
   "sizes_failed": [],
   "params_m": 31.93,
   "export_dynamic": "ok",
-  "probe_seconds": 4.0
+  "probe_seconds": 3.0
  },
  {
   "name": "convnextv2_tiny",
@@ -393,7 +393,7 @@
   "sizes_failed": [],
   "params_m": 31.98,
   "export_dynamic": "ok",
-  "probe_seconds": 4.1
+  "probe_seconds": 3.3
  },
  {
   "name": "edgenext_small",
@@ -431,7 +431,7 @@
   "sizes_failed": [],
   "params_m": 7.67,
   "export_dynamic": "ok",
-  "probe_seconds": 6.4
+  "probe_seconds": 3.9
  },
  {
   "name": "mobilenetv3_large_100",
@@ -471,7 +471,7 @@
   "sizes_failed": [],
   "params_m": 6.69,
   "export_dynamic": "ok",
-  "probe_seconds": 3.3
+  "probe_seconds": 2.7
  },
  {
   "name": "mobilenetv4_conv_small",
@@ -511,7 +511,7 @@
   "sizes_failed": [],
   "params_m": 4.98,
   "export_dynamic": "ok",
-  "probe_seconds": 1.7
+  "probe_seconds": 1.8
  },
  {
   "name": "regnetx_032",
@@ -551,7 +551,7 @@
   "sizes_failed": [],
   "params_m": 19.07,
   "export_dynamic": "ok",
-  "probe_seconds": 2.9
+  "probe_seconds": 2.8
  },
  {
   "name": "regnety_016",
@@ -591,7 +591,7 @@
   "sizes_failed": [],
   "params_m": 14.49,
   "export_dynamic": "ok",
-  "probe_seconds": 3.0
+  "probe_seconds": 2.9
  },
  {
   "name": "ghostnetv2_100",
@@ -631,7 +631,7 @@
   "sizes_failed": [],
   "params_m": 3.04,
   "export_dynamic": "ok",
-  "probe_seconds": 3.6
+  "probe_seconds": 3.5
  },
  {
   "name": "rexnet_100",
@@ -671,7 +671,7 @@
   "sizes_failed": [],
   "params_m": 5.27,
   "export_dynamic": "ok",
-  "probe_seconds": 3.5
+  "probe_seconds": 3.3
  },
  {
   "name": "densenet121",
@@ -711,7 +711,7 @@
   "sizes_failed": [],
   "params_m": 13.61,
   "export_dynamic": "ok",
-  "probe_seconds": 4.7
+  "probe_seconds": 4.5
  },
  {
   "name": "vgg16_bn",
@@ -753,7 +753,7 @@
   "sizes_failed": [],
   "params_m": 19.05,
   "export_dynamic": "ok",
-  "probe_seconds": 2.7
+  "probe_seconds": 2.4
  },
  {
   "name": "dla34",
@@ -835,7 +835,7 @@
   "sizes_failed": [],
   "params_m": 31.73,
   "export_dynamic": "ok",
-  "probe_seconds": 3.4
+  "probe_seconds": 3.1
  },
  {
   "name": "hrnet_w18_small",
@@ -875,7 +875,7 @@
   "sizes_failed": [],
   "params_m": 7.94,
   "export_dynamic": "ok",
-  "probe_seconds": 3.2
+  "probe_seconds": 3.1
  },
  {
   "name": "inception_next_tiny",
@@ -913,7 +913,7 @@
   "sizes_failed": [],
   "params_m": 28.08,
   "export_dynamic": "ok",
-  "probe_seconds": 3.5
+  "probe_seconds": 3.0
  },
  {
   "name": "repvit_m1",
@@ -989,7 +989,7 @@
   "sizes_failed": [],
   "params_m": 31.63,
   "export_dynamic": "fail: UserError",
-  "probe_seconds": 299.0
+  "probe_seconds": 160.9
  },
  {
   "name": "swinv2_tiny_window8_256",
@@ -1027,7 +1027,7 @@
   "sizes_failed": [],
   "params_m": 31.69,
   "export_dynamic": "fail: UserError",
-  "probe_seconds": 40.5
+  "probe_seconds": 40.8
  },
  {
   "name": "pvt_v2_b1",
@@ -1065,12 +1065,12 @@
   "sizes_failed": [],
   "params_m": 16.78,
   "export_dynamic": "ok",
-  "probe_seconds": 3.6
+  "probe_seconds": 3.2
  },
  {
   "name": "maxvit_tiny_tf_224",
   "buildable": true,
-  "error": "AssertionError: height (16) must be divisible by window (7)",
+  "error": "fixed input size 224x224: smaller inputs are padded, larger need backbone_kwargs={'img_size': ...}",
   "feature_strides": [
    2,
    4,
@@ -1088,8 +1088,7 @@
   "native_layout": "NCHW",
   "plain_vit": false,
   "size_support": "fixed",
-  "sizes_ok": [],
-  "sizes_failed": [
+  "sizes_ok": [
    [
     64,
     64
@@ -1103,14 +1102,15 @@
     96
    ]
   ],
+  "sizes_failed": [],
   "params_m": 33.29,
   "export_dynamic": "not probed",
-  "probe_seconds": 0.6
+  "probe_seconds": 1.2
  },
  {
   "name": "coatnet_0_rw_224",
   "buildable": true,
-  "error": "RuntimeError: The size of tensor a (16) must match the size of tensor b (196) at non-singleton dimension 3",
+  "error": "fixed input size 224x224: smaller inputs are padded, larger need backbone_kwargs={'img_size': ...}",
   "feature_strides": [
    2,
    4,
@@ -1128,8 +1128,7 @@
   "native_layout": "NCHW",
   "plain_vit": false,
   "size_support": "fixed",
-  "sizes_ok": [],
-  "sizes_failed": [
+  "sizes_ok": [
    [
     64,
     64
@@ -1143,9 +1142,10 @@
     96
    ]
   ],
+  "sizes_failed": [],
   "params_m": 30.79,
   "export_dynamic": "not probed",
-  "probe_seconds": 0.3
+  "probe_seconds": 0.8
  },
  {
   "name": "fastvit_t12",
@@ -1183,12 +1183,12 @@
   "sizes_failed": [],
   "params_m": 9.52,
   "export_dynamic": "ok",
-  "probe_seconds": 3.1
+  "probe_seconds": 2.8
  },
  {
   "name": "efficientformerv2_s0",
   "buildable": true,
-  "error": "RuntimeError: shape '[1, 8, -1, 49]' is invalid for input of size 1024",
+  "error": "fixed input size 224x224: smaller inputs are padded, larger need backbone_kwargs={'img_size': ...}",
   "feature_strides": [
    4,
    8,
@@ -1204,8 +1204,7 @@
   "native_layout": "NCHW",
   "plain_vit": false,
   "size_support": "fixed",
-  "sizes_ok": [],
-  "sizes_failed": [
+  "sizes_ok": [
    [
     64,
     64
@@ -1219,14 +1218,15 @@
     96
    ]
   ],
+  "sizes_failed": [],
   "params_m": 5.13,
   "export_dynamic": "not probed",
-  "probe_seconds": 0.1
+  "probe_seconds": 0.5
  },
  {
   "name": "levit_128s",
   "buildable": true,
-  "error": "RuntimeError: The size of tensor a (16) must match the size of tensor b (196) at non-singleton dimension 3",
+  "error": "fixed input size 224x224: smaller inputs are padded, larger need backbone_kwargs={'img_size': ...}",
   "feature_strides": [
    16,
    32,
@@ -1240,8 +1240,7 @@
   "native_layout": "NCHW",
   "plain_vit": false,
   "size_support": "fixed",
-  "sizes_ok": [],
-  "sizes_failed": [
+  "sizes_ok": [
    [
     64,
     64
@@ -1255,14 +1254,15 @@
     96
    ]
   ],
+  "sizes_failed": [],
   "params_m": 9.81,
   "export_dynamic": "not probed",
-  "probe_seconds": 0.2
+  "probe_seconds": 0.4
  },
  {
   "name": "hiera_tiny_224",
   "buildable": true,
-  "error": "RuntimeError: The size of tensor a (256) must match the size of tensor b (3136) at non-singleton dimension 1",
+  "error": "fixed input size 224x224: smaller inputs are padded, larger need backbone_kwargs={'img_size': ...}",
   "feature_strides": [
    4,
    8,
@@ -1278,8 +1278,7 @@
   "native_layout": "NCHW",
   "plain_vit": false,
   "size_support": "fixed",
-  "sizes_ok": [],
-  "sizes_failed": [
+  "sizes_ok": [
    [
     64,
     64
@@ -1293,9 +1292,10 @@
     96
    ]
   ],
+  "sizes_failed": [],
   "params_m": 31.25,
   "export_dynamic": "not probed",
-  "probe_seconds": 0.7
+  "probe_seconds": 0.6
  },
  {
   "name": "mambaout_tiny",
@@ -1333,7 +1333,7 @@
   "sizes_failed": [],
   "params_m": 26.57,
   "export_dynamic": "ok",
-  "probe_seconds": 12.1
+  "probe_seconds": 3.1
  },
  {
   "name": "caformer_s18",
@@ -1371,7 +1371,7 @@
   "sizes_failed": [],
   "params_m": 26.52,
   "export_dynamic": "ok",
-  "probe_seconds": 10.5
+  "probe_seconds": 3.5
  },
  {
   "name": "poolformerv2_s12",
@@ -1409,7 +1409,7 @@
   "sizes_failed": [],
   "params_m": 14.66,
   "export_dynamic": "ok",
-  "probe_seconds": 6.5
+  "probe_seconds": 2.6
  },
  {
   "name": "nextvit_small",
@@ -1447,7 +1447,7 @@
   "sizes_failed": [],
   "params_m": 35.81,
   "export_dynamic": "ok",
-  "probe_seconds": 7.2
+  "probe_seconds": 3.7
  },
  {
   "name": "focalnet_tiny_srf",
@@ -1485,7 +1485,7 @@
   "sizes_failed": [],
   "params_m": 31.77,
   "export_dynamic": "ok",
-  "probe_seconds": 6.7
+  "probe_seconds": 3.5
  },
  {
   "name": "davit_tiny",
@@ -1523,7 +1523,7 @@
   "sizes_failed": [],
   "params_m": 31.7,
   "export_dynamic": "fail: UserError",
-  "probe_seconds": 107.2
+  "probe_seconds": 73.9
  },
  {
   "name": "efficientvit_b1",
@@ -1561,7 +1561,7 @@
   "sizes_failed": [],
   "params_m": 6.8,
   "export_dynamic": "ok",
-  "probe_seconds": 5.9
+  "probe_seconds": 3.7
  },
  {
   "name": "vit_small_patch16_224",
@@ -1599,7 +1599,7 @@
   "sizes_failed": [],
   "params_m": 26.35,
   "export_dynamic": "ok",
-  "probe_seconds": 6.2
+  "probe_seconds": 2.7
  },
  {
   "name": "vit_base_patch16_224",
@@ -1637,7 +1637,7 @@
   "sizes_failed": [],
   "params_m": 98.07,
   "export_dynamic": "ok",
-  "probe_seconds": 7.5
+  "probe_seconds": 3.4
  },
  {
   "name": "deit3_small_patch16_224",
@@ -1675,7 +1675,7 @@
   "sizes_failed": [],
   "params_m": 26.36,
   "export_dynamic": "ok",
-  "probe_seconds": 5.7
+  "probe_seconds": 2.8
  },
  {
   "name": "vit_small_patch14_dinov2",
@@ -1713,7 +1713,7 @@
   "sizes_failed": [],
   "params_m": 26.74,
   "export_dynamic": "ok",
-  "probe_seconds": 7.2
+  "probe_seconds": 3.1
  },
  {
   "name": "eva02_small_patch14_224",
@@ -1751,7 +1751,7 @@
   "sizes_failed": [],
   "params_m": 26.31,
   "export_dynamic": "ok",
-  "probe_seconds": 8.0
+  "probe_seconds": 4.5
  },
  {
   "name": "vit_base_patch16_siglip_224",
@@ -1789,6 +1789,6 @@
   "sizes_failed": [],
   "params_m": 98.07,
   "export_dynamic": "ok",
-  "probe_seconds": 7.6
+  "probe_seconds": 3.5
  }
 ]

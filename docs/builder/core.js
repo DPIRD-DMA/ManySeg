@@ -341,7 +341,7 @@ function derive(s) {
     if (task[o.name]) task[h.name] = { ...task[o.name], input: h.input, sharesWith: o.name };
   }
 
-  // which levels are read, as in DenseModel.restrict_to_read_levels: each decoder's read levels
+  // which levels are read, as in DenseModel._restrict_to_read_levels: each decoder's read levels
   // (ManySeg's gradient probe, exported in data.js) plus the deepest when a head pools the
   // encoder. Only read levels are fused, and an input (or the deepest levels of one) that nothing
   // reads is an error in create_model, since its parameters would never get a gradient.
@@ -785,7 +785,7 @@ function generateCode(s, D) {
   if (rsWeights) saveArgs.push(`normalize="weights"`);
   lines.push(`# manyseg.save(model, ${saveArgs.join(", ")})`);
   lines.push("# model = manyseg.load(\"model.safetensors\")  # model.tiling_spec(): sizes for tiled inference");
-  if (s.meta) lines.push(`# real metadata: model.conditioner.encoders[${py(s.meta.name)}].pack({...})`);
+  if (s.meta) lines.push(`# real metadata: model.pack_metadata(${py(s.meta.name)}, {...})`);
   return lines.join("\n");
 }
 

@@ -50,8 +50,9 @@ First release. Python 3.10–3.14, PyTorch ≥ 2.9, timm ≥ 1.0.20.
 * `manyseg.save` / `manyseg.load` (safetensors plus the stored configuration, normalisation,
   activations and class names). Save format 2; format-1 files (development versions, which
   said `"channels"` for all three) are migrated on load.
-* `torch.compile(dynamic=True)`, `manyseg.export.export_model` (dynamic size, batch and date
-  count) and ONNX; int8 quantisation (`manyseg.quantize`, extra `quant`); FSDP2
+* `torch.compile(dynamic=True)`, `manyseg.export.export_model` (dynamic size; dynamic batch
+  with `dynamic_batch=True`; dynamic date count except for `concat` / `diff` aggregation) and
+  ONNX; int8 quantisation (`manyseg.quantize`, extra `quant`); FSDP2
   (`manyseg.distributed.shard_model`).
 * `model.describe()` shows what was built, with shapes and FLOPs.
 * Decoders upsample to their skip connections with an exact integer nearest rule

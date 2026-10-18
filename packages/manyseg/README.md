@@ -5,7 +5,7 @@ backbones (46 families tested), any channel count, multiple inputs and outputs. 
 `torch.compile` and `torch.export`.
 
 ```bash
-pip install manyseg                 # torch + timm only
+pip install manyseg                 # torch, timm and safetensors
 pip install "manyseg[quant]"        # + torchao int8 quantisation
 pip install "manyseg[onnx]"         # + ONNX export (add onnxruntime to check parity)
 pip install "manyseg[instances]"    # + scipy / scikit-image post-processing
@@ -23,15 +23,23 @@ print(model.describe())                    # what was actually built, stage by s
 * **Backbones:** timm CNNs, hierarchical transformers and plain ViTs (through a pyramid neck),
   configured by introspection.
 * **Inputs:** any channel count (pretrained stem adapters), several rasters with early,
-  intermediate or late fusion and explicit `same_grid` / `same_extent` alignment, and
-  non-raster metadata (date, angles, lat/lon) through FiLM.
+  intermediate or late fusion and explicit `same_grid` / `same_extent` alignment, time series
+  (masks, acquisition dates), change detection (Siamese encoders, difference fusion,
+  per-date heads) and non-raster metadata (date, angles, lat/lon) through FiLM.
+* **Remote-sensing weights:** SSL4EO-S12 and SatlasPretrain Sentinel-2 / Sentinel-1 weights
+  for timm ResNets and ViTs (`pretrained="ssl4eo_s2_dino"`), with their band order and
+  normalisation.
 * **Decoders:** `unet` (identical to SMP's), `unetplusplus`, `fastai_unet` (identical to
-  fastai's), `fpn`, `deeplabv3plus`, `upernet` and `segformer`, shared or per head, with
-  `out_stride` and an optional full-resolution `input_cross`.
+  fastai's), `fpn`, `deeplabv3plus`, `upernet` and `segformer`, shared or per head;
+  reduced output resolution (`out_stride` for `unet`, `unetplusplus` and `fastai_unet`) and an
+  optional full-resolution `input_cross` stage for `unet`.
 * **Heads:** segmentation, regression (with uncertainty) and classification, at pixel or image
-  scope and at reduced scale. Includes instance (boundary + distance) and point/density presets.
-* **Deployment:** `torch.compile(dynamic=True)`, `torch.export` and ONNX with dynamic H/W
-  (except Swin-family encoders, a timm limitation), and int8 quantisation (`manyseg.quantize`).
+  scope and at reduced scale; image-only models build no decoder. Includes instance
+  (boundary + distance) and point/density presets, and feature / embedding output.
+* **Deployment:** `manyseg.save` / `manyseg.load` (weights plus configuration and inference
+  metadata), `torch.compile(dynamic=True)`, `torch.export` and ONNX with dynamic H/W (a few
+  encoder families need a fixed size; see the compatibility table on GitHub), int8
+  quantisation (`manyseg.quantize`) and FSDP2.
 
 Every design default comes from a pre-registered, multi-seed experiment, and negative results
 are kept. Documentation, examples and experiments are on

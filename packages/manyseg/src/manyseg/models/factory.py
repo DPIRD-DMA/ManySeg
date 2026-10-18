@@ -169,12 +169,44 @@ def create_model(
     heads: Mapping[str, Mapping[str, Any]] | None = None,
     pad_to_stride: bool = True,
 ) -> DenseModel:
-    """Build a dense prediction model.
+    """Build a dense prediction model (segmentation, regression, classification, ...).
 
     Exactly one of ``num_classes`` or ``heads`` is required. With ``num_classes`` the model
     returns a Tensor; with ``heads`` a ``dict[str, Tensor]`` keyed by head name, even for a
-    single head.
-    See ``docs/api_design.md``.
+    single head. Full reference: ``docs/api_design.md``.
+
+    Args:
+        backbone: A timm model name, or an ``nn.Module`` with ``feature_specs`` and
+            ``input_divisor``.
+        inputs: Several inputs, ``{name: config}`` (the first raster input is the primary).
+            Raster or time-series configs: ``in_channels`` (required), ``kind``
+            (``"raster"`` / ``"timeseries"``), ``backbone`` (or ``"shared:<input>"``),
+            ``pretrained``, ``channel_adapter``, ``alignment`` (``"same_grid"`` /
+            ``"same_extent"``), ``share_norm``, ``backbone_kwargs``, ``out_indices``,
+            ``rgb_indices``, ``temporal`` (time series). Vector (metadata) configs:
+            ``{"kind": "vector"}`` with ``fields`` or ``num_features``, ``dim``, ``dropout``,
+            ``conditioning`` (``"film"`` / ``"head"`` / ``"channels"``).
+        fusion: ``{"type": "early" | "intermediate" | "late", "op": ..., "op_kwargs": ...,
+            "strides": [...]}`` for several raster inputs.
+        pretrained: ``True`` (timm weights), ``False``, or a ``manyseg.weights`` tag such as
+            ``"ssl4eo_s2_dino"``.
+        in_channels: Input bands of a single-input model.
+        channel_adapter: How the RGB stem is adapted to ``in_channels``.
+        out_indices: Encoder levels to return (timm ``out_indices``).
+        backbone_kwargs: Passed to ``timm.create_model``.
+        decoder: A decoder name, a decoder class or callable, or one dict
+            ``{"type": name, **options}``.
+        decoder_kwargs: Options for the decoder (not together with the same keys in a dict
+            ``decoder``).
+        num_classes: One segmentation head with this many output channels.
+        heads: ``{name: config}`` with ``type`` (``"segmentation"``: pixel scope,
+            ``"classification"``: image scope, ``"regression"``: either), ``out_channels``
+            (required), ``scope`` (``"pixel"`` / ``"image"``), ``source``, ``scale``,
+            ``uncertainty``, ``decoder`` (a per-head decoder), ``input`` and ``share``
+            (per-input heads), and head options (``kernel_size``, ``bias_init``,
+            ``dropout``, ``init_std``).
+        pad_to_stride: Pad inputs to the encoder stride and crop outputs back (default);
+            ``False`` resizes outputs to the input size instead.
     """
     if (num_classes is None) == (heads is None):
         raise ValueError("pass exactly one of num_classes= or heads=")

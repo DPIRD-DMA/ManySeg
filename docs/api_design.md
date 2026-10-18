@@ -24,10 +24,10 @@ inputs ──► InputAdapter ──► Backbone ──► (Neck) ──┘
 
 | Layer | Contract |
 | --- | --- |
-| `InputAdapter` | Maps `C_in` channels to what the backbone stem expects. It is either folded into the stem conv (`repeat`, `mean`, `random`, `zero`), or it is a small module in front of the stem (`projection`). |
-| `Backbone` | `forward(x) -> list[Tensor]`, all NCHW, plus a static `feature_specs: tuple[FeatureSpec, ...]`. |
+| `InputAdapter` | Maps `C_in` channels to what the backbone stem expects. It is either folded into the stem conv (`repeat`, `mean`, `rgb_plus_random`, `rgb_plus_zero`), or it is a small module in front of the stem (`projection`). |
+| `Backbone` | `forward(x) -> list[Tensor]`, all NCHW, plus a static `feature_specs: tuple[FeatureSpec, ...]`. Levels the built model never reads may be `None` (pruned ViT neck levels). |
 | `Neck` | Optional. Converts single-scale token maps (plain ViT) into a pyramid. Same contract as a backbone. |
-| `Fusion` | Combines several pyramids into one *(phase 4)*. |
+| `Fusion` | Combines several pyramids into one (early, intermediate or late; see Multiple inputs). |
 | `Decoder` | Constructed from `in_specs`. `forward(list[Tensor]) -> Tensor`. Exposes `out_spec: FeatureSpec`. |
 | `Head` | Constructed from a `FeatureSpec`. Maps decoder (or encoder) features to a named output. |
 
@@ -321,8 +321,8 @@ dates never affect the output: in training mode only valid dates are encoded (so
 of BatchNorm batch statistics; a partly masked batch has a data-dependent shape, so
 `torch.compile(fullgraph=True)` of a training step needs fully valid batches), and NaNs in
 masked dates are ignored.
-Not yet: `shared:` backbones between a time series and another input, and metadata in
-`"channels"` mode targeting a time series.
+Not yet: `shared:` backbones between a time series and another input, metadata in
+`"channels"` mode targeting a time series, and per-input heads (`"input"`) on a time series.
 
 > **Evidence (E021):** several dates beat one by a wide margin (PASTIS +8.6 mIoU, AI4Boundaries
 > +5.6 PQ). Stacking all dates as channels in one input is a strong, cheaper baseline: it beat
@@ -404,8 +404,8 @@ model = create_model(
     },
     num_classes=2,
 )
-meta = model.conditioner.encoders["meta"].pack(
-    {"doy": doy, "sun_elev": elev, "latlon": latlon, "sensor": sensor})   # (B, 5)
+meta = model.pack_metadata(
+    "meta", {"doy": doy, "sun_elev": elev, "latlon": latlon, "sensor": sensor})   # (B, 5)
 out = model({"s2": s2, "meta": meta})                   # optional: "meta_mask": (B, 4)
 ```
 
@@ -485,6 +485,8 @@ line up exactly. ManySeg handles this explicitly:
   required divisor, the network runs, and outputs are cropped back to `(H, W)`. Pixels keep
   their positions, so pixel `(i, j)` of the output corresponds to pixel `(i, j)` of the input.
   The pad value is 0 (applied after the user's normalisation, so 0 is the per-channel mean).
+  Models built with `inputs=` always pad each input inside the multi-input encoder; there
+  `pad_to_stride=False` only switches the outputs from cropping to resizing.
 * Decoders resize the upsampled feature to each skip's exact size rather than assuming
   `2×`, so they also work when padding is disabled and a backbone rounds feature sizes up.
 * Backbones that only run at one size (MaxViT, CoAtNet, LeViT, EfficientFormerV2, Hiera:
@@ -606,7 +608,8 @@ native density. Native-scale semantic metrics are optional (`native_metrics=True
 ## Input channel adaptation
 
 ```python
-create_model(backbone="resnet34", pretrained=True, in_channels=13, channel_adapter="repeat")
+create_model(backbone="resnet34", pretrained=True, in_channels=13, channel_adapter="repeat",
+             num_classes=2)
 ```
 
 | `channel_adapter` | Behaviour on the pretrained stem conv `W ∈ R^{O×3×k×k}` |
@@ -617,8 +620,10 @@ create_model(backbone="resnet34", pretrained=True, in_channels=13, channel_adapt
 | `"rgb_plus_zero"` | The first 3 channels keep `W`. The others are zero, so the model is initially identical to RGB-only. |
 | `"projection"` | A learned 1×1 conv `C→3` in front of the unchanged stem. RGB-identity initialisation when `C ≥ 3`. |
 
-`in_channels=3` with a pretrained backbone leaves the weights untouched for every adapter. The
-benchmarks in Phase 5 decide whether the default should change.
+`in_channels=3` with a pretrained backbone leaves the weights untouched for every adapter.
+
+> **Evidence (E004, 13-band Sentinel-2):** no adapter beat `repeat`, which stays the default;
+> `projection` was harmful.
 
 ## Lower-level composition
 
@@ -661,17 +666,19 @@ from manyseg.points import point_heads, density_head, find_peaks, count_from_den
 model = create_model(backbone="convnext_tiny", in_channels=4,
                      heads=instance_heads(decoders={"boundary": "unet"}))
 t = instance_targets(instance_ids, boundary_width=2)     # torch, runs on the GPU
+out = model(x)
 labels = instances_from_outputs(out["extent"], out["boundary"], out["distance"], logits=True)
 
 # Counting / locating trees, livestock, dams, sheds
 model = create_model(backbone="resnet34", heads={**point_heads(offsets=True), **density_head()})
+out = model(x)
 peaks = find_peaks(out["heatmap"], threshold=thr)        # thr chosen on val (E011b: ~0.15-0.2)
 count = count_from_density(out["density"])
 ```
 
 | Preset | Heads | Targets (`manyseg.*.targets`) | Post-processing |
 | --- | --- | --- | --- |
-| `instance_heads(num_classes=1, distance="normalized", decoders=None)` | `extent` (1 ch, or C+1 with background), `boundary` (1), `distance` (1, regression) | `instance_targets(ids, boundary_width, boundary_mode="inner"/"outer"/"both")`: exact EDT; distance is 1 + distance to the instance's edge, normalised per instance; tile borders are not boundaries | seeds = extent ∧ ¬boundary ∧ distance > t; every component gets at least one seed; growth in torch (default) or skimage watershed (`manyseg[instances]`) |
+| `instance_heads(num_classes=1, distance="normalized", decoders=None)` | `extent` (1 ch, or C+1 with background), `boundary` (1), `distance` (1, regression) | `instance_targets(ids, boundary_width=1, boundary_mode="inner"/"outer"/"both")`: exact EDT; distance is 1 + distance to the instance's edge, normalised per instance; tile borders are not boundaries | seeds = extent ∧ ¬boundary ∧ distance > t; every component gets at least one seed; growth in torch (default) or skimage watershed (`manyseg[instances]`) |
 | `point_heads(heatmap="regression"/"segmentation", offsets=False)` | `heatmap` (1), `offset` (2: dy, dx) | `gaussian_heatmap(points, sigma)`, `heatmap_from_instances` (centroids rounded to pixels; fixed or size-scaled σ), `offset_targets` (to exact centroids) | `find_peaks` (max-pool NMS), `group_by_offsets` → instance ids, `panoptic_labels` |
 | `density_head()` | `density` (1) | `density_map(points, sigma)`: each point's Gaussian sums to exactly 1 inside the image | `count_from_density` |
 
