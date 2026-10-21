@@ -33,10 +33,11 @@ class _Node(nn.Module):
         super().__init__()
         self.block = UNetBlock(cin, 0, cout, norm, upsample)
         self.upsample = upsample
+        self.exact_2x = False  # set by the model when inputs are padded to the stride
 
     def forward(self, below: Tensor, same: list[Tensor]) -> Tensor:
         ref = same[0]
-        up = upsample2x(below, ref.shape[-2:], self.upsample)
+        up = upsample2x(below, ref.shape[-2:], self.upsample, self.exact_2x)
         x = torch.cat([up, *same], dim=1)
         return self.block.conv2(self.block.conv1(x))
 
@@ -50,6 +51,7 @@ class UNetPlusPlusDecoder(nn.Module):
             if s.stride & (s.stride - 1):
                 raise ValueError(f"UNetPlusPlusDecoder needs power-of-two strides, got {s.stride}")
         deepest = max(s.stride for s in in_specs)
+        self._deepest_stride = deepest
         check_power_of_two_stride("UNetPlusPlusDecoder", out_stride, deepest)
         order = sorted((i for i, s in enumerate(in_specs) if s.stride >= out_stride),
                        key=lambda i: in_specs[i].stride)
@@ -70,6 +72,9 @@ class UNetPlusPlusDecoder(nn.Module):
                 cout = width[specs[i].stride]
                 cin = ch[(i + 1, j - 1)] + sum(ch[(i, k)] for k in range(j))
                 nodes[f"{i + self._first}_{j}"] = _Node(cin, cout, norm, upsample)
+                # this node upsamples level i + 1 to level i: 2x unless out_indices skip one
+                nodes[f"{i + self._first}_{j}"].step_2x = \
+                    specs[i + 1].stride == 2 * specs[i].stride
                 ch[(i, j)] = cout
         self.nodes = nn.ModuleDict(nodes)
         tail, c, s = [], ch[(0, L - 1)], specs[0].stride
@@ -80,6 +85,12 @@ class UNetPlusPlusDecoder(nn.Module):
         self.tail = nn.ModuleList(tail)
         self.out_spec = FeatureSpec(c, out_stride, "unetplusplus")
         init_decoder_(self)
+
+    def _set_input_divisor(self, divisor: int) -> None:
+        """Inputs padded to a multiple of the deepest stride: every level is exactly twice the
+        next, so the upsampling needs no gather (E025)."""
+        for node in self.nodes.values():
+            node.exact_2x = divisor % self._deepest_stride == 0 and node.step_2x
 
     def forward(self, features: list[Tensor]) -> Tensor:
         e = [features[i] for i in self._order]

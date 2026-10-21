@@ -240,3 +240,6 @@ experiments/setonix_watch.log*
 
 # Promo video build (local only)
 /promo/
+
+# test fixtures (the golden saved-model files must be committed)
+!packages/manyseg/tests/data/

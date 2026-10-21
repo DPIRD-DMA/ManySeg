@@ -67,3 +67,46 @@ def test_gradcheck_double():
     xs = [torch.randn(1, s.channels, 8 // s.stride, 8 // s.stride, dtype=torch.double,
                       requires_grad=True) for s in specs]
     assert torch.autograd.gradcheck(lambda *a: dec(list(a)), xs)
+
+
+@pytest.mark.parametrize("hw, size", [((16, 16), (32, 32)), ((8, 13), (16, 26)),
+                                      ((8, 13), (15, 25)), ((5, 7), (9, 14)), ((1, 1), (1, 2))])
+def test_fast_2x_upsample_equals_integer_gather(hw, size):
+    """E025: the scale_factor=2 path gives the gather's exact values (forward) and gradients
+    that agree up to summation order, for 2n and 2n - 1 outputs."""
+    from manyseg.utils.spatial import is_2x, resize_nearest, upsample2x_nearest
+
+    assert is_2x(hw[0], size[0]) and is_2x(hw[1], size[1])
+    x = torch.randn(2, 3, *hw, requires_grad=True)
+    g = torch.randn(2, 3, *size)
+    a, b = upsample2x_nearest(x, size), resize_nearest(x, size)
+    assert torch.equal(a, b)
+    ga, = torch.autograd.grad(a, x, g)
+    gb, = torch.autograd.grad(b, x, g)
+    torch.testing.assert_close(ga, gb)
+
+
+def test_fast_upsample_keeps_channels_last():
+    from manyseg.utils.spatial import upsample2x_nearest
+
+    x = torch.randn(1, 8, 5, 6).to(memory_format=torch.channels_last)
+    y = upsample2x_nearest(x, (10, 11))
+    assert y.shape == (1, 8, 10, 11) and y.is_contiguous(memory_format=torch.channels_last)
+
+
+def test_padded_models_mark_exact_2x_blocks():
+    from manyseg import create_model
+
+    padded = create_model(backbone="resnet18", pretrained=False, num_classes=2)
+    assert all(b.exact_2x for b in padded.decoder.blocks)
+    unpadded = create_model(backbone="resnet18", pretrained=False, num_classes=2,
+                            pad_to_stride=False)
+    assert not any(b.exact_2x for b in unpadded.decoder.blocks)
+    task = create_model(backbone="resnet18", pretrained=False,
+                        heads={"a": {"type": "segmentation", "out_channels": 2,
+                                     "decoder": "unet"}})
+    assert all(b.exact_2x for b in task.task_decoders["a"].blocks)
+    x = torch.randn(1, 3, 67, 93)
+    padded.eval(), unpadded.load_state_dict(padded.state_dict()), unpadded.eval()
+    with torch.no_grad():
+        assert padded(x).shape == unpadded(x).shape == (1, 2, 67, 93)

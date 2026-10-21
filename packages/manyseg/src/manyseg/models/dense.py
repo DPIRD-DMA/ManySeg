@@ -86,6 +86,11 @@ class DenseModel(nn.Module):
         late = getattr(backbone, "mode", None) == "late"
         levels = range(*backbone.groups[0]) if late else range(len(backbone.feature_specs))
         self._deepest = max(levels, key=lambda i: backbone.feature_specs[i].stride)
+        # padded inputs: decoders can skip size checks in their upsampling (E025)
+        if pad_to_stride and getattr(backbone, "fixed_size", None) is None:
+            for dec in [self.decoder, *self.task_decoders.values()]:
+                if hasattr(dec, "_set_input_divisor"):
+                    dec._set_input_divisor(self.divisor)
 
     @property
     def feature_specs(self) -> tuple[FeatureSpec, ...]:
@@ -270,7 +275,10 @@ class DenseModel(nn.Module):
             inp = self._decode_cond(f"task_{name}", self.task_decoders[name], x, feats, cond,
                                     valid)
         head = self.heads[name]
-        y = head(inp)
+        # a head bias goes before a built-in output activation, so softplus heads stay > 0
+        late = (cond is not None and getattr(head, "activation", None) is not None
+                and name in self.conditioner.head_bias)
+        y = head(inp, activate=False) if late else head(inp)
         if name in self._pixel_heads:
             f = getattr(head, "factor", 1)  # 1 / scale; floor division keeps sizes symbolic
             hs, ws = (h + f - 1) // f, (w + f - 1) // f
@@ -278,7 +286,9 @@ class DenseModel(nn.Module):
                 y = crop_to(y, hs, ws)
             else:
                 y = F.interpolate(y, size=(hs, ws), mode="bilinear", align_corners=False)
-        return y if cond is None else self.conditioner.head(name, y, cond)
+        if cond is not None:
+            y = self.conditioner.head(name, y, cond)
+        return head.activate(y) if late else y
 
     def _pad(self, x: Tensor) -> Tensor:
         fixed = getattr(self.backbone, "fixed_size", None)

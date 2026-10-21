@@ -5,6 +5,8 @@ model: peaks via max-pool NMS, count = density integral, instances via offset gr
 predicted foreground (a small segmentation head trained alongside).
 """
 
+import math
+
 import torch
 import torch.nn.functional as F
 from manyseg import create_model
@@ -12,7 +14,7 @@ from manyseg.points import (
     centers_from_instances,
     count_from_density,
     density_head,
-    density_map,
+    density_loss,
     find_peaks,
     group_by_offsets,
     heatmap_from_instances,
@@ -36,17 +38,18 @@ def main():
     torch.manual_seed(0)
     img, masks = synthetic_objects()
     model = create_model(backbone="resnet18", pretrained=False,
-                         heads={**point_heads(offsets=True), **density_head(),
+                         heads={**point_heads(offsets=True),
+                                **density_head(activation="softplus"),  # density >= 0
                                 "fg": {"type": "segmentation", "out_channels": 1}})
     pts = [torch.floor(c + 0.5) for c, _ in centers_from_instances(masks)]
     hm_t = heatmap_from_instances(masks, sigma=2.0)
     off_t = offset_targets(masks)
-    den_t = density_map(pts, masks.shape[-2:], sigma=2.0) * 100  # scaled for optimisation
     fg = (masks > 0)[:, None].float()
     opt = torch.optim.AdamW(model.parameters(), lr=1e-3)
     for _ in range(40):
         out = model(img)
-        loss = (F.mse_loss(out["heatmap"], hm_t) + F.mse_loss(out["density"], den_t)
+        # density target: sums to the count, times 2 pi sigma^2 so peaks are about 1
+        loss = (F.mse_loss(out["heatmap"], hm_t) + density_loss(out["density"], pts, sigma=2.0)
                 + (F.l1_loss(out["offset"], off_t, reduction="none") * fg).sum() / fg.sum()
                 + F.binary_cross_entropy_with_logits(out["fg"], fg))
         opt.zero_grad()
@@ -55,12 +58,14 @@ def main():
     model.eval()
     with torch.no_grad():
         out = model(img)
-    # choose the peak threshold on validation data (as manyseg-bench's calibrate does, E011b)
+    # choose the peak threshold on validation data: manyseg.points.calibrate_threshold (E011b);
+    # smooth_sigma= and mask= (a foreground prediction) help on noisy heatmaps
     peaks = find_peaks(out["heatmap"], threshold=0.5)
     print("(40 steps from random weights: predictions are not converged)")
     print("true counts:   ", [len(p) for p in pts])
     print("peak counts:   ", [len(p) for p, _ in peaks])
-    print("density counts:", [round(float(c) / 100, 1) for c in count_from_density(out["density"])])
+    counts = count_from_density(out["density"], value_scale=2 * math.pi * 2.0 ** 2)
+    print("density counts:", [round(float(c), 1) for c in counts])
     inst = group_by_offsets([p.float() for p, _ in peaks], out["offset"], out["fg"][:, 0] > 0)
     print("instances from offsets (image 0):", int(inst[0].max()))
 

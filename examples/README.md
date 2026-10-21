@@ -1,10 +1,10 @@
 # Examples
 
-Short scripts that run on CPU with random weights: the numbered ones in a few seconds, the
-walkthroughs that train briefly (`instance_fields`, `point_counting`) in 10–20 s
-(`pretrained=False`; each
-script shows where to switch pretrained weights on). 01–04 and 08 use a GPU if one is
-available; the others run on CPU.
+Short scripts that run on CPU with random weights: the numbered ones in a few seconds (09,
+which trains two short fastai epochs, in about 12 s), the walkthroughs that train briefly
+(`instance_fields`, `point_counting`) in 10–20 s (`pretrained=False`; each script shows where
+to switch pretrained weights on). 01–04, 08 and 09 use a GPU if one is available; the others
+run on CPU.
 
 | Script | Shows |
 | --- | --- |
@@ -16,13 +16,14 @@ available; the others run on CPU.
 | [`06_export.py`](06_export.py) | `torch.export` with dynamic H/W, ONNX checked with onnxruntime, a `torch.compile` note |
 | [`07_quantise.py`](07_quantise.py) | `manyseg.quantize`: PT2E static int8 and int8 weight-only, `model_size`, `compare_outputs` |
 | [`08_classification_regression.py`](08_classification_regression.py) | Image-level models with no decoder: a multi-label classifier; then two S2 resolutions + S1 + day of year, a yield head with uncertainty and a pixel head together |
+| [`09_fastai.py`](09_fastai.py) | fastai `Learner` with a dict-output model: a loss and metrics that read heads by name, bf16 on GPU, `fit_one_cycle`, an EMA callback, `concat_heads` for single-tensor code (needs `fastai`, skips without it) |
 
 Longer walkthroughs:
 
 | Script | Shows |
 | --- | --- |
 | [`instance_fields.py`](instance_fields.py) | Field delineation: 30 training steps on synthetic touching fields, then instances |
-| [`point_counting.py`](point_counting.py) | Heatmap + offset + density heads: peaks, counts, instances by offset grouping |
+| [`point_counting.py`](point_counting.py) | Heatmap + offset + softplus density heads with `density_loss`: peaks, counts, instances by offset grouping |
 | [`metadata_conditioning.py`](metadata_conditioning.py) | Metadata fields, missing values, the three injection modes, export with a vector input |
 
 ## Running
@@ -34,7 +35,7 @@ uv sync --all-packages --all-extras
 uv run python examples/01_single_input.py
 ```
 
-With pip, `pip install manyseg` is enough for 01-05 and 08. Optional parts skip with a message when
+With pip, `pip install manyseg` is enough for 01-05 and 08; 09 needs `fastai`. Optional parts skip with a message when
 their dependency is missing: ONNX in 06 needs `manyseg[onnx]` and `onnxruntime`, 07 needs
 `manyseg[quant]` (torchao), and the PNG in 03 needs the Graphviz `dot` binary.
 

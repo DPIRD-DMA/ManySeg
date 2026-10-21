@@ -656,7 +656,16 @@ and conditioning are configured by dicts only.
 > validation data: E011b raised test point F1 from 0.40 (fixed 0.5) to 0.59 (val-chosen 0.15–0.2,
 > since MSE peaks rarely reach 1). With calibrated peaks, counting peaks (MAE 20.6) is close to
 > the density head (19.4). `density_head()` stays slightly better for counting and needs no
-> threshold.
+> threshold, **for many small objects per tile** (OAM-TCD trees, σ = 2 px). On a downstream
+> drone dataset with a few large plants per tile (1–20 per 792 px tile, about 115 px across),
+> peak counting on a separately decoded heatmap was far better (count MAE 1.0 vs 9–11 for
+> the density head): a background bias of about 0.01 per pixel, summed over 600k pixels,
+> adds phantom objects. A Gaussian blur before NMS (`smooth_sigma=3`) and a foreground mask
+> were its biggest peak-counting gains. With 45 validation images, calibrated thresholds
+> differed between folds and did not beat a fixed 0.3. A softplus density output cut the
+> density head's count MAE there from 10.1 to 2.9 (a floor of about +1.75 objects per image
+> remains); a ReLU output died (map at 0) and was removed. Softplus is recommended but not
+> the default until E011's density arm is rerun with it.
 
 
 Dense instance-style outputs are built from ordinary pixel heads, optionally with per-head
@@ -664,7 +673,8 @@ task decoders. There are no proposal- or query-based methods. Presets return hea
 
 ```python
 from manyseg.instances import instance_heads, instance_targets, instances_from_outputs
-from manyseg.points import point_heads, density_head, find_peaks, count_from_density
+from manyseg.points import (point_heads, density_head, find_peaks, count_from_density,
+                            calibrate_threshold)
 
 # Field / paddock / crown / footprint delineation (ResUNet-a / FracTAL style)
 model = create_model(backbone="convnext_tiny", in_channels=4,
@@ -676,21 +686,23 @@ labels = instances_from_outputs(out["extent"], out["boundary"], out["distance"],
 # Counting / locating trees, livestock, dams, sheds
 model = create_model(backbone="resnet34", heads={**point_heads(offsets=True), **density_head()})
 out = model(x)
-peaks = find_peaks(out["heatmap"], threshold=thr)        # thr chosen on val (E011b: ~0.15-0.2)
+thr, curve = calibrate_threshold(val_heatmaps, val_points, metric="f1")  # E011b: ~0.15-0.2
+peaks = find_peaks(out["heatmap"], threshold=thr, smooth_sigma=0, mask=None)
 count = count_from_density(out["density"])
 ```
 
 | Preset | Heads | Targets (`manyseg.*.targets`) | Post-processing |
 | --- | --- | --- | --- |
 | `instance_heads(num_classes=1, distance="normalized", decoders=None)` | `extent` (1 ch, or C+1 with background), `boundary` (1), `distance` (1, regression) | `instance_targets(ids, boundary_width=1, boundary_mode="inner"/"outer"/"both")`: exact EDT; distance is 1 + distance to the instance's edge, normalised per instance; tile borders are not boundaries | seeds = extent ∧ ¬boundary ∧ distance > t; every component gets at least one seed; `backend="auto"` (default): skimage watershed when scikit-image is installed (`manyseg[instances]`), else seeded growth in torch |
-| `point_heads(heatmap="regression"/"segmentation", offsets=False)` | `heatmap` (1), `offset` (2: dy, dx) | `gaussian_heatmap(points, size, sigma)`, `heatmap_from_instances` (centroids rounded to pixels; fixed or size-scaled σ), `offset_targets` (to exact centroids) | `find_peaks` (max-pool NMS), `group_by_offsets` → instance ids, `panoptic_labels` |
-| `density_head()` | `density` (1) | `density_map(points, size, sigma)`: each point's Gaussian sums to exactly 1 inside the image | `count_from_density` |
+| `point_heads(heatmap="regression"/"segmentation", offsets=False)` | `heatmap` (1), `offset` (2: dy, dx) | `gaussian_heatmap(points, size, sigma)`, `heatmap_from_instances` (centroids rounded to pixels; fixed or size-scaled σ), `offset_targets` (to exact centroids), `points_from_boxes` (YOLO / `xyxy` / COCO `xywh` → `(y, x)`, optional σ from box size) | `find_peaks` (max-pool NMS; optional `smooth_sigma` blur and `mask`), `calibrate_threshold`, `group_by_offsets` → instance ids, `panoptic_labels` |
+| `density_head(activation=None/"softplus")` | `density` (1; > 0 with softplus, recommended) | `density_map(points, size, sigma)`: each point's Gaussian sums to exactly 1 inside the image; `density_loss` (target × 2πσ², valid mask, optional count L1) | `count_from_density(value_scale=, mask=)` |
 
 `decoders=None` shares the model decoder. `"separate"` gives each head its own `unet`. A name or
 `{head: decoder}` mapping chooses decoders per head. Post-processing (peak picking, seeded
 growth or watershed, grouping) is **not part of the exported graph**: export the model, then
 run the post-processing functions on its outputs. Losses and object metrics (PQ, object F1,
-over-/under-segmentation, point F1, count MAE) live in `manyseg-bench`
+over-/under-segmentation, point F1, count MAE) live in `manyseg-bench`, except
+`manyseg.points.density_loss`
 (`manyseg_bench.losses`, `manyseg_bench.evaluation.objects`, `manyseg_bench.tasks`).
 
 > **Evidence (E009, Sen1Floods11, leave-events-out):** FiLM beat metadata-as-channels (+1.3

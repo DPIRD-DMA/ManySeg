@@ -144,6 +144,17 @@ def _fmt_shape(t) -> str:
     return type(t).__name__
 
 
+def _fmt_hidden(seq) -> str:
+    """``64 (d8) -> 32 (d16), bn + ReLU`` for a head's hidden conv layers."""
+    convs = [m for m in seq if isinstance(m, torch.nn.Conv2d)]
+    norm = next((type(m).__name__ for m in seq if not isinstance(
+        m, (torch.nn.Conv2d, torch.nn.ReLU))), None)
+    norm = {"BatchNorm2d": "bn", "GroupNorm": "gn"}.get(norm, norm)
+    layers = " -> ".join(f"{c.out_channels}" + (f" (d{c.dilation[0]})" if c.dilation[0] > 1
+                                                 else "") for c in convs)
+    return f"{layers}, {norm + ' + ' if norm else ''}ReLU" if convs else "none"
+
+
 def _fmt_scale(f: int) -> str:
     return "1" if f == 1 else f"1/{f}"
 
@@ -663,10 +674,11 @@ class _Builder:
                 ch = head.conv.out_channels
             elif isinstance(head, ImageHead):
                 ch = head.fc.out_features
-            else:
-                ch = None
+            else:  # a registered custom head class
+                ch = getattr(head, "out_channels", None)
             unc = getattr(head, "uncertainty", False)
-            chs = f"{ch // 2} ch + log-var ({ch} ch)" if unc and ch else f"{ch} ch"
+            chs = (f"{ch // 2} ch + log-var ({ch} ch)" if unc and ch else
+                   f"{ch} ch" if ch is not None else "custom")
             bias = self.cond is not None and name in self.cond.head_bias
             n = self.add(f"head_{name}", "head", name, f"{kind}, {scope}, {chs}",
                          modules=[head, self.cond.head_bias[name] if bias else None])
@@ -684,6 +696,10 @@ class _Builder:
                 res = ("none" if head.up == 1 and head.down == 1 else
                        f"bilinear x{head.up}" if head.up > 1 else f"block mean /{head.down}")
                 n.attrs.append(("resample", f"/{head.stride} feature, {res}", True))
+                if head.hidden is not None:
+                    n.attrs.append(("hidden", _fmt_hidden(head.hidden), True))
+                if head.activation is not None:
+                    n.attrs.append(("activation", head.activation, True))
             elif isinstance(head, ImageHead):
                 n.attrs.append(("pooling", "global average -> linear", False))
             if unc:

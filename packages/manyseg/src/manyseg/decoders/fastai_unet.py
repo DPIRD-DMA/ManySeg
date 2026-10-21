@@ -38,7 +38,7 @@ import torch.nn.functional as F
 from torch import Tensor, nn
 
 from ..features import FeatureSpec
-from ..utils.spatial import resize_nearest
+from ..utils.spatial import fit_nearest, is_2x, resize_nearest, upsample2x_nearest
 from .base import DECODERS, check_input_spec, check_power_of_two_stride
 
 
@@ -82,10 +82,12 @@ class _Block(nn.Module):
         nf = ni if final_div else ni // 2
         self.conv1, self.conv2 = _conv(ni, nf), _conv(nf, nf)
         self.out_channels = nf
+        self.exact = False  # set by the model when inputs are padded to the stride
 
     def forward(self, x: Tensor, skip: Tensor) -> Tensor:
-        # always (an exact copy when sizes match): a shape test would be frozen by export
-        up = resize_nearest(self.shuf(x), skip.shape[-2:])
+        # the shuffled map is 2x, the skip 2x or 2x - 1: a crop (E025); the model says when
+        # that holds, so export traces no shape test
+        up = fit_nearest(self.shuf(x), skip.shape[-2:], self.exact)
         return self.conv2(self.conv1(F.relu(torch.cat([up, self.bn(skip)], dim=1))))
 
 
@@ -123,8 +125,13 @@ class FastaiUNetDecoder(nn.Module):
         self.head_bn = _bn(ni)
         self.middle = nn.Sequential(_conv(ni, ni * 2), _conv(ni * 2, ni))
         blocks, c = [], ni
+        prev = enc[order[-1]].stride
         for k, i in enumerate(self.skips):  # widths as in the full decoder (prefix property)
             blk = _Block(c, in_specs[i].channels, final_div=k != len(all_skips) - 1)
+            # the shuffle doubles the size: a crop to the skip only if it is 2x (out_indices
+            # may skip a level)
+            blk.step_2x = prev == 2 * in_specs[i].stride
+            prev = in_specs[i].stride
             blocks.append(blk)
             c = blk.out_channels
         self.blocks = nn.ModuleList(blocks)
@@ -133,11 +140,21 @@ class FastaiUNetDecoder(nn.Module):
                               else None)
         reached = shallowest // 2 if self.final_shuffle is not None else shallowest
         self._resize = out_stride > 1 and reached != out_stride  # decided here, not per call
+        self._reached = reached
+        self._deepest_stride = enc[order[-1]].stride
+        self._exact = False
         self.last_cross = last_cross
         if last_cross:
             c = c + self.in_channels
             self.res = _ResBlock(c)
         self.out_spec = FeatureSpec(c, out_stride, "fastai_unet")
+
+    def _set_input_divisor(self, divisor: int) -> None:
+        """Inputs padded to a multiple of the deepest stride: each shuffled map matches its skip
+        and the output the input, so the nearest resizes are crops (E025)."""
+        self._exact = divisor % self._deepest_stride == 0
+        for blk in self.blocks:
+            blk.exact = self._exact and blk.step_2x
 
     def forward(self, features: list[Tensor]) -> Tensor:
         inp = features[0]
@@ -152,7 +169,14 @@ class FastaiUNetDecoder(nn.Module):
                 size = ((inp.shape[-2] + s - 1) // s, (inp.shape[-1] + s - 1) // s)
                 x = resize_nearest(x, size)
             return x
-        x = resize_nearest(x, inp.shape[-2:])  # always, as above
+        size = inp.shape[-2:]
+        if self._reached == 1:  # already at input resolution: a crop when padded
+            x = fit_nearest(x, size, self._exact)
+        elif self._reached == 2 and (self._exact or (not torch.compiler.is_compiling() and is_2x(
+                x.shape[-2], size[0]) and is_2x(x.shape[-1], size[1]))):
+            x = upsample2x_nearest(x, size)  # e.g. ConvNeXt: no stride-2 feature
+        else:
+            x = resize_nearest(x, size)
         if self.last_cross:
             x = self.res(torch.cat([x, inp], dim=1))
         return x

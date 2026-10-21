@@ -11,14 +11,20 @@ from torch import Tensor, nn
 
 from ..features import FeatureSpec
 from ..layers import ConvNormAct, init_decoder_
-from ..utils.spatial import resize_nearest
+from ..utils.spatial import is_2x, resize_nearest, upsample2x_nearest
 from .base import DECODERS, check_power_of_two_stride
 
 UPSAMPLE_MODES = ("nearest", "bilinear", "aligned")
 
 
-def upsample2x(x: Tensor, size: Sequence[int], mode: str) -> Tensor:
+def upsample2x(x: Tensor, size: Sequence[int], mode: str, exact_2x: bool = False) -> Tensor:
     """Upsample a stride-2s feature map to stride s, output cropped/resized to ``size``.
+
+    ``nearest`` uses ``F.interpolate(scale_factor=2)`` (as SMP; fast backward) when ``size`` is
+    known to be 2x the input (``exact_2x``: the model pads inputs to the stride, so no check is
+    traced under torch.compile / export) or is, in eager mode, ``2n`` / ``2n - 1``; otherwise
+    the integer-index gather (:func:`~manyseg.utils.spatial.resize_nearest`). Both give the
+    same values.
 
     ``nearest`` and ``bilinear`` (align_corners=False) treat coarse sample ``j`` as covering
     fine pixels ``2j, 2j+1``. Odd-kernel "same"-padded strided convs instead centre sample ``j``
@@ -26,6 +32,9 @@ def upsample2x(x: Tensor, size: Sequence[int], mode: str) -> Tensor:
     geometry (see experiments/E001_upsample_alignment).
     """
     if mode == "nearest":
+        if exact_2x or (not torch.compiler.is_compiling() and is_2x(x.shape[-2], size[0])
+                        and is_2x(x.shape[-1], size[1])):
+            return upsample2x_nearest(x, size)
         return resize_nearest(x, size)
     if mode == "bilinear":
         return F.interpolate(x, size=size, mode="bilinear", align_corners=False)
@@ -43,14 +52,16 @@ class UNetBlock(nn.Module):
     ) -> None:
         super().__init__()
         self.upsample = upsample
+        self.exact_2x = False  # set by the model when inputs are padded to the stride
         self.conv1 = ConvNormAct(cin + cskip, cout, norm=norm)
         self.conv2 = ConvNormAct(cout, cout, norm=norm)
 
     def forward(self, x: Tensor, skip: Tensor | None, size=None) -> Tensor:
         # Resize to the skip's exact size so odd (ceil-rounded) feature maps stay aligned.
+        exact = self.exact_2x or (skip is None and size is None)  # no skip: 2x by construction
         if size is None:
             size = skip.shape[-2:] if skip is not None else (2 * x.shape[-2], 2 * x.shape[-1])
-        x = upsample2x(x, size, self.upsample)
+        x = upsample2x(x, size, self.upsample, exact)
         if skip is not None:
             x = torch.cat([x, skip], dim=1)
         return self.conv2(self.conv1(x))
@@ -119,6 +130,7 @@ class UNetDecoder(nn.Module):
             )
         by_stride = {s.stride: (i, s) for i, s in enumerate(in_specs)}
         self._deepest_index = by_stride[deepest.stride][0]
+        self._deepest_stride = deepest.stride
         self._skip_index: list[int] = []
         blocks = []
         cin, stride = deepest.channels, deepest.stride
@@ -138,6 +150,16 @@ class UNetDecoder(nn.Module):
             self.cross = _ResBlock(out_ch)
         self.out_spec = FeatureSpec(out_ch, out_stride, "unet")
         init_decoder_(self)
+
+    def _set_input_divisor(self, divisor: int) -> None:
+        """Inputs arrive padded to a multiple of ``divisor``: when that covers the deepest
+        stride, every level is exactly twice the next, and the upsampling needs no gather."""
+        exact = divisor % self._deepest_stride == 0
+        for i, block in enumerate(self.blocks):
+            # the final input_cross stage lands on the (unpadded) image grid: keep the check
+            last_cross = self.wants_input and i == len(self.blocks) - 1 and \
+                self._skip_index[i] < 0
+            block.exact_2x = exact and not last_cross
 
     @staticmethod
     def wants_input_for(kwargs) -> bool:

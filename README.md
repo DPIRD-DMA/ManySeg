@@ -23,7 +23,7 @@ Any number of bands, several inputs at different resolutions, metadata, and many
 
 ## Install
 
-ManySeg is not on PyPI yet. Install it from GitHub (Python ≥ 3.10, PyTorch ≥ 2.9):
+ManySeg is not on PyPI yet. Install it from GitHub (Python ≥ 3.10, PyTorch ≥ 2.10):
 
 ```bash
 pip install "manyseg @ git+https://github.com/DPIRD-DMA/ManySeg#subdirectory=packages/manyseg"
@@ -114,6 +114,15 @@ model = create_model(
 )
 ```
 
+A pixel head is one 3×3 conv, as in SMP. For a wider one, give it hidden layers, e.g.
+`"hidden": [64, 32, 16], "dilation": [8, 16, 32]` for a receptive field that matches large
+objects. Any head can also get its own decoder (`"decoder": "unet"`), or be your own class
+registered with `manyseg.heads.HEADS.register("name")`.
+
+**Training with fastai** (or anything else that wants one tensor): a loss and metrics can
+read the dict (`out["landcover"]`), or `manyseg.utils.concat_heads(model, ["landcover",
+"height"])` returns one concatenated tensor. See [`examples/09_fastai.py`](examples/09_fastai.py).
+
 **Image classification or regression.** Use only image heads: no decoder is built, and the
 model is a classifier that still accepts several inputs, metadata and extra heads.
 
@@ -180,8 +189,15 @@ expects. Fed their own pretraining normalisation, SSL4EO DINO weights beat the I
 baseline on all three Sentinel-2 datasets we tested (ResNet-50, full fine-tuning; E024).
 
 **Objects and counts.** `manyseg.instances` (touching fields, crowns, buildings) and
-`manyseg.points` (trees, animals: centres, counts) provide the heads, training targets and
-post-processing.
+`manyseg.points` (trees, animals: centres, counts) provide the heads, training targets (from
+instance masks, points or YOLO / COCO boxes), losses and post-processing. To count, either
+find peaks in a centre heatmap (`find_peaks`, with optional smoothing and a foreground mask)
+or sum a density map (`density_head`, `density_loss`). Which is better depends on the data.
+With many small trees per tile, the density head halved count error (E011). With a few large
+plants per drone tile, peak counting was far better (count MAE 1.0 against 9–11), because a
+small background bias summed over every pixel adds up; count peaks for a few large objects.
+If you use a density head, `density_head(activation="softplus")` is recommended: on that
+drone data it cut density count error from 10.1 to 2.9. Validate on your data.
 
 **Save and load.** `manyseg.save` stores the weights with the configuration and, as metadata
 for inference code, the input normalisation, output activations and class names; `manyseg.load`
@@ -202,6 +218,15 @@ meta = manyseg.read_metadata("model.safetensors")  # the stored normalize / acti
 The loaded model still takes the raw-scale input you trained on and returns logits: applying
 the stored normalisation and activations is up to the inference code. The default head of a
 `num_classes=` model is named `"logits"`.
+
+Don't save the whole model with `torch.save(model)`: that pickle refers to ManySeg's internal
+module paths, so it breaks when a later version moves or renames a class, and loading it
+needs `torch.load(weights_only=False)`, which can run arbitrary code. A `manyseg.save` file holds
+plain data: the `create_model` arguments, a save-format number and the weights. Files from an
+older format are migrated on load, and a file from a newer ManySeg fails with both versions
+named. A library that keeps its own table of models (architecture names plus weights) should
+store one `manyseg.save` file per model and call `manyseg.load`; take
+`manyseg.load(path).state_dict()` if it needs a state dict.
 
 **Deployment.** Models work with `torch.compile(dynamic=True)`, `torch.export` and ONNX with
 dynamic input sizes (a few encoder families only run at a fixed size or cannot export

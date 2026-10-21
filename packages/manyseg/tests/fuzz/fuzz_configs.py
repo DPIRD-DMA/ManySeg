@@ -146,11 +146,21 @@ def sample_config(rng: random.Random) -> dict:
                 h["scale"] = rng.choice([1, 0.5, 0.25])
             if _maybe(rng, 0.15):
                 h["source"] = "encoder"
+            if _maybe(rng, 0.15):  # hidden conv layers (dilated, normed) before the final conv
+                n = rng.randint(1, 3)
+                h["hidden"] = [rng.choice([4, 8, 16]) for _ in range(n)]
+                if _maybe(rng, 0.6):
+                    h["dilation"] = rng.choice([rng.choice([1, 2, 8]),
+                                                [rng.choice([1, 4, 16, 32]) for _ in range(n)]])
+                if _maybe(rng, 0.4):
+                    h["norm"] = rng.choice([None, "bn", "gn"])
+            if t == "regression" and _maybe(rng, 0.15):
+                h["activation"] = "softplus"
             if _maybe(rng, 0.2):
                 h["decoder"] = rng.choice([rng.choice(DECODERS),
                                            {"type": rng.choice(DECODERS),
                                             "out_stride": rng.choice([1, 2, 4])}])
-        if t == "regression" and _maybe(rng, 0.3):
+        if t == "regression" and "activation" not in h and _maybe(rng, 0.3):
             h["uncertainty"] = True
         heads[name] = h
     rasters = [n for n, c in cfg.get("inputs", {}).items() if c.get("kind") != "vector"]
@@ -294,6 +304,8 @@ def check(cfg: dict, seed: int, export: bool = False) -> str:
     assert {k: tuple(v.shape) for k, v in y.items()} == want, ("train shapes", hw)
     for k, v in y.items():
         assert torch.isfinite(v).all(), f"non-finite train output {k}"
+        if getattr(model.heads[k], "activation", None) is not None:
+            assert v.min() >= 0, f"{model.heads[k].activation} head {k} is negative"
     sum(v.float().square().mean() for v in y.values()).backward()
     unused = []
     for n, p in model.named_parameters():

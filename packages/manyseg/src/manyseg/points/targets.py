@@ -3,7 +3,8 @@
 Coordinates are ``(y, x)`` in pixels, pixel centres at integer positions.
 
 * :func:`gaussian_heatmap`: per image, the max over points of ``exp(-r^2 / 2 sigma^2)`` (peak 1 at
-  a point lying on a pixel centre). ``sigma`` is a float or a per-point tensor.
+  a point lying on a pixel centre). ``sigma`` is a float, a per-point tensor (one image) or a
+  list of per-image per-point tensors (as :func:`points_from_boxes` returns).
 * :func:`heatmap_from_instances`: CenterNet-style: centres are instance centroids **rounded to the
   nearest pixel** (a half-pixel centroid would otherwise give a two-pixel plateau and duplicate
   peaks); ``sigma`` fixed or ``sigma_scale * sqrt(area)``.
@@ -11,6 +12,8 @@ Coordinates are ``(y, x)`` in pixels, pixel centres at integer positions.
   ``(dy, dx)``; zero on background (Panoptic-DeepLab).
 * :func:`density_map`: one Gaussian per point, each normalised to sum to exactly 1 inside the
   image (truncated at borders), so ``density.sum() == number of points``.
+* :func:`points_from_boxes`: box centres (YOLO, ``xyxy`` or COCO ``xywh`` boxes) as ``(y, x)``
+  points, optionally with a per-point sigma from the box size.
 """
 
 from __future__ import annotations
@@ -39,7 +42,25 @@ def _gaussians(pts: Tensor, sigma: Tensor, h: int, w: int) -> Tensor:
 
 def _sigmas(sigma, n: int, device) -> Tensor:
     s = torch.as_tensor(sigma, dtype=torch.float32, device=device)
-    return s.expand(n).clone() if s.dim() == 0 else s
+    if not (s > 0).all():
+        raise ValueError("sigma must be > 0 (a zero-size box gives sigma 0: use "
+                         "points_from_boxes(min_sigma=...))")
+    if s.dim() == 0:
+        return s.expand(n).clone()
+    if s.shape != (n,):
+        raise ValueError(f"sigma has {tuple(s.shape)} values for {n} points; give one float, "
+                         "one value per point, or a list of per-image tensors")
+    return s
+
+
+def _per_image(sigma, n_images: int) -> list:
+    """``sigma`` per image: a list of per-image tensors (e.g. from :func:`points_from_boxes`)
+    is used as is; a float or one per-point tensor applies to every image."""
+    if isinstance(sigma, (list, tuple)) and sigma and all(isinstance(t, Tensor) for t in sigma):
+        if len(sigma) != n_images:
+            raise ValueError(f"{len(sigma)} per-image sigma tensors for {n_images} images")
+        return list(sigma)
+    return [sigma] * n_images
 
 
 @torch.no_grad()
@@ -47,10 +68,10 @@ def gaussian_heatmap(points: Sequence[Tensor], size: tuple[int, int], sigma=2.0)
     """Centre heatmap ``(B, 1, H, W)`` from per-image point lists ``(N_i, 2)``."""
     h, w = size
     out = []
-    for pts in points:
+    for pts, sig in zip(points, _per_image(sigma, len(points))):
         pts = pts.float()
         hm = torch.zeros(h, w, device=pts.device)
-        s = _sigmas(sigma, len(pts), pts.device)
+        s = _sigmas(sig, len(pts), pts.device)
         for i in range(0, len(pts), _CHUNK):
             hm = torch.maximum(hm, _gaussians(pts[i:i + _CHUNK], s[i:i + _CHUNK], h, w).amax(0))
         out.append(hm)
@@ -62,10 +83,10 @@ def density_map(points: Sequence[Tensor], size: tuple[int, int], sigma=3.0) -> T
     """Density ``(B, 1, H, W)`` whose integral equals the number of points (mass preserved)."""
     h, w = size
     out = []
-    for pts in points:
+    for pts, sig in zip(points, _per_image(sigma, len(points))):
         pts = pts.float()
         d = torch.zeros(h, w, device=pts.device)
-        s = _sigmas(sigma, len(pts), pts.device)
+        s = _sigmas(sig, len(pts), pts.device)
         for i in range(0, len(pts), _CHUNK):
             g = _gaussians(pts[i:i + _CHUNK], s[i:i + _CHUNK], h, w)
             d = d + (g / g.sum(dim=(1, 2), keepdim=True).clamp(min=1e-12)).sum(0)
@@ -142,3 +163,54 @@ def offset_targets(instance_mask: Tensor) -> Tensor:
         out[i, 0] = (cen[..., 0] - ys[:, None]) * fg
         out[i, 1] = (cen[..., 1] - xs[None, :]) * fg
     return out
+
+
+BOX_FORMATS = ("yolo", "xyxy", "xywh")
+
+
+def points_from_boxes(boxes: Sequence[Tensor], size: tuple[int, int] | None = None,
+                      fmt: str = "yolo", sigma_from_size: float | None = None,
+                      min_sigma: float = 1.0):
+    """Box centres as point targets: per image ``(N, 2)`` float ``(y, x)``, **y first** (box
+    formats are x first).
+
+    ``boxes``: per image ``(N, 4)``, in ``fmt``:
+
+    * ``"yolo"``: ``(cx, cy, w, h)`` normalised to [0, 1] (drop the class column of a YOLO
+      label file first); needs ``size=(H, W)``;
+    * ``"xyxy"``: ``(x1, y1, x2, y2)`` in pixels;
+    * ``"xywh"``: COCO ``(x, y, w, h)``, top-left corner and size in pixels.
+
+    Box coordinates have pixel edges at integers (a box over pixels 0-9 spans 0 to 10); points
+    have pixel centres at integers, like every target here, so a centre ``c`` becomes
+    ``c - 0.5``. ``sigma_from_size``: also return a per-point sigma ``max(min_sigma, k *
+    sqrt(w * h))`` (pixels; the floor keeps zero-size boxes valid), as ``(points, sigmas)``,
+    ready for :func:`gaussian_heatmap` / :func:`density_map` ``sigma=``. Points are not
+    rounded: round them (``torch.floor(p + 0.5)``) for a heatmap whose peaks must be exactly 1
+    on a pixel.
+    """
+    if fmt not in BOX_FORMATS:
+        raise ValueError(f"fmt must be one of {BOX_FORMATS}, got {fmt!r}")
+    if fmt == "yolo" and size is None:
+        raise ValueError("fmt='yolo' boxes are normalised: give size=(H, W)")
+    pts, sigmas = [], []
+    for b in boxes:
+        b = torch.as_tensor(b, dtype=torch.float32)
+        b = b.reshape(0, 4) if b.numel() == 0 else b
+        if b.dim() != 2 or b.shape[1] != 4:
+            raise ValueError(f"boxes must be (N, 4), got {tuple(b.shape)}"
+                             + (" (drop the YOLO class column)" if b.shape[-1] == 5 else ""))
+        if fmt == "yolo":
+            h, w = size
+            cx, cy, bw, bh = b[:, 0] * w, b[:, 1] * h, b[:, 2] * w, b[:, 3] * h
+        elif fmt == "xyxy":
+            cx, cy = (b[:, 0] + b[:, 2]) / 2, (b[:, 1] + b[:, 3]) / 2
+            bw, bh = b[:, 2] - b[:, 0], b[:, 3] - b[:, 1]
+        else:
+            cx, cy, bw, bh = b[:, 0] + b[:, 2] / 2, b[:, 1] + b[:, 3] / 2, b[:, 2], b[:, 3]
+        if (bw < 0).any() or (bh < 0).any():
+            raise ValueError(f"boxes with negative width or height: are they {fmt!r}?")
+        pts.append(torch.stack([cy - 0.5, cx - 0.5], 1))
+        if sigma_from_size is not None:
+            sigmas.append((sigma_from_size * (bw * bh).sqrt()).clamp(min=min_sigma))
+    return (pts, sigmas) if sigma_from_size is not None else pts

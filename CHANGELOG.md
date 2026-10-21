@@ -6,7 +6,7 @@ API, and every such change is listed here.
 
 ## 0.1.0 (unreleased)
 
-First release. Python 3.10–3.14, PyTorch ≥ 2.9, timm ≥ 1.0.20.
+First release. Python 3.10–3.14, PyTorch ≥ 2.10, timm ≥ 1.0.20.
 
 ### Models (`manyseg.create_model`)
 
@@ -55,12 +55,53 @@ First release. Python 3.10–3.14, PyTorch ≥ 2.9, timm ≥ 1.0.20.
 * Renamed for the config vocabulary: `MetadataEncoder(num_features=)` (was `channels=`) and
   `Weights.in_channels` (was `in_chans`). The unimplemented `"token"` conditioning mode is no
   longer listed in `MODES`.
+* **Pixel-head options** (all opt-in; the default head is still SMP's single conv, same
+  parameters): `hidden` conv → norm → ReLU layers with per-layer `dilation` and `norm`
+  (`"bn"`, `"gn"`, None) before the final conv, and `activation="softplus"` for regression
+  heads, applied after resampling and after a metadata head bias. Custom head
+  classes register with `manyseg.heads.HEADS.register(name)` and are built as `cls(spec,
+  out_channels, **opts)`. `describe()`, save / load, `torch.export` / ONNX, the fuzzer and the
+  web model builder cover them; `manyseg.save` stores `"none"` for a head that applies its own
+  activation and refuses another.
+* **Counting** (`manyseg.points`), from a downstream drone-imagery project:
+  * `density_head(activation="softplus")` keeps the density positive (bias starts at -4).
+    Validated on one downstream drone dataset (792 × 792 tiles, 1–20 plants of ~115 px,
+    σ = 12, 45 val images, one seed): density count MAE 10.1 → 2.9 against the raw head
+    (clamped at 0; 7.5 summed raw). It leaves a floor of about +1.75 objects per image, as
+    softplus never reaches 0; peak counting on a heatmap still scored 1.0 there. The default
+    stays no activation until E011's density arm is rerun with softplus.
+  * A `"relu"` activation was tried and removed: on the same data the head died (the map
+    went to 0, count MAE 3.5, correlation 0.37).
+  * `density_loss`: a pixel loss against the mass-preserving target scaled by `2πσ²`, over
+    an optional valid mask, plus an optional per-image count L1 term.
+  * `count_from_density(value_scale=, mask=)`: it now sums in float32.
+  * `find_peaks(smooth_sigma=, mask=)`: a separable Gaussian blur before NMS, and no peaks
+    outside a mask. The defaults give the same peaks as before.
+  * `points_from_boxes` turns YOLO, `xyxy` or COCO `xywh` boxes into `(y, x)` points, with an
+    optional per-point sigma from the box size (at least `min_sigma`). `gaussian_heatmap` and
+    `density_map` take a list of per-image sigma tensors, and refuse a sigma of 0.
+  * `calibrate_threshold` chooses the peak threshold by count MAE or point F1 (E011b's
+    calibration, previously in `manyseg-bench` only). It keeps peaks scoring above the
+    threshold, as `find_peaks` does, and counts F1 matches with a maximum one-to-one matching.
+    Its docstring warns that small validation sets give unstable thresholds.
+  * The docs now qualify E011. Density counting won on many small objects per tile; on a few
+    large ones per tile, peak counting was far better and stays the recommendation.
+* **Single-tensor output:** `manyseg.utils.concat_heads(model, order)` for pipelines that
+  expect one tensor, with each head's channel slice; `examples/09_fastai.py` trains a
+  dict-output model with fastai (bf16, one-cycle, EMA; `get_preds(reorder=False)` for dict
+  outputs).
 
 ### Deployment
 
 * `manyseg.save` / `manyseg.load` (safetensors plus the stored configuration, normalisation,
   activations and class names). Save format 2; format-1 files (development versions, which
-  said `"channels"` for all three) are migrated on load.
+  said `"channels"` for all three) are migrated on load. Compatibility policy (`manyseg.io`):
+  renamed or reinterpreted config keys, modules or parameters bump the format and get a
+  migration; a committed golden file (`tests/data/golden_format2.safetensors`) must keep
+  loading to the same outputs. A file from a newer ManySeg that this one cannot rebuild
+  fails with both versions named and an upgrade hint, instead of a bare `create_model`
+  error. The README warns against `torch.save(model)` pickles, which depend on internal
+  module paths.
 * `torch.compile(dynamic=True)`, `manyseg.export.export_model` (dynamic size; dynamic batch
   with `dynamic_batch=True`; dynamic date count except for `concat` / `diff` aggregation) and
   ONNX; int8 quantisation (`manyseg.quantize`, extra `quant`); FSDP2
@@ -68,11 +109,25 @@ First release. Python 3.10–3.14, PyTorch ≥ 2.9, timm ≥ 1.0.20.
 * `model.describe()` shows what was built; `model.describe(sample)` adds shapes and FLOPs.
 * `export_model` and `quantize_pt2e` export in eval mode and then restore every submodule's
   train / eval flag; `dynamic_batch=True` needs an example with batch size ≥ 2.
-* Decoders upsample to their skip connections with an exact integer nearest rule
-  (`manyseg.utils.spatial.resize_nearest`) because `torch.compile(dynamic=True)` on CUDA
-  miscomputes `F.interpolate(mode="nearest")` (draft upstream report in `docs/upstream/`).
-  With stride padding (the default) this is bit-identical to `F.interpolate`; without it, a
-  few rows can differ from PyTorch's float32 rounding.
+* Decoders upsample to their skip connections with the exact integer nearest rule, because
+  `torch.compile(dynamic=True)` on CUDA miscomputes `F.interpolate(mode="nearest", size=...)`
+  (draft upstream report in `docs/upstream/`). With stride padding (the default) this is
+  bit-identical to `F.interpolate`; without it, a few rows can differ from PyTorch's float32
+  rounding.
+* **Training speed (E025).** That rule was implemented as an integer-index gather, whose
+  backward is an atomic scatter-add: a U-Net training step was 2–5% slower than SMP's eager
+  and 83–98% slower compiled (bf16, batch 40, 509², `edgenext_small` / `convnextv2_femto`).
+  The U-Net, U-Net++, FPN and fastai U-Net now use `F.interpolate(scale_factor=2)` (which
+  compiles correctly) or a plain crop wherever the sizes give the same values: in eager mode
+  whenever a level is 2n or 2n − 1 of the next, compiled or exported when the model pads
+  inputs to the stride (a static flag, no traced size check). The gather remains for other
+  sizes. Outputs are the same (gradients up to summation order), and channels-last encoder
+  features now stay channels-last through the decoder; the upsampled maps keep the input
+  dtype under autocast (which runs upsampling in float32), so bf16 decoders use no extra
+  memory. U-Net steps are now at parity with SMP compiled and 18–25% faster eager (SMP's two
+  finest decoder blocks run in NCHW), with no more memory; FPN and the fastai U-Net are 14% and
+  6% faster compiled. Whether a step is exactly 2x is decided per pair of levels, so sparse
+  `out_indices` (e.g. strides 4, 16, 32) keep the gather where levels are 4x apart. A crop to an unchanged size no longer copies.
 
 ### Testing
 

@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
 
 from ..features import FeatureSpec
 from ..layers import ConvNormAct, init_decoder_
-from ..utils.spatial import resize_nearest
+from ..utils.spatial import is_2x, resize_nearest, upsample2x_nearest
 from .base import DECODERS, check_out_stride, pyramid_levels
 
 
@@ -50,14 +51,27 @@ class FPNDecoder(nn.Module):
         )
         self.dropout = nn.Dropout2d(dropout)
         self.out_spec = FeatureSpec(segmentation_channels, specs[0].stride, "fpn")
+        self._deepest_stride = specs[-1].stride
+        # per top-down step: adjacent levels exactly 2x apart (sparse out_indices may skip one)
+        self._step_2x = [b.stride == 2 * a.stride for a, b in zip(specs, specs[1:])]
+        self._exact_2x = [False] * len(self._step_2x)  # set by the model (padded inputs)
         init_decoder_(self)
+
+    def _set_input_divisor(self, divisor: int) -> None:
+        padded = divisor % self._deepest_stride == 0
+        self._exact_2x = [padded and two for two in self._step_2x]
 
     def forward(self, features: list[Tensor]) -> Tensor:
         cs = [features[i] for i in self.levels]
         p = [None] * len(cs)
         p[-1] = self.lateral[-1](cs[-1])
         for i in range(len(cs) - 2, -1, -1):
-            up = resize_nearest(p[i + 1], cs[i].shape[-2:])
+            up, size = p[i + 1], cs[i].shape[-2:]
+            if self._exact_2x[i] or (not torch.compiler.is_compiling() and is_2x(
+                    up.shape[-2], size[0]) and is_2x(up.shape[-1], size[1])):
+                up = upsample2x_nearest(up, size)  # same values, fast backward (E025)
+            else:
+                up = resize_nearest(up, size)
             p[i] = self.lateral[i](cs[i]) + up
         sizes = [c.shape[-2:] for c in cs]
         out = self.seg[0](p[0], [])

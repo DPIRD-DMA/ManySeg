@@ -207,8 +207,10 @@ def create_model(
             ``"classification"``: image scope, ``"regression"``: either), ``out_channels``
             (required), ``scope`` (``"pixel"`` / ``"image"``), ``source``, ``scale``,
             ``uncertainty``, ``decoder`` (a per-head decoder), ``input`` and ``share``
-            (per-input heads), and head options (``kernel_size``, ``bias_init``,
-            ``dropout``, ``init_std``).
+            (per-input heads), and head options (pixel: ``kernel_size``, ``bias_init``,
+            ``hidden``, ``dilation``, ``norm``, ``activation``; image: ``dropout``,
+            ``init_std``; see :class:`manyseg.heads.PixelHead`). A ``type`` registered with
+            ``manyseg.heads.HEADS.register`` builds a custom head class.
         pad_to_stride: Pad inputs to the encoder stride and crop outputs back (default);
             ``False`` resizes outputs to the input size instead.
     """

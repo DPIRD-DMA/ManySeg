@@ -7,6 +7,17 @@ names and band names. ``load(path)`` rebuilds the model (without downloading pre
 and loads the weights; its :meth:`~manyseg.DenseModel.tiling_spec` then reports the stored
 normalisation and activations, so ManyPred uses them without being told.
 
+Compatibility policy. The file stores a save ``format`` number and the ``manyseg_version`` that
+wrote it, and holds only plain data (no pickled classes), so it survives refactors that move or
+rename modules. A change that renames or reinterprets ``create_model`` arguments, modules or
+parameters bumps ``FORMAT`` and adds a migration that :func:`read_metadata` applies to older
+files (format 1 -> 2 renamed ``channels``); the committed golden file in
+``tests/data`` checks that today's files keep loading to the same outputs. A file with a newer
+format fails with an upgrade message. A newer ManySeg may also add options within a format (a
+new head option, say): an older ManySeg then cannot build the model, and :func:`load` names
+both versions. ``torch.save(model)`` pickles are not covered: they depend on internal module
+paths.
+
 Normalisation is stored as a ManyPred normalisation spec (plain data): a list of steps such as
 ``[{"type": "scale", "value": 10000}, {"type": "zscore", "mean": [...], "std": [...]}]``, or
 ``{input_name: steps}`` for several inputs.
@@ -86,7 +97,8 @@ def save(model: DenseModel, path: str | Path, *, normalize: Any = None,
             becomes a prediction (softmax for one class per pixel or image, sigmoid for
             multi-label, none for raw values). Required for every segmentation and
             classification head, as the head type can't tell softmax from sigmoid; regression
-            heads default to "none".
+            heads default to "none", as do heads with a built-in output ``activation``
+            (``"softplus"`` density heads: the model's output already is the prediction).
         classes: Class names, per head (``{head: [...]}``) or for a single head.
         bands: Band names, per input (``{input: [...]}``) or for a single input.
         extra: Any other JSON-compatible metadata, stored as is.
@@ -111,6 +123,9 @@ def save(model: DenseModel, path: str | Path, *, normalize: Any = None,
         if act not in ACTIVATIONS:
             raise ValueError(f"Head {name!r}: activation must be one of {ACTIVATIONS}, got "
                              f"{act!r}.")
+        if act != "none" and getattr(model.heads[name], "activation", None) is not None:
+            raise ValueError(f"Head {name!r} applies {model.heads[name].activation} itself; its "
+                             f"output is the prediction, so its activation is 'none'.")
         acts[name] = act
     missing = [n for n in heads if n not in acts]
     if missing:
@@ -263,6 +278,33 @@ def _no_download(config: dict) -> dict:
     return config
 
 
+def _is_newer(saved, current: str) -> bool:
+    """PEP 440 ordering (``0.1.0.dev0 < 0.1.0rc1 < 0.1.0``); False when unknown."""
+    try:
+        from packaging.version import InvalidVersion, Version
+    except ImportError:  # packaging comes with timm's huggingface_hub; be safe anyway
+        return False
+    try:
+        return Version(str(saved)) > Version(current)
+    except InvalidVersion:
+        return False
+
+
+def _version_error(path, meta: dict, err: Exception) -> Exception:
+    """The error for a file this ManySeg cannot rebuild, naming the versions involved. The
+    model was built once when it was saved, so a failure here is either a newer ManySeg's
+    option or a missing migration."""
+    saved = meta.get("manyseg_version", "unknown")
+    if _is_newer(saved, __version__):
+        return ValueError(f"{path} was saved by ManySeg {saved}; this is {__version__}, which "
+                          f"cannot rebuild it ({err}). It may use options added since: upgrade "
+                          f"ManySeg to {saved} or later.")
+    return ValueError(f"{path} (saved by ManySeg {saved}, format {meta.get('format')}) cannot be "
+                      f"rebuilt by this ManySeg ({__version__}): {err}. If it was saved by an "
+                      f"older ManySeg, this is a missing migration (a ManySeg bug): please "
+                      f"report it.")
+
+
 def load(path: str | Path, map_location: str | torch.device = "cpu") -> DenseModel:
     """Rebuild and load a model saved with :func:`save`, in eval mode, on ``map_location`` and
     in the dtype it was saved in. Its metadata is on ``model.saved_metadata`` and its
@@ -272,7 +314,10 @@ def load(path: str | Path, map_location: str | torch.device = "cpu") -> DenseMod
     from .models import create_model
 
     meta = read_metadata(path)
-    model = create_model(**_no_download(meta["create_model"]))
+    try:
+        model = create_model(**_no_download(meta["create_model"]))
+    except (TypeError, ValueError) as e:
+        raise _version_error(path, meta, e) from e
     if meta.get("single_output") is not None and model.single_output is None:
         model.select_heads([meta["single_output"]])
         model.single_output = meta["single_output"]
@@ -286,6 +331,9 @@ def load(path: str | Path, map_location: str | torch.device = "cpu") -> DenseMod
         aliases = json.loads((f.metadata() or {}).get(_ALIASES, "{}"))
     state = load_file(str(path), device="cpu")
     state.update({alias: state[name] for alias, name in aliases.items()})
-    model.load_state_dict(state, strict=True)
+    try:
+        model.load_state_dict(state, strict=True)
+    except RuntimeError as e:
+        raise _version_error(path, meta, e) from e
     model.saved_metadata = meta
     return model.to(device=map_location).eval()

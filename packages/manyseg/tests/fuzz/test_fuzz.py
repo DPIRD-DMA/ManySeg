@@ -13,8 +13,9 @@ from fuzz_configs import Rejected, check, sample_config
 # Seeds 0-19 that are invalid configurations (each reason checked by hand): pinned so that a
 # change refusing valid configurations (or accepting invalid ones) fails here instead of
 # quietly counting as a pass. Changing the generator reshuffles the seeds: re-pin, re-check.
-REJECTED = {0: "out_indices", 2: "input image", 5: "time series", 8: "time series",
-            10: "time series", 15: "input image", 16: "early fusion", 18: "intermediate fusion"}
+REJECTED = {0: "out_indices", 2: "input image", 3: "out_stride=2", 5: "time series",
+            6: "out_stride=2", 8: "time series", 10: "time series", 16: "early fusion",
+            17: "cannot also have its own decoder", 18: "no image-scope heads"}
 
 
 def _run(seed: int, export: bool = False) -> str:
