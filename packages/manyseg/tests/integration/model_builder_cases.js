@@ -96,6 +96,28 @@ for (const agg of ["mean", "max", "attention", "concat", "diff"]) {
 { const st = state(ex("semantic")); st.heads[2].share = ""; ok("semantic-no-share", small(st)); }
 { const st = state(ex("semantic")); st.heads = st.heads.filter((h) => h.name === "lc1"); ok("one-per-input-head-returns-dict", small(st)); }
 
+// pixel-head options: hidden layers (dilation, norm), output activations, bias init
+{ const st = state(ex("multitask")); Object.assign(st.heads[0], { hidden: "16, 8", dilation: "2" });
+  Object.assign(st.heads[1], { hidden: "8 4 8", dilation: "1, 4, 8", norm: "none" }); ok("head-hidden", small(st)); }
+{ const st = state(ex("multitask")); Object.assign(st.heads[0], { hidden: "12", norm: "gn", scale: 0.5, bias_init: -2 }); ok("head-hidden-gn-scale", small(st)); }
+{ const st = state(ex("segmentation")); st.heads[0].hidden = "8"; ok("head-hidden-single-returns-dict", small(st)); }
+{ const st = state(ex("trees")); st.heads[2].activation = "softplus"; st.heads[2].bias_init = -4; ok("head-softplus", small(st)); }
+{ const st = state({ ...ex("segmentation"), heads: [...ex("segmentation").heads, ...C.HEAD_GROUPS.density_softplus] }); ok("group-density-softplus", small(st)); }
+{ const st = metaBase(); st.meta.mode = "head"; st.heads.push(C.normHead({ name: "d", type: "regression", activation: "softplus", hidden: [8] })); ok("meta-head-softplus", small(st)); }
+{ const st = state({ ...ex("fusion"), fusion: { type: "late", op: "concat" } }); st.heads[0].hidden = "8, 8"; st.heads[0].dilation = "2, 3"; ok("late-head-hidden", small(st)); }
+{ const st = state(ex("semantic")); for (const h of st.heads.slice(1)) Object.assign(h, { hidden: "16", norm: "gn" }); ok("semantic-share-hidden", small(st)); }
+{ const st = state(ex("semantic")); st.heads[1].hidden = "16"; bad("err-share-hidden-differs", small(st)); }
+{ const st = state(ex("multitask")); st.heads[0].hidden = "8, 0"; bad("err-hidden-zero", small(st)); }
+{ const st = state(ex("multitask")); st.heads[0].hidden = "8, x"; bad("err-hidden-text", small(st)); }
+{ const st = state(ex("multitask")); st.heads[0].hidden = "8, 8"; st.heads[0].dilation = "2, 2, 2"; bad("err-dilation-count", small(st)); }
+{ const st = state(ex("multitask")); st.heads[0].hidden = "8"; st.heads[0].dilation = "0"; bad("err-dilation-zero", small(st)); }
+{ const st = state(ex("multitask")); st.heads[1].activation = "softplus"; bad("err-softplus-uncertainty", small(st)); }
+{ const st = state(ex("multitask")); st.heads[0].activation = "softplus"; bad("err-activation-segmentation", small(st)); }
+{ const st = state(ex("trees")); st.heads[2].activation = "relu"; bad("err-relu-removed", small(st)); }
+{ const st = state(ex("fusion")); st.heads[1].hidden = "8"; bad("err-image-head-hidden", small(st)); }
+{ const st = state(ex("fusion")); st.heads[1].activation = "softplus"; bad("err-image-head-activation", small(st)); }
+{ const st = state(ex("fusion")); st.heads[1].bias_init = 1; bad("err-image-head-bias", small(st)); }
+
 // configurations the page must refuse (and ManySeg must reject too)
 // levels: only levels a decoder reads are fused (DeepLabV3+ reads /4 and /32)
 { const st = state({ ...ex("fusion"), decoder: { type: "deeplabv3plus" } }); ok("fusion-deeplab-reads-4-32", small(st)); }

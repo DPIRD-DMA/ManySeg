@@ -183,6 +183,8 @@ const HEAD_GROUPS = {
     { name: "offset", type: "regression", channels: 2 },
   ],
   density: [{ name: "density", type: "regression", channels: 1 }],
+  // manyseg.points.density_head(activation="softplus"): >= 0, bias starting near 0
+  density_softplus: [{ name: "density", type: "regression", channels: 1, activation: "softplus", bias_init: -4 }],
 };
 
 function normInput(i, idx) {
@@ -223,6 +225,9 @@ function inputPixels(st, r, H) {
   return Math.max(1, Math.round(H * st.inputs[0].gsd / r.gsd));
 }
 
+// "64, 32" for a list field typed in a text box (arrays and numbers from examples or old states)
+const listText = (v) => Array.isArray(v) ? v.join(", ") : v == null ? "" : String(v);
+
 function normHead(h) {
   return {
     name: h.name, type: h.type ?? "segmentation", channels: h.channels ?? 1,
@@ -230,7 +235,55 @@ function normHead(h) {
     decoder: h.decoder ?? "",
     input: h.input ?? "",                // per-input head: read this raster input's own features
     share: h.share ?? "",                // reuse another per-input head's decoder and head
+    // PixelHead options, all off by default (the single 3x3 conv)
+    hidden: listText(h.hidden),          // widths of conv -> norm -> ReLU layers, "" = none
+    dilation: listText(h.dilation),      // one value or one per hidden layer, "" = 1
+    norm: h.norm === undefined ? "bn" : (h.norm ?? "none"),   // of the hidden layers: bn, gn, none
+    activation: h.activation ?? "",      // "softplus" (regression): output > 0
+    bias_init: h.bias_init ?? 0,         // the final conv's bias
   };
+}
+
+// "64, 32" -> [64, 32] (ok: all positive); "" -> []. Text that is not whole numbers stays text,
+// so the generated code fails in create_model as the page's error says it would.
+function parseList(text) {
+  const parts = String(text).split(/[\s,]+/).filter((x) => x);
+  if (!parts.every((x) => /^-?\d+$/.test(x))) return { vals: String(text).trim(), ok: false };
+  const vals = parts.map(Number);
+  return { vals, ok: vals.every((v) => v > 0) };
+}
+
+// a head's PixelHead options as create_model takes them (only the ones set), and the errors
+// create_head would raise for them (manyseg.heads.heads), as text after "head 'name': "
+function headOptions(head) {
+  const h = normHead(head);   // defaults for states built without normHead
+  const opts = {}, errors = [];
+  const hidden = parseList(h.hidden);
+  if (hidden.vals.length) {
+    opts.hidden = hidden.vals;
+    if (!hidden.ok) errors.push("hidden layer widths must be positive whole numbers, e.g. 64, 32 (leave it empty for the single-conv head).");
+    // dilation and norm configure the hidden layers, so they exist only with them
+    const dil = parseList(h.dilation);
+    if (dil.vals.length === 1 && dil.ok) { if (dil.vals[0] !== 1) opts.dilation = dil.vals[0]; }
+    else if (dil.vals.length) {
+      opts.dilation = dil.vals;
+      if (!dil.ok || (hidden.ok && dil.vals.length !== hidden.vals.length))
+        errors.push(`dilation must be one positive whole number or one per hidden layer${hidden.ok ? ` (${hidden.vals.length})` : ""}.`);
+    }
+    if (h.norm !== "bn") opts.norm = h.norm === "none" ? null : h.norm;
+  }
+  if (h.activation) opts.activation = h.activation;
+  if (h.bias_init) opts.bias_init = h.bias_init;
+  if (!["bn", "gn", "none"].includes(h.norm)) errors.push(`norm must be bn, gn or none, not '${h.norm}'.`);
+  if (!["", "softplus"].includes(h.activation)) errors.push(`the output activation must be softplus or none, not '${h.activation}'${h.activation === "relu" ? " (relu was removed: a relu density head died on the drone data)" : ""}.`);
+  const set = Object.keys(opts);
+  if (h.scope !== "pixel" && set.length)
+    errors.push(`${set.map((k) => k === "hidden" ? "hidden layers" : k.replace("_", " ")).join(", ")} ${set.length > 1 ? "apply" : "applies"} to pixel heads only.`);
+  else if (h.activation && h.type !== "regression")
+    errors.push("an output activation is only for regression heads; segmentation heads return logits for the loss.");
+  else if (h.activation && h.uncertainty)
+    errors.push(`${h.activation} with uncertainty would also apply to the log-variance; use one or the other.`);
+  return { opts, errors, hidden: hidden.ok ? hidden.vals : [] };
 }
 
 function makeState(partial) {
@@ -334,8 +387,8 @@ function derive(s) {
     const o = s.heads.find((x) => x.name === h.share);
     const err = (t) => issues.push({ level: "error", text: `head '${h.name}': ${t}` });
     if (!h.input || !o || !o.input || o.share) { err(`'share' links two per-input heads, and '${h.share}' must be one that does not share itself.`); continue; }
-    const cfg = (x) => [x.type, x.channels, x.scope, x.scale, x.uncertainty].join();
-    if (cfg(h) !== cfg(o)) { err(`'share' needs the same type, channels, scale and uncertainty as '${o.name}'.`); continue; }
+    const cfg = (x) => JSON.stringify([x.type, x.channels, x.scope, x.scale, x.uncertainty, headOptions(x).opts]);
+    if (cfg(h) !== cfg(o)) { err(`'share' needs the same head config (type, channels, scale, uncertainty and head layers) as '${o.name}'.`); continue; }
     const a = encOf(h.input), b = encOf(o.input);
     if (a && b && (a.info.strides.join() !== b.info.strides.join() || a.info.channels.join() !== b.info.channels.join())) { err(`'share' needs inputs with the same encoder levels ('${h.input}' and '${o.input}' differ).`); continue; }
     if (task[o.name]) task[h.name] = { ...task[o.name], input: h.input, sharesWith: o.name };
@@ -425,6 +478,7 @@ function derive(s) {
   for (const h of s.heads)  // the type follows the scope (regression is either)
     if ((h.type === "segmentation" && h.scope === "image") || (h.type === "classification" && h.scope === "pixel"))
       issues.push({ level: "error", text: `head '${h.name}': ${h.type} heads are per ${h.type === "segmentation" ? "pixel" : "image"}. Change Per, or use ${h.type === "segmentation" ? "classification" : "segmentation"} (or regression).` });
+  for (const h of s.heads) for (const t of headOptions(h).errors) issues.push({ level: "error", text: `head '${h.name}': ${t}` });
   for (const r of rasters) if (!(r.gsd > 0)) issues.push({ level: "error", text: `input '${r.name}' needs a relative pixel size above 0.` });
   {
     const [H0, W0] = s.size;
@@ -494,6 +548,10 @@ function derive(s) {
   if (s.meta) issues.push({ level: "tip", text: "Metadata showed no benefit on three datasets (E009, E013, E016). Compare against the same model without it, on splits that hold out whole regions or events." });
   if (needsShared && d.input_cross) issues.push({ level: "tip", text: "input_cross helped water mapping (E012) but not pets or clouds. It suits targets decided by a pixel's own spectrum." });
   if (!pixelHeads.length && imageHeads.length) issues.push({ level: "tip", text: "No pixel heads, so no decoder is built: this is a classifier. With pixel labels, an auxiliary segmentation head raised mAP by 2.3 in E020; drop it before deployment with model.select_heads([...])." });
+  if (s.heads.some((h) => h.activation && h.type === "regression"))
+    issues.push({ level: "tip", text: "Softplus keeps a head's output above 0. On a downstream drone dataset it cut density count MAE from 10.1 (raw head) to 2.9, leaving a floor of about +1.75 objects per image since softplus never reaches 0. For a few large objects per image, peak counting on a heatmap was still better (MAE 1.0). The output already is the prediction, so manyseg.save records the activation as 'none'." });
+  if (s.heads.some((h) => h.scope === "pixel" && headOptions(h).hidden.length))
+    issues.push({ level: "tip", text: "Hidden head layers are opt-in and untested in our experiments: the default single conv is SMP's head. Compare against it. They run on the head's grid, so a head scale below 1 makes them cheaper." });
   if (s.heads.some((h) => h.uncertainty)) issues.push({ level: "tip", text: "Uncertainty heads return [mean, log_variance] (2x channels), for a Gaussian NLL loss." });
   if (series.length) issues.push({ level: "tip", text: "Stacking all dates as channels of one input is a strong, cheaper baseline: it beat the time-series input on PASTIS crop types, while the time-series input with attention won on AI4Boundaries (E021). Try both." });
   if (multi && ftype !== "early" && ["diff", "concat_diff"].includes(s.fusion.op)) issues.push({ level: "tip", text: "Neither difference op won on both change datasets in E022: diff was best on Sentinel-2 (OSCD) and worst of the Siamese ops on 0.5 m imagery (LEVIR-CD). Try both." });
@@ -556,7 +614,14 @@ function estimate(s, D) {
     if (h.scope === "image") parts.heads += deep * c + c;
     else {
       const src = (h.decoder || h.input) ? D.task[h.name] : D.shared;
-      if (src && !src.error && !src.sharesWith) parts.heads += src.channels * c * 9 + c;
+      if (src && !src.error && !src.sharesWith) {
+        // hidden 3x3 convs (no bias when normed; BatchNorm and GroupNorm have 2 per channel),
+        // then the final conv reads the last hidden width
+        const { hidden } = headOptions(h);
+        let cin = src.channels;
+        for (const w of hidden) { parts.heads += cin * w * 9 + (h.norm === "none" ? w : 2 * w); cin = w; }
+        parts.heads += cin * c * 9 + c;
+      }
     }
   }
   if (s.meta && s.meta.fields.length) {
@@ -601,7 +666,7 @@ function sampleSize(s, D) {
 function isSingleOutput(s) {
   const h = s.heads[0];
   return s.heads.length === 1 && h.type === "segmentation" && h.scope === "pixel" && h.scale === 1 &&
-    !h.decoder && !h.input && !h.uncertainty;
+    !h.decoder && !h.input && !h.uncertainty && !Object.keys(headOptions(h).opts).length;
 }
 
 function outputShapes(s, D) {
@@ -746,6 +811,7 @@ function generateCode(s, D) {
       if (h.scope === "pixel" && h.decoder && !h.share) c.decoder = h.decoder;
       if (h.input) c.input = h.input;
       if (h.input && h.share) c.share = h.share;
+      Object.assign(c, headOptions(h).opts);
       heads[h.name] = c;
     }
     args.push(`heads=${pyBlock(heads, 4)}`);
@@ -785,7 +851,8 @@ function generateCode(s, D) {
   else for (const o of shapes) lines.push(`# out[${py(o.name)}]: (${o.shape.join(", ")})`);
   lines.push("print(model.describe(x))  # what was built, with shapes and FLOPs");
   // after training: manyseg.save stores the weights plus what inference needs; activations are
-  // required for segmentation and classification heads (softmax, or sigmoid for one channel)
+  // required for segmentation and classification heads (softmax, or sigmoid for one channel).
+  // Regression heads default to "none", which is also the only choice for a softplus head.
   const acts = {};
   for (const h of s.heads) if (h.type !== "regression") acts[single ? "logits" : h.name] = h.channels === 1 ? "sigmoid" : "softmax";
   const rs = s.inputs.filter((r) => !r.backbone.startsWith("shared:") && !(D.ftype === "early" && r !== s.inputs[0]));
@@ -804,5 +871,5 @@ function generateCode(s, D) {
 }
 
 if (typeof module !== "undefined") {
-  module.exports = { EXAMPLES, HEAD_GROUPS, makeState, syncRes, resLabel, derive, estimate, generateCode, outputShapes, fmtParams, weightTags, isSingleOutput };
+  module.exports = { EXAMPLES, HEAD_GROUPS, makeState, syncRes, resLabel, derive, estimate, generateCode, outputShapes, fmtParams, weightTags, isSingleOutput, normHead, headOptions };
 }

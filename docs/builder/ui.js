@@ -187,13 +187,15 @@ function renderForm() {
         const share = `<label class="f">${lab("Shares weights with", "f.share")}<select id="hd-${i}-sh" data-path="heads.${i}.share">${opt("", "nothing", hd.share)}${others.map((o) => opt(o.name, o.name, hd.share)).join("")}</select></label>`;
         return `<div class="row">${reads}${share}</div>`;
       })()}
+      ${pix ? headLayers(hd, i) : ""}
     </div>`;
   });
   h += `<div class="btns"><button class="btn" type="button" data-act="add-head">+ Head</button>
     <span class="hint" style="margin-left:6px">Add a set:</span>
     <button class="btn" type="button" data-act="group" data-g="instances">instances</button>
     <button class="btn" type="button" data-act="group" data-g="points">points</button>
-    <button class="btn" type="button" data-act="group" data-g="density">density</button></div></section>`;
+    <button class="btn" type="button" data-act="group" data-g="density">density</button>
+    <button class="btn" type="button" data-act="group" data-g="density_softplus" data-tipk="g.densp">density, softplus</button></div></section>`;
 
   // options
   h += `<section class="sec"><h2>Options${info("sec.options", "options")}</h2>
@@ -211,6 +213,35 @@ function renderForm() {
   const focused = document.activeElement && document.activeElement.id;
   $("form").innerHTML = h;
   if (focused && $(focused)) $(focused).focus();
+}
+
+// PixelHead options (hidden layers, output activation, bias), folded away until used.
+// headOpen: index -> open, once the user toggles it; otherwise open when an option is set.
+const headOpen = new Map();
+function headLayers(hd, i) {
+  const { opts, hidden } = headOptions(hd);
+  const set = Object.keys(opts).length || hd.hidden.trim();
+  const open = headOpen.has(i) ? headOpen.get(i) : !!set;
+  const bits = [];
+  if (hidden.length) bits.push(`hidden ${hidden.join(", ")}`);
+  if ("dilation" in opts) bits.push(`dilation ${listText(opts.dilation)}`);
+  if ("norm" in opts) bits.push(opts.norm ? `${opts.norm} norm` : "no norm");
+  if (opts.activation) bits.push(opts.activation);
+  if (opts.bias_init) bits.push(`bias ${opts.bias_init}`);
+  const off = hidden.length ? "" : " disabled";
+  return `<details class="more" data-hd="${i}"${open ? " open" : ""}>
+      <summary>${lab("Head layers", "f.hlayers")}<span class="hint">${esc(bits.length ? bits.join(" \u00b7 ") : "single 3\u00d73 conv")}</span></summary>
+      <div class="row" style="--cols:3">
+        <label class="f">${lab("Hidden widths", "f.hidden")}<input type="text" class="mono" id="hd-${i}-hid" data-path="heads.${i}.hidden" placeholder="none, e.g. 64, 32" value="${esc(hd.hidden)}"></label>
+        <label class="f">${lab("Dilation", "f.dil")}<input type="text" class="mono" id="hd-${i}-dil" data-path="heads.${i}.dilation" placeholder="1" value="${esc(hd.dilation)}"${off}></label>
+        <label class="f">${lab("Norm", "f.hnorm")}<select id="hd-${i}-norm" data-path="heads.${i}.norm"${off}>${opt("bn", "BatchNorm", hd.norm)}${opt("gn", "GroupNorm", hd.norm)}${opt("none", "none", hd.norm)}</select></label>
+      </div>
+      <div class="row" style="--cols:3; margin-top:8px">
+        ${hd.type === "regression" ? `<label class="f">${lab("Output", "f.hact")}<select id="hd-${i}-act" data-path="heads.${i}.activation">${opt("", "raw values", hd.activation)}${opt("softplus", "softplus (> 0)", hd.activation)}</select></label>` : "<span></span>"}
+        <label class="f">${lab("Bias init", "f.hbias")}<input type="number" step="any" class="nospin" id="hd-${i}-bias" data-path="heads.${i}.bias_init" data-type="float" value="${hd.bias_init}"></label>
+        <span></span>
+      </div>
+    </details>`;
 }
 
 function matchingPresetName(s, D) {
@@ -266,8 +297,9 @@ function setPath(path, raw, type) {
   if (path === "fusion.type" && v === "early") state.inputs.forEach((r, i) => {
     r.alignment = "same_grid"; if (i > 0) r.backbone = state.inputs[0].backbone; });
   if (/^inputs\.0\.backbone$/.test(path) && state.fusion.type === "early") state.inputs.forEach((r) => { r.backbone = v; });
-  if (/heads\.\d+\.type$/.test(path) && v !== "regression") obj.uncertainty = false;
-  if (/heads\.\d+\.scope$/.test(path) && v === "image") { obj.scale = 1; obj.decoder = ""; obj.input = ""; obj.share = ""; }
+  if (/heads\.\d+\.type$/.test(path) && v !== "regression") { obj.uncertainty = false; obj.activation = ""; }
+  // image heads have no head layers (create_head refuses them)
+  if (/heads\.\d+\.scope$/.test(path) && v === "image") { obj.scale = 1; obj.decoder = ""; obj.input = ""; obj.share = ""; obj.hidden = ""; obj.activation = ""; obj.bias_init = 0; }
   if (/heads\.\d+\.input$/.test(path) && !v) obj.share = "";
   if (/heads\.\d+\.share$/.test(path) && v) obj.decoder = "";
   if (/inputs\.\d+\.temporal$/.test(path) && v === "diff") obj.dates = 2;
@@ -310,6 +342,7 @@ function act(a, el) {
     s.heads.push(normHead({ name: uniqueName("output", taken), type: "segmentation", channels: 2 }));
   }
   if (a === "rm-head") {
+    headOpen.clear();   // indices shift
     const gone = s.heads.splice(+el.dataset.i, 1)[0];
     s.heads.forEach((h) => { if (h.share === gone.name) h.share = ""; });
   }
@@ -353,12 +386,17 @@ document.addEventListener("change", (e) => {
     changed(true);
   } else changed(true);   // number/text commit: re-render dependent controls
 });
+document.addEventListener("toggle", (e) => {   // does not bubble, so capture
+  const d = e.target;
+  if (d.dataset && d.dataset.hd !== undefined) headOpen.set(+d.dataset.hd, d.open);
+}, true);
 document.addEventListener("click", (e) => {
   const b = e.target.closest("button");
   if (!b) return;
   if (b.dataset.ex) {
     state = makeState(EXAMPLES[b.dataset.ex].state);
     activeExample = b.dataset.ex;
+    headOpen.clear();
     renderForm(); renderExamples(); renderPreview(); save();
   } else if (b.dataset.set) {
     setPath(b.dataset.set, JSON.parse(b.dataset.val));
@@ -757,7 +795,8 @@ function drawDiagram(s, D) {
     const gy = gys[i];
     P.push(headGlyph(h, hx, gy, h.type === "regression" ? "var(--in4)" : "var(--in1)"));
     P.push(`<text class="nm" x="${hx + 50}" y="${gy + 12}">${esc(h.name)}</text>`);
-    const desc = `${h.type} \u00b7 ${h.channels} ${h.type === "regression" ? "val" : "cls"}${h.uncertainty ? " \u00b1\u03c3" : ""} \u00b7 ${h.scope}${h.scale !== 1 ? ` \u00b7 \u00d7${h.scale}` : ""}`;
+    const nh = h.scope === "pixel" ? headOptions(h).hidden.length : 0;
+    const desc = `${h.type} \u00b7 ${h.channels} ${h.type === "regression" ? "val" : "cls"}${h.uncertainty ? " \u00b1\u03c3" : ""}${h.activation ? " \u2265 0" : ""} \u00b7 ${h.scope}${h.scale !== 1 ? ` \u00b7 \u00d7${h.scale}` : ""}${nh ? ` \u00b7 +${nh} conv` : ""}`;
     P.push(`<text class="sub" x="${hx + 50}" y="${gy + 26}">${esc(desc)}</text>`);
     P.push(`<text class="shape" x="${hx + 50}" y="${gy + 40}">(${shapes[i].shape.join(", ")})</text>`);
     if (srcs[i]) E.push(curve(srcs[i].x, srcs[i].y, hx - 4, gy + 20, "edge", ` marker-end="url(#arr)"`));

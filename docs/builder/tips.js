@@ -47,6 +47,13 @@ const TIPS = {
   "f.scope": "<b>pixel</b>: one prediction per pixel, read from the decoder.<br><b>image</b>: one prediction per image, from a global average pool of the deepest encoder feature.",
   "f.scale": "Output resolution of this pixel head relative to the input. \u00bd gives an output half the height and width. With a decoder output stride to match, nothing runs at full resolution.",
   "f.hdec": "<b>shared</b>: read the model's decoder.<br><b>own \u2026</b>: give this head a decoder of its own. Separate decoders for extent, boundary and distance heads improved field delineation in our tests.",
+  "f.hlayers": "Options of the pixel head, all off by default: the default head is one 3\u00d73 conv, as in segmentation_models_pytorch. Image heads have none of these. A custom head class can be registered with <code>manyseg.heads.HEADS.register(name)</code> (not available here).",
+  "f.hidden": "Widths of 3\u00d73 conv \u2192 norm \u2192 ReLU layers before the final conv, e.g. <code>64, 32, 16</code>. They run on the head's grid, before upsampling. Empty: the single-conv head. Untested in our experiments, so compare against the default.",
+  "f.dil": "Dilation of the hidden layers: one value for all, or one per layer (e.g. <code>8, 16, 32</code>), to widen the receptive field for large objects. Needs hidden widths.",
+  "f.hnorm": "Normalisation after each hidden conv: <b>BatchNorm</b> (the default), <b>GroupNorm</b> (for small batches) or none, which gives the convs a bias instead. Needs hidden widths.",
+  "f.hact": "<b>raw values</b>: the head returns the conv output (the default).<br><b>softplus</b>: the output is always above 0; recommended for density heads (on a downstream drone dataset, density count MAE 10.1 \u2192 2.9, with a floor of about +1.75 objects per image). ReLU was tried and removed: the head died.<br>Regression heads only, not with uncertainty. <code>manyseg.save</code> records the activation as \u201cnone\u201d, as the output already is the prediction.",
+  "f.hbias": "Initial bias of the final conv (before an output activation), e.g. the logit of a class prior for a focal-loss head. Default 0.",
+  "g.densp": "<code>manyseg.points.density_head(activation=\"softplus\")</code>: a density map that stays above 0, with the bias starting at \u22124 so the untrained map is near 0. Unvalidated against the plain density head; for a few large objects per image, peak counting on a heatmap was far better than either density head.",
   "h.unc": "Also predict a log-variance per value: the head returns 2\u00d7 the channels, [mean, log_variance], for a Gaussian negative log-likelihood loss.",
 
   // ---- options ----
