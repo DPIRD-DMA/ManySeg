@@ -90,15 +90,10 @@ def test_onnx_export_dynamic_matches_onnxruntime(tmp_path):
         torch.testing.assert_close(torch.from_numpy(got), model(x), atol=1e-3, rtol=1e-3)
 
 
-_OLD_TORCH = tuple(int(v) for v in torch.__version__.split("+")[0].split(".")[:2]) < (2, 11)
-
-
 @pytest.mark.parametrize("backbone", [
     "vit_tiny_patch16_224", "eva02_tiny_patch14_224",
-    # Swin's dynamic fullgraph compile fails on torch 2.9 (any timm); passes from 2.11.
-    pytest.param("swin_tiny_patch4_window7_224", marks=pytest.mark.xfail(
-        _OLD_TORCH, reason="Swin dynamic fullgraph compile needs torch >= 2.11", strict=False)),
-    "pvt_v2_b0"])
+    # Swin's dynamic fullgraph compile fails on torch 2.9 (any timm); passes from 2.10.
+    "swin_tiny_patch4_window7_224", "pvt_v2_b0"])
 def test_transformer_compile_fullgraph_dynamic(backbone):
     model = model_(backbone)
     compiled = torch.compile(model, fullgraph=True, dynamic=True, backend="aot_eager")
