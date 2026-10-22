@@ -13,7 +13,7 @@ import torch.nn.functional as F
 from torch import Tensor, nn
 
 from ..features import FeatureSpec
-from ..utils.spatial import crop_to, pad_to_multiple
+from ..utils.spatial import crop_to, pad_to_multiple, resize_bilinear
 from .ops import FUSION_OPS
 
 ALIGNMENTS = ("same_grid", "same_extent")
@@ -36,7 +36,7 @@ def _resize_valid(f: Tensor, valid: tuple, target_valid: tuple, target_full: tup
     """Resample the valid (unpadded) region of ``f`` onto the target's valid region, then pad
     to the target's full (padded) size. Used for ``same_extent`` alignment."""
     f = crop_to(f, *valid)  # not slicing: export would specialise on stride-aligned sizes
-    f = F.interpolate(f, size=target_valid, mode="bilinear", align_corners=False)
+    f = resize_bilinear(f, target_valid)  # keeps the dtype: a concat fusion follows (E027)
     return F.pad(f, (0, target_full[1] - target_valid[1], 0, target_full[0] - target_valid[0]))
 
 

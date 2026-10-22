@@ -10,7 +10,7 @@ from pathlib import Path
 import torch
 
 from ..datasets import GPULoader, data_root, get_dataset, load_split
-from ..datasets.base import channel_stats, load_meta
+from ..datasets.base import Split, channel_stats, load_meta
 from ..env import environment, gpu_contention
 from ..profiling import count_flops
 from ..providers import ModelSpec, get_provider
@@ -235,6 +235,11 @@ def run_training(
     eval_bs = getattr(ds, "EVAL_BATCH_SIZE", 32)
     val_loader = GPULoader(val.images, val.masks, eval_bs, train=False, vectors=val.vectors,
                            **common)
+    if val_loader.device_resident:  # the loaders hold device copies: free the host arrays
+        # (E027: 2.8 GB of host RAM for the whole Sen1Floods11 run); names stay for the record
+        train_split = Split(None, None, train_split.names)
+        val = Split(None, None, val.names)
+        del imgs
 
     env = environment(dev)
     if dev.type == "cuda":

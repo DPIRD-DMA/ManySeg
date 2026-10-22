@@ -24,6 +24,19 @@ MODELS = {
     "fastai_edgenext": dict(backbone="edgenext_small", decoder="fastai_unet"),
     "unet_vit": dict(backbone="vit_small_patch16_224", decoder="unet",
                      backbone_kwargs={"img_size": 512}),
+    # E027: fusion with a coarser same_extent input (resized, then concatenated)
+    "late_concat_extent": dict(inputs={"a": {"in_channels": 4, "backbone": "resnet18"},
+                                       "b": {"in_channels": 2, "backbone": "resnet18",
+                                             "alignment": "same_extent"}},
+                               fusion={"type": "late", "op": "concat"}, decoder="unet"),
+    "inter_concat_extent": dict(inputs={"a": {"in_channels": 4, "backbone": "resnet18"},
+                                        "b": {"in_channels": 2, "backbone": "resnet18",
+                                              "alignment": "same_extent"}},
+                                fusion={"type": "intermediate", "op": "concat"}, decoder="unet"),
+    "unet_vit256": dict(backbone="vit_small_patch16_224", decoder="unet",
+                        backbone_kwargs={"img_size": 256}),
+    "unet_r34_bilinear": dict(R34, decoder="unet", decoder_kwargs={"upsample": "bilinear"}),
+    "unet_r34_aligned": dict(R34, decoder="unet", decoder_kwargs={"upsample": "aligned"}),
     # time series: (B, T, C, H, W), mean over dates (E021's default)
     "unet_r34_ts": dict(inputs={"s2": {"kind": "timeseries", "in_channels": 13,
                                        "backbone": "resnet34", "temporal": "mean"}},
@@ -55,6 +68,8 @@ def make_input(name: str, batch: int, size: int, in_channels: int, device, dtype
     for k, c in cfg["inputs"].items():
         if c.get("kind") == "timeseries":
             out[k] = r(batch, dates, c["in_channels"], size, size)
+        elif c.get("alignment") == "same_extent":  # a coarser grid over the same extent
+            out[k] = r(batch, c["in_channels"], size // 2, size // 2)
         else:
             out[k] = r(batch, c["in_channels"], size, size)
     return out

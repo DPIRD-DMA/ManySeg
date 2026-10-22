@@ -1,0 +1,2 @@
+{"dataset": "sen1floods11", "mmap": false, "rss_start_mb": 609.796875, "rss_loaded_mb": 3423.21875, "rss_loaders_mb": 3437.34765625, "rss_after_drop_mb": 624.06640625, "batches": 21}
+{"dataset": "sen1floods11", "mmap": true, "rss_start_mb": 609.74609375, "rss_loaded_mb": 609.83203125, "rss_loaders_mb": 3437.2578125, "rss_after_drop_mb": 623.9765625, "batches": 21}

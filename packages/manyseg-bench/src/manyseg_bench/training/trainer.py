@@ -99,18 +99,39 @@ def lr_factor(step: int, total: int, warmup: int, schedule: str) -> float:
     raise ValueError(f"unknown schedule {schedule!r}")
 
 
+def _pad_batch(x, n: int):
+    """``x`` (a tensor or dict of tensors with the batch first) padded to ``n`` samples by
+    repeating its first sample."""
+    def pad(t):
+        if not isinstance(t, torch.Tensor) or t.ndim == 0 or t.shape[0] >= n:
+            return t
+        return torch.cat([t, t[:1].expand(n - t.shape[0], *t.shape[1:])])
+    return {k: pad(v) for k, v in x.items()} if isinstance(x, dict) else pad(x)
+
+
+def _take(out, n: int):
+    """The first ``n`` samples of a model output (a tensor or dict of tensors)."""
+    return {k: v[:n] for k, v in out.items()} if isinstance(out, dict) else out[:n]
+
+
 @torch.no_grad()
 def evaluate(model: nn.Module, loader, num_classes: int, device: torch.device,
-             precision: str = "bf16", ignore_index: int | None = None, task=None) -> dict:
+             precision: str = "bf16", ignore_index: int | None = None, task=None,
+             pad_last: bool = False) -> dict:
+    """``pad_last``: run a short final batch padded to the first batch's size (the padding is
+    dropped before the metrics), so a static compiled model sees one shape."""
     from ..tasks import SemanticTask
 
     task = task or SemanticTask(num_classes, ignore_index)
     model.eval()
     ev = task.evaluator()
+    full = None
     for x, y in loader:
+        n = _batch_size(x)
+        full = full or n
         with autocast(device, precision):
-            out = model(x)
-        ev.update(out, y)
+            out = model(_pad_batch(x, full)) if pad_last and n < full else model(x)
+        ev.update(_take(out, n) if pad_last and n < full else out, y)
     return ev.compute()
 
 
@@ -138,6 +159,10 @@ def train(
     if recipe.channels_last:
         model = model.to(memory_format=torch.channels_last)
     run = torch.compile(model) if recipe.compile else model
+    # Evaluation gets its own static compile, fed one shape (the short last batch padded): the
+    # shared callable recompiles for the eval batch size and then runs dynamic-shape kernels
+    # (E027: +13-25% evaluation throughput for the PVTv2-b0 presets).
+    eval_run = torch.compile(model, dynamic=False) if recipe.compile else model
     opt = build_optimizer(enc_params, dec_params, recipe)
     accum = max(1, int(recipe.grad_accum_steps))
     micro_per_epoch = len(train_loader)
@@ -227,8 +252,8 @@ def train(
                "nonfinite_steps": nonfinite, "epoch_time_s": time.perf_counter() - t0,
                "train_images": n_img, "encoder_frozen": frozen}
         if (epoch + 1) % recipe.eval_every == 0 or epoch + 1 == recipe.epochs:
-            rec["val"] = evaluate(run, val_loader, num_classes, device, recipe.precision,
-                                  ignore_index, task=task)
+            rec["val"] = evaluate(eval_run, val_loader, num_classes, device, recipe.precision,
+                                  ignore_index, task=task, pad_last=recipe.compile)
             pm = task.primary_metric
             name = "mIoU" if pm == "miou" else pm
             log(f"epoch {epoch + 1}/{recipe.epochs} loss {rec['train_loss']:.4f} "

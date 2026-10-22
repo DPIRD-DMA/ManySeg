@@ -11,7 +11,7 @@ from torch import Tensor, nn
 
 from ..features import FeatureSpec
 from ..layers import ConvNormAct, init_decoder_
-from ..utils.spatial import is_2x, resize_nearest, upsample2x_nearest
+from ..utils.spatial import is_2x, resize_bilinear, resize_nearest, upsample2x_nearest
 from .base import DECODERS, check_power_of_two_stride
 
 UPSAMPLE_MODES = ("nearest", "bilinear", "aligned")
@@ -36,13 +36,15 @@ def upsample2x(x: Tensor, size: Sequence[int], mode: str, exact_2x: bool = False
                         and is_2x(x.shape[-1], size[1])):
             return upsample2x_nearest(x, size)
         return resize_nearest(x, size)
+    # bilinear outputs keep the input dtype: CUDA autocast returns float32, and the skip
+    # concat after this would make the whole block float32 (E027: -7% training memory)
     if mode == "bilinear":
-        return F.interpolate(x, size=size, mode="bilinear", align_corners=False)
+        return resize_bilinear(x, size)
     if mode == "aligned":
         h, w = x.shape[-2], x.shape[-1]
-        x = F.pad(x, (0, 1, 0, 1), mode="replicate")
-        x = F.interpolate(x, size=(2 * h + 1, 2 * w + 1), mode="bilinear", align_corners=True)
-        return x[..., : size[0], : size[1]]
+        y = F.pad(x, (0, 1, 0, 1), mode="replicate")
+        y = F.interpolate(y, size=(2 * h + 1, 2 * w + 1), mode="bilinear", align_corners=True)
+        return y[..., : size[0], : size[1]].to(x.dtype)
     raise ValueError(f"unknown upsample mode {mode!r}; choose from {UPSAMPLE_MODES}")
 
 

@@ -317,3 +317,20 @@ def test_device_side_nonfinite_skip_equals_dropping_the_batch():
     # other tests) allows rounding-level differences between the two runs
     assert all(torch.isfinite(u).all() for u in pa)
     assert all(torch.allclose(u, v, rtol=1e-5, atol=1e-6) for u, v in zip(pa, pb))
+
+
+def test_evaluate_pad_last_gives_the_same_metrics():
+    """E027: padding the short last batch (for a static compiled model) must not change the
+    metrics: the padded rows are dropped before the evaluator sees them."""
+    from manyseg_bench.training.trainer import evaluate
+
+    imgs, masks = synthetic(n=10)
+    ld = GPULoader(imgs, masks, 4, (0.5,) * 3, (0.25,) * 3, torch.device("cpu"), False)
+    torch.manual_seed(0)
+    m = nn.Sequential(nn.Conv2d(3, 8, 3, padding=1), nn.ReLU(), nn.Conv2d(8, 3, 1)).eval()
+    seen = []
+    m.register_forward_hook(lambda _m, i, _o: seen.append(i[0].shape[0]) and None)
+    a = evaluate(m, ld, 3, torch.device("cpu"), "fp32")
+    b = evaluate(m, ld, 3, torch.device("cpu"), "fp32", pad_last=True)
+    assert seen == [4, 4, 2, 4, 4, 4]  # the padded pass runs the short batch at full size
+    assert a == pytest.approx(b)

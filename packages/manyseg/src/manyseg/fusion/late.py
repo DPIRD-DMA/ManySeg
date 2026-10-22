@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 
-import torch.nn.functional as F
 from torch import Tensor, nn
 
 from ..features import FeatureSpec
+from ..utils.spatial import resize_bilinear
 from .encoders import _ceil_div, _resize_valid
 from .ops import FUSION_OPS
 
@@ -42,8 +42,7 @@ class LateFusionDecoder(nn.Module):
         outs = [d(features[a:b]) for d, (a, b) in zip(self.decoders, self.groups)]
         size = outs[0].shape[-2:]
         if valid is None:
-            outs = [outs[0]] + [o if o.shape[-2:] == size else
-                                F.interpolate(o, size=size, mode="bilinear", align_corners=False)
+            outs = [outs[0]] + [o if o.shape[-2:] == size else resize_bilinear(o, size)
                                 for o in outs[1:]]
             return self.fuse(outs)
         s0 = self.decoders[0].out_spec.stride
@@ -54,6 +53,6 @@ class LateFusionDecoder(nn.Module):
                 s = d.out_spec.stride
                 o = _resize_valid(o, (_ceil_div(h, s), _ceil_div(w, s)), target, size)
             elif o.shape[-2:] != size:  # same_grid with a different encoder stride layout
-                o = F.interpolate(o, size=size, mode="bilinear", align_corners=False)
+                o = resize_bilinear(o, size)
             fused.append(o)
         return self.fuse(fused)

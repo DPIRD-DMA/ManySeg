@@ -104,6 +104,8 @@ First release. Python 3.10–3.14, PyTorch ≥ 2.10, timm ≥ 1.0.20.
 * Temporal mean sums bf16 features with a float32 accumulator instead of upcasting them;
   fastai_unet keeps channels_last through its pixel shuffles; `connected_components` uses
   pointer jumping (18–44× faster on long or field-like components, same labels).
+* Bilinear resizes keep the activation dtype in U-Net `upsample="bilinear"` / `"aligned"`
+  (−7% memory) and in late / `same_extent` fusion before a concat (E027).
 * `model.set_grad_checkpointing()`: opt-in encoder gradient checkpointing (timm's), with
   in-place activations switched off and BatchNorm running statistics updated once per step,
   as without it. −22% memory for +5% step time (ResNet-34 U-Net), −61% for +18% (ConvNeXt-T).
@@ -162,9 +164,12 @@ First release. Python 3.10–3.14, PyTorch ≥ 2.10, timm ≥ 1.0.20.
   seeded data loading; recipes; JSON run records with provenance.
 * Datasets: Oxford Pet, Sen1Floods11, CloudSEN12+, AI4Boundaries, OAM-TCD, PASTIS, EuroSAT,
   BigEarthNet v2, OSCD, LEVIR-CD, SECOND.
-* Pre-registered experiments E000–E026 with write-ups in `experiments/`, negative results
+* Pre-registered experiments E000–E027 with write-ups in `experiments/`, negative results
   included.
 * Training loop without per-step host syncs on CUDA: fused AdamW, a non-finite loss skips the
   update on the device (as before, without waiting for the GPU), losses summed on the device,
   one gradient-scaling kernel; the loader copies the epoch order to the GPU once and normalises
   in place. 24–26% faster steps for the PVTv2-b0 presets (E026).
+* With `compile`, evaluation uses its own static compiled model and pads the short last batch
+  (+12–27% evaluation throughput, E027); device-resident datasets free their host arrays
+  once on the GPU (−2.8 GB host RAM on Sen1Floods11).
