@@ -125,7 +125,15 @@ First release. Python 3.10–3.14, PyTorch ≥ 2.10, timm ≥ 1.0.20.
   with `dynamic_batch=True`; dynamic date count except for `concat` / `diff` aggregation) and
   ONNX; int8 quantisation (`manyseg.quantize`, extra `quant`); FSDP2
   (`manyseg.distributed.shard_model`).
+* Saved models carry the licence and citation of the pretrained weights they started from
+  (`pretrained_weights` in the file metadata, `manyseg.weights.attribution(model)`), through
+  load and re-save; `describe()` lists them. Fine-tuned weights stay under those licences
+  (SSL4EO-S12 CC BY 4.0, SatlasPretrain ODC-BY, timm's per-checkpoint licences).
 * `model.describe()` shows what was built; `model.describe(sample)` adds shapes and FLOPs.
+  An adapted stem says which pretrained filter each input channel starts from (so a mask
+  channel given an RGB filter by `repeat` shows), and `manyseg.save` on a wrapper names the
+  model inside it to save instead. The docs cover non-image channels (`rgb_plus_zero`),
+  missing bands and which conditioning mode to use.
 * `export_model` and `quantize_pt2e` export in eval mode and then restore every submodule's
   train / eval flag; `dynamic_batch=True` needs an example with batch size ≥ 2.
 * Decoders upsample to their skip connections with the exact integer nearest rule, because

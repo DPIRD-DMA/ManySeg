@@ -315,3 +315,28 @@ def test_weight_shared_encoders_are_one_node_with_per_input_bn():
     assert "BatchNorm per input" in enc.attr("sharing")
     assert sum(n.params or 0 for n in g.nodes.values()) == \
         sum(p.numel() for p in model.parameters())
+
+
+@pytest.mark.parametrize("c, adapter, rgb, expect", [
+    (6, "repeat", None, "ch i starts from pretrained filter i % 3, x3/6"),
+    (1, "repeat", None, "the sum of the 3 pretrained filters"),
+    (5, "mean", None, "every ch starts from the mean pretrained filter, x3/5"),
+    (6, "rgb_plus_zero", None, "ch 0, 1, 2 keep the pretrained filters; ch 3-5 start zero"),
+    (13, "rgb_plus_random", (3, 2, 1),
+     "ch 3, 2, 1 keep the pretrained filters; ch 0, 4-12 start random"),
+])
+def test_adapted_stem_says_which_filters_each_channel_starts_from(c, adapter, rgb, expect):
+    """E.g. a 0/1 mask appended to RGB gets copies of the RGB filters under 'repeat'."""
+    bkw = {"rgb_indices": rgb} if rgb else {}
+    model = make(in_channels=c, channel_adapter=adapter, backbone_kwargs=bkw, num_classes=2)
+    model.backbone.pretrained = True  # adaptation runs either way; describe reports it if set
+    assert f"{c} ch, '{adapter}' weights from 3 ch ({expect})" in model.describe()
+
+
+@pytest.mark.parametrize("c, rgb, expect", [(6, (3, 2, 1), "3, 2, 1"), (2, None, "0, 1, 0")])
+def test_projection_stem_says_which_channels_it_starts_from(c, rgb, expect):
+    bkw = {"rgb_indices": rgb} if rgb else {}
+    text = make(in_channels=c, channel_adapter="projection", backbone_kwargs=bkw,
+                num_classes=2).describe()
+    assert (f"{c} ch, projection 1x1 conv {c}->3 (starts by passing ch {expect} to the "
+            "pretrained stem)") in text

@@ -71,6 +71,8 @@ class ModelGraph:
     edges: list[Edge]
     summary: list[tuple[str, str]]
     stage_params: dict[str, int]
+    # manyseg.weights.attribution: the pretrained weights, their licences and citations
+    pretrained_weights: list[dict[str, str]] = field(default_factory=list)
 
     def by_stage(self, stage: str) -> list[Node]:
         return [n for n in self.nodes.values() if n.stage == stage]
@@ -256,8 +258,14 @@ class _Capture:
 class _Builder:
     def __init__(self, model: nn.Module, sample=None) -> None:
         from .fusion import EarlyFusionEncoder, LateFusionDecoder, MultiEncoder
+        from .weights import attribution
 
         self.model = model
+        # by backbone module: a loaded model's backbones were rebuilt without weights, so they
+        # no longer say what they started from; the record saved with the model does
+        self.pretrained_weights = attribution(model)
+        self.weights_by_id = {id(model.get_submodule(e["module"])): e
+                              for e in self.pretrained_weights}
         self.nodes: dict[str, Node] = {}
         self.edges: list[Edge] = []
         self.paths = {}
@@ -369,7 +377,8 @@ class _Builder:
             self.dec_out[f"task_{h}"] = node
         self._heads(feats)
         self._conditioning_edges()
-        return ModelGraph(self.nodes, self.edges, self._summary(), self._stage_params())
+        return ModelGraph(self.nodes, self.edges, self._summary(), self._stage_params(),
+                          self.pretrained_weights)
 
     def _vector_widths(self) -> dict[str, int]:
         """Extra channels that ``channels``-mode metadata adds to each raster."""
@@ -449,19 +458,28 @@ class _Builder:
             return n
 
         if isinstance(enc, TimmBackbone):
-            init = (f"weights {enc.weights}" if getattr(enc, "weights", None)
-                    else "pretrained" if enc.pretrained else "random init")
+            rec = self.weights_by_id.get(id(enc))
+            pretrained = enc.pretrained or rec is not None
+            weights = getattr(enc, "weights", None) or (
+                rec["weights"] if rec and rec.get("provider") == "manyseg" else None)
+            init = (f"weights {weights}" if weights
+                    else "pretrained" if pretrained else "random init")
             n = self.add(node_id, "encoder", name, f"{enc.name} ({init})", modules=[enc])
             cfg = getattr(enc.model, "pretrained_cfg", {}) or {}
-            native = (cfg.get("input_size") or (3,))[0]
+            # remote-sensing weights come with the input's band count: no stem adaptation
+            native = enc.in_channels if weights else (cfg.get("input_size") or (3,))[0]
             if isinstance(enc.input_adapter, ProjectionAdapter):
                 p = enc.input_adapter.proj
+                src = getattr(enc, "rgb_indices", None) or tuple(
+                    o % p.in_channels for o in range(p.out_channels))
                 stem = (f"{enc.in_channels} ch, projection 1x1 conv "
-                        f"{p.in_channels}->{p.out_channels}")
-            elif enc.in_channels != native and not enc.pretrained:
+                        f"{p.in_channels}->{p.out_channels} (starts by passing ch "
+                        f"{', '.join(map(str, src))} to the pretrained stem)")
+            elif enc.in_channels != native and not pretrained:
                 stem = f"{enc.in_channels} ch, random init (no pretrained weights to adapt)"
             elif enc.in_channels != native:
-                stem = f"{enc.in_channels} ch, '{enc.channel_adapter}' weights from {native} ch"
+                stem = (f"{enc.in_channels} ch, '{enc.channel_adapter}' weights from {native} "
+                        f"ch ({_stem_mapping(enc, native)})")
             else:
                 stem = f"{enc.in_channels} ch, unchanged"
             n.attrs.append(("stem", stem, True))
@@ -836,6 +854,34 @@ def render_dot(source: str, path: str, format: str | None = None) -> str:
     return path
 
 
+def _channel_list(idx) -> str:
+    """``[0, 4, 5, 6]`` -> ``"0, 4-6"``."""
+    runs: list[list[int]] = []
+    for i in sorted(idx):
+        if runs and i == runs[-1][1] + 1:
+            runs[-1][1] = i
+        else:
+            runs.append([i, i])
+    return ", ".join(str(a) if a == b else f"{a}-{b}" for a, b in runs)
+
+
+def _stem_mapping(enc, native: int) -> str:
+    """Which pretrained filters each input channel of an adapted stem starts from: shows, for
+    example, that ``repeat`` gives mask or elevation channels copies of the RGB filters."""
+    c, method = enc.in_channels, enc.channel_adapter
+    if method == "repeat":
+        if c == 1:
+            return f"the sum of the {native} pretrained filters"
+        return f"ch i starts from pretrained filter i % {native}, x{native}/{c}"
+    if method == "mean":
+        return f"every ch starts from the mean pretrained filter, x{native}/{c}"
+    keep = getattr(enc, "rgb_indices", None) or tuple(range(native))
+    rest = [i for i in range(c) if i not in keep]
+    init = "zero" if method == "rgb_plus_zero" else "random"
+    return (f"ch {', '.join(map(str, keep))} keep the pretrained filters; "
+            f"ch {_channel_list(rest)} start {init}")
+
+
 # ---------------------------------------------------------------------------------------------
 # renderers
 
@@ -873,6 +919,15 @@ def _to_text(g: ModelGraph) -> str:
                     lines.append(f"      <- {_heading(src)}{tag}{via}")
             for k, v in n.shapes:
                 lines.append(f"      shape {k}: {v}")
+    if g.pretrained_weights:
+        lines.append("pretrained weights (fine-tuned weights keep these licences; cite when "
+                     "publishing)")
+        for e in g.pretrained_weights:
+            lines.append(f"  {e['module']}: {e['provider']} {e['weights']} ({e['license']})")
+            if e.get("citation"):
+                lines.append(f"      cite: {e['citation']}")
+            if e.get("source"):
+                lines.append(f"      source: {e['source']}")
     return "\n".join(lines) + "\n"
 
 

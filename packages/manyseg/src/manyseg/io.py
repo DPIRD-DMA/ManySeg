@@ -3,9 +3,12 @@
 ``save(model, path, ...)`` writes one ``.safetensors`` file: the weights, plus JSON metadata with
 the ``create_model`` arguments the model was built with, its heads, and what inference needs to
 know that the weights don't say: how inputs were normalised, each head's activation, class
-names and band names. ``load(path)`` rebuilds the model (without downloading pretrained weights)
-and loads the weights; its :meth:`~manyseg.DenseModel.tiling_spec` then reports the stored
-normalisation and activations, so ManyPred uses them without being told.
+names and band names. It also records the pretrained weights the model started from, with their
+licences and citations (``pretrained_weights``, see :func:`manyseg.weights.attribution`):
+fine-tuned weights are still subject to them, and most require attribution. ``load(path)``
+rebuilds the model (without downloading pretrained weights) and loads the weights; its
+:meth:`~manyseg.DenseModel.tiling_spec` then reports the stored normalisation and activations,
+so ManyPred uses them without being told.
 
 Compatibility policy. The file stores a save ``format`` number and the ``manyseg_version`` that
 wrote it, and holds only plain data (no pickled classes), so it survives refactors that move or
@@ -35,6 +38,7 @@ import torch
 
 from . import __version__
 from .models import DenseModel
+from .weights import attribution
 
 FORMAT = 2  # 2: in_channels / out_channels / num_features (1: "channels"; migrated on read)
 _KEY = "manyseg"
@@ -104,9 +108,14 @@ def save(model: DenseModel, path: str | Path, *, normalize: Any = None,
         extra: Any other JSON-compatible metadata, stored as is.
     """
     if not isinstance(model, DenseModel):
+        inner = next((n for n, m in model.named_children() if isinstance(m, DenseModel)), None) \
+            if isinstance(model, torch.nn.Module) else None
+        hint = (f" It wraps one as .{inner}: save that, and rebuild the wrapper around "
+                f"manyseg.load(path)." if inner else "")
         raise TypeError(
-            f"save takes a manyseg DenseModel, got {type(model).__name__}. Unwrap compiled, "
-            f"DataParallel or quantised models first (e.g. model._orig_mod, model.module)."
+            f"save takes a manyseg DenseModel, got {type(model).__name__}.{hint} Unwrap "
+            f"compiled, DataParallel, quantised or wrapped models first (e.g. "
+            f"model._orig_mod, model.module, model.model)."
         )
     config = getattr(model, "build_config", None)
     if config is None:
@@ -157,6 +166,7 @@ def save(model: DenseModel, path: str | Path, *, normalize: Any = None,
         "activations": acts,
         "classes": classes,
         "bands": bands,
+        "pretrained_weights": attribution(model),
         "extra": dict(extra or {}),
     }
     try:
@@ -336,4 +346,7 @@ def load(path: str | Path, map_location: str | torch.device = "cpu") -> DenseMod
     except RuntimeError as e:
         raise _version_error(path, meta, e) from e
     model.saved_metadata = meta
+    for rec in meta.get("pretrained_weights") or []:  # load built the backbones without them
+        rec = dict(rec)
+        model.get_submodule(rec.pop("module")).restored_attribution = rec
     return model.to(device=map_location).eval()

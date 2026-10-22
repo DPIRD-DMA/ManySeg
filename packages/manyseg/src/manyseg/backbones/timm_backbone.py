@@ -209,6 +209,10 @@ class TimmBackbone(nn.Module):
         **timm_kwargs: Forwarded to ``timm.create_model`` (e.g. ``drop_path_rate``).
     """
 
+    # set by manyseg.load: the pretrained weights this backbone started from (see
+    # manyseg.weights.attribution), as the rebuilt backbone was not given them
+    restored_attribution: dict[str, str] | None = None
+
     def __init__(
         self,
         name: str,
@@ -280,6 +284,7 @@ class TimmBackbone(nn.Module):
         self.pretrained = bool(pretrained)  # recorded for describe(); weights are already set
         self.in_channels = in_channels
         self.channel_adapter = channel_adapter
+        self.rgb_indices = None if rgb_indices is None else tuple(int(i) for i in rgb_indices)
 
         cfg = getattr(self.model, "pretrained_cfg", {}) or {}
         native = in_channels if self.weights is not None else 3

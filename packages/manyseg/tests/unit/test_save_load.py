@@ -239,3 +239,13 @@ def test_format_1_files_with_the_old_channels_keys_still_load(tmp_path):
     x = {"img": torch.randn(1, 3, 64, 64), "meta": torch.randn(1, 2)}
     loaded = manyseg.load(old)
     assert torch.equal(outputs(model, x)["seg"], outputs(loaded, x)["seg"])
+
+
+def test_save_names_the_model_inside_a_wrapper(tmp_path):
+    from manyseg.utils import concat_heads
+
+    model = create_model(backbone="resnet18", pretrained=False, heads={
+        "a": {"type": "segmentation", "out_channels": 2},
+        "b": {"type": "regression", "out_channels": 1}})
+    with pytest.raises(TypeError, match=r"It wraps one as \.model: save that"):
+        manyseg.save(concat_heads(model, ["a", "b"]), tmp_path / "a.safetensors")

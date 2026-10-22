@@ -180,6 +180,32 @@ def test_channels_mode_widens_the_target_input():
     assert out.shape == (1, 2, 64, 64)
 
 
+@pytest.mark.parametrize("backbone", ["resnet18", "convnext_atto"])
+def test_channels_mode_with_rgb_plus_zero_is_the_image_model_at_init(backbone):
+    """Information about the input itself (e.g. per-band presence) as extra channels: with
+    ``rgb_plus_zero`` they start at zero weight, so the model starts as the image-only one."""
+    fields = {f"b{i}": {"type": "continuous", "mean": 0.5, "std": 0.5} for i in range(3)}
+    torch.manual_seed(0)
+    model = create_model(backbone=backbone, pretrained=False, num_classes=2,
+                         channel_adapter="rgb_plus_zero", inputs={
+                             "img": {"in_channels": 3},
+                             "bands": {"kind": "vector", "fields": fields,
+                                       "conditioning": "channels"}}).eval()
+    assert model.backbone.in_channels == 6
+    torch.manual_seed(0)
+    plain = create_model(backbone=backbone, pretrained=False, num_classes=2).eval()
+    sd = {k: v for k, v in model.state_dict().items() if not k.startswith("conditioner.")}
+    stem = model.backbone._stem_name
+    key = next(k for k in sd if k.endswith(f"{stem}.weight"))
+    assert sd[key][:, 3:].abs().sum() == 0
+    sd[key] = sd[key][:, :3]
+    plain.load_state_dict(sd)
+    x = torch.randn(2, 3, 64, 64)
+    a = model({"img": x, "bands": torch.rand(2, 3)})
+    assert torch.equal(a, plain(x))
+    assert torch.equal(a, model({"img": x, "bands": torch.rand(2, 3)}))
+
+
 @pytest.mark.parametrize("ftype", ["early", "intermediate", "late"])
 def test_with_raster_fusion(ftype):
     model = perturb(build("film", rasters={"a": {"in_channels": 4}, "b": {"in_channels": 2}},

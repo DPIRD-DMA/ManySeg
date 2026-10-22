@@ -67,7 +67,10 @@ reject. Open `docs/builder/index.html` in a browser; it needs no server.
 ## Common tasks
 
 **Multispectral imagery.** Set `in_channels` (e.g. 13 for Sentinel-2). The pretrained RGB stem
-is adapted automatically.
+is adapted automatically. For extra channels that are not image bands (validity masks, quality
+flags), use `channel_adapter="rgb_plus_zero"`. If bands can be missing at inference, fill them
+the way you did in training and drop bands at random while training
+([missing bands](docs/api_design.md#missing-bands)).
 
 **Pick a speed/accuracy trade-off.** Presets are measured configurations:
 
@@ -122,6 +125,9 @@ registered with `manyseg.heads.HEADS.register("name")`.
 **Training with fastai** (or anything else that wants one tensor): a loss and metrics can
 read the dict (`out["landcover"]`), or `manyseg.utils.concat_heads(model, ["landcover",
 "height"])` returns one concatenated tensor. See [`examples/09_fastai.py`](examples/09_fastai.py).
+A model with metadata inputs takes a dict, so a loop that passes one tensor needs a small
+wrapper of your own that builds it. Save the model inside, not the wrapper
+(`manyseg.save(wrapper.model, ...)`), and wrap `manyseg.load(path)` again after loading.
 
 **Image classification or regression.** Use only image heads: no decoder is built, and the
 model is a classifier that still accepts several inputs, metadata and extra heads.
@@ -187,6 +193,8 @@ pretrained="ssl4eo_s2_dino", in_channels=13, ...)` loads SSL4EO-S12 weights
 ResNet-50) or SatlasPretrain Sentinel-2 weights (ResNet-50/152); `manyseg.weights.WEIGHTS` lists the band order and normalisation each
 expects. Fed their own pretraining normalisation, SSL4EO DINO weights beat the ImageNet
 baseline on all three Sentinel-2 datasets we tested (ResNet-50, full fine-tuning; E024).
+The weights are CC BY 4.0 / ODC-BY and need attribution, also once fine-tuned: saved models
+record each pretrained backbone's licence and citation, and `describe()` lists them.
 
 **Objects and counts.** `manyseg.instances` (touching fields, crowns, buildings) and
 `manyseg.points` (trees, animals: centres, counts) provide the heads, training targets (from
@@ -251,6 +259,8 @@ scripts in a few seconds, the walkthroughs that train briefly in 10–20 s.
 * **Water and other per-pixel spectral targets:** `decoder_kwargs={"input_cross": True}`
   feeds the raw bands to the last decoder stage. It did not help pet or cloud segmentation.
 * **Mixed precision is safe:** bf16, fp16 and int8 weight-only showed no accuracy loss.
+* **Training speed:** the default U-Net trains as fast as SMP's `Unet` on the same timm
+  encoder: compiled steps match it, and eager steps are 18–25% faster (bf16, E025).
 * **Fusion:** stacking all bands (optical and SAR) into one input matched the fancier fusion
   options on Sen1Floods11 (E005); start there. Splitting Sentinel-2 bands into resolution groups
   helped on one dataset (E015) and not on another (E016).

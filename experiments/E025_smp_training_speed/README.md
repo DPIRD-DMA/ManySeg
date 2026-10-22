@@ -118,3 +118,10 @@ a cost.
 
 These are single-session timings on a shared GPU, so treat ±3% as noise; the U-Net conclusions
 rest on gaps of 18–98%, the other decoders' compiled gains of 6–14% (UNet++'s ±2% is noise).
+
+**Downstream check (whole runs).** The OmniCloudMask project reran its full training with the
+fix (fastai, bf16, 509², batch 40, 35 epochs, RTX 4090; one run each, data loading included).
+ManySeg went from 3.56 h to 3.23 h on `edgenext_small` and from 3.81 h to 3.30 h on
+`convnextv2_femto`. SMP's `Unet` took 3.40 h and 3.54 h, so ManySeg is now 5–7% faster end to
+end, with accuracy unchanged within run-to-run noise. Whole-run times also include data
+loading and evaluation, so the gap is smaller than the eager step gap.

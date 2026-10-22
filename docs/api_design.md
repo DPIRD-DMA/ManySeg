@@ -234,7 +234,11 @@ mean (0 after normalising). Works per input in multi-input models (`inputs={"s2"
 **Attribution.** The weights are the authors', under the listed licences (CC BY 4.0, ODC-BY),
 which require attribution: cite `WEIGHTS[key].citation` (SSL4EO-S12: Wang et al. 2023;
 SatlasPretrain: Bastani et al. 2023) in work that uses them. ManySeg's MIT licence does not
-cover them.
+cover them. Fine-tuning does not remove the obligation, so the model carries it:
+`manyseg.weights.attribution(model)` lists the weights each pretrained backbone started from
+(these tags, or timm's ImageNet checkpoints with the licence timm lists) with licence, citation
+and source; `manyseg.save` stores the list in the file (`pretrained_weights`), `manyseg.load`
+restores it so a re-saved model keeps it, and `describe()` prints it.
 
 > **Evidence (E024; Sen1Floods11, BigEarthNet v2, PASTIS; ResNet-50, full fine-tuning after
 > one frozen epoch):** with each weight fed its own pretraining normalisation (ImageNet: dataset
@@ -629,6 +633,46 @@ create_model(backbone="resnet34", pretrained=True, in_channels=13, channel_adapt
 > **Evidence (E004, 13-band Sentinel-2):** no adapter beat `repeat`, which stays the default;
 > `projection` was harmful.
 
+**Channels that are not image bands.** `repeat` and `mean` treat every input channel as a
+band. Take RGB plus three 0/1 validity masks (`in_channels=6`): `repeat` gives each mask a copy
+of an RGB filter and halves the filters on the image channels. Masks are 1 almost everywhere,
+so at init they add a near-constant offset to the stem output, and the image signal is halved.
+For masks, quality flags and other channels that are not image bands, `rgb_plus_zero` starts
+as the exact RGB model and the extra channels learn from zero weights. Pass `rgb_indices` if
+the RGB bands are not channels 0–2. `describe()` lists which pretrained filter each input
+channel starts from. Training does recover from the perturbation: in the OmniCloudMask runs
+(see [Missing bands](#missing-bands)), mask channels under `repeat` ended within noise of no
+mask channels. `rgb_plus_zero` was not compared there, so treat it as the safer start, not a
+measured gain.
+
+### Missing bands
+
+A model has a fixed band list. If a band can be missing at inference, fill it at inference the
+same way you filled it in training, and make it go missing in training too. The OmniCloudMask
+project (cloud and shadow masking of Sentinel-2, Landsat 8 and PlanetScope: R, G, NIR, per-image
+z-score normalisation) sets a missing band to 0 after normalisation. In training, it zeroes
+whole bands at random: 20% of images lose one band and 10% lose two. With that recipe, zero
+filling alone handled missing bands. Two extra signals added nothing clear (CloudSEN12 val mean
+dice, ManySeg U-Net, one run per arm; run-to-run noise about ±0.003):
+
+| bands present | edgenext_small: zero-fill | + mask channels | + presence FiLM | convnextv2_femto: zero-fill | + mask channels |
+|---|---|---|---|---|---|
+| R+G+NIR | 0.8537 | 0.8532 | 0.8500 | 0.8524 | 0.8533 |
+| R+G | 0.8461 | 0.8470 | 0.8386 | 0.8439 | 0.8449 |
+| R+NIR | 0.8431 | 0.8422 | 0.8363 | 0.8404 | 0.8401 |
+| G+NIR | 0.8478 | 0.8477 | 0.8443 | 0.8469 | 0.8490 |
+| R only | 0.8240 | 0.8219 | 0.8212 | 0.8156 | 0.8185 |
+| G only | 0.8332 | 0.8335 | 0.8310 | 0.8317 | 0.8336 |
+| NIR only | 0.7668 | 0.7676 | 0.7700 | 0.7593 | 0.7650 |
+
+"Mask channels" adds the per-pixel valid mask (`x != 0`) per band as three extra input channels
+(`in_channels=6`, `repeat`). "Presence FiLM" adds the fraction of valid pixels per band as a
+`film` vector input. Mask channels gained at most a little (femto, single-band cases). FiLM
+gained nothing and may have cost a little on edgenext (−0.003 to −0.008 with two bands). The
+model can see a zero-filled band in the pixels, so telling it again is redundant. These are
+single downstream runs, not a pre-registered experiment. Other fills, such as copying a
+neighbouring band, were not tested; they may work as well if training uses the same fill.
+
 ## Lower-level composition
 
 ```python
@@ -716,6 +760,17 @@ over-/under-segmentation, point F1, count MAE) live in `manyseg-bench`, except
 > bit is learned to > 0.95 mIoU through the bench's real training recipe, and a shuffled bit stays
 > at chance. The negative results are about the metadata, not the plumbing. Only use `coords` fields with geographic or event-level
 > splits; otherwise the model can memorise locations and the evaluation will not show it.
+> **Downstream (OmniCloudMask, CloudSEN12, single runs):** per-band presence of zero-filled
+> bands by FiLM gained nothing and may have cost a little (see [Missing bands](#missing-bands)).
+
+**Which mode.** `film` and `head` are for information the pixels do not hold: sensor, date,
+task, a prompt. FiLM acts on the encoder features the decoder reads, after the encoder has
+mixed the bands, so it cannot change how the encoder treats its input. For information about
+the input itself (band availability, quality flags), use extra input channels with
+`channel_adapter="rgb_plus_zero"`: a raster input for per-pixel masks, `channels` mode for
+per-image values. The model then starts exactly as the image-only model (tested). That is the
+sensible way to add such information, not a measured gain. If the information is already
+visible in the pixels, as a zero-filled band is, it may not help at all.
 
 ## Inspecting a built model
 
