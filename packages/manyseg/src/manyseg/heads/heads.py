@@ -27,6 +27,7 @@ import torch.nn.functional as F
 from torch import Tensor, nn
 
 from ..features import FeatureSpec
+from ..layers import GroupNorm
 from ..registry import Registry
 from ..utils.resolution import scale_factor
 from ..utils.spatial import pad_to_multiple
@@ -136,7 +137,7 @@ def _hidden_layers(in_ch: int, hidden: Sequence[int], dilation: int | Sequence[i
         if norm == "bn":
             layers.append(nn.BatchNorm2d(c))
         elif norm == "gn":
-            layers.append(nn.GroupNorm(math.gcd(32, c), c))
+            layers.append(GroupNorm(math.gcd(32, c), c))
         layers.append(nn.ReLU(inplace=True))
         in_ch = c
     return nn.Sequential(*layers)

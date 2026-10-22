@@ -70,7 +70,13 @@ class PixelShuffleICNR(nn.Module):
         self.shuffle = nn.PixelShuffle(2)
 
     def forward(self, x: Tensor) -> Tensor:
-        return self.shuffle(F.relu(self.conv(x)))
+        y = self.shuffle(F.relu(self.conv(x), inplace=True))
+        # CUDA's pixel_shuffle returns a contiguous (NCHW) tensor even for channels_last input;
+        # the mixed-layout concat after it would then convert the whole buffer
+        if x.is_contiguous(memory_format=torch.channels_last) and not y.is_contiguous(
+                memory_format=torch.channels_last):
+            y = y.contiguous(memory_format=torch.channels_last)
+        return y
 
 
 class _Block(nn.Module):
@@ -88,7 +94,7 @@ class _Block(nn.Module):
         # the shuffled map is 2x, the skip 2x or 2x - 1: a crop (E025); the model says when
         # that holds, so export traces no shape test
         up = fit_nearest(self.shuf(x), skip.shape[-2:], self.exact)
-        return self.conv2(self.conv1(F.relu(torch.cat([up, self.bn(skip)], dim=1))))
+        return self.conv2(self.conv1(F.relu(torch.cat([up, self.bn(skip)], dim=1), inplace=True)))
 
 
 class _ResBlock(nn.Module):
@@ -97,7 +103,7 @@ class _ResBlock(nn.Module):
         self.convs = nn.Sequential(_conv(c, c), _conv(c, c, act=False))
 
     def forward(self, x: Tensor) -> Tensor:
-        return F.relu(self.convs(x) + x)
+        return F.relu(self.convs(x) + x, inplace=True)
 
 
 @DECODERS.register("fastai_unet")
@@ -178,5 +184,7 @@ class FastaiUNetDecoder(nn.Module):
         else:
             x = resize_nearest(x, size)
         if self.last_cross:
-            x = self.res(torch.cat([x, inp], dim=1))
+            # the input image is float32 under autocast: concatenated as is, it would make the
+            # input-resolution residual block float32 (E026: -20% training memory)
+            x = self.res(torch.cat([x, inp.to(x.dtype)], dim=1))
         return x

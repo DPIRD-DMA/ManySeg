@@ -2,7 +2,16 @@
 
 from __future__ import annotations
 
-from torch import nn
+from torch import Tensor, nn
+
+
+class GroupNorm(nn.GroupNorm):
+    """``nn.GroupNorm`` whose output keeps the input's dtype: CUDA autocast runs ``group_norm``
+    in float32, which would otherwise carry float32 activations (and the ReLU after them) into
+    the next layer, which casts back to bf16 anyway (E026: -19% decoder training memory)."""
+
+    def forward(self, x: Tensor) -> Tensor:
+        return super().forward(x).to(x.dtype)
 
 
 def make_norm(norm: str | None, channels: int) -> nn.Module:
@@ -11,7 +20,7 @@ def make_norm(norm: str | None, channels: int) -> nn.Module:
     if norm == "batch":
         return nn.BatchNorm2d(channels)
     if norm == "group":
-        return nn.GroupNorm(min(32, channels), channels)
+        return GroupNorm(min(32, channels), channels)
     raise ValueError(f"unknown norm {norm!r}; choose from 'batch', 'group', None")
 
 

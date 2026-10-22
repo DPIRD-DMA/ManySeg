@@ -99,8 +99,7 @@ class GPULoader:
                 raise ValueError(f"vector input {k!r} has {v.shape[0]} rows for {self.n} samples")
 
     def _fetch(self, idx: Tensor):
-        if self.device_resident:
-            idx = idx.to(self.device)
+        if self.device_resident:  # idx is already on the device (see __iter__)
             return {k: self.images[k][idx] for k in self.names}, self._label(self.masks[idx])
         # Sorted reads are faster on memory-mapped files; restore the requested order after.
         sidx, inv = torch.sort(idx)
@@ -130,12 +129,12 @@ class GPULoader:
         ty = (torch.rand(n, generator=g) * 2 - 1) * (1 - sh)
         fx = torch.where(torch.rand(n, generator=g) < 0.5, -1.0, 1.0) if self.hflip else 1.0
         fy = torch.where(torch.rand(n, generator=g) < 0.5, -1.0, 1.0) if self.vflip else 1.0
-        theta = torch.zeros(n, 2, 3)
+        theta = torch.zeros(n, 2, 3, pin_memory=self.device.type == "cuda")
         theta[:, 0, 0] = sw * fx
         theta[:, 0, 2] = tx
         theta[:, 1, 1] = sh * fy
         theta[:, 1, 2] = ty
-        theta = theta.to(self.device)
+        theta = theta.to(self.device, non_blocking=True)  # pinned: no wait for the GPU
         grid = F.affine_grid(theta, (n, 1, *self.out_size), align_corners=False)
         x = F.grid_sample(x, grid, mode="bilinear", padding_mode="reflection", align_corners=False)
         if not self.pixel_labels:  # image-level labels do not move with the pixels
@@ -147,18 +146,22 @@ class GPULoader:
 
     def __iter__(self):
         order = torch.randperm(self.n, generator=self.gen) if self.train else torch.arange(self.n)
+        # One copy of the epoch's order to the device: a per-batch copy of a CPU index tensor
+        # makes the host wait for the GPU every batch (E026).
+        dev_order = order.to(self.device) if self.device_resident or self.vectors else None
         for b in range(len(self)):
-            idx = order[b * self.bs:(b + 1) * self.bs]
+            sl = slice(b * self.bs, (b + 1) * self.bs)
+            idx = dev_order[sl] if self.device_resident else order[sl]
             imgs, y = self._fetch(idx)
             parts = []
-            for k in self.names:
+            for k in self.names:  # the fetched batch is a fresh tensor: normalise in place
                 if k in self.times:  # (B, T, H, W, C) -> (B, T * C, H, W), date-major
-                    v = (imgs[k].permute(0, 1, 4, 2, 3).float() - self.mean[k]) / self.std[k]
+                    v = imgs[k].permute(0, 1, 4, 2, 3).float().sub_(self.mean[k]).div_(self.std[k])
                     parts.append(v.flatten(1, 2))
                 else:
-                    parts.append((imgs[k].permute(0, 3, 1, 2).float() - self.mean[k])
-                                 / self.std[k])
-            x = torch.nan_to_num(torch.cat(parts, dim=1))
+                    parts.append(imgs[k].permute(0, 3, 1, 2).float().sub_(self.mean[k])
+                                 .div_(self.std[k]))
+            x = (parts[0] if len(parts) == 1 else torch.cat(parts, dim=1)).nan_to_num_()
             if self.train:
                 x, y = self._augment(x, y)
             if (self.multi or self.times) and not self.stack:
@@ -168,5 +171,6 @@ class GPULoader:
                     x[k] = x[k].unflatten(1, (t, self.channels[k]))
             if self.vectors:
                 x = x if isinstance(x, dict) else {self.names[0]: x}
-                x.update({k: v[idx.to(v.device)] for k, v in self.vectors.items()})
+                vidx = dev_order[sl]
+                x.update({k: v[vidx] for k, v in self.vectors.items()})
             yield x, y

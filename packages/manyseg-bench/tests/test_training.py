@@ -289,3 +289,31 @@ def test_reported_train_loss_weights_batches_by_image_count(monkeypatch):
         per_image = [float(nn.functional.cross_entropy(m(x[i:i + 1]), y[i:i + 1].long()))
                      for x, y in ld for i in range(x.shape[0])]
     assert out["history"][0]["train_loss"] == pytest.approx(sum(per_image) / 6, rel=1e-4)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
+def test_device_side_nonfinite_skip_equals_dropping_the_batch():
+    """E026: on CUDA (fused AdamW, one micro-batch per step) a non-finite loss skips the update
+    on the device, without a host sync. It must equal training without that batch."""
+    dev = torch.device("cuda")
+    imgs, masks = synthetic(n=12)
+    batches = list(GPULoader(imgs, masks, 4, (0.5,) * 3, (0.25,) * 3, dev, False))
+    bad = (batches[1][0].clone(), batches[1][1])
+    bad[0][0, 0, 0, 0] = float("nan")
+    got = []
+    for data in ([batches[0], bad, batches[2]], [batches[0], batches[2]]):
+        torch.manual_seed(0)
+        m = nn.Sequential(nn.Conv2d(3, 8, 3, padding=1), nn.ReLU(), nn.Conv2d(8, 3, 1))
+        params = list(m.parameters())
+        rec = get_recipe("standard", epochs=1, batch_size=4, precision="fp32", warmup_epochs=0,
+                         schedule="constant")
+        out = train(m, params[:2], params[2:], data, batches[:1], num_classes=3, recipe=rec,
+                    device=dev, log=lambda *_: None)
+        got.append(([p.detach().clone() for p in m.parameters()], out["history"][0]))
+    (pa, ha), (pb, hb) = got
+    assert ha["nonfinite_steps"] == 1 and hb["nonfinite_steps"] == 0
+    assert ha["train_loss"] == pytest.approx(hb["train_loss"], rel=1e-6)
+    # a failed skip would leave NaN weights; cuDNN algorithm choice (benchmark mode, set by
+    # other tests) allows rounding-level differences between the two runs
+    assert all(torch.isfinite(u).all() for u in pa)
+    assert all(torch.allclose(u, v, rtol=1e-5, atol=1e-6) for u, v in zip(pa, pb))

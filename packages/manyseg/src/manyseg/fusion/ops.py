@@ -167,7 +167,10 @@ class CrossAttentionFusion(nn.Module):
 
     def _tokens(self, x: Tensor) -> Tensor:  # (B, C, H, W) -> (B, heads, HW, C/heads)
         b, c, h, w = x.shape
-        return x.reshape(b, self.heads, c // self.heads, h * w).transpose(-1, -2)
+        # contiguous: SDPA's flash / memory-efficient kernels need a unit last-dim stride, and
+        # otherwise fall back to the math kernel, which builds the full attention matrix
+        # (E026: -50% step time, -77% memory)
+        return x.reshape(b, self.heads, c // self.heads, h * w).transpose(-1, -2).contiguous()
 
     def forward(self, xs: list[Tensor]) -> Tensor:
         b, _, h, w = xs[0].shape

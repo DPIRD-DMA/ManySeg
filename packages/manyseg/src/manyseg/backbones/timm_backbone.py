@@ -363,6 +363,40 @@ class TimmBackbone(nn.Module):
     def stem_conv(self) -> nn.Conv2d:
         return self.model.get_submodule(self._stem_name)
 
+    def _ckpt_target(self) -> nn.Module:
+        target = self.model if hasattr(self.model, "set_grad_checkpointing") else \
+            getattr(self.model, "model", None)  # FeatureGetterNet wraps the timm model
+        if not hasattr(target, "set_grad_checkpointing"):
+            raise NotImplementedError(
+                f"timm backbone {self.name!r} does not support gradient checkpointing")
+        return target
+
+    def set_grad_checkpointing(self, enable: bool = True) -> None:
+        """Recompute the encoder's activations in the backward pass instead of storing them
+        (timm's gradient checkpointing): less training memory for more compute (E026: -22%
+        peak memory for +5% step time on a ResNet-34 U-Net, -61% for +18% on ConvNeXt-T).
+
+        Values are unchanged. In-place activations are switched off while it is on (they would
+        overwrite tensors the checkpoint saved), and BatchNorm running statistics are restored
+        after the recomputation, so they are updated once per step, as without checkpointing.
+        """
+        self._ckpt_target().set_grad_checkpointing(enable)
+        for h in getattr(self, "_ckpt_hooks", ()):
+            h.remove()
+        self._ckpt_hooks = []
+        saved = getattr(self, "_ckpt_inplace", {})
+        if enable:
+            for m in self.model.modules():
+                if isinstance(getattr(m, "inplace", None), bool) and m not in saved:
+                    saved[m], m.inplace = m.inplace, False
+                if isinstance(m, nn.modules.batchnorm._BatchNorm) and m.track_running_stats:
+                    self._ckpt_hooks.append(m.register_forward_pre_hook(_bn_stash))
+        else:
+            for m, inplace in saved.items():
+                m.inplace = inplace
+            saved = {}
+        self._ckpt_inplace = saved
+
     def forward(self, x: Tensor) -> list[Tensor]:
         h, w = x.shape[-2], x.shape[-1]
         if self.fixed_size is not None and (h, w) != self.fixed_size:
@@ -378,6 +412,29 @@ class TimmBackbone(nn.Module):
         if self.neck is not None:
             feats = self.neck(feats, h, w)
         return feats
+
+
+def _in_backward() -> bool:
+    return torch._C._current_graph_task_id() != -1
+
+
+def _bn_stash(m: nn.Module, args) -> None:
+    """A BatchNorm forward inside the backward pass is a checkpoint's recomputation: put its
+    running statistics back when the backward pass ends. (Not in a forward hook: checkpointing
+    stops a recomputation early, inside the forward, once it has every tensor it needs.)"""
+    if not (m.training and _in_backward()) or m.__dict__.get("_ckpt_pending"):
+        return  # the first recomputation in a backward pass saves (shared encoders run twice)
+    bufs = (m.running_mean, m.running_var, m.num_batches_tracked)
+    saved = [t.clone() for t in bufs]
+    m.__dict__["_ckpt_pending"] = True
+
+    def restore():
+        with torch.no_grad():
+            for t, s in zip(bufs, saved):
+                t.copy_(s)
+        m.__dict__["_ckpt_pending"] = False
+
+    torch.autograd.Variable._execution_engine.queue_callback(restore)
 
 
 def create_backbone(name: str, pretrained: bool | str = True, **kwargs) -> TimmBackbone:

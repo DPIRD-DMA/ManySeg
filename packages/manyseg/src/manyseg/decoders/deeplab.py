@@ -5,11 +5,11 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 import torch
-import torch.nn.functional as F
 from torch import Tensor, nn
 
 from ..features import FeatureSpec
 from ..layers import init_decoder_
+from ..utils.spatial import resize_bilinear
 from .base import DECODERS, check_out_stride, pyramid_levels
 
 
@@ -78,5 +78,5 @@ class DeepLabV3PlusDecoder(nn.Module):
     def forward(self, features: list[Tensor]) -> Tensor:
         low = features[self.low]
         x = self.aspp(features[self.high])
-        x = F.interpolate(x, size=low.shape[-2:], mode="bilinear", align_corners=False)
+        x = resize_bilinear(x, low.shape[-2:])
         return self.fuse(torch.cat([x, self.low_proj(low)], dim=1))

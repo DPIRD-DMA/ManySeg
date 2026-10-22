@@ -247,6 +247,21 @@ class DenseModel(nn.Module):
 
         return describe(self, sample, format)
 
+    def set_grad_checkpointing(self, enable: bool = True) -> None:
+        """Gradient checkpointing for every encoder in the model (see
+        :meth:`manyseg.backbones.TimmBackbone.set_grad_checkpointing`): the encoder's
+        activations are recomputed in the backward pass instead of stored. Less training
+        memory for more compute; values and BatchNorm statistics are unchanged."""
+        from ..backbones.timm_backbone import TimmBackbone
+
+        encoders = [m for m in self.modules() if isinstance(m, TimmBackbone)]
+        if not encoders:
+            raise NotImplementedError("set_grad_checkpointing: this model has no timm encoder")
+        for m in encoders:  # all or nothing: check every encoder before changing one
+            m._ckpt_target()
+        for m in encoders:
+            m.set_grad_checkpointing(enable)
+
     @staticmethod
     def _decode(decoder: nn.Module, x: Tensor | None, feats: list[Tensor], valid=None) -> Tensor:
         if getattr(decoder, "wants_valid", False):  # late fusion: per-input unpadded sizes

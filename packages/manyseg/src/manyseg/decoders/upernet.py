@@ -10,6 +10,7 @@ from torch import Tensor, nn
 
 from ..features import FeatureSpec
 from ..layers import ConvNormAct, init_decoder_
+from ..utils.spatial import resize_bilinear
 from .base import DECODERS, check_out_stride, pyramid_levels
 
 
@@ -23,11 +24,8 @@ class PPM(nn.Module):
 
     def forward(self, x: Tensor) -> list[Tensor]:
         size = x.shape[-2:]
-        return [
-            F.interpolate(conv(F.adaptive_avg_pool2d(x, s)), size=size, mode="bilinear",
-                          align_corners=False)
-            for s, conv in zip(self.scales, self.convs)
-        ]
+        return [resize_bilinear(conv(F.adaptive_avg_pool2d(x, s)), size)
+                for s, conv in zip(self.scales, self.convs)]
 
 
 @DECODERS.register("upernet")
@@ -51,10 +49,8 @@ class UPerNetDecoder(nn.Module):
         top = self.bottleneck(torch.cat([cs[-1], *self.ppm(cs[-1])], dim=1))
         lats = [lat(c) for lat, c in zip(self.lateral, cs[:-1])] + [top]
         for i in range(len(lats) - 2, -1, -1):
-            lats[i] = lats[i] + F.interpolate(lats[i + 1], size=lats[i].shape[-2:],
-                                              mode="bilinear", align_corners=False)
+            lats[i] = lats[i] + resize_bilinear(lats[i + 1], lats[i].shape[-2:])
         outs = [conv(lat) for conv, lat in zip(self.fpn, lats[:-1])] + [lats[-1]]
         size = outs[0].shape[-2:]
-        outs = [outs[0]] + [F.interpolate(o, size=size, mode="bilinear", align_corners=False)
-                            for o in outs[1:]]
+        outs = [outs[0]] + [resize_bilinear(o, size) for o in outs[1:]]
         return self.fuse(torch.cat(outs, dim=1))

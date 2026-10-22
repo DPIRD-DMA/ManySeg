@@ -177,5 +177,7 @@ class UNetDecoder(nn.Module):
             size = image.shape[-2:] if self.wants_input and i == last and idx < 0 else None
             x = block(x, features[idx] if idx >= 0 else None, size)
         if self.wants_input:
-            x = self.cross(torch.cat([x, image], dim=1))
+            # the input image is float32 under autocast: concatenated as is, it would make the
+            # whole full-resolution stage float32 (E026)
+            x = self.cross(torch.cat([x, image.to(x.dtype)], dim=1))
         return x

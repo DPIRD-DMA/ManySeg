@@ -72,7 +72,8 @@ def _per_date(v: Tensor | None, b: int, t: int, device, what: str, dtype) -> Ten
 class MeanAggregation(nn.Module):
     def forward(self, f: Tensor, mask: Tensor, dates: Tensor | None = None) -> Tensor:
         m = mask[:, :, None, None, None]  # B T 1 1 1; select (NaN * 0 is NaN), sum in fp32
-        s = torch.where(m, f.float(), torch.zeros((), device=f.device)).sum(1)
+        s = torch.where(m, f, torch.zeros((), device=f.device, dtype=f.dtype)).sum(
+            1, dtype=torch.promote_types(f.dtype, torch.float32))
         return (s / mask.sum(1).clamp(min=1)[:, None, None, None]).to(f.dtype)
 
 

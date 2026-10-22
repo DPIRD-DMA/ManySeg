@@ -26,7 +26,13 @@ def _neighbour_max(lab: Tensor) -> Tensor:
 @torch.no_grad()
 def connected_components(mask: Tensor, check_every: int = 8) -> Tensor:
     """4-connected component labels for a bool ``(B, H, W)`` mask (0 = background). Torch only;
-    labels are not sequential (see :func:`relabel_sequential`)."""
+    labels are not sequential (see :func:`relabel_sequential`).
+
+    Each pixel starts with its own index and takes the largest label among its neighbours
+    until nothing changes: every component ends with its largest pixel index. Pointer
+    jumping (a pixel also takes the label of the pixel its label names, which is in the same
+    component) lets long components converge in far fewer sweeps (E026: 18-44x on long or
+    field-like components) with the same result."""
     b, h, w = mask.shape
     lab = torch.arange(1, h * w + 1, device=mask.device).view(1, h, w).expand(b, h, w)
     lab = torch.where(mask, lab, 0)
@@ -35,6 +41,9 @@ def connected_components(mask: Tensor, check_every: int = 8) -> Tensor:
         prev = lab
         for _ in range(check_every):
             lab = torch.where(mask, torch.maximum(lab, _neighbour_max(lab)), 0)
+            flat = lab.reshape(b, -1)
+            jumped = flat.gather(1, (flat - 1).clamp(min=0)).view(b, h, w)
+            lab = torch.where(mask, torch.maximum(lab, jumped), 0)
         it += check_every
         if torch.equal(lab, prev) or it > h * w:
             return lab

@@ -243,7 +243,11 @@ scripts in a few seconds, the walkthroughs that train briefly in 10–20 s.
   training (frozen running statistics; their weights still train;
   [recipe](docs/api_design.md#small-batches)).
 * **Memory-bound?** `decoder_kwargs={"out_stride": 2}` costs no accuracy for the U-Net and
-  saves 11–18% memory.
+  saves 11–18% memory. `model.set_grad_checkpointing()` recomputes encoder activations in
+  the backward pass: same values, −22% memory for +5% step time on the ResNet-34 U-Net,
+  −61% for +18% on ConvNeXt-T (E026).
+* **Batch-1 inference:** `torch.compile(model, mode="reduce-overhead")` (CUDA graphs, fixed
+  input size) is up to 1.8× faster than the default compile for the PVTv2-b0 presets (E026).
 * **Water and other per-pixel spectral targets:** `decoder_kwargs={"input_cross": True}`
   feeds the raw bands to the last decoder stage. It did not help pet or cloud segmentation.
 * **Mixed precision is safe:** bf16, fp16 and int8 weight-only showed no accuracy loss.

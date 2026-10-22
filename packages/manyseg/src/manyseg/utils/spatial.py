@@ -37,6 +37,14 @@ def pad_to_multiple(x: Tensor, divisor: int, value: float = 0.0) -> Tensor:
     return F.pad(x, (0, pad_w, 0, pad_h), value=value)
 
 
+def resize_bilinear(x: Tensor, size) -> Tensor:
+    """Bilinear resize (``align_corners=False``) that keeps ``x``'s dtype: CUDA autocast runs
+    ``upsample_bilinear2d`` in float32, and concatenating that output would make the whole
+    buffer float32 (E026: -27% UPerNet training memory). The consumer is a conv that casts
+    to bf16 anyway."""
+    return F.interpolate(x, size=size, mode="bilinear", align_corners=False).to(x.dtype)
+
+
 def upsample2x_nearest(x: Tensor, size) -> Tensor:
     """Nearest-neighbour 2x upsampling, cropped to ``size``: ``F.interpolate(scale_factor=2)``
     (the kernel SMP's U-Net uses; its backward is a cheap reduction).

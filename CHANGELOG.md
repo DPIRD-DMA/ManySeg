@@ -91,6 +91,23 @@ First release. Python 3.10–3.14, PyTorch ≥ 2.10, timm ≥ 1.0.20.
   dict-output model with fastai (bf16, one-cycle, EMA; `get_preds(reorder=False)` for dict
   outputs).
 
+### Performance (E026; values unchanged up to rounding)
+
+* bf16 autocast no longer carries float32 activations where CUDA runs an op in float32:
+  fastai_unet and U-Net `input_cross` (the input image), GroupNorm decoders and head layers,
+  UPerNet and DeepLabV3+ (bilinear upsampling). Training memory −20% (fastai_unet), −27%
+  (UPerNet), −19% (GroupNorm U-Net); steps up to 13% faster.
+* SegFormer decoder: the fuse conv runs per level before upsampling (same parameters):
+  −26 to −38% training memory, 10–15% faster.
+* Cross-attention fusion: tokens are contiguous, so SDPA uses its fused kernels: −50% step
+  time, −77% memory.
+* Temporal mean sums bf16 features with a float32 accumulator instead of upcasting them;
+  fastai_unet keeps channels_last through its pixel shuffles; `connected_components` uses
+  pointer jumping (18–44× faster on long or field-like components, same labels).
+* `model.set_grad_checkpointing()`: opt-in encoder gradient checkpointing (timm's), with
+  in-place activations switched off and BatchNorm running statistics updated once per step,
+  as without it. −22% memory for +5% step time (ResNet-34 U-Net), −61% for +18% (ConvNeXt-T).
+
 ### Deployment
 
 * `manyseg.save` / `manyseg.load` (safetensors plus the stored configuration, normalisation,
@@ -145,5 +162,9 @@ First release. Python 3.10–3.14, PyTorch ≥ 2.10, timm ≥ 1.0.20.
   seeded data loading; recipes; JSON run records with provenance.
 * Datasets: Oxford Pet, Sen1Floods11, CloudSEN12+, AI4Boundaries, OAM-TCD, PASTIS, EuroSAT,
   BigEarthNet v2, OSCD, LEVIR-CD, SECOND.
-* Pre-registered experiments E000–E024 with write-ups in `experiments/`, negative results
+* Pre-registered experiments E000–E026 with write-ups in `experiments/`, negative results
   included.
+* Training loop without per-step host syncs on CUDA: fused AdamW, a non-finite loss skips the
+  update on the device (as before, without waiting for the GPU), losses summed on the device,
+  one gradient-scaling kernel; the loader copies the epoch order to the GPU once and normalises
+  in place. 24–26% faster steps for the PVTv2-b0 presets (E026).

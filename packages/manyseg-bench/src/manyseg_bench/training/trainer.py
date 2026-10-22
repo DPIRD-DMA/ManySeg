@@ -73,7 +73,11 @@ def build_optimizer(enc, dec, recipe: Recipe) -> torch.optim.Optimizer:
             if ps:
                 groups.append({"params": ps, "lr": recipe.lr * mult, "base_lr": recipe.lr * mult,
                                "weight_decay": wd, "tag": tag})
-    return torch.optim.AdamW(groups, lr=recipe.lr, betas=recipe.betas, eps=recipe.eps)
+    # fused (one kernel for the whole step) when every parameter is on CUDA: same update up to
+    # rounding, and it can skip a step on a device-side non-finite flag (see train)
+    fused = bool(groups) and all(p.is_cuda for g in groups for p in g["params"])
+    return torch.optim.AdamW(groups, lr=recipe.lr, betas=recipe.betas, eps=recipe.eps,
+                             fused=fused or None)
 
 
 def lr_factor(step: int, total: int, warmup: int, schedule: str) -> float:
@@ -141,6 +145,12 @@ def train(
     total = steps_per_epoch * recipe.epochs
     warmup = int(recipe.warmup_epochs * steps_per_epoch)
     scaler = torch.amp.GradScaler(enabled=recipe.precision == "fp16")
+    # No host sync per step (E026: -24% step time on small models): with one micro-batch per
+    # step and a fused optimiser, a non-finite loss skips the update on the device (the fused
+    # kernel's found_inf, as GradScaler uses), and losses are summed on the device. Otherwise
+    # (accumulation, fp16 scaling, other optimisers) the per-micro-batch check below stays.
+    device_skip = (accum == 1 and not scaler.is_enabled()
+                   and bool(getattr(opt, "defaults", {}).get("fused")))
 
     enc_bn = _encoder_bn(model, enc_params) if recipe.freeze_encoder_bn else []
     history, step = [], 0
@@ -154,6 +164,9 @@ def train(
             m.eval()
         t0 = time.perf_counter()
         loss_sum, nb, nonfinite, n_img = 0.0, 0, 0, 0
+        loss_dev = torch.zeros((), device=device)  # device_skip: summed without a sync
+        nonfinite_dev = torch.zeros((), device=device, dtype=torch.long)
+        skipped_img_dev = torch.zeros((), device=device, dtype=torch.long)
         for i, (x, y) in enumerate(train_loader):
             n_img += _batch_size(x)
             if recipe.channels_last:
@@ -170,7 +183,17 @@ def train(
             with autocast(device, recipe.precision):
                 out = run(x)
             loss = task.loss(out, task.targets(y))
-            if not torch.isfinite(loss):
+            if device_skip:
+                n = _batch_size(x)
+                bad = ~torch.isfinite(loss.detach())
+                scaler.scale(loss * n).backward()
+                backward, group_n = True, n
+                loss_dev += torch.where(bad, 0.0, loss.detach().float()) * n
+                nonfinite_dev += bad.long()
+                skipped_img_dev += bad.long() * n
+                nb += n  # skipped images are subtracted at the end of the epoch
+                opt.found_inf = bad.float()  # the fused step leaves everything as it was
+            elif not torch.isfinite(loss):
                 nonfinite += 1
             else:
                 # Sum of per-image-weighted losses; divided by the group's image count below,
@@ -185,9 +208,9 @@ def train(
             if not backward:  # every micro-batch was non-finite: skip the update
                 step += 1
                 continue
-            for p in model.parameters():
-                if p.grad is not None:
-                    p.grad.div_(group_n)
+            grads = [p.grad for p in model.parameters() if p.grad is not None]
+            if grads:
+                torch._foreach_div_(grads, group_n)
             if recipe.grad_clip:
                 scaler.unscale_(opt)
                 torch.nn.utils.clip_grad_norm_(model.parameters(), recipe.grad_clip)
@@ -196,6 +219,10 @@ def train(
             step += 1
         if device.type == "cuda":
             torch.cuda.synchronize(device)
+        if device_skip:
+            nonfinite += int(nonfinite_dev)
+            loss_sum += float(loss_dev)
+            nb -= int(skipped_img_dev)
         rec = {"epoch": epoch + 1, "train_loss": loss_sum / max(1, nb),
                "nonfinite_steps": nonfinite, "epoch_time_s": time.perf_counter() - t0,
                "train_images": n_img, "encoder_frozen": frozen}
