@@ -107,6 +107,20 @@ CUDA launches are asynchronous. Training on CloudSEN12+ is disk-bound; the lever
 * `pad_to_multiple` zero-pad fast path: −1%, noise.
 * FPN bilinear dtype: no change (its upsampled maps are summed, not concatenated).
 
+## Verification of the applied changes (`run_verify.sh`, `runs/verify.jsonl`)
+The library on branch `perf/e026` (no patches) reproduces the patched numbers: fastai_unet
+R34 8.85 GiB (patched 8.86), SegFormer R34 / PVT 2.62 / 3.35 GiB (2.62 / 3.35), UPerNet 4.24
+(4.24), GroupNorm U-Net 4.08 (4.08), cross-attention 2.22 (2.22), encoder checkpointing via
+`model.set_grad_checkpointing()` 2.78 (2.78).
+
+## Round 2 candidate, negative: timm LayerNorm dtype (`ln_dtype`)
+A dtype scan of whole models under CUDA bf16 autocast found timm `LayerNorm` / `LayerNorm2d`
+outputs in float32, which keeps the residual stream of ConvNeXt, EdgeNeXt, PVTv2, ViT and Swin
+encoders in float32. Casting the norm outputs back changes numerics (bf16 error vs fp32 +22%
+on PVTv2) and buys nothing: peak memory ConvNeXt-T 6.82 → 6.82 GiB, EdgeNeXt-S 4.36 → 4.36,
+ViT-S 4.89 → 4.89, PVTv2-b0 4.11 → 3.98 (−3%, −3% time), 2 pairs each. Those float32 tensors are
+transient; what backward saves is already bf16. Not applied.
+
 ## Not measured
 * Siamese shared-encoder batching changes BatchNorm statistics in training (out of scope:
   accuracy-neutral only); eval-only batching remains a candidate.
