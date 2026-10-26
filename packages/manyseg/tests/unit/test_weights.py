@@ -81,6 +81,7 @@ def test_attribution_is_saved_restored_and_described(monkeypatch, tmp_path):
         "s2": {"in_channels": 13, "pretrained": "ssl4eo_s2_moco"},
         "dem": {"in_channels": 1, "pretrained": False}})
     (rec,) = attribution(m)  # the randomly initialised dem encoder needs none
+    assert m.backbone.encoders["s2"].std == (10000.0,) * 13  # not timm's ImageNet values
     assert rec["module"] == "backbone.encoders.s2" and rec["license"] == "CC BY 4.0"
     assert rec["citation"].startswith("Wang") and rec["source"].startswith("https://")
     path = manyseg.save(m, tmp_path / "m.safetensors", normalize=[],
@@ -93,6 +94,10 @@ def test_attribution_is_saved_restored_and_described(monkeypatch, tmp_path):
     text = loaded.describe()
     assert "resnet18 (weights resnet18.ssl4eo_s2_moco)" in text
     assert "stem: 13 ch, unchanged" in text and "cite: Wang" in text
+    assert rec["normalization"] == {"mean": [0.0] * 13, "std": [10000.0] * 13, "clip": True,
+                                    "units": WEIGHTS["resnet18.ssl4eo_s2_moco"].units}
+    assert ("pretrained on: (x - 0) / 10000; x = Sentinel-2 L1C digital numbers "
+            "(reflectance x 10000), clipped to [0, 1]") in text
     again = manyseg.save(loaded, tmp_path / "again.safetensors", normalize=[],
                          activations={"logits": "softmax"})
     assert manyseg.read_metadata(again)["pretrained_weights"] == [rec]
@@ -124,8 +129,28 @@ def test_attribution_of_timm_and_random_weights():
     m.backbone.pretrained = True  # as if built with timm's ImageNet weights (no download)
     (rec,) = attribution(m)
     assert rec["weights"] == "resnet34.a1_in1k" and rec["provider"] == "timm"
-    assert rec["license"] == "apache-2.0"
+    # older timm (1.0.20) lists no licence for this tag
+    assert rec["license"] == (m.backbone.model.pretrained_cfg.get("license") or "unknown")
     assert rec["source"] == "https://huggingface.co/timm/resnet34.a1_in1k"
+    assert rec["normalization"] == {"mean": [0.485, 0.456, 0.406], "std": [0.229, 0.224, 0.225],
+                                    "units": "RGB in [0, 1]", "clip": False}
+    assert ("pretrained on: (x - (0.485, 0.456, 0.406)) / (0.229, 0.224, 0.225); "
+            "x = RGB in [0, 1]") in m.describe()
+
+
+@pytest.mark.parametrize("backbone, mean, std", [
+    ("vit_small_patch16_224", [0.5] * 3, [0.5] * 3),  # AugReg: not ImageNet statistics
+    ("eva02_small_patch14_224", [0.48145466, 0.4578275, 0.40821073],
+     [0.26862954, 0.26130258, 0.27577711]),  # CLIP statistics
+])
+def test_attribution_records_each_timm_tags_normalization(backbone, mean, std):
+    from manyseg.weights import attribution
+
+    m = create_model(backbone=backbone, pretrained=False, num_classes=2)
+    m.backbone.pretrained = True
+    (rec,) = attribution(m)
+    assert rec["normalization"]["mean"] == pytest.approx(mean)
+    assert rec["normalization"]["std"] == pytest.approx(std)
 
 
 @pytest.mark.network

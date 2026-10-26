@@ -170,7 +170,8 @@ def load_into(model, weights: Weights) -> None:
 
 def attribution(model) -> list[dict]:
     """The pretrained weights each backbone of ``model`` started from: ``[{"module", "weights",
-    "provider", "license", "citation", "source"}]``, one entry per pretrained backbone module
+    "provider", "license", "citation", "source", "normalization"}]``, one entry per pretrained
+    backbone module
     (an encoder shared as one module appears once; ``shared:<input>`` copies, which share
     weights but are separate modules, appear once each).
 
@@ -178,7 +179,17 @@ def attribution(model) -> list[dict]:
     (SSL4EO-S12 CC BY 4.0, SatlasPretrain ODC-BY): cite ``citation`` when you publish or share
     work built on them. ``provider`` is ``"manyseg"`` for the remote-sensing weights here and
     ``"timm"`` for timm's ImageNet checkpoints, with the licence timm lists ("unknown" when it
-    lists none: check the model card at ``source``). :func:`manyseg.save` stores this list and
+    lists none: check the model card at ``source``).
+
+    ``normalization`` (``{"mean", "std", "units", "clip"}``) is the input normalisation the
+    weights were pretrained with: ``(x - mean) / std`` with ``x`` in ``units``, then clipped to
+    [0, 1] where ``clip`` is set. For timm checkpoints it comes from the weights tag's
+    ``pretrained_cfg`` (ImageNet statistics for most; 0.5 / 0.5 for ViT AugReg, SigLIP and
+    others; CLIP statistics for EVA-02) and describes RGB: bands fed through an adapted stem are
+    better standardised with your data's own statistics. Records restored from files saved
+    before ManySeg recorded it have none.
+
+    :func:`manyseg.save` stores this list and
     :func:`manyseg.load` restores each entry on its backbone, which was rebuilt without
     downloading anything, so a reloaded and re-saved model keeps it; a backbone replaced after
     loading reports its own weights."""
@@ -201,15 +212,22 @@ def _backbone_attribution(m) -> dict | None:
     if m.weights is not None:
         w = WEIGHTS[m.weights]
         return {"weights": w.key, "provider": "manyseg", "license": w.license,
-                "citation": w.citation, "source": w.source}
+                "citation": w.citation, "source": w.source,
+                "normalization": {"mean": list(w.mean), "std": list(w.std), "units": w.units,
+                                  "clip": w.clip}}
     cfg = getattr(m.model, "pretrained_cfg", {}) or {}
     tag = cfg.get("tag")
     hub = cfg.get("hf_hub_id")
     papers = cfg.get("paper_ids") or ""
-    return {"weights": f"{cfg.get('architecture', m.name)}.{tag}" if tag else m.name,
-            "provider": "timm", "license": cfg.get("license") or "unknown",
-            "citation": papers if isinstance(papers, str) else ", ".join(papers),
-            "source": f"https://huggingface.co/{hub}" if hub else cfg.get("url", "")}
+    rec = {"weights": f"{cfg.get('architecture', m.name)}.{tag}" if tag else m.name,
+           "provider": "timm", "license": cfg.get("license") or "unknown",
+           "citation": papers if isinstance(papers, str) else ", ".join(papers),
+           "source": f"https://huggingface.co/{hub}" if hub else cfg.get("url", "")}
+    if cfg.get("mean") and cfg.get("std"):  # per weights tag: not always ImageNet's
+        rec["normalization"] = {"mean": [float(v) for v in cfg["mean"]],
+                                "std": [float(v) for v in cfg["std"]],
+                                "units": "RGB in [0, 1]", "clip": False}
+    return rec
 
 
 __all__ = ["WEIGHTS", "Weights", "attribution", "get_weights", "load_into"]

@@ -224,7 +224,7 @@ class TimmBackbone(nn.Module):
 
     # set by manyseg.load: the pretrained weights this backbone started from (see
     # manyseg.weights.attribution), as the rebuilt backbone was not given them
-    restored_attribution: dict[str, str] | None = None
+    restored_attribution: dict | None = None
 
     def __init__(
         self,
@@ -342,8 +342,12 @@ class TimmBackbone(nn.Module):
             self.fixed_size = _probe_fixed_size(name, kwargs, self.input_divisor,
                                                 self._run_adapted, in_channels,
                                                 channel_adapter)
-        self.mean = tuple(cfg.get("mean", (0.485, 0.456, 0.406)))
-        self.std = tuple(cfg.get("std", (0.229, 0.224, 0.225)))
+        # the pretraining normalisation: remote-sensing weights' own, else timm's for the tag
+        if self.weights is not None:
+            self.mean, self.std = w.mean, w.std
+        else:
+            self.mean = tuple(cfg.get("mean", (0.485, 0.456, 0.406)))
+            self.std = tuple(cfg.get("std", (0.229, 0.224, 0.225)))
 
     def _drop_unreturned_blocks(self) -> None:
         """timm's EfficientNet / MobileNetV3 feature models run every block whatever

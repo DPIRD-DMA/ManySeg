@@ -133,7 +133,10 @@ First release. Python 3.10–3.14, PyTorch ≥ 2.10, timm ≥ 1.0.20.
 * Saved models carry the licence and citation of the pretrained weights they started from
   (`pretrained_weights` in the file metadata, `manyseg.weights.attribution(model)`), through
   load and re-save; `describe()` lists them. Fine-tuned weights stay under those licences
-  (SSL4EO-S12 CC BY 4.0, SatlasPretrain ODC-BY, timm's per-checkpoint licences).
+  (SSL4EO-S12 CC BY 4.0, SatlasPretrain ODC-BY, timm's per-checkpoint licences). Each
+  record also gives the weights' pretraining normalisation (`normalization`: mean, std,
+  units, clip), taken from timm's `pretrained_cfg` per weights tag, which is not always
+  ImageNet's (0.5 / 0.5 for ViT AugReg and SigLIP, CLIP's for EVA-02).
 * `model.describe()` shows what was built; `model.describe(sample)` adds shapes and FLOPs.
   An adapted stem says which pretrained filter each input channel starts from (so a mask
   channel given an RGB filter by `repeat` shows), and `manyseg.save` on a wrapper names the

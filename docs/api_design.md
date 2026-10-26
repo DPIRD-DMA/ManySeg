@@ -241,9 +241,19 @@ which require attribution: cite `WEIGHTS[key].citation` (SSL4EO-S12: Wang et al.
 SatlasPretrain: Bastani et al. 2023) in work that uses them. ManySeg's MIT licence does not
 cover them. Fine-tuning does not remove the obligation, so the model carries it:
 `manyseg.weights.attribution(model)` lists the weights each pretrained backbone started from
-(these tags, or timm's ImageNet checkpoints with the licence timm lists) with licence, citation
-and source; `manyseg.save` stores the list in the file (`pretrained_weights`), `manyseg.load`
-restores it so a re-saved model keeps it, and `describe()` prints it.
+(these tags, or timm's ImageNet checkpoints with the licence timm lists) with licence, citation,
+source and pretraining normalisation; `manyseg.save` stores the list in the file
+(`pretrained_weights`), `manyseg.load` restores it so a re-saved model keeps it, and
+`describe()` prints it.
+
+**Pretraining normalisation.** Each record's `normalization` (`{"mean", "std", "units",
+"clip"}`) is what the weights were pretrained on: these tags' `WEIGHTS` values, or for timm
+checkpoints the weights tag's `pretrained_cfg` (RGB in [0, 1]). The timm statistics are not
+always ImageNet's: of the 46 tested backbones' default tags, ViT AugReg
+(`vit_small_patch16_224`, `vit_base_patch16_224`), SigLIP, `tf_efficientnetv2_s` and
+`coatnet_0_rw_224` use 0.5 / 0.5 and EVA-02 uses CLIP's. The model applies none of it. `manyseg.save` does not take it as the default
+`normalize` for timm backbones: with an adapted stem the RGB statistics are not what the bands
+were trained with, so pass the normalisation you used.
 
 > **Evidence (E024; Sen1Floods11, BigEarthNet v2, PASTIS; ResNet-50, full fine-tuning after
 > one frozen epoch):** with each weight fed its own pretraining normalisation (ImageNet: dataset

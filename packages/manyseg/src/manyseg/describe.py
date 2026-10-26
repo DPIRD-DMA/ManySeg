@@ -72,7 +72,7 @@ class ModelGraph:
     summary: list[tuple[str, str]]
     stage_params: dict[str, int]
     # manyseg.weights.attribution: the pretrained weights, their licences and citations
-    pretrained_weights: list[dict[str, str]] = field(default_factory=list)
+    pretrained_weights: list[dict] = field(default_factory=list)
 
     def by_stage(self, stage: str) -> list[Node]:
         return [n for n in self.nodes.values() if n.stage == stage]
@@ -928,7 +928,21 @@ def _to_text(g: ModelGraph) -> str:
                 lines.append(f"      cite: {e['citation']}")
             if e.get("source"):
                 lines.append(f"      source: {e['source']}")
+            if e.get("normalization"):
+                lines.append(f"      pretrained on: {_normalization(e['normalization'])}")
     return "\n".join(lines) + "\n"
+
+
+def _normalization(n: dict) -> str:
+    """``(x - mean) / std`` with the values; one number when every channel shares it."""
+    def vals(v) -> str:
+        v = [f"{float(x):g}" for x in v]
+        return v[0] if len(set(v)) == 1 else "(" + ", ".join(v) + ")"
+
+    out = f"(x - {vals(n['mean'])}) / {vals(n['std'])}"
+    if n.get("units"):
+        out += f"; x = {n['units']}"
+    return out + (", clipped to [0, 1]" if n.get("clip") else "")
 
 
 def _diagram_lines(n: Node) -> list[str]:

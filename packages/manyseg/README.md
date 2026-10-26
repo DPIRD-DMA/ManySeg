@@ -51,8 +51,10 @@ size. Pretrained weights are the default (`pretrained=True`): timm downloads the
 and they are adapted to your band count. Pass `pretrained=False` to skip the download.
 
 The model does not normalise its input: scale or standardise your bands as you would for any
-timm model (the ImageNet weights saw `(x - mean) / std` RGB). With `num_classes=` the output is
-one tensor of raw logits; with `heads=` it is a dict of raw logits keyed by head name.
+timm model. Each pretrained weights saw RGB as `(x - mean) / std` with its own statistics:
+ImageNet's for most, 0.5 / 0.5 for ViT AugReg and SigLIP, CLIP's for EVA-02. `describe()` and
+`manyseg.weights.attribution(model)` show the values. With `num_classes=` the output is one
+tensor of raw logits; with `heads=` it is a dict of raw logits keyed by head name.
 
 ## Model builder
 
