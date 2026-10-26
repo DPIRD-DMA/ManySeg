@@ -1,6 +1,6 @@
 # E028: Oracle decodability of vector representations (roads, footprints) (pre-registered)
 
-Status: **complete** (2026-10-26; CPU only, no model trained; code `f7b46ba`, test run 115 min on 8 processes). **Roads: the graph tensor (R2) has the best ceiling and is the only representation that keeps overpasses, but it is dropped by the pre-registered rule: missed vertices and occlusion break it faster than a mask. Junction (R1) and corner (B1) heatmaps are dropped. Footprints: the same graph tensor (B2) is viable and gives the best polygons up to level 2.**
+Status: **complete** (2026-10-26; CPU only, no model trained; code `f7b46ba`, test run 115 min on 8 processes). **Oracle results (decoding of synthetically corrupted perfect targets, not trained models). Roads: the graph tensor (R2) has the best ceiling and is the only representation that keeps overpasses, but it fails the pre-registered inclusion rule: missed vertices and occlusion break it faster than a mask. Junction (R1) and corner (B1) heatmaps fail too. Footprints: the same graph tensor (B2) passes the viability rule and has the best oracle-decoded polygon metrics through level 2.**
 
 Background: the vector-output proposal (roads and lines as graphs, building footprints as
 polygons, later LoD1/LoD2 buildings) and its Codex review. The review's main point was that the
@@ -116,8 +116,8 @@ the combined levels).
 ## Tuning
 Each decoder has a small grid of parameters: thresholds, spur length, simplify tolerance, merge or
 link radius; at most 24 combinations per decoder. The grid is searched on **innaloo** at each
-level with seeds 0–1, separately for each representation, and the best setting by the primary
-metric is then frozen for the test areas (seeds 0–4). This is the equivalent of calibrating on
+level with seeds 0–1, separately for each representation, and the best setting by the primary metric (footprints: C-IoU × detection F1
+since amendment 2) is then frozen for the test areas (seeds 0–4). This is the equivalent of calibrating on
 validation predictions. The chosen settings are recorded in `runs/`.
 
 ## Metrics
@@ -292,8 +292,8 @@ B2 encoding: 2 of 23474 edge ends found no free sector (0.01%).
 
 Murdoch: 16 road tiles, 14 building tiles; Northam: 16 road tiles, 8 building tiles. Northam's road tiles
 have no grade-separated crossing. Tuned parameters per level are in `runs/best.json`; at level 0 every
-graph decoder chose no gap bridging, at levels 1–2 they chose 25–50 px. Every heatmap decoder chose
-the lowest vertex threshold in its grid (0.2), so the grid edge may have limited R2 and B2.
+graph decoder chose no gap bridging, at levels 1–2 they chose 25–50 px. Both graph-tensor decoders (R2, B2)
+chose the lowest vertex threshold in their grid (0.2), so the grid edge may have limited them.
 
 ![Murdoch road tile 5, tuned decoders, levels 0–2](murdoch_roads_5.png)
 ![Northam building tile (crop), tuned decoders, levels 0–2](northam_buildings_19.png)
@@ -313,14 +313,16 @@ the lowest vertex threshold in its grid (0.2), so the grid edge may have limited
 * **Junction heatmap (R1): no gain.** It matches R0 at levels 0–1 and is worse at 2–3.
 * **Corner heatmap (B1): better shapes, fewer detections.** At level 0 it cuts PoLiS from 0.24 / 0.19 m to
   0.07 / 0.04 m (C-IoU 0.95 / 0.97 vs 0.90 / 0.94), and it beats B0 on C-IoU at level 2, but its
-  detection F1 is lower at levels 1–2 (the rule requires matching it). Dropped.
-* **Footprints, graph tensor (B2): viable, best polygons up to level 2.** C-IoU 0.98 / 0.99 at level 0
-  and 0.72 / 0.75 at level 2 (B0: 0.54 / 0.53), PoLiS two to eight times lower, N-ratio closest to 1,
+  detection F1 is lower at levels 1–2 (−0.07 / −0.12 at level 2, the level where it beats B0 on C-IoU). Rule 2
+  did not say at which levels detection F1 must match; `analyze.py` checked levels 0–2, but B1 fails even
+  at level 2 alone. Dropped.
+* **Footprints, graph tensor (B2): passes the viability rule; best oracle-decoded polygons through level 2.** C-IoU 0.98 / 0.99 at level 0
+  and 0.72 / 0.75 at level 2 (B0: 0.54 / 0.53), PoLiS 1.9–29× lower than B0's (2.0–6.1× lower than B1's), N-ratio closest to 1,
   and detection F1 at least B0's. It fails all-or-nothing: a building comes out with near-exact
   corners or not at all, where B0 degrades the outline (N-ratio 2.1–2.2 at level 2). At level 3 it
   collapses (detection F1 0.01 / 0.03 vs 0.07 / 0.15), outside the rule's levels 0–2.
-* **Unification.** Rule 3 passes: the graph tensor and its decoder work for footprints. They do not
-  work for roads under corruption, so one learned representation for both tasks is not supported. Roads
+* **Unification.** Rule 3 passes for footprints; for roads the same representation fails rule 1 under
+  these corruptions, so the oracle does not support one learned representation for both tasks. Roads
   and footprints keep separate dense encodings, and share the output schema, the geometry utilities
   and, for footprints, the graph-tensor encoder and decoder. This is what the Codex review predicted
   for roads, but not for footprints, where it expected rings to be fragile; tuned gap bridging closes
