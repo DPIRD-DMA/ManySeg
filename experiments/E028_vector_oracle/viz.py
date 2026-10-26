@@ -161,7 +161,8 @@ def main():
     params = dict(DEFAULT)
     if args.params:
         best = json.loads(args.params.read_text())
-        params["_by_level"] = {f"L{lv}": best[str(lv)] for lv in levels}
+        params["_by_level"] = {f"L{lv}": {r: v["params"] for r, v in best[f"L{lv}"].items()}
+                               for lv in levels}
     crop = tuple(float(v) for v in args.crop.split(",")) if args.crop else None
     tile_figure(t, [(f"L{lv}", E.LEVELS[lv]) for lv in levels], params,
                 args.out / f"{args.area}_{args.task}_{t.index}.png", crop)
