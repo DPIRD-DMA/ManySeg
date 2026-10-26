@@ -107,8 +107,7 @@ def run_split(model, arm, ds, gt, params, device, procs, chunk=48, limit=None):
         for x, y in dl:
             with torch.autocast("cuda", dtype=torch.bfloat16):
                 out = model(x)
-            ext = y if arm == "B0" else y["extent"]
-            pr, g = out["extent"][:, 0] > 0, (ext > 0)
+            pr, g = out["extent"][:, 0] > 0, (y > 0)  # y: instance ids (B0 loader) for both arms
             inter += int((pr & g).sum())
             union += int((pr | g).sum())
             for b in range(x.shape[0]):
