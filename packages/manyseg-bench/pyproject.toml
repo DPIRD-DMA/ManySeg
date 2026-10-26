@@ -38,7 +38,8 @@ geo = [
     "safetensors>=0.4",
     "h5py>=3.10",
 ]
-test = ["pytest>=8", "manyseg"]
+vectors = ["scipy>=1.10", "shapely>=2", "networkx>=3"]
+test = ["pytest>=8", "manyseg", "scipy>=1.10", "shapely>=2", "networkx>=3"]
 
 [project.scripts]
 manyseg-bench = "manyseg_bench.cli:main"
