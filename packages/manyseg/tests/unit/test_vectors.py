@@ -87,3 +87,51 @@ def test_to_geojson_transform():
     assert fc["features"][0]["geometry"]["type"] == "Polygon"
     with pytest.raises(ValueError):
         to_geojson([Polygon([(0, 0), (1, 0), (1, 1)])], properties=[])
+
+
+def buildings():
+    return [box(100, 100, 200, 160), box(300, 100, 380, 220), box(200, 160, 260, 200),
+            Polygon([(500, 500), (600, 500), (600, 560), (560, 560), (560, 620), (500, 620)]),
+            box(980, 300, 1024, 380)]  # clipped by the image border
+
+
+def test_graph_tensor_round_trip():
+    from manyseg.vectors import encode_graph_tensor, polygons_from_tensor, vertex_graph
+
+    polys = buildings()
+    vg = vertex_graph(polys, border=(1024, 1024))
+    t = encode_graph_tensor(vg, (1024, 1024))
+    assert t["edge"].shape == (6, 1024, 1024) and t["vector"].shape == (6, 2, 1024, 1024)
+    assert t["support"].sum() > 0 and t["vertex"].max() > 0.8
+    extent = np.zeros((1024, 1024), np.float32)
+    for p in polys:
+        x0, y0, x1, y1 = (int(v) for v in p.bounds)
+        extent[y0:y1, x0:x1] = 1  # the L-shape's bounding box is enough for face selection
+    out = polygons_from_tensor(t["vertex"], t["edge"], t["vector"], extent, gap=0, link_radius=4,
+                               simplify=0.5)
+    assert len(out) == len(polys)
+    for p in polys:
+        best = max(out, key=lambda q: p.intersection(q).area / p.union(q).area)
+        assert p.intersection(best).area / p.union(best).area > 0.98
+        assert len(best.exterior.coords) == len(p.exterior.coords)
+
+
+def test_graph_tensor_matches_e028_encoder():
+    """The library encoder gives E028's targets (whose decoding the oracle measured)."""
+    import importlib.util
+    import pathlib
+
+    path = pathlib.Path(__file__).parents[4] / "experiments" / "E028_vector_oracle" / "e028.py"
+    if not path.exists():
+        pytest.skip("E028 code not in this checkout")
+    spec = importlib.util.spec_from_file_location("e028", path)
+    e028 = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(e028)
+    from manyseg.vectors import encode_graph_tensor, vertex_graph
+
+    vg = vertex_graph(buildings(), border=(1024, 1024))
+    ours = encode_graph_tensor(vg, (1024, 1024))
+    theirs = e028.graph_tensor(e028.VertexGraph(vg.xy, vg.edges))
+    np.testing.assert_allclose(ours["vertex"], theirs["vertex"], atol=1e-5)
+    np.testing.assert_array_equal(ours["edge"], theirs["edge"])
+    np.testing.assert_allclose(ours["vector"], theirs["vec"], atol=1e-4)
