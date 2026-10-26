@@ -96,6 +96,16 @@ First release. Python 3.10–3.14, PyTorch ≥ 2.10, timm ≥ 1.0.20.
   Accelerate (`12_accelerate.py`) and TorchGeo (`13_torchgeo.py`: its segmentation task with
   `configure_models` swapped for a ManySeg model, keeping its losses, metrics and freezing).
 
+
+### Vector outputs (`manyseg.vectors`, `manyseg[vectors]`)
+
+* `graph_from_mask` (line probability → `VectorGraph`: skeleton, junction merging, spur pruning,
+  end bridging, simplification), `polygons_from_labels` (instance labels → exact pixel-edge
+  polygons with holes), `to_geojson` (with an affine geotransform). Experimental graph-tensor
+  polygon heads (`graph_tensor_heads`, `encode_graph_tensor`, `polygons_from_tensor`), pending
+  E030.
+* `manyseg-bench`: `evaluation.vectors` with APLS, GEO, junction F1, crossing scores and polygon
+  metrics (C-IoU, detection F1, PoLiS, N-ratio).
 ### Performance (E026; values unchanged up to rounding)
 
 * bf16 autocast no longer carries float32 activations where CUDA runs an op in float32:

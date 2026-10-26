@@ -780,6 +780,38 @@ over-/under-segmentation, point F1, count MAE) live in `manyseg-bench`, except
 `manyseg.points.density_loss`
 (`manyseg_bench.losses`, `manyseg_bench.evaluation.objects`, `manyseg_bench.tasks`).
 
+### Vector outputs (line graphs, polygons)
+
+> **Evidence:** E028 (oracle: perfect OSM roads and footprints rasterized into each candidate set
+> of targets, corrupted, decoded, scored). Roads: a road mask → skeleton is the baseline to beat.
+> A Sat2Graph-style graph tensor decodes perfect targets best and is the only one that keeps
+> overpasses, but missed vertices and occlusion break it faster than a mask, so it is not offered
+> for roads; a junction heatmap adds nothing. Footprints: the same graph tensor → faces gave the
+> best oracle polygons through moderate corruption (C-IoU 0.72–0.75 vs 0.53 for mask contours) and
+> fails all-or-nothing; it is **experimental** until the trained comparison (E030) decides.
+
+Decoding runs outside the exported model. Coordinates are `(x, y)` in GIS raster convention
+(pixel corners at integers), unlike `manyseg.points` (`(y, x)`, centres at integers), so a
+geotransform maps them directly (`to_geojson(..., transform=)`). Needs `manyseg[vectors]`.
+
+```python
+from manyseg.vectors import graph_from_mask, polygons_from_labels, to_geojson
+
+# Roads, tracks, fences: one line-probability head
+g = graph_from_mask(torch.sigmoid(out["roads"])[0, 0], threshold=0.5, gap=25)  # VectorGraph
+fc = to_geojson(g, transform=geotransform)        # LineStrings, world coordinates
+
+# Footprints, fields: instance heads -> exact pixel-edge polygons
+labels = instances_from_outputs(out["extent"], out["boundary"], out["distance"], logits=True)[0]
+polys = polygons_from_labels(labels, simplify=1.0)   # shapely Polygons, holes kept
+
+# Experimental: graph-tensor polygon heads (E028; E030 pending)
+from manyseg.vectors import graph_tensor_heads, polygons_from_tensor
+```
+
+Metrics (APLS, GEO precision / recall, junction F1, grade-separated crossings, C-IoU, PoLiS,
+N-ratio) are in `manyseg_bench.evaluation.vectors`.
+
 > **Evidence (E009, Sen1Floods11, leave-events-out):** FiLM beat metadata-as-channels (+1.3
 > water IoU, 2.9 SE, all folds); FiLM vs no metadata was +0.9 but under the 2 SE bar. Lat/lon added
 > nothing on held-out events. **E013 (CloudSEN12+, unseen locations):** FiLM with lat/lon, day of
