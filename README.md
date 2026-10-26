@@ -125,9 +125,13 @@ A pixel head is one 3×3 conv, as in SMP. For a wider one, give it hidden layers
 objects. Any head can also get its own decoder (`"decoder": "unet"`), or be your own class
 registered with `manyseg.heads.HEADS.register("name")`.
 
-**Training with fastai** (or anything else that wants one tensor): a loss and metrics can
-read the dict (`out["landcover"]`), or `manyseg.utils.concat_heads(model, ["landcover",
-"height"])` returns one concatenated tensor. See [`examples/09_fastai.py`](examples/09_fastai.py).
+**Training.** A model is a plain `nn.Module`, so any trainer works. There are examples for
+[fastai](examples/09_fastai.py), a [plain PyTorch loop](examples/10_pytorch.py),
+[Lightning](examples/11_lightning.py), [Accelerate](examples/12_accelerate.py) and
+[TorchGeo](examples/13_torchgeo.py) (its segmentation task with a ManySeg model), all tested
+in CI. With several heads, a loss and metrics read the dict (`out["landcover"]`), or
+`manyseg.utils.concat_heads(model, ["landcover", "height"])` returns one concatenated tensor
+for code that wants one.
 A model with metadata inputs takes a dict, so a loop that passes one tensor needs a small
 wrapper of your own that builds it. Save the model inside, not the wrapper
 (`manyseg.save(wrapper.model, ...)`), and wrap `manyseg.load(path)` again after loading.

@@ -91,6 +91,10 @@ First release. Python 3.10–3.14, PyTorch ≥ 2.10, timm ≥ 1.0.20.
   expect one tensor, with each head's channel slice; `examples/09_fastai.py` trains a
   dict-output model with fastai (bf16, one-cycle, EMA; `get_preds(reorder=False)` for dict
   outputs).
+* **Training frameworks:** examples for a plain PyTorch loop (`10_pytorch.py`), Lightning
+  (`11_lightning.py`: a two-head model, checkpoints reloaded with `load_from_checkpoint`),
+  Accelerate (`12_accelerate.py`) and TorchGeo (`13_torchgeo.py`: its segmentation task with
+  `configure_models` swapped for a ManySeg model, keeping its losses, metrics and freezing).
 
 ### Performance (E026; values unchanged up to rounding)
 
@@ -166,6 +170,10 @@ First release. Python 3.10–3.14, PyTorch ≥ 2.10, timm ≥ 1.0.20.
 * A random-configuration fuzzer (`packages/manyseg/tests/fuzz`) checks thousands of
   `create_model` configurations on CPU and CUDA (bf16, `torch.compile`); about 25 bugs it
   found are regression tests.
+* Training-framework integration tests (`tests/integration/test_trainers.py`): fastai,
+  Lightning (fp32 and bf16-mixed), Accelerate and TorchGeo fit on CPU, with checkpoint and
+  `manyseg.save` round trips. CI's slow job installs the frameworks and sets
+  `MANYSEG_REQUIRE_TRAINERS=1`, so a missing one fails rather than skips.
 
 ### Benchmark (`manyseg-bench`)
 

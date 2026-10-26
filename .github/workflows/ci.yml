@@ -52,15 +52,19 @@ jobs:
         run: uv run --no-sync pytest packages/manyseg-bench -n 2 -q
 
   slow:
-    name: slow (compile / export / ONNX)
+    name: slow (compile / export / ONNX / training frameworks)
     runs-on: ubuntu-latest
     if: github.event_name != 'pull_request'
+    env:
+      # the trainer integration tests and examples fail, not skip, when a framework is missing
+      MANYSEG_REQUIRE_TRAINERS: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
       - run: |
           uv venv --python 3.12
-          uv pip install --torch-backend cpu -e "packages/manyseg[test]"
+          uv pip install --torch-backend cpu -e "packages/manyseg[test]" \
+            fastai lightning accelerate torchgeo
       - run: uv run --no-sync pytest packages/manyseg -m slow -n 2 -q
 
   lint:

@@ -20,6 +20,9 @@ dev = [
     "manyseg[test]",
     "manyseg-bench[smp,fastai,geo,test]",
     "ruff>=0.6",
+    "lightning>=2.4",
+    "accelerate>=1.0",
+    "torchgeo>=0.9 ; python_full_version >= '3.12'",
 ]
 
 [tool.ruff]

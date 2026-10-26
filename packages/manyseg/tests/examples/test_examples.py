@@ -42,3 +42,6 @@ def test_example_runs(script, tmp_path):
     r = subprocess.run([sys.executable, str(script)], cwd=tmp_path, env=env,
                        capture_output=True, text=True, timeout=300)
     assert r.returncode == 0, f"{script.name} failed:\n{r.stdout[-2000:]}\n{r.stderr[-4000:]}"
+    # CI installs the training frameworks: there, an example skipping one is a broken install
+    if os.environ.get("MANYSEG_REQUIRE_TRAINERS"):
+        assert "is not installed" not in r.stdout, f"{script.name} skipped:\n{r.stdout[-500:]}"

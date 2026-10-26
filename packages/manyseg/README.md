@@ -89,7 +89,10 @@ model = create_model(**preset("balanced"), in_channels=4, num_classes=2)
 | `accurate` | PVTv2-b0 + U-Net | 1.5× | matches or beats the default |
 
 Relative to the default ResNet-34 U-Net, on an RTX 4090 with bf16 + `torch.compile`; accuracy
-on two datasets. Validate on your own data.
+on two datasets. Validate on your own data. On CPU the speed-up disappears: with fp32, one
+1024² tile and 16 threads, the presets ran at 0.48–0.60 s compiled against the default's 0.58 s
+(`PRESETS[name].measured["cpu_s"]`), although the default has 2–6× their FLOPs. For CPU
+inference, time your candidates on the target machine, eager and compiled separately.
 
 **Several inputs, possibly at different resolutions**, e.g. optical + radar:
 
@@ -123,9 +126,13 @@ A pixel head is one 3×3 conv, as in SMP. For a wider one, give it hidden layers
 objects. Any head can also get its own decoder (`"decoder": "unet"`), or be your own class
 registered with `manyseg.heads.HEADS.register("name")`.
 
-**Training with fastai** (or anything else that wants one tensor): a loss and metrics can
-read the dict (`out["landcover"]`), or `manyseg.utils.concat_heads(model, ["landcover",
-"height"])` returns one concatenated tensor. See [`examples/09_fastai.py`](https://github.com/DPIRD-DMA/ManySeg/blob/main/examples/09_fastai.py).
+**Training.** A model is a plain `nn.Module`, so any trainer works. There are examples for
+[fastai](https://github.com/DPIRD-DMA/ManySeg/blob/main/examples/09_fastai.py), a [plain PyTorch loop](https://github.com/DPIRD-DMA/ManySeg/blob/main/examples/10_pytorch.py),
+[Lightning](https://github.com/DPIRD-DMA/ManySeg/blob/main/examples/11_lightning.py), [Accelerate](https://github.com/DPIRD-DMA/ManySeg/blob/main/examples/12_accelerate.py) and
+[TorchGeo](https://github.com/DPIRD-DMA/ManySeg/blob/main/examples/13_torchgeo.py) (its segmentation task with a ManySeg model), all tested
+in CI. With several heads, a loss and metrics read the dict (`out["landcover"]`), or
+`manyseg.utils.concat_heads(model, ["landcover", "height"])` returns one concatenated tensor
+for code that wants one.
 A model with metadata inputs takes a dict, so a loop that passes one tensor needs a small
 wrapper of your own that builds it. Save the model inside, not the wrapper
 (`manyseg.save(wrapper.model, ...)`), and wrap `manyseg.load(path)` again after loading.
