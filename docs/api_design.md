@@ -77,7 +77,7 @@ are keyword sets for `create_model` and are opt-in; the defaults above keep SMP 
 from manyseg.presets import PRESETS, preset
 
 model = create_model(**preset("balanced"), in_channels=4, num_classes=3)
-PRESETS["balanced"].measured   # latency, GFLOPs, params, val mIoU per dataset
+PRESETS["balanced"].measured   # GPU and CPU latency, GFLOPs, params, val mIoU per dataset
 ```
 
 | preset | config | 4090 bf16 b8 512² | Pet val | Sen1Floods11 val |
@@ -88,9 +88,14 @@ PRESETS["balanced"].measured   # latency, GFLOPs, params, val mIoU per dataset
 | `accurate` | PVTv2-b0 + U-Net (256…16) | 7.3 ms | 0.827 | 0.901 |
 | (default) | ResNet-34 + U-Net (256…16) | 10.9 ms | 0.823 | 0.890 |
 
-Two datasets and one GPU; validate on your own data. On CPU (fp32, contended) every preset was
-at least as fast as the default, by a smaller margin; see the E018 write-up. The ResNet-34 default stays because it is
-the familiar SMP baseline, not because it is on the front.
+Two datasets and one GPU; validate on your own data. On CPU the GPU ordering does not carry
+over. With fp32, one 3×1024² tile, batch 1 and 16 threads (Ryzen 9 5950X, light background
+load), the presets took 0.58–0.84 s eager and 0.48–0.60 s compiled, against 0.62 s and 0.58 s
+for the default (`measured["cpu_s"]`). In OmniCloudMask's architecture screen
+([#2](https://github.com/DPIRD-DMA/ManySeg/issues/2)), PVTv2 encoders were slow on CPU for
+their FLOPs, ResNet-34 and EdgeNeXt U-Nets were fast, and compiling changed the ranking, so
+time CPU candidates eager and compiled on the target machine. The ResNet-34 default stays
+because it is the familiar SMP baseline, not because it is on the front.
 
 ### Multiple outputs
 
@@ -543,6 +548,22 @@ at `out_stride=2`: it is the step from stride 4 to 2. See the `fastai_unet` modu
 `fpn`, `deeplabv3plus`, `upernet` and `segformer` have a fixed stride (4 for usual encoders).
 They accept `out_stride` only if it equals that stride; anything else is a `ValueError`.
 
+**Choosing a decoder.** Start with `unet`, then try `segformer` (cheaper) and `upernet`
+(larger context, more compute) on your own task: their ranking changed between datasets.
+
+> **Evidence (E003, Oxford Pet, ResNet-34, 3 seeds):** `upernet` tied `unet`; `segformer`, `fpn`
+> and `deeplabv3plus` were 0.3–1.0 mIoU points behind.
+>
+> **External data point (OmniCloudMask training on CloudSEN12+, not a pre-registered ManySeg
+> experiment; [#4](https://github.com/DPIRD-DMA/ManySeg/issues/4)):** 4 decoders × 5 small
+> backbones (EdgeNeXt, ConvNeXtV2-femto, EfficientViT-B1, PVTv2-b0), 3 repeats, 20 epochs.
+> `upernet` led on almost every backbone (mean dice 0.840 vs 0.836 for `unet`), mostly on cloud
+> shadow, at about 1.5–3× the GPU cost. `segformer` matched `unet` at lower cost, including on
+> thin cloud, and `unetplusplus` added nothing. `fpn` and `deeplabv3plus` were about 0.007
+> behind, weakest on shadow. In full-length training (35 epochs, 2 seeds, independent test
+> sets), a pair of SegFormer models beat a pair of U-Nets at about 0.8× the GPU time, and
+> stride-4 logits did no harm at 20 m input.
+
 **`input_cross`** (`unet` only: `decoder_kwargs={"input_cross": True}`, default off). It adds
 fastai's full-resolution stage to the SMP-style U-Net: the raw input image is concatenated after
 the last block, followed by fastai's residual block (about +7k parameters). It requires
@@ -909,6 +930,19 @@ Recommended for inference: `torch.autocast("cuda", torch.bfloat16)` +
 `torch.compile(model, dynamic=True)` (one graph across input sizes; see the spatial policy).
 At batch 1 in eager mode, fp32 can beat bf16 because cast overhead dominates small decoders;
 compiling removes that. For training, use bf16 autocast; compile is optional.
+
+**Training with variable input sizes** (random rescaling or crops, so the batch shape changes
+every step). PyTorch's CUDA caching allocator keeps blocks for each size it has seen, so the
+memory it reserves (what `nvidia-smi` shows) can grow well past the peak the model allocates,
+and allocations then fail and retry once the GPU fills. On a shared GPU the cache also blocks
+other jobs. Set `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` before CUDA initialises,
+compare `torch.cuda.max_memory_reserved()` with `max_memory_allocated()`, and compile with
+`dynamic=True` so new sizes do not each trigger a recompile.
+
+> **External data point (OmniCloudMask training, ConvNeXtV2-femto U-Net, batch 40, bf16, inputs
+> 36–565 px; [#3](https://github.com/DPIRD-DMA/ManySeg/issues/3)):** peak allocated memory was
+> 11.9 GiB while `nvidia-smi` showed 21 GB reserved. Allocator OOM-retry warnings appeared in
+> 12 of 12 runs without `expandable_segments` and in 0 of 69 (shorter) runs with it.
 
 ## Quantisation
 

@@ -135,3 +135,13 @@ def test_decoder_kwargs_unused_by_explicit_per_input_decoders():
                      decoder_kwargs={"out_stride": 2}, heads={
                          "lc": {"type": "segmentation", "out_channels": 3, "input": "a",
                                 "decoder": "fpn"}})
+
+
+def test_backbone_kwarg_the_architecture_lacks_names_the_backbone():
+    # efficientvit has no stochastic depth: timm's bare TypeError named only the class (#6)
+    with pytest.raises(TypeError, match=r"efficientvit_b0.*drop_path_rate") as e:
+        create_model(backbone="efficientvit_b0", pretrained=False, num_classes=2,
+                     backbone_kwargs={"drop_path_rate": 0.1})
+    assert isinstance(e.value.__cause__, TypeError)
+    create_model(backbone="convnextv2_atto", pretrained=False, num_classes=2,
+                 backbone_kwargs={"drop_path_rate": 0.1})

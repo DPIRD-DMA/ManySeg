@@ -196,8 +196,10 @@ def create_model(
             per input instead).
         channel_adapter: How the RGB stem is adapted to ``in_channels``.
         out_indices: Encoder levels to return (timm ``out_indices``).
-        backbone_kwargs: Passed to ``timm.create_model``; also takes ``rgb_indices`` (input
-            channels carrying R, G, B for the ``rgb_plus_*`` / ``projection`` adapters).
+        backbone_kwargs: Passed to ``timm.create_model``, so the keywords depend on the
+            architecture (``drop_path_rate``, for one, exists only where timm implements
+            stochastic depth); also takes ``rgb_indices`` (input channels carrying R, G, B for
+            the ``rgb_plus_*`` / ``projection`` adapters).
         decoder: A decoder name, a decoder class or callable, or one dict
             ``{"type": name, **options}``.
         decoder_kwargs: Options for the decoder (not together with the same keys in a dict

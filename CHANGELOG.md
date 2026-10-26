@@ -40,7 +40,8 @@ First release. Python 3.10–3.14, PyTorch ≥ 2.10, timm ≥ 1.0.20.
   MoCo (ResNet-18/50, ViT-S/16) and DINO (ResNet-50, ViT-S/16), SSL4EO-S12 Sentinel-1 MoCo
   (ResNet-50) and SatlasPretrain Sentinel-2 (ResNet-50/152). SSL4EO beat ImageNet weights on three Sentinel-2
   datasets with a ResNet-50 (E024); cite the authors (`WEIGHTS[key].citation`).
-* **Presets** (`manyseg.presets`): four measured speed / accuracy configurations.
+* **Presets** (`manyseg.presets`): four measured speed / accuracy configurations, with GPU
+  and CPU (eager and compiled) latency; on CPU they run at about the default's speed.
 * **Features and embeddings:** `features()`, `embed()`, an exportable `embedder()`;
   `select_heads()` for deployment.
 * Every parameter gets a gradient (DDP needs no `find_unused_parameters`): modules for

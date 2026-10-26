@@ -148,6 +148,10 @@ forecast before submission.
 * Important comparisons use at least 3 seeds and report mean ± standard deviation.
 * A difference smaller than the seed standard deviation is reported as *no detectable
   difference*.
+* Short screens (fewer epochs, a data subset) may rule options out, but a claim that a decoder
+  or recipe change helps needs confirming at full training length. In OmniCloudMask training
+  ([#4](https://github.com/DPIRD-DMA/ManySeg/issues/4)), gradient clip 1.0 gained +0.003 dice
+  over 0.1 in a 20-epoch screen and was neutral to slightly worse over 3 full-length seeds.
 * Accuracy is compared against FLOPs, latency and parameters as Pareto fronts
   (`reporting.pareto_front`), not as one aggregate score.
 

@@ -8,6 +8,10 @@ Numbers (``Preset.measured``) are from ``experiments/E018_pareto_presets``: val 
 of 3 seeds on Oxford-IIIT Pet and Sen1Floods11 with the bench ``fastai_like`` recipe; latency is
 the compiled bf16 forward of a batch of 8 at 512x512 with 15 input channels on one (shared) RTX
 4090. On the same scale the default ResNet-34 U-Net is 10.9 ms, 0.8231 Pet, 0.8901 Sen1Floods11.
+``cpu_s`` is the median CPU forward in seconds, eager and ``torch.compile``: fp32, batch 1, one
+3x1024x1024 tile, 4 classes, 16 threads on a Ryzen 9 5950X under light background load (spread
+up to ~1.5x). The default is 0.62 s eager, 0.58 s compiled: on CPU the presets are
+about as fast as the default, so the GPU ordering does not carry over.
 Between presets, accuracy differences under ~0.3 mIoU are within seed noise; they are ordered
 by latency.
 """
@@ -30,25 +34,29 @@ PRESETS: dict[str, Preset] = {
     "fast": Preset(
         {"backbone": "pvt_v2_b0.in1k", "decoder": "segformer"},
         "PVT-v2-B0 + SegFormer head: lowest GPU latency.",
-        {"latency_ms": 4.5, "gflops": 17.5, "params_m": 3.8,
+        {"cpu_s": {"eager": 0.62, "compiled": 0.54},
+         "latency_ms": 4.5, "gflops": 17.5, "params_m": 3.8,
          "val_miou": {"oxford_pet": 0.8197, "sen1floods11": 0.9012}}),
     "compact": Preset(
         {"backbone": "pvt_v2_b0.in1k", "decoder": "unet",
          "decoder_kwargs": {"channels": [64, 32, 16, 8, 8]}},
         "PVT-v2-B0 + quarter-width U-Net: fewest FLOPs of the front.",
-        {"latency_ms": 4.9, "gflops": 10.4, "params_m": 3.8,
+        {"cpu_s": {"eager": 0.58, "compiled": 0.48},
+         "latency_ms": 4.9, "gflops": 10.4, "params_m": 3.8,
          "val_miou": {"oxford_pet": 0.8229, "sen1floods11": 0.9009}}),
     "balanced": Preset(
         {"backbone": "pvt_v2_b0.in1k", "decoder": "unet",
          "decoder_kwargs": {"channels": [128, 64, 32, 16, 8]}},
         "PVT-v2-B0 + half-width U-Net: about 2x faster than the default ResNet-34 U-Net and "
         "more accurate on both E018 datasets.",
-        {"latency_ms": 5.3, "gflops": 13.8, "params_m": 4.2,
+        {"cpu_s": {"eager": 0.61, "compiled": 0.53},
+         "latency_ms": 5.3, "gflops": 13.8, "params_m": 4.2,
          "val_miou": {"oxford_pet": 0.8254, "sen1floods11": 0.9024}}),
     "accurate": Preset(
         {"backbone": "pvt_v2_b0.in1k", "decoder": "unet"},
         "PVT-v2-B0 + full-width U-Net: best on Pet; on Sen1Floods11 tied with 'balanced'.",
-        {"latency_ms": 7.3, "gflops": 27.2, "params_m": 5.7,
+        {"cpu_s": {"eager": 0.84, "compiled": 0.6},
+         "latency_ms": 7.3, "gflops": 27.2, "params_m": 5.7,
          "val_miou": {"oxford_pet": 0.8268, "sen1floods11": 0.9015}}),
 }
 

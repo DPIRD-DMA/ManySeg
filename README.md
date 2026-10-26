@@ -88,7 +88,10 @@ model = create_model(**preset("balanced"), in_channels=4, num_classes=2)
 | `accurate` | PVTv2-b0 + U-Net | 1.5× | matches or beats the default |
 
 Relative to the default ResNet-34 U-Net, on an RTX 4090 with bf16 + `torch.compile`; accuracy
-on two datasets. Validate on your own data.
+on two datasets. Validate on your own data. On CPU the speed-up disappears: with fp32, one
+1024² tile and 16 threads, the presets ran at 0.48–0.60 s compiled against the default's 0.58 s
+(`PRESETS[name].measured["cpu_s"]`), although the default has 2–6× their FLOPs. For CPU
+inference, time your candidates on the target machine, eager and compiled separately.
 
 **Several inputs, possibly at different resolutions**, e.g. optical + radar:
 

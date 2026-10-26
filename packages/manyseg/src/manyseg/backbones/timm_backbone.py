@@ -23,6 +23,19 @@ def _timm_create(name: str, pretrained: bool = False, **kwargs) -> nn.Module:
     return timm.create_model(name, pretrained=pretrained, **kwargs)
 
 
+def _create_explained(name: str, timm_kwargs: dict, pretrained: bool = False,
+                      **kwargs) -> nn.Module:
+    # timm's error for a keyword the architecture lacks names only the class
+    # ("EfficientVit.__init__() got an unexpected keyword argument ..."), not the backbone.
+    try:
+        return _timm_create(name, pretrained=pretrained, **kwargs)
+    except TypeError as e:
+        if not timm_kwargs:
+            raise
+        raise TypeError(f"timm backbone {name!r} rejected backbone_kwargs {timm_kwargs!r} "
+                        f"(passed to timm.create_model): {e}") from e
+
+
 def _check_name(name: str) -> None:
     arch = name.split(".", 1)[0]
     if arch in timm.list_models():
@@ -273,12 +286,12 @@ class TimmBackbone(nn.Module):
                 raise ValueError(f"{w.key} expects {w.in_channels} bands "
                                  f"({', '.join(w.bands)}), in that order; got "
                                  f"in_channels={in_channels}")
-            self.model = _timm_create(name, pretrained=False,
-                                      **{**kwargs, "in_chans": w.in_channels})
+            self.model = _create_explained(name, timm_kwargs, pretrained=False,
+                                           **{**kwargs, "in_chans": w.in_channels})
             load_into(self.model, w)
             self.weights = w.key
         else:
-            self.model = _timm_create(name, pretrained=pretrained, **kwargs)
+            self.model = _create_explained(name, timm_kwargs, pretrained=pretrained, **kwargs)
         self._drop_unreturned_blocks()
         self.name = name
         self.pretrained = bool(pretrained)  # recorded for describe(); weights are already set
