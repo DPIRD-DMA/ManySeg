@@ -51,6 +51,7 @@ packages = ["src/manyseg"]
 testpaths = ["tests"]
 markers = [
     "slow: slow tests (compile, export, many backbones)",
+    "heavy: slow tests too long for every push (minutes on CI); CI runs them nightly",
     "cuda: requires a CUDA device",
     "mps: requires an MPS device",
     "network: downloads pretrained weights",

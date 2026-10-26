@@ -91,9 +91,7 @@ def test_onnx_export_dynamic_matches_onnxruntime(tmp_path):
 
 
 @pytest.mark.parametrize("backbone", [
-    "vit_tiny_patch16_224", "eva02_tiny_patch14_224",
-    # Swin's dynamic fullgraph compile fails on torch 2.9 (any timm); passes from 2.10.
-    "swin_tiny_patch4_window7_224", "pvt_v2_b0"])
+    "vit_tiny_patch16_224", "eva02_tiny_patch14_224", "pvt_v2_b0"])
 def test_transformer_compile_fullgraph_dynamic(backbone):
     model = model_(backbone)
     compiled = torch.compile(model, fullgraph=True, dynamic=True, backend="aot_eager")
@@ -101,6 +99,23 @@ def test_transformer_compile_fullgraph_dynamic(backbone):
         for hw in [(64, 96), (97, 131)]:
             x = torch.randn(1, 3, *hw)
             torch.testing.assert_close(compiled(x), model(x), atol=1e-3, rtol=1e-3)
+
+
+@pytest.mark.heavy
+def test_swin_compile_fullgraph_dynamic():
+    """Swin's dynamic fullgraph compile fails on torch 2.9 (any timm) and passes from 2.10.
+
+    Heavy (nightly): swin_tiny took 27 min on CI's 2-core runner. One block per stage keeps
+    every Swin op (patch embed, shifted-window masks, patch merging) at a third of the cost.
+    One size only: Swin specialises on the padded H x W, so a second size is a full recompile.
+    """
+    model = model_("swin_tiny_patch4_window7_224",
+                   backbone_kwargs={"depths": (1, 1, 1, 1), "embed_dim": 32,
+                                    "num_heads": (1, 2, 4, 8)})
+    compiled = torch.compile(model, fullgraph=True, dynamic=True, backend="aot_eager")
+    x = torch.randn(1, 3, 97, 131)
+    with torch.no_grad():
+        torch.testing.assert_close(compiled(x), model(x), atol=1e-3, rtol=1e-3)
 
 
 @pytest.mark.parametrize("backbone", ["vit_tiny_patch16_224", "eva02_tiny_patch14_224",
@@ -116,9 +131,11 @@ def test_transformer_export_dynamic(backbone):
         torch.testing.assert_close(ep.module()(x), model(x), atol=1e-4, rtol=1e-4)
 
 
+@pytest.mark.heavy
 def test_swin_dynamic_export_known_limitation():
     """timm Swin with dynamic H/W hangs in torch.export (see architecture_review §2.4).
-    Probe in a subprocess with a timeout; if it starts working, this test tells us."""
+    Probe in a subprocess with a timeout; if it starts working, this test tells us. Heavy
+    (nightly): while it hangs, it always waits out the timeout."""
     import subprocess
     import sys
 

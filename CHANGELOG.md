@@ -174,6 +174,10 @@ First release. Python 3.10–3.14, PyTorch ≥ 2.10, timm ≥ 1.0.20.
   Lightning (fp32 and bf16-mixed), Accelerate and TorchGeo fit on CPU, with checkpoint and
   `manyseg.save` round trips. CI's slow job installs the frameworks and sets
   `MANYSEG_REQUIRE_TRAINERS=1`, so a missing one fails rather than skips.
+* A `heavy` marker for slow tests that take minutes on CI (the Swin compile and export
+  probes): pushes run `slow and not heavy`, nightly and manual runs all of `slow`. The
+  Swin compile test uses one block per stage and one input size: 2.8x faster locally (438 s
+  to 155 s), which should fit the floor job's 900 s limit.
 
 ### Benchmark (`manyseg-bench`)
 

@@ -68,7 +68,10 @@ jobs:
           uv venv --python 3.12
           uv pip install --torch-backend cpu -e "packages/manyseg[test]" \
             fastai lightning accelerate torchgeo
-      - run: uv run --no-sync pytest packages/manyseg -m slow -n 2 -q --durations=15
+      # heavy tests (Swin compile and export probes, minutes each) run nightly and on demand
+      - run: >-
+          uv run --no-sync pytest packages/manyseg -n 2 -q --durations=15
+          -m "${{ github.event_name == 'push' && 'slow and not heavy' || 'slow' }}"
       - if: always()
         run: df -h / /tmp; du -sh /tmp/* 2>/dev/null | sort -h | tail -5
 
