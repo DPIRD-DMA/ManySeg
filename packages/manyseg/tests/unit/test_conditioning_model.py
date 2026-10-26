@@ -202,7 +202,8 @@ def test_channels_mode_with_rgb_plus_zero_is_the_image_model_at_init(backbone):
     plain.load_state_dict(sd)
     x = torch.randn(2, 3, 64, 64)
     a = model({"img": x, "bands": torch.rand(2, 3)})
-    assert torch.equal(a, plain(x))
+    # 6- vs 3-channel stems take different conv kernels (macOS arm64 differs in the last bits)
+    torch.testing.assert_close(a, plain(x))
     assert torch.equal(a, model({"img": x, "bands": torch.rand(2, 3)}))
 
 

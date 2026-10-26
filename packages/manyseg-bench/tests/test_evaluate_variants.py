@@ -119,7 +119,9 @@ def test_compiled_int8_with_uneven_batches_and_failures_are_recorded(saved_run, 
     monkeypatch.setattr(oxford_pet, "EVAL_BATCH_SIZE", 3, raising=False)
     ev = evaluate_run(rec["path"], variants=("int8_pt2e_compiled",), device="cpu", data=root,
                       out_dir=root / "eval", calib_batches=2)
-    assert 0.5 < ev["variants"]["int8_pt2e_compiled"]["test"]["agreement"] <= 1.0
+    res = ev["variants"]["int8_pt2e_compiled"]
+    assert "test" in res, res.get("error")
+    assert 0.5 < res["test"]["agreement"] <= 1.0
 
     def boom(*a, **k):
         raise RuntimeError("quantiser exploded")
