@@ -62,5 +62,15 @@ are rerun, as a dated amendment.
 6 runs, about 3 h of GPU on the 4090 (CPU workers encode B2 targets). Stop and report if it
 exceeds 6 h.
 
+## Amendment 1 (2026-10-26 16:50, before any training)
+The WHU tiles are not georeferenced, so, as the Data section allows, ground truth comes from the
+raster labels: buildings are the label's False pixels (checked visually; empty tiles are all
+True), instances are 4-connected components (buildings that share a wall are one instance, for
+both arms alike). Raster outlines of rotated buildings are staircases that a 0.5 px
+simplification keeps, which would inflate GT vertex counts and favour staircase-like
+predictions in C-IoU. GT polygons are therefore simplified by **1 px (0.3 m)** when they are made
+(`prepare.py`), checked visually to keep real corners; the metric's 0.5 px tolerance then
+applies on top as registered. Nothing else changed.
+
 ## Results
 (pending)
