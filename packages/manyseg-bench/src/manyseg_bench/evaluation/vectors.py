@@ -298,7 +298,8 @@ def polygon_metrics(gt: list, pred: list, gsd: float = 1.0, *, iou_threshold: fl
       N the exterior vertex count (GT simplified by ``gt_vertex_tolerance`` px to drop collinear
       nodes); only matched pairs count, so read it with ``det_f1`` (``ciou * det_f1`` is a
       PQ-like single number);
-    * ``miou``, ``n_ratio`` (Σ N_pred / Σ N_gt over matched pairs) and ``polis`` (metres).
+    * ``miou``, ``n_ratio`` (Σ N_pred / Σ N_gt over matched pairs; the sums are returned as
+      ``sum_n_pred`` / ``sum_n_gt`` for pooling over tiles) and ``polis`` (metres).
     """
     import shapely
 
@@ -323,10 +324,12 @@ def polygon_metrics(gt: list, pred: list, gsd: float = 1.0, *, iou_threshold: fl
     out = {"det_f1": 2 * len(matched) / (len(gt) + len(pred)) if gt or pred else 1.0,
            "n_gt": len(gt), "n_pred": len(pred), "tp": len(matched)}
     if not matched:
-        return {**out, "ciou": 0.0, "miou": 0.0, "n_ratio": math.nan, "polis": math.nan}
+        return {**out, "ciou": 0.0, "miou": 0.0, "n_ratio": math.nan, "polis": math.nan,
+                "sum_n_pred": 0, "sum_n_gt": 0}
     np_ = np.array([_n_vertices(pred[j]) for _, _, j in matched])
     ng = np.array([gt_n[i] for _, i, _ in matched])
     ious = np.array([m[0] for m in matched])
     return {**out, "ciou": float(np.mean(ious * (1 - np.abs(np_ - ng) / (np_ + ng)))),
             "miou": float(ious.mean()), "n_ratio": float(np_.sum() / ng.sum()),
+            "sum_n_pred": int(np_.sum()), "sum_n_gt": int(ng.sum()),
             "polis": float(np.mean([polis(gt[i], pred[j]) for _, i, j in matched]) * gsd)}
