@@ -59,13 +59,18 @@ jobs:
       # the trainer integration tests and examples fail, not skip, when a framework is missing
       MANYSEG_REQUIRE_TRAINERS: "1"
     steps:
+      # the frameworks' dependencies plus export files and checkpoints filled the default disk
+      - name: Free disk (preinstalled .NET, Android, GHC)
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc && df -h /
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
       - run: |
           uv venv --python 3.12
           uv pip install --torch-backend cpu -e "packages/manyseg[test]" \
             fastai lightning accelerate torchgeo
-      - run: uv run --no-sync pytest packages/manyseg -m slow -n 2 -q
+      - run: uv run --no-sync pytest packages/manyseg -m slow -n 2 -q --durations=15
+      - if: always()
+        run: df -h / /tmp; du -sh /tmp/* 2>/dev/null | sort -h | tail -5
 
   lint:
     runs-on: ubuntu-latest

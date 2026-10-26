@@ -56,3 +56,6 @@ markers = [
     "network: downloads pretrained weights",
 ]
 addopts = "-m 'not slow and not network' --strict-markers"
+# Delete a passing test's tmp_path when it finishes: the slow tier's export files and
+# checkpoints otherwise pile up until the session ends and fill CI's disk.
+tmp_path_retention_policy = "failed"
