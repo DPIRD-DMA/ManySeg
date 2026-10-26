@@ -77,6 +77,25 @@ channels, which are then clipped to [0, 1]. "Missed peaks" zero a disk of radius
 random fraction of the vertices, junctions or corners, in the heatmap channels only. Vector noise
 applies to the R2/B2 offsets. Five noise seeds per tile and level.
 
+## Amendment 1 (2026-10-26 13:00, before any area result)
+In the synthetic sanity figures (default, untuned decoder parameters), per-pixel independent
+noise at level 2 (std 0.2) turned every representation into speckle: it pushes about 0.6% of
+background pixels over 0.5 and punches holes inside roads, giving skeleton loops, spurs and
+stray vertices everywhere (APLS ≈ 0.05 for R0, R1 and R2 alike). A network's errors are smooth,
+not salt-and-pepper, so this mostly measured speckle filtering. The additive noise is now white
+noise smoothed with a Gaussian (σ = 2 px, per channel), then rescaled to the table's std.
+The same figures showed that a single occlusion gap disconnects a road (APLS charges every
+broken path) and opens a building ring (B2 then loses the whole face), and that none of the
+graph decoders could bridge a gap. That would measure decoder naivety rather than the
+representation, so every graph decoder (R0, R1, R2 and B2) gets the same end-bridging step:
+mutually-nearest dangling ends (not at the tile border) within `gap` px are joined, unless a
+path shorter than 3 × `gap` already connects them. `gap` ∈ {0, 25, 50} px joins each
+grid; to keep grids at ≤ 24, other values were dropped (grids in `run.py`). B0/B1 need no such step: a mask
+contour stays closed around a gap.
+When noise was changed, no real-area tile had been decoded. The gap step and its grid were fixed
+after viewing one Murdoch (test) road tile decoded with default, untuned parameters (visual
+check of encoders and decoders); no tuning or test metrics existed.
+
 Secondary analysis: each corruption family alone at its level-2 setting (the primary analysis is
 the combined levels).
 
