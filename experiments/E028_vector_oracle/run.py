@@ -112,6 +112,12 @@ def load(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.open()] if path.exists() else []
 
 
+def tuning_score(r: dict) -> float:
+    """Roads: APLS. Footprints: C-IoU x detection F1 (amendment 2; C-IoU alone averages over
+    matched pairs only, so it would reward predicting few, confident polygons)."""
+    return r["apls"] if r["task"] == "roads" else r["ciou"] * r["det_f1"]
+
+
 def select(rows: list[dict]) -> dict:
     """Best parameter index per (rep, cond) by mean primary metric over tiles and seeds."""
     import numpy as np
@@ -119,7 +125,7 @@ def select(rows: list[dict]) -> dict:
     acc: dict = {}
     for r in rows:
         k = (r["rep"], r["cond"], r["pidx"])
-        acc.setdefault(k, [json.dumps(r["params"]), []])[1].append(r[PRIMARY[r["task"]]])
+        acc.setdefault(k, [json.dumps(r["params"]), []])[1].append(tuning_score(r))
     best: dict = {}
     for (rep, cond, pidx), (params, vals) in acc.items():
         score = float(np.mean(vals))

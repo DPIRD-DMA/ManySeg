@@ -93,8 +93,8 @@ def test_overpass():
     assert len(t.crossings) == 1
     r2 = E.decode_r2(E.encode(t, "R2").arrays, dict(thr_v=0.4, thr_e=0.5, link_r=6, mutual=False, kernel=5))
     r0 = E.decode_r0(E.encode(t, "R0").arrays, dict(thr=0.5, spur=20, simplify=1, min_len=20))
-    assert E.crossing_score(t, r2) == (1, 1)
-    assert E.crossing_score(t, r0) == (0, 1)
+    assert E.crossing_score(t, r2) == (1, 1, 1)
+    assert E.crossing_score(t, r0) == (0, 0, 1)
 
 
 def building_tile():
@@ -134,3 +134,33 @@ def test_corruption_shared_draw():
     a1 = E.corrupt(E.encode(t, "R1"), t, cfg, 3)
     np.testing.assert_array_equal(a0["mask"], a1["mask"])
     assert not np.array_equal(a0["mask"], E.corrupt(E.encode(t, "R0"), t, cfg, 4)["mask"])
+
+
+# Regressions from the Codex review of the metrics (2026-10-26).
+
+def test_apls_parallel_chains_identity():
+    g = line_graph([(0, 0), (20, 0), (10, 0), (10, 10), (10, -10)],
+                   [(0, 2), (2, 1), (0, 3), (3, 1), (0, 4), (4, 1)])
+    for n in g:
+        g.nodes[n]["xy"] = g.nodes[n]["xy"] + 300
+    assert E.apls(g, g, 1.0) == pytest.approx(1.0)
+
+
+def test_apls_short_cycle_identity():
+    g = line_graph([(300, 300), (310, 300), (310, 310), (300, 310)], [(0, 1), (1, 2), (2, 3), (3, 0)])
+    assert E.apls(g, g, 1.0) == pytest.approx(1.0)
+
+
+def test_geo_weights_by_length():
+    a = line_graph([(100 + 0.1 * k, 100) for k in range(1001)], [(k, k + 1) for k in range(1000)])
+    b = line_graph([(100, 300), (200, 300)], [(0, 1)])
+    gt = nx.disjoint_union(a, b)
+    m = E.geo_f1(gt, a, 1.0)
+    assert m["geo_r"] == pytest.approx(0.5, abs=0.02)
+    assert E.geo_f1(nx.Graph(), a, 1.0)["geo_f1"] == 0.0
+
+
+def test_refine_border_not_biased():
+    hm = E.gaussian_points(np.array([[0.2, 2.5]]), sigma=2, shape=(8, 8))
+    x, y = E._refine(hm, np.array([[2, 0]]))[0]
+    assert x == pytest.approx(0.5) and y == pytest.approx(2.5, abs=0.05)

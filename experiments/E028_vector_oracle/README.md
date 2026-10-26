@@ -96,6 +96,20 @@ When noise was changed, no real-area tile had been decoded. The gap step and its
 after viewing one Murdoch (test) road tile decoded with default, untuned parameters (visual
 check of encoders and decoders); no tuning or test metrics existed.
 
+## Amendment 2 (2026-10-26 13:45, after a Codex review of the metric code; no tuning or test output read)
+* Metric bugs fixed, with regression tests: APLS summed parallel chains between the same two
+  nodes (SciPy adds duplicate sparse entries) instead of taking the shorter; an isolated loop
+  shorter than 50 m got one control point and APLS 0 against itself; GEO sampled per edge,
+  not per metre of road; sub-pixel peak refinement was biased at the tile border.
+* Crossings: the registered metric (no predicted junction within 8 m, of all GT crossings) is
+  reported, plus the same among crossings with a predicted road within 5 m, because a missing
+  road otherwise counts as correct.
+* Footprint tuning selects by C-IoU × detection F1 (like PQ = SQ × RQ), not C-IoU alone:
+  C-IoU averages over matched pairs only, so it rewards predicting a few confident polygons.
+  The reported metrics and decision rules are unchanged.
+* The first tuning run (`runs/aborted_v1/`, buggy APLS) was stopped and not analysed; everything
+  is rerun from scratch.
+
 Secondary analysis: each corruption family alone at its level-2 setting (the primary analysis is
 the combined levels).
 

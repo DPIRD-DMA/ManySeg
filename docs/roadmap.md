@@ -114,6 +114,24 @@ Stopping rule: an idea is kept only if it beats its baseline by more than 2 seed
 deviations on at least two datasets, at no more than a small, stated cost in latency or memory.
 Negative results are written up in `experiments/` like positive ones.
 
+### Vector outputs (roads, lines, footprints, 3D buildings) 🔄
+
+Design after a Codex review: one shared *output schema* (attributed graphs, polygons, later
+meshes; GeoJSON / CityJSON export) and shared geometry utilities, but separate dense encodings
+and decoders per family: open networks (roads, lines), closed polygons (footprints), roof
+surfaces. Everything stays dense heads + decoding outside `forward`, like `manyseg.instances`.
+Roads are not forced planar (overpasses keep no junction). Learned second stages (SAM-Road / HEAT
+style edge classifiers) would be a separate optional module, never a head.
+
+| Stage | Question | Status |
+| --- | --- | --- |
+| E028 | Oracle: rasterize perfect OSM vectors into each candidate target set, corrupt, decode, score (APLS; C-IoU). Mask → skeleton vs mask + junction heatmap vs Sat2Graph-style graph tensor (roads); instance mask → contour vs + corner heatmap vs the same graph tensor → faces (footprints). CPU only | 🔄 running |
+| 1 | Trained roads: only the representations E028 licenses, against the mask baseline (APLS, TOPO, overpass subset) | ⏳ after E028 |
+| 2 | Trained footprints: mask → contour vs mask + boundary + corner heatmap; frame field / HiSup only if corners help | ⏳ after E028 |
+| 3 | Shared utilities and schema; one model with task-specific heads vs separate models | ⏳ |
+| 4 | LoD1: footprint + ground / eave / roof height; roof-to-footprint offset for off-nadir imagery | ⏳ |
+| 5 | LoD2 roofs: roof-face segmentation + ridge / edge evidence, planes fitted jointly from DSM / LiDAR, watertight solid, CityJSON. RGB-only heights are a learned prior, reported separately from topology | ⏳ |
+
 ## Phase 6: release preparation 🔄
 
 * ✅ Runnable examples (`examples/`): single input, multispectral, multi-modal, multi-task,

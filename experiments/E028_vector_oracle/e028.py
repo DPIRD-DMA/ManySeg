@@ -872,8 +872,9 @@ def _refine(hm: np.ndarray, pix: np.ndarray) -> np.ndarray:
         den = lo - 2 * mid + hi
         return np.clip(np.where(den < -1e-9, 0.5 * (lo - hi) / np.where(den < -1e-9, den, -1), 0), -1, 1)
 
-    dx = offset(lg[r, np.maximum(c - 1, 0)], lg[r, c], lg[r, np.minimum(c + 1, W - 1)])
-    dy = offset(lg[np.maximum(r - 1, 0), c], lg[r, c], lg[np.minimum(r + 1, H - 1), c])
+    inx, iny = (c > 0) & (c < W - 1), (r > 0) & (r < H - 1)  # both neighbours inside
+    dx = np.where(inx, offset(lg[r, np.maximum(c - 1, 0)], lg[r, c], lg[r, np.minimum(c + 1, W - 1)]), 0)
+    dy = np.where(iny, offset(lg[np.maximum(r - 1, 0), c], lg[r, c], lg[np.minimum(r + 1, H - 1), c]), 0)
     return np.stack([c + 0.5 + dx, r + 0.5 + dy], 1)
 
 
@@ -1082,7 +1083,8 @@ def control_graph(g: nx.Graph, spacing: float):
             continue
         cum = np.concatenate([[0], np.cumsum(seg)])
         prev, prev_s = node(ch[0]), 0.0
-        s = spacing
+        step = min(spacing, L / 2) if ch[0] == ch[-1] else spacing  # a short loop: 2 points
+        s = step
         while s < L - 1e-6:
             k = min(int(np.searchsorted(cum, s, side="right") - 1), len(seg) - 1)
             f = (s - cum[k]) / max(seg[k], 1e-12)
@@ -1090,7 +1092,7 @@ def control_graph(g: nx.Graph, spacing: float):
             cur = len(pts) - 1
             edges.append((prev, cur, s - prev_s))
             prev, prev_s = cur, s
-            s += spacing
+            s += step
         end = node(ch[-1])
         if end != prev or L - prev_s > 1e-9:
             edges.append((prev, end, L - prev_s))
@@ -1098,9 +1100,17 @@ def control_graph(g: nx.Graph, spacing: float):
 
 
 def _csr(n: int, edges) -> csr_matrix:
-    if not edges:
+    """Symmetric weight matrix; parallel edges keep their minimum (scipy would sum them)."""
+    best: dict = {}
+    for a, b, w in edges:
+        if a == b:
+            continue
+        k = (min(a, b), max(a, b))
+        best[k] = min(best.get(k, np.inf), float(w))
+    if not best:
         return csr_matrix((n, n))
-    i, j, w = map(np.asarray, zip(*edges))
+    i, j = map(np.asarray, zip(*best))
+    w = np.fromiter(best.values(), float)
     w = np.maximum(w.astype(float), 1e-9)
     m = csr_matrix((np.concatenate([w, w]), (np.concatenate([i, j]), np.concatenate([j, i]))),
                    shape=(n, n))
@@ -1163,12 +1173,20 @@ def apls(gt: nx.Graph, pred: nx.Graph, gsd: float, spacing_m=50.0, buffer_m=5.0)
 
 
 def _samples(g: nx.Graph, step: float) -> np.ndarray:
-    _, p, q = _segments(g)
+    """Points every ``step`` px of arc length along each chain (not per edge, so the number of
+    samples does not depend on how finely a road is split into edges)."""
     out = []
-    for a, b in zip(p, q):
-        n = max(1, int(math.ceil(np.hypot(*(b - a)) / step)))
-        f = (np.arange(n) + 0.5) / n
-        out.append(a + (b - a) * f[:, None])
+    for ch in graph_chains(g):
+        c = np.array([g.nodes[n]["xy"] for n in ch], float)
+        seg = np.hypot(*np.diff(c, axis=0).T)
+        L = seg.sum()
+        if L <= 0:
+            continue
+        s = np.arange(step / 2, L, step)
+        cum = np.concatenate([[0], np.cumsum(seg)])
+        k = np.clip(np.searchsorted(cum, s, side="right") - 1, 0, len(seg) - 1)
+        f = (s - cum[k]) / np.maximum(seg[k], 1e-12)
+        out.append(c[k] + (c[k + 1] - c[k]) * f[:, None])
     return np.concatenate(out) if out else np.zeros((0, 2))
 
 
@@ -1186,7 +1204,7 @@ def _dist_to_graph(pts: np.ndarray, g: nx.Graph) -> np.ndarray:
 
 def geo_f1(gt, pred, gsd, buffer_m=5.0) -> dict:
     sg, sp = _samples(gt, 1.0 / gsd), _samples(pred, 1.0 / gsd)
-    if len(sp) == 0:
+    if len(sp) == 0 or len(sg) == 0:
         return {"geo_p": 0.0, "geo_r": 0.0, "geo_f1": 0.0}
     prec = float((_dist_to_graph(sp, gt) <= buffer_m / gsd).mean())
     rec = float((_dist_to_graph(sg, pred) <= buffer_m / gsd).mean())
@@ -1214,11 +1232,12 @@ def junction_f1(gt, pred, gsd, radius_m=5.0) -> float:
     return 2 * match_points(a, b, radius_m / gsd) / (len(a) + len(b))
 
 
-def crossing_score(t: Tile, pred: nx.Graph) -> tuple[int, int]:
-    """(correct, covered): GT crossings with predicted road within 5 m, and of those, the ones
-    without a predicted junction within 8 m."""
+def crossing_score(t: Tile, pred: nx.Graph) -> tuple[int, int, int]:
+    """(no_junction, covered_ok, covered) over GT crossings. ``no_junction``: no predicted junction
+    within 8 m (the registered metric; a missing road also counts). ``covered``: predicted road
+    within 5 m; ``covered_ok``: covered and no junction within 8 m."""
     if not t.crossings:
-        return 0, 0
+        return 0, 0, 0
     cr = np.array(t.crossings)
     cov = _dist_to_graph(cr, pred) <= 5 / t.gsd
     jn = junctions(pred)
@@ -1226,14 +1245,14 @@ def crossing_score(t: Tile, pred: nx.Graph) -> tuple[int, int]:
         dj = cKDTree(jn).query(cr)[0]
     else:
         dj = np.full(len(cr), np.inf)
-    ok = cov & (dj > 8 / t.gsd)
-    return int(ok.sum()), int(cov.sum())
+    nj = dj > 8 / t.gsd
+    return int(nj.sum()), int((cov & nj).sum()), int(cov.sum())
 
 
 def road_metrics(t: Tile, pred: nx.Graph) -> dict:
     m = {"apls": apls(t.graph, pred, t.gsd), "junction_f1": junction_f1(t.graph, pred, t.gsd)}
     m.update(geo_f1(t.graph, pred, t.gsd))
-    m["cross_ok"], m["cross_cov"] = crossing_score(t, pred)
+    m["cross_nojunc"], m["cross_ok"], m["cross_cov"] = crossing_score(t, pred)
     m["cross_n"] = len(t.crossings)
     return m
 
