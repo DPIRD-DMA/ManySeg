@@ -124,9 +124,16 @@ def test_graph_tensor_matches_e028_encoder():
     path = pathlib.Path(__file__).parents[4] / "experiments" / "E028_vector_oracle" / "e028.py"
     if not path.exists():
         pytest.skip("E028 code not in this checkout")
-    spec = importlib.util.spec_from_file_location("e028", path)
+    pytest.importorskip("rasterio")  # E028's own dependency
+    import sys
+
+    spec = importlib.util.spec_from_file_location("_e028_oracle", path)
     e028 = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(e028)
+    sys.modules[spec.name] = e028  # dataclasses look their module up
+    try:
+        spec.loader.exec_module(e028)
+    finally:
+        sys.modules.pop(spec.name, None)
     from manyseg.vectors import encode_graph_tensor, vertex_graph
 
     vg = vertex_graph(buildings(), border=(1024, 1024))
