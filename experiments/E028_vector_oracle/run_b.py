@@ -46,6 +46,9 @@ def work(job):
     cfg = E.LEVELS[job["level"]]
     a0 = E.corrupt(E.encode(t, "B0"), t, cfg, job["seed"])
     a2 = E.corrupt(E.encode(t, "B2"), t, cfg, job["seed"])
+    # one corrupted footprint for both: E.corrupt seeds noise by channel name, and B0's "extent"
+    # and B2's "mask" are the same footprint under different names (Codex review)
+    a0["extent"] = a2["mask"].copy()
     E.CACHE.clear()
     lv = f"L{job['level']}"
     p0, p2 = BEST[lv]["B0"]["params"], BEST[lv]["B2"]["params"]

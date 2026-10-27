@@ -18,7 +18,7 @@ with the same evaluation code as the new arms.
 |---|---|
 | B2 (control) | E030: BCE vertex + BCE edge on support + smooth-L1 vector + dice-BCE extent |
 | B2w | B2 + decode-cost weighting: vertex BCE weight 1 + 10·target; edge BCE pos_weight 5 |
-| B2e | B2w + 0.1 × destination loss: at pixels within ~1.5 px of a target vertex centre with a true edge in sector k, sample the **target** vertex map at the predicted endpoint (bilinear, `align_corners=False`, outside-tile endpoints masked), −log(sample + 1e-4) |
+| B2e | B2w + 0.1 × destination loss: at pixels within ~1.5 px of a target vertex centre with a true edge in sector k, sample the **target** vertex map at the predicted endpoint (bilinear, `align_corners=False`; endpoints within half a pixel of the tile edge masked), −log(sample + 1e-4) |
 
 Cut after review: the degree loss (degenerate: spreading 1/3 over six sectors satisfies it, and
 it fights the per-sector BCE); reciprocity (needs geometric, not opposite-sector, matching);
@@ -30,7 +30,8 @@ Primary comparison **B2e vs B2**, metric **C-IoU × detection F1** on test, pair
 B2e wins if the mean paired difference is at least 0.02 and more than 2 SDs of the paired
 differences, and its C-IoU is no more than 0.02 below B2's. Then the B2e loss becomes the default
 for graph heads. B2w vs B2 is reported as an ablation (no decision). Also reported: detection
-F1, C-IoU, PoLiS, N-ratio, and the share of GT buildings recovered as a closed face. Three seeds
+F1, C-IoU, PoLiS, N-ratio, and recall (the share of GT buildings matched by a closed predicted
+polygon at IoU > 0.5). Three seeds
 are few; a borderline result is reported as inconclusive.
 
 ## Budget

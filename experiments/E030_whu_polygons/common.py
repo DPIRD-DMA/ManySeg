@@ -132,7 +132,7 @@ class GraphTensorTask:
     * ``endpoint``: weight of a destination loss. At pixels within ~1.5 px of a target vertex
       centre (target vertex > 0.6) that have a true edge in sector k, the predicted vector
       (x SPACING) from the pixel centre gives an endpoint; the *target* vertex map is sampled
-      there (bilinear, ``align_corners=False``, endpoints outside the tile masked) and
+      there (bilinear, ``align_corners=False``, endpoints within half a pixel of the tile edge or outside it masked) and
       -log(sample + 1e-4) is averaged. Sampling the fixed target cannot be gamed by raising the
       predicted vertex map (Codex review).
     """
@@ -188,7 +188,9 @@ class GraphTensorTask:
         ys, xs = torch.meshgrid(torch.arange(H, device=tv.device) + 0.5,
                                 torch.arange(W, device=tv.device) + 0.5, indexing="ij")
         ex, ey = xs + v[:, :, 0], ys + v[:, :, 1]  # (B, S, H, W) endpoints, geometric (x, y)
-        inside = (ex >= 0) & (ex <= W) & (ey >= 0) & (ey <= H)
+        # fully inside: with align_corners=False a point within half a pixel of the edge samples
+        # the zero padding (Codex review), so those endpoints are masked
+        inside = (ex > 0.5) & (ex < W - 0.5) & (ey > 0.5) & (ey < H - 0.5)
         grid = torch.stack([2 * ex / W - 1, 2 * ey / H - 1], -1).view(B, S * H, W, 2)
         samp = F.grid_sample(tv[:, None], grid, mode="bilinear", padding_mode="zeros",
                              align_corners=False).view(B, S, H, W)

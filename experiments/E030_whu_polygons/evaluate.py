@@ -94,6 +94,7 @@ def summarise(acc: dict) -> dict:
     det = 2 * acc["tp"] / max(1, acc["n_gt"] + acc["n_pred"])
     ciou = acc["ciou"] / tp
     return {"ciou": ciou, "det_f1": det, "ciou_x_f1": ciou * det, "miou": acc["miou"] / tp,
+            "recall": acc["tp"] / max(1, acc["n_gt"]),  # GT buildings recovered as a matched closed polygon
             "polis_m": acc["polis"] / tp, "n_ratio": acc["sum_n_pred"] / max(1, acc["sum_n_gt"]),
             "tp": acc["tp"], "n_gt": acc["n_gt"], "n_pred": acc["n_pred"],
             "decode_s_per_tile": acc["decode_s"] / max(1, acc["tiles"]),
@@ -142,7 +143,8 @@ def main():
     ap.add_argument("--procs", type=int, default=6)
     ap.add_argument("--limit", type=int, default=None, help="smoke test: first N tiles")
     args = ap.parse_args()
-    arm = args.run[:2]  # "B0", "B2", or E032's "B2w" / "B2e"
+    arm = args.run[:2]  # decoder: "B0" or "B2" (E032's "B2w" / "B2e" decode as B2)
+    run_arm = args.run.split("_")[0]  # experimental arm, kept in the results
     device = torch.device("cuda")
     model = build(arm)
     model.load_state_dict(torch.load(HERE / "runs" / f"{args.run}.pt", map_location="cpu"))
@@ -156,7 +158,7 @@ def main():
     test_gt = load_polygons(args.cache / "test_poly.npz")
     (test_row,), test_iou = run_split(model, arm, test, test_gt, [GRIDS[arm][best]], device, args.procs,
                                       limit=args.limit)
-    res = {"run": args.run, "arm": arm, "params": GRIDS[arm][best], "val": val_rows[best],
+    res = {"run": args.run, "arm": run_arm, "decoder_arm": arm, "params": GRIDS[arm][best], "val": val_rows[best],
            "val_extent_iou": val_iou, "val_grid": [dict(p, **r) for p, r in zip(GRIDS[arm], val_rows)],
            "test": test_row, "test_extent_iou": test_iou, "wall_s": time.time() - t0, "limit": args.limit}
     (HERE / "runs" / f"{args.run}_eval{'_smoke' if args.limit else ''}.json").write_text(json.dumps(res, indent=1))

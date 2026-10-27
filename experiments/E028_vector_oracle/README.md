@@ -340,7 +340,8 @@ mask baselines are in `manyseg.vectors` / `manyseg_bench.evaluation.vectors` (st
 
 Plan reviewed by Codex (`E032_graph_completeness/PLAN.md`; review applied). Same data, levels,
 seeds, tiles and metrics as E028; B0 and B2 frozen at their E028 settings (`runs/best.json`).
-Each tile is encoded for B0 and B2 with the same corruption draw.
+Each tile is encoded for B0 and B2 with the same corruption draw; B0's extent channel is replaced
+by B2's corrupted mask so both see the identical footprint.
 
 * **B2F (per-building fallback):** components of B2's extent mask (the single extent source).
   A face belongs to the component it overlaps most. A component takes B2's faces if they cover
