@@ -124,30 +124,37 @@ def encode_graph_tensor(vg: VectorGraph, shape: tuple[int, int], *, sectors: int
                 if not has[v, k]:
                     has[v, k], nb[v, k] = True, vg.xy[u]
                     break
-    best = np.full((H, W), np.inf, np.float32)
-    owner = np.full((H, W), V, np.int64)
+    # Nearest vertex per pixel within `radius`, all vertices at once (vectorised; ties go to the
+    # lower vertex index, as in a loop over vertices with a strict "closer" test).
+    vertex = np.zeros((H, W), np.float32)
+    edge = np.zeros((sectors, H, W), np.float32)
+    vec = np.zeros((sectors, 2, H, W), np.float32)
+    support = np.zeros((H, W), bool)
+    if V == 0:
+        return {"vertex": vertex, "edge": edge, "vector": vec, "support": support}
     r = int(math.ceil(radius))
-    for v, (x, y) in enumerate(vg.xy):
-        c0, r0 = int(math.floor(x)) - r, int(math.floor(y)) - r
-        c1, r1 = c0 + 2 * r + 1, r0 + 2 * r + 1
-        cs, rs = max(c0, 0), max(r0, 0)
-        ce, re = min(c1, W), min(r1, H)
-        if cs >= ce or rs >= re:
-            continue
-        yy, xx = np.mgrid[rs:re, cs:ce]
-        d2 = (xx + 0.5 - x) ** 2 + (yy + 0.5 - y) ** 2
-        win = best[rs:re, cs:ce]
-        upd = (d2 <= radius ** 2) & (d2 < win)
-        win[upd] = d2[upd]
-        owner[rs:re, cs:ce][upd] = v
-    support = owner < V
-    vertex = np.where(support, np.exp(-best / (2 * sigma ** 2)), 0).astype(np.float32)
-    yy, xx = np.mgrid[0:H, 0:W]
-    pix = np.stack([xx + 0.5, yy + 0.5], -1).astype(np.float32)  # (H, W, 2)
-    edge = has[owner].transpose(2, 0, 1).astype(np.float32)  # (S, H, W)
-    vec = (nb[owner] - pix[:, :, None, :]) * has[owner][..., None]  # (H, W, S, 2)
-    return {"vertex": vertex, "edge": edge, "vector": vec.transpose(2, 3, 0, 1).astype(np.float32),
-            "support": support}
+    off = np.arange(-r, r + 1)
+    x, y = vg.xy[:, 0], vg.xy[:, 1]
+    cc = np.floor(x).astype(np.int64)[:, None, None] + off[None, None, :]
+    rr = np.floor(y).astype(np.int64)[:, None, None] + off[None, :, None]
+    cc, rr = np.broadcast_arrays(cc, rr)
+    d2 = (cc + 0.5 - x[:, None, None]) ** 2 + (rr + 0.5 - y[:, None, None]) ** 2
+    vi = np.broadcast_to(np.arange(V)[:, None, None], d2.shape)
+    ok = (d2 <= radius ** 2) & (cc >= 0) & (cc < W) & (rr >= 0) & (rr < H)
+    cc, rr, d2, vi = cc[ok], rr[ok], d2[ok], vi[ok]
+    pix = rr * W + cc
+    order = np.lexsort((vi, d2.astype(np.float32), pix))  # by pixel, then distance, then vertex
+    pix, d2, vi, cc, rr = pix[order], d2[order], vi[order], cc[order], rr[order]
+    first = np.r_[True, pix[1:] != pix[:-1]]
+    rr, cc, vi = rr[first], cc[first], vi[first]
+    best = d2[first].astype(np.float32)
+    support[rr, cc] = True
+    vertex[rr, cc] = np.exp(-best / (2 * sigma ** 2))
+    h = has[vi]  # (P, S)
+    edge[:, rr, cc] = h.T
+    pxy = np.stack([cc + 0.5, rr + 0.5], -1).astype(np.float32)  # (P, 2)
+    vec[:, :, rr, cc] = ((nb[vi] - pxy[:, None, :]) * h[..., None]).transpose(1, 2, 0)
+    return {"vertex": vertex, "edge": edge, "vector": vec, "support": support}
 
 
 def _peak_pixels(hm: np.ndarray, threshold: float, kernel: int) -> np.ndarray:

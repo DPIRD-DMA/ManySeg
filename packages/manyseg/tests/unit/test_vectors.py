@@ -157,3 +157,69 @@ def test_graph_tensor_decoding_is_bounded_on_noise():
     d = g.xy[g.edges[:, 0]] - g.xy[g.edges[:, 1]]
     assert len(d) == 0 or np.hypot(d[:, 0], d[:, 1]).max() <= 60 + 1e-6
     polygons_from_tensor(v, e, vec, rng.random((256, 256)), vertex_threshold=0.1, max_vertices=300)
+
+
+def _encode_loop_reference(vg, shape, sectors=6, radius=3.0, sigma=1.5):
+    """The original per-vertex loop encoder (kept to check the vectorised one)."""
+    import math
+
+    H, W = shape
+    V = len(vg.xy)
+    nb = np.zeros((V + 1, sectors, 2), np.float32)
+    has = np.zeros((V + 1, sectors), bool)
+    width = 2 * math.pi / sectors
+    adj = [[] for _ in range(V)]
+    for a, b in vg.edges:
+        adj[a].append(b)
+        adj[b].append(a)
+    for v in range(V):
+        for u in adj[v]:
+            d = vg.xy[u] - vg.xy[v]
+            ang = math.atan2(d[1], d[0]) % (2 * math.pi)
+            own = int(ang // width) % sectors
+            side = 1 if ang / width - own >= 0.5 else -1
+            for k in (own, (own + side) % sectors, (own - side) % sectors):
+                if not has[v, k]:
+                    has[v, k], nb[v, k] = True, vg.xy[u]
+                    break
+    best = np.full((H, W), np.inf, np.float32)
+    owner = np.full((H, W), V, np.int64)
+    r = int(math.ceil(radius))
+    for v, (x, y) in enumerate(vg.xy):
+        c0, r0 = int(math.floor(x)) - r, int(math.floor(y)) - r
+        cs, rs, ce, re = max(c0, 0), max(r0, 0), min(c0 + 2 * r + 1, W), min(r0 + 2 * r + 1, H)
+        if cs >= ce or rs >= re:
+            continue
+        yy, xx = np.mgrid[rs:re, cs:ce]
+        d2 = (xx + 0.5 - x) ** 2 + (yy + 0.5 - y) ** 2
+        win = best[rs:re, cs:ce]
+        upd = (d2 <= radius ** 2) & (d2 < win)
+        win[upd] = d2[upd]
+        owner[rs:re, cs:ce][upd] = v
+    support = owner < V
+    vertex = np.where(support, np.exp(-best / (2 * sigma ** 2)), 0).astype(np.float32)
+    yy, xx = np.mgrid[0:H, 0:W]
+    pix = np.stack([xx + 0.5, yy + 0.5], -1).astype(np.float32)
+    edge = has[owner].transpose(2, 0, 1).astype(np.float32)
+    vec = (nb[owner] - pix[:, :, None, :]) * has[owner][..., None]
+    return {"vertex": vertex, "edge": edge, "vector": vec.transpose(2, 3, 0, 1).astype(np.float32), "support": support}
+
+
+def test_vectorised_encoder_matches_loop():
+    from shapely import affinity
+
+    from manyseg.vectors import encode_graph_tensor, vertex_graph
+
+    rng = np.random.default_rng(0)
+    for trial in range(5):
+        polys = []
+        for _ in range(25):  # random rotated rectangles, some touching or overlapping, some cut by the border
+            cx, cy = rng.uniform(-20, 532, 2)
+            p = box(cx - rng.uniform(5, 40), cy - rng.uniform(5, 30), cx + rng.uniform(5, 40), cy + rng.uniform(5, 30))
+            p = affinity.rotate(p, rng.uniform(0, 90)).intersection(box(0, 0, 512, 512))
+            if p.geom_type == "Polygon" and p.area > 20:
+                polys.append(p)
+        vg = vertex_graph(polys, 20.0, border=(512, 512))
+        a, b = encode_graph_tensor(vg, (512, 512)), _encode_loop_reference(vg, (512, 512))
+        for k in a:
+            np.testing.assert_array_equal(a[k], b[k], err_msg=f"trial {trial}, {k}")
