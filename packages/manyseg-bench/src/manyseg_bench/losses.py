@@ -48,3 +48,57 @@ def heatmap_focal(logits: Tensor, target: Tensor, alpha: float = 2.0, beta: floa
     pos_loss = -((1 - p) ** alpha) * torch.log(p) * pos
     neg_loss = -((1 - target) ** beta) * (p ** alpha) * torch.log(1 - p) * (~pos)
     return (pos_loss.sum() + neg_loss.sum()) / pos.sum().clamp(min=1)
+
+
+def distance_to(geometry: Tensor, max_distance: float) -> Tensor:
+    """Euclidean distance (px) from each pixel to the nearest ``True`` pixel of ``geometry``
+    ``(B, H, W)`` bool, capped at ``max_distance`` (also for images with no geometry). Uses the
+    library's exact GPU distance transform."""
+    from manyseg.instances import edt
+
+    return edt(geometry.bool()).clamp(max=max_distance)
+
+
+def distance_aware_bce(logits: Tensor, target: Tensor, geometry: Tensor | None = None, *,
+                       tolerance: float = 2.0, pull: float = 0.1, max_distance: float = 32.0,
+                       distance: Tensor | None = None) -> Tensor:
+    """BCE for sparse targets (points, vertices, lines, boundaries) that knows how far a wrong
+    prediction is from the true geometry.
+
+    Plain BCE charges a false positive the same whether it is 1 px or 100 px from a true point,
+    so a slightly shifted prediction is punished like a missing one plus a far-away false one.
+    Here, with ``D`` the distance (px) of each pixel to the nearest true element:
+
+    * false positives are weighted ``w(D) = 1 - exp(-D^2 / (2 tolerance^2))``: almost free next to
+      the truth, full cost far from it (CenterNet's penalty reduction, generalised from Gaussian
+      points to any geometry through the distance map);
+    * a pull term ``pull * sum(p * D') / max(sum(y), 1)`` per image, with ``D' = D / max_distance``:
+      predicted mass costs in proportion to its (capped) distance from the truth, so the further
+      away, the larger the loss and its gradient; it is zero on the truth and never rewards a
+      wrong pixel (normalising by the predicted mass instead would reward pixels closer than
+      average, i.e. near misses);
+    * true pixels are trained as in BCE (``-y log p``), which raises the correct location while
+      the two terms above lower the wrong ones.
+
+    Args:
+        logits: ``(B, 1, H, W)`` or ``(B, H, W)`` raw outputs.
+        target: same shape, in [0, 1] (binary or a soft blob such as a Gaussian heatmap).
+        geometry: bool ``(B, H, W)`` true elements (point / vertex pixels, line or boundary pixels);
+            default ``target >= 0.5``.
+        distance: precomputed ``D`` ``(B, H, W)`` (e.g. from the data loader) instead of
+            ``geometry``.
+    """
+    x = logits.float().reshape(logits.shape[0], *logits.shape[-2:])
+    y = target.float().reshape(x.shape)
+    if distance is None:
+        geometry = (y >= 0.5) if geometry is None else geometry.reshape(x.shape)
+        distance = distance_to(geometry, max_distance)
+    d = distance.float().clamp(max=max_distance)
+    w_neg = 1 - torch.exp(-d ** 2 / (2 * tolerance ** 2))
+    # BCE written out: -y log p - (1 - y) w log(1 - p), stable via logsigmoid
+    loss = -(y * F.logsigmoid(x) + (1 - y) * w_neg * F.logsigmoid(-x)).mean()
+    if pull > 0:
+        p = x.sigmoid()
+        per = (p * d / max_distance).flatten(1).sum(1) / y.flatten(1).sum(1).clamp(min=1)
+        loss = loss + pull * per.mean()
+    return loss
