@@ -246,3 +246,24 @@ def test_offset_field_from_mask_lines():
     f, m = offset_field_from_mask(g, radius=4)
     assert m[13, 12] and not m[20, 12]
     assert f[1, 13, 12] == -3 and f[0, 13, 12] == 0  # straight up to the line
+
+
+def test_polygons_from_corners_round_trip_and_dent():
+    """Perfect targets give exact polygons; a dent in the instance mask does not add corners."""
+    from manyseg.vectors import corner_targets, polygons_from_corners
+
+    polys = [box(20, 20, 120, 80), Polygon([(150, 150), (250, 150), (250, 200), (200, 200), (200, 250), (150, 250)])]
+    t = corner_targets(polys, (300, 300))
+    lab = np.zeros((300, 300), np.int32)
+    lab[20:80, 20:120] = 1
+    lab[150:200, 150:250] = 2
+    lab[200:250, 150:200] = 2
+    out = polygons_from_corners(lab, t["corner"], t["direction"])
+    assert len(out) == 2
+    for p in polys:
+        q = max(out, key=lambda q: p.intersection(q).area / p.union(q).area)
+        assert p.intersection(q).area / p.union(q).area > 0.98
+        assert len(q.exterior.coords) == len(p.exterior.coords)
+    lab[20:24, 60:66] = 0  # a dent in the top wall
+    q = max(polygons_from_corners(lab, t["corner"], t["direction"]), key=lambda q: q.intersection(polys[0]).area)
+    assert len(q.exterior.coords) - 1 == 4
