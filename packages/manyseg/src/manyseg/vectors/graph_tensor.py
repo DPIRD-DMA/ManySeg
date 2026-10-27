@@ -193,9 +193,15 @@ def _refine(hm: np.ndarray, pix: np.ndarray) -> np.ndarray:
 
 def graph_from_tensor(vertex, edge, vector, *, vertex_threshold: float = 0.2,
                       edge_threshold: float = 0.5, link_radius: float = 10.0, gap: float = 25.0,
-                      kernel: int = 3, snap_border: bool = True) -> VectorGraph:
+                      kernel: int = 3, snap_border: bool = True,
+                      max_vertices: int | None = 5000) -> VectorGraph:
     """Decode a graph from ``vertex`` (H, W), ``edge`` (S, H, W) probabilities and ``vector``
     (S, 2, H, W) in pixels (numpy or torch). Defaults are E028's level-2 tuning for footprints.
+
+    ``max_vertices`` keeps only the strongest peaks: on a noisy vertex map (an untrained model,
+    a low threshold) the number of peaks, and the cost of polygonizing the edges, is otherwise
+    unbounded (E030: one 512² tile took > 10 GB). A 512² WHU tile has about 2,000 GT vertices
+    at most.
     """
     nx, _, cKDTree, _, _ = _deps()
     from .graph import bridge_ends
@@ -203,7 +209,9 @@ def graph_from_tensor(vertex, edge, vector, *, vertex_threshold: float = 0.2,
     vertex, edge, vector = (a.detach().float().cpu().numpy() if hasattr(a, "detach") else np.asarray(a)
                             for a in (vertex, edge, vector))
     H, W = vertex.shape
-    pi = _peak_pixels(vertex, vertex_threshold, kernel)
+    pi = _peak_pixels(vertex, vertex_threshold, kernel)  # strongest first
+    if max_vertices is not None:
+        pi = pi[:max_vertices]
     g = nx.Graph()
     if len(pi) == 0:
         return VectorGraph(np.zeros((0, 2)), np.zeros((0, 2), int))

@@ -72,5 +72,16 @@ predictions in C-IoU. GT polygons are therefore simplified by **1 px (0.3 m)** w
 (`prepare.py`), checked visually to keep real corners; the metric's 0.5 px tolerance then
 applies on top as registered. Nothing else changed.
 
+## Amendment 2 (2026-10-27 08:20, before any full training run)
+The first chain (26 Oct, 17:00) ran the workstation out of memory during the B2 *preflight*
+evaluation (a 1-epoch model trained on 64 tiles): its vertex map is noise, so at the lowest
+tuning threshold every tile gave tens of thousands of peaks, and polygonizing their edges took
+over 10 GB per decoding worker (about 110 GB in total). Changes, before any full run: the B2
+decoder keeps at most the 5,000 strongest vertex peaks per tile (`max_vertices`; a WHU tile has
+at most about 2,000 GT vertices, so a trained model is unaffected); evaluation uses 6 decoding
+workers, counts a tile whose decoding runs out of memory as an empty prediction
+(`failed_tiles`, reported); and the chain runs in a systemd scope capped at 12 GB, so a fault
+kills only this job. Nothing else changed.
+
 ## Results
 (pending)

@@ -142,3 +142,15 @@ def test_graph_tensor_matches_e028_encoder():
     np.testing.assert_allclose(ours["vertex"], theirs["vertex"], atol=1e-5)
     np.testing.assert_array_equal(ours["edge"], theirs["edge"])
     np.testing.assert_allclose(ours["vector"], theirs["vec"], atol=1e-4)
+
+
+def test_graph_tensor_decoding_is_bounded_on_noise():
+    from manyseg.vectors import graph_from_tensor, polygons_from_tensor
+
+    rng = np.random.default_rng(0)
+    v = rng.random((256, 256)).astype(np.float32)  # an untrained model's vertex map
+    e = rng.random((6, 256, 256)).astype(np.float32)
+    vec = rng.normal(0, 10, (6, 2, 256, 256)).astype(np.float32)
+    g = graph_from_tensor(v, e, vec, vertex_threshold=0.1, max_vertices=300)
+    assert len(g.xy) <= 300
+    polygons_from_tensor(v, e, vec, rng.random((256, 256)), vertex_threshold=0.1, max_vertices=300)

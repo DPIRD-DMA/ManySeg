@@ -32,7 +32,8 @@ GRIDS = {
     "B2": grid(vertex_threshold=[0.1, 0.2, 0.3], link_radius=[6.0, 10.0], gap=[0.0, 25.0],
                simplify=[1.0, 1.5]),
 }
-SUMS = ("tp", "n_gt", "n_pred", "ciou", "miou", "polis", "sum_n_pred", "sum_n_gt", "decode_s")
+SUMS = ("tp", "n_gt", "n_pred", "ciou", "miou", "polis", "sum_n_pred", "sum_n_gt", "decode_s",
+        "failed")
 
 _GT: list = []
 
@@ -72,7 +73,11 @@ def work(item):
     rows = []
     for p in params:
         t0 = time.perf_counter()
-        pred = decode(arm, a, p, cache)
+        failed = 0
+        try:
+            pred = decode(arm, a, p, cache)
+        except MemoryError:  # counted, never silent; the run's scope caps total memory
+            pred, failed = [], 1
         dt = time.perf_counter() - t0
         m = polygon_metrics(_GT[i], pred, gsd=0.3)
         tp = m["tp"]
@@ -80,7 +85,7 @@ def work(item):
                      "ciou": m["ciou"] * tp, "miou": m["miou"] * tp,
                      "polis": (m["polis"] * tp) if tp else 0.0,
                      "sum_n_pred": m.get("sum_n_pred", 0), "sum_n_gt": m.get("sum_n_gt", 0),
-                     "decode_s": dt})
+                     "decode_s": dt, "failed": failed})
     return rows
 
 
@@ -91,7 +96,8 @@ def summarise(acc: dict) -> dict:
     return {"ciou": ciou, "det_f1": det, "ciou_x_f1": ciou * det, "miou": acc["miou"] / tp,
             "polis_m": acc["polis"] / tp, "n_ratio": acc["sum_n_pred"] / max(1, acc["sum_n_gt"]),
             "tp": acc["tp"], "n_gt": acc["n_gt"], "n_pred": acc["n_pred"],
-            "decode_s_per_tile": acc["decode_s"] / max(1, acc["tiles"])}
+            "decode_s_per_tile": acc["decode_s"] / max(1, acc["tiles"]),
+            "failed_tiles": int(acc["failed"])}
 
 
 @torch.no_grad()
@@ -133,7 +139,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--run", required=True, help="e.g. B2_s0")
     ap.add_argument("--cache", type=Path, required=True)
-    ap.add_argument("--procs", type=int, default=8)
+    ap.add_argument("--procs", type=int, default=6)
     ap.add_argument("--limit", type=int, default=None, help="smoke test: first N tiles")
     args = ap.parse_args()
     arm = args.run.split("_")[0]
