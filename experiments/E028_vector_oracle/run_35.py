@@ -17,11 +17,16 @@ from pathlib import Path
 import numpy as np
 
 HERE = Path(__file__).resolve().parent
-RUNS = HERE / "runs_35"
+RUNS = HERE / ("runs_35" if os.environ.get("E035_ARM", "B3") == "B3" else "runs_35b")
 TUNE_AREA, TEST_AREAS = "innaloo", ("murdoch", "northam")
 TUNE_SEEDS, TEST_SEEDS = (0, 1), (0, 1, 2, 3, 4)
-GRID = [dict(zip(k, v)) for k in [("thr_c", "dev", "agree", "snap_r")]
-        for v in itertools.product((0.2, 0.4), (1.5, 3.0), (0.6, 0.8), (3.0, 6.0))]
+ARM = os.environ.get("E035_ARM", "B3")  # "B3" (E035) or "B3r" (E035b)
+if ARM == "B3":
+    GRID = [dict(zip(k, v)) for k in [("thr_c", "dev", "agree", "snap_r")]
+            for v in itertools.product((0.2, 0.4), (1.5, 3.0), (0.6, 0.8), (3.0, 6.0))]
+else:
+    GRID = [dict(zip(k, v), snap_r=4.0) for k in [("thr_c", "big_dev", "agree", "merge_deg")]
+            for v in itertools.product((0.3, 0.5), (4.0, 8.0), (0.4, 0.6), (8.0, 15.0))]
 _T: dict = {}
 BEST: dict = {}
 
@@ -60,7 +65,8 @@ def work(job):
             elif arm == "B2":
                 pred = E.decode_b2(a2, p2)
             else:
-                pred = B.decode_b3(a3, dict(p, b0=p0, kernel=3, simplify=p0["simplify"]))
+                dec = B.decode_b3 if arm == "B3" else B.decode_b3r
+                pred = dec(a3, dict(p, b0=p0, kernel=3, simplify=p0["simplify"]))
             m = E.polygon_metrics(t, pred)
             rows.append(dict(area=t.area, tile=t.index, level=job["level"], seed=job["seed"], arm=arm, pidx=pi,
                              params=p, decode_s=time.perf_counter() - t0, score=m["ciou"] * m["det_f1"], **m))
@@ -94,7 +100,7 @@ def main():
         for ti in range(min(n, args.limit_tiles or n)):
             for lv in range(4):
                 for s in TUNE_SEEDS:
-                    jobs.append(dict(area=TUNE_AREA, tile=ti, level=lv, seed=s, arms={"B3": GRID}))
+                    jobs.append(dict(area=TUNE_AREA, tile=ti, level=lv, seed=s, arms={ARM: GRID}))
         out = RUNS / "tune.jsonl"
         run(jobs, out, args.n, best)
         acc: dict = {}
@@ -111,7 +117,7 @@ def main():
             n = len(tiles(area))
             for ti in range(min(n, args.limit_tiles or n)):
                 for lv in range(4):
-                    arms = {"B0": [{}], "B2": [{}], "B3": [sel[f"L{lv}"]["params"]]}
+                    arms = {"B0": [{}], "B2": [{}], ARM: [sel[f"L{lv}"]["params"]]}
                     for s in TEST_SEEDS:
                         jobs.append(dict(area=area, tile=ti, level=lv, seed=s, arms=arms))
         run(jobs, RUNS / "test.jsonl", args.n, best)

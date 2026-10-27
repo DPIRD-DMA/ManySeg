@@ -560,3 +560,19 @@ edges. **By the rule B3 does not go to training: it never beats B2 at level 1 or
 * Next: E035b, a corner-trusting decoder (split only at corner evidence or strong direction
   disagreement; merge nearly collinear walls), pre-registered separately.
 
+
+# E035b: corner-trusting B3 decoder (pre-registered 2026-10-27 16:40)
+
+After E035 (B3 traced mask dents with vertex clusters): same targets, corruptions, tiles, seeds
+and rule as E035, decoder **B3r** (`e035.decode_b3r`): a wall between two snapped corners is split
+only if its outline strays more than `big_dev` px from the chord (a real missed turn) or its mean
+direction agreement is below `agree` (at the agreement change point); each wall's line is a
+trimmed total-least-squares fit (points > 1.5 px from the first fit dropped, so dents do not bend
+it); consecutive walls closer than `merge_deg` in direction are merged. Grid (16): `thr_c` ∈ {0.3,
+0.5}, `big_dev` ∈ {4, 8}, `agree` ∈ {0.4, 0.6}, `merge_deg` ∈ {8, 15}, `snap_r` 4. Decision as E035:
+B3r goes to a trained WHU seed-0 screen if it beats B2 at level 1 or 2 (C-IoU × detection F1, both
+test areas, > 2 pooled SDs and ≥ 0.02) and its detection F1 is not more than 0.02 below B0's at
+levels 0–2.
+
+## E035b results
+(pending)

@@ -177,3 +177,114 @@ def decode_b3(a: dict, p: dict) -> list[Polygon]:
         if q is not None:
             out.append(q)
     return out
+
+
+# ---------------------------------------------------------------------------------------------
+# E035b: corner-trusting decoder (B3r). Same targets and corruptions as B3.
+# ---------------------------------------------------------------------------------------------
+
+
+def _trimmed_line(pts: np.ndarray, keep_px: float = 1.5):
+    """Total-least-squares line, refitted without points more than ``keep_px`` from the first fit
+    (a dent in the mask outline does not bend the wall)."""
+    c = pts.mean(0)
+    u = np.linalg.svd(pts - c, full_matrices=False)[2][0]
+    rel = pts - c
+    off = np.abs(u[0] * rel[:, 1] - u[1] * rel[:, 0])
+    inl = pts[off <= keep_px]
+    if len(inl) >= 2 and len(inl) < len(pts):
+        c = inl.mean(0)
+        u = np.linalg.svd(inl - c, full_matrices=False)[2][0]
+    return c, u
+
+
+def _split_r(points: np.ndarray, dirs: np.ndarray, big_dev: float, agree: float) -> list[int]:
+    """Split only on strong evidence: a deviation above ``big_dev`` px (a real missed turn), or a
+    mean direction agreement below ``agree`` (then at the agreement change point)."""
+    if len(points) < 6:
+        return []
+    a, b = points[0], points[-1]
+    ab = b - a
+    L = np.hypot(*ab)
+    if L < 1e-6:
+        return []
+    rel = points - a
+    off = np.abs(ab[0] * rel[:, 1] - ab[1] * rel[:, 0]) / L
+    th = math.atan2(ab[1], ab[0])
+    per = (1 + dirs[:, 0] * math.cos(2 * th) + dirs[:, 1] * math.sin(2 * th)) / 2
+    if off.max() > big_dev:
+        k = int(np.argmax(off))
+    elif per.mean() < agree:
+        c = np.cumsum(per)
+        n = len(per)
+        ks = np.arange(3, n - 2)
+        k = int(ks[np.argmax(np.abs(c[ks - 1] / ks - (c[-1] - c[ks - 1]) / (n - ks)))])
+    else:
+        return []
+    left = _split_r(points[: k + 1], dirs[: k + 1], big_dev, agree)
+    right = _split_r(points[k:], dirs[k:], big_dev, agree)
+    return left + [k] + [k + i for i in right]
+
+
+def polygon_b3r(ring: np.ndarray, corner_pts: np.ndarray, dir_field: np.ndarray, p: dict) -> Polygon | None:
+    ring = ring[:-1] if np.allclose(ring[0], ring[-1]) else ring
+    K = len(ring)
+    if K < 4:
+        return None
+    idx = []
+    if len(corner_pts):
+        d, j = cKDTree(ring).query(corner_pts)
+        idx = sorted({int(x) for x, dd in zip(j, d) if dd <= p["snap_r"]})
+    if len(idx) < 3:
+        q = Polygon(ring).buffer(0).simplify(p["simplify"])
+        return q if q.geom_type == "Polygon" else None
+    rc = np.clip(np.floor(ring).astype(int), 0, E.TILE - 1)
+    dirs = dir_field[:, rc[:, 1], rc[:, 0]].T
+    verts = []
+    for a, b in zip(idx, idx[1:] + [idx[0] + K]):
+        seg = np.arange(a, b + 1)
+        verts += [a] + [a + c for c in _split_r(ring[seg % K], dirs[seg % K], p["big_dev"], p["agree"])]
+    verts = sorted(set(verts))
+    walls = []
+    for a, b in zip(verts, verts[1:] + [verts[0] + K]):
+        pts = ring[np.arange(a, b + 1) % K]
+        if len(pts) >= 2 and not np.allclose(pts[0], pts[-1]):
+            walls.append(_trimmed_line(pts) + (a,))
+    # merge consecutive nearly collinear walls (re-fit not needed: keep the longer one's line)
+    merged = True
+    while merged and len(walls) > 3:
+        merged = False
+        for i in range(len(walls)):
+            (c1, u1, s1), (c2, u2, s2) = walls[i - 1], walls[i]
+            ang = math.degrees(math.acos(min(1.0, abs(float(u1 @ u2)))))
+            if ang < p["merge_deg"]:
+                del walls[i]
+                merged = True
+                break
+    if len(walls) < 3:
+        return None
+    out = []
+    for i in range(len(walls)):
+        (p1, d1, _), (p2, d2, s2) = walls[i - 1], walls[i]
+        x = _intersect(p1, d1, p2, d2)
+        corner = ring[s2 % K]
+        out.append(x if x is not None and np.hypot(*(x - corner)) <= 3 * p["snap_r"] else corner)
+    q = Polygon(out)
+    if not q.is_valid:
+        q = q.buffer(0)
+        if q.geom_type == "MultiPolygon":
+            q = max(q.geoms, key=lambda g: g.area)
+    return q if q.geom_type == "Polygon" and q.area > 1 else None
+
+
+def decode_b3r(a: dict, p: dict) -> list[Polygon]:
+    lab = E._labels_b0(a, p["b0"])
+    exact = polygons_from_labels(lab, simplify=0.0, min_area=16)
+    pk = E._peaks(a["corner"], p["thr_c"], p["kernel"])
+    out = []
+    for poly in exact:
+        ring = np.asarray(shapely.segmentize(poly.exterior, 1.0).coords)
+        q = polygon_b3r(ring, pk, a["direction"], p)
+        if q is not None:
+            out.append(q)
+    return out
