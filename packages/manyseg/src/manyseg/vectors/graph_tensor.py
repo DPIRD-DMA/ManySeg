@@ -194,14 +194,17 @@ def _refine(hm: np.ndarray, pix: np.ndarray) -> np.ndarray:
 def graph_from_tensor(vertex, edge, vector, *, vertex_threshold: float = 0.2,
                       edge_threshold: float = 0.5, link_radius: float = 10.0, gap: float = 25.0,
                       kernel: int = 3, snap_border: bool = True,
-                      max_vertices: int | None = 5000) -> VectorGraph:
+                      max_vertices: int | None = 5000,
+                      max_edge_length: float | None = 60.0) -> VectorGraph:
     """Decode a graph from ``vertex`` (H, W), ``edge`` (S, H, W) probabilities and ``vector``
     (S, 2, H, W) in pixels (numpy or torch). Defaults are E028's level-2 tuning for footprints.
 
     ``max_vertices`` keeps only the strongest peaks: on a noisy vertex map (an untrained model,
     a low threshold) the number of peaks, and the cost of polygonizing the edges, is otherwise
     unbounded (E030: one 512² tile took > 10 GB). A 512² WHU tile has about 2,000 GT vertices
-    at most.
+    at most. ``max_edge_length`` (px) drops longer edges: true edges are at most the encoding's
+    vertex spacing (20 px) long, and long edges from noisy vectors cross each other quadratically
+    when polygonized.
     """
     nx, _, cKDTree, _, _ = _deps()
     from .graph import bridge_ends
@@ -230,7 +233,8 @@ def graph_from_tensor(vertex, edge, vector, *, vertex_threshold: float = 0.2,
             d, j = tree.query(centre[i] + vector[k, :, r, c], k=2, distance_upper_bound=link_radius)
             for dd, jj in zip(np.atleast_1d(d), np.atleast_1d(j)):
                 if np.isfinite(dd) and jj != i:
-                    g.add_edge(i, int(jj))
+                    if max_edge_length is None or np.hypot(*(xy[jj] - xy[i])) <= max_edge_length:
+                        g.add_edge(i, int(jj))
                     break
     g.remove_nodes_from([n for n in list(g) if g.degree(n) == 0])
     bridge_ends(g, gap, (H, W))

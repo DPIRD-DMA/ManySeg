@@ -151,6 +151,9 @@ def test_graph_tensor_decoding_is_bounded_on_noise():
     v = rng.random((256, 256)).astype(np.float32)  # an untrained model's vertex map
     e = rng.random((6, 256, 256)).astype(np.float32)
     vec = rng.normal(0, 10, (6, 2, 256, 256)).astype(np.float32)
+    vec = rng.normal(0, 100, (6, 2, 256, 256)).astype(np.float32)  # long random vectors
     g = graph_from_tensor(v, e, vec, vertex_threshold=0.1, max_vertices=300)
     assert len(g.xy) <= 300
+    d = g.xy[g.edges[:, 0]] - g.xy[g.edges[:, 1]]
+    assert len(d) == 0 or np.hypot(d[:, 0], d[:, 1]).max() <= 60 + 1e-6
     polygons_from_tensor(v, e, vec, rng.random((256, 256)), vertex_threshold=0.1, max_vertices=300)

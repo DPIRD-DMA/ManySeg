@@ -78,7 +78,9 @@ evaluation (a 1-epoch model trained on 64 tiles): its vertex map is noise, so at
 tuning threshold every tile gave tens of thousands of peaks, and polygonizing their edges took
 over 10 GB per decoding worker (about 110 GB in total). Changes, before any full run: the B2
 decoder keeps at most the 5,000 strongest vertex peaks per tile (`max_vertices`; a WHU tile has
-at most about 2,000 GT vertices, so a trained model is unaffected); evaluation uses 6 decoding
+at most about 2,000 GT vertices, so a trained model is unaffected) and drops decoded edges longer
+than 60 px (`max_edge_length`; true edges are at most 20 px, bridged gaps 25 px), since a first
+fix with the vertex cap alone still reached the 12 GB cap on the noise model; evaluation uses 6 decoding
 workers, counts a tile whose decoding runs out of memory as an empty prediction
 (`failed_tiles`, reported); and the chain runs in a systemd scope capped at 12 GB, so a fault
 kills only this job. Nothing else changed.
