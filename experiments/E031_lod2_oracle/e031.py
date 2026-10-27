@@ -422,5 +422,5 @@ def metrics(t: Tile, faces: list, planes: np.ndarray) -> dict:
 
 
 def score(m: dict) -> float:
-    """Tuning objective (README): face F1 x (1 - min(1, height RMSE / 1 m))."""
-    return m["face_f1"] * (1 - min(1.0, m["h_rmse"] / 1.0))
+    """Tuning objective (README amendment 1): face F1 / (1 + height RMSE in m)."""
+    return m["face_f1"] / (1.0 + m["h_rmse"])

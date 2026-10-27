@@ -76,5 +76,13 @@ The corruptions are synthetic and independent between the graph and the height m
 a trained network's graph errors would correlate with what the height model shows. The labels
 come from an automatic LiDAR reconstruction. Dutch roofs only.
 
+## Amendment 1 (2026-10-27 09:12, before tuning)
+A 2-tile smoke run on delft (tuning data) showed the registered tuning objective,
+face F1 × (1 − min(1, RMSE / 1 m)), is 0 for almost every setting: height RMSE is above 1 m even
+for good decodes, because a pixel assigned to the wrong side of a step edge (often 10–20 m) and
+uncovered pixels (height 0) dominate it. Tuning would then pick the first grid entry. The
+objective is now **face F1 / (1 + RMSE in m)**, which never saturates. Metrics and decision rules
+are unchanged. The aborted run was discarded.
+
 ## Results
 (pending)
