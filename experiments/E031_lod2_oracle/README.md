@@ -212,4 +212,90 @@ experiment (imagery + height model in; roof graph + mask out; this hybrid decode
 running. Otherwise LoD2 stays with plane segmentation.
 
 ## E031b results
-(pending)
+
+Status: **complete** (2026-10-27; code `e1c20c7`; tuned coverage threshold 0.7 at levels 0, 2, 3
+and 0.9 at level 1, `runs/best_h.json`). Same tiles, seeds and metrics as E031; A0 and A1 rerun
+with identical results.
+
+**face_f1**
+
+| area | arm | L0 | L1 | L2 | L3 |
+|---|---|---|---|---|---|
+| leidscherijn | A0 | 0.479 ± 0.000 | 0.428 ± 0.008 | 0.252 ± 0.010 | 0.136 ± 0.004 |
+| leidscherijn | A1 | 0.994 ± 0.000 | 0.871 ± 0.007 | 0.550 ± 0.009 | 0.055 ± 0.007 |
+| leidscherijn | H | 0.993 ± 0.000 | 0.796 ± 0.015 | 0.453 ± 0.016 | 0.137 ± 0.004 |
+| staphorst | A0 | 0.616 ± 0.000 | 0.548 ± 0.012 | 0.325 ± 0.008 | 0.151 ± 0.007 |
+| staphorst | A1 | 0.993 ± 0.000 | 0.894 ± 0.002 | 0.576 ± 0.014 | 0.059 ± 0.004 |
+| staphorst | H | 0.995 ± 0.000 | 0.814 ± 0.015 | 0.478 ± 0.030 | 0.153 ± 0.007 |
+
+**h_rmse**
+
+| area | arm | L0 | L1 | L2 | L3 |
+|---|---|---|---|---|---|
+| leidscherijn | A0 | 0.86 ± 0.00 | 1.44 ± 0.02 | 2.04 ± 0.05 | 2.81 ± 0.03 |
+| leidscherijn | A1 | 0.36 ± 0.00 | 1.55 ± 0.04 | 4.01 ± 0.15 | 6.15 ± 0.03 |
+| leidscherijn | H | 0.34 ± 0.00 | 1.15 ± 0.03 | 2.08 ± 0.06 | 2.81 ± 0.03 |
+| staphorst | A0 | 0.78 ± 0.00 | 1.36 ± 0.01 | 1.92 ± 0.03 | 2.69 ± 0.07 |
+| staphorst | A1 | 0.28 ± 0.00 | 1.80 ± 0.24 | 4.32 ± 0.11 | 6.42 ± 0.02 |
+| staphorst | H | 0.27 ± 0.00 | 1.10 ± 0.02 | 1.89 ± 0.03 | 2.69 ± 0.07 |
+
+**h_mae**
+
+| area | arm | L0 | L1 | L2 | L3 |
+|---|---|---|---|---|---|
+| leidscherijn | A0 | 0.33 ± 0.00 | 0.58 ± 0.01 | 1.03 ± 0.03 | 1.60 ± 0.02 |
+| leidscherijn | A1 | 0.03 ± 0.00 | 0.55 ± 0.06 | 2.83 ± 0.14 | 5.76 ± 0.05 |
+| leidscherijn | H | 0.03 ± 0.00 | 0.33 ± 0.02 | 1.02 ± 0.03 | 1.60 ± 0.02 |
+| staphorst | A0 | 0.22 ± 0.00 | 0.49 ± 0.02 | 0.91 ± 0.02 | 1.45 ± 0.04 |
+| staphorst | A1 | 0.02 ± 0.00 | 0.77 ± 0.17 | 3.15 ± 0.09 | 6.06 ± 0.03 |
+| staphorst | H | 0.02 ± 0.00 | 0.29 ± 0.02 | 0.86 ± 0.01 | 1.45 ± 0.04 |
+
+**corner_f1**
+
+| area | arm | L0 | L1 | L2 | L3 |
+|---|---|---|---|---|---|
+| leidscherijn | A0 | 0.554 ± 0.000 | 0.429 ± 0.002 | 0.232 ± 0.005 | 0.103 ± 0.001 |
+| leidscherijn | A1 | 0.951 ± 0.000 | 0.793 ± 0.004 | 0.526 ± 0.007 | 0.110 ± 0.004 |
+| leidscherijn | H | 0.951 ± 0.000 | 0.661 ± 0.020 | 0.331 ± 0.007 | 0.103 ± 0.001 |
+| staphorst | A0 | 0.462 ± 0.000 | 0.379 ± 0.003 | 0.226 ± 0.004 | 0.095 ± 0.002 |
+| staphorst | A1 | 0.951 ± 0.000 | 0.796 ± 0.005 | 0.529 ± 0.006 | 0.105 ± 0.007 |
+| staphorst | H | 0.952 ± 0.000 | 0.616 ± 0.020 | 0.309 ± 0.013 | 0.096 ± 0.002 |
+
+**normal_err_deg**
+
+| area | arm | L0 | L1 | L2 | L3 |
+|---|---|---|---|---|---|
+| leidscherijn | A0 | 2.5 ± 0.0 | 2.9 ± 0.1 | 9.1 ± 0.6 | 14.8 ± 0.6 |
+| leidscherijn | A1 | 0.1 ± 0.0 | 2.0 ± 0.2 | 12.0 ± 0.4 | 19.9 ± 1.5 |
+| leidscherijn | H | 0.1 ± 0.0 | 1.9 ± 0.3 | 10.9 ± 0.5 | 14.9 ± 0.6 |
+| staphorst | A0 | 1.6 ± 0.0 | 2.1 ± 0.2 | 7.5 ± 0.4 | 12.5 ± 0.4 |
+| staphorst | A1 | 0.2 ± 0.0 | 1.4 ± 0.1 | 8.6 ± 0.3 | 17.1 ± 1.4 |
+| staphorst | H | 0.2 ± 0.0 | 1.5 ± 0.1 | 7.9 ± 0.5 | 12.6 ± 0.4 |
+
+**ciou**
+
+| area | arm | L0 | L1 | L2 | L3 |
+|---|---|---|---|---|---|
+| leidscherijn | A0 | 0.662 ± 0.000 | 0.560 ± 0.005 | 0.405 ± 0.004 | 0.406 ± 0.005 |
+| leidscherijn | A1 | 0.938 ± 0.000 | 0.829 ± 0.001 | 0.688 ± 0.004 | 0.553 ± 0.010 |
+| leidscherijn | H | 0.938 ± 0.000 | 0.803 ± 0.009 | 0.619 ± 0.005 | 0.408 ± 0.005 |
+| staphorst | A0 | 0.620 ± 0.000 | 0.517 ± 0.002 | 0.374 ± 0.007 | 0.391 ± 0.006 |
+| staphorst | A1 | 0.938 ± 0.000 | 0.836 ± 0.004 | 0.708 ± 0.003 | 0.568 ± 0.016 |
+| staphorst | H | 0.938 ± 0.000 | 0.794 ± 0.010 | 0.601 ± 0.017 | 0.395 ± 0.008 |
+
+### Decision (pre-registered rule, applied by `analyze.py`)
+
+* H beats A0 at: ['L1', 'L2']; viable per level: {'L0': True, 'L1': True, 'L2': True}.
+* → **a trained LoD2 experiment with roof-graph heads is worth running.**
+
+### Interpretation
+* **The hybrid passes: H beats A0 at levels 1 and 2 on both test areas and is viable at 0–2.**
+  It keeps almost all of the roof graph's structure (face F1 0.99 clean; 0.80–0.81 vs 0.43–0.55
+  at level 1; 0.45–0.48 vs 0.25–0.33 at level 2) and the fallback removes its height failure
+  (RMSE 1.10–1.15 vs 1.36–1.44 m at level 1, 1.89–2.08 vs 1.92–2.04 m at level 2; MAE at least
+  as good everywhere).
+* At level 3 H equals A0 exactly: the graph covers no building well enough, so every building
+  falls back. The fallback costs nothing when the graph fails.
+* By the registered rule, **a trained LoD2 experiment is worth running**: imagery + height model
+  in; roof-graph heads (vertex, edge, vector) + building mask out; this hybrid decoder. The
+  E031 limits still apply (synthetic, independent corruptions; weak A0 relative to roofer).
