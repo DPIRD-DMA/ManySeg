@@ -87,7 +87,7 @@ def select(rows) -> dict:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("phase", choices=["tune", "test"])
+    ap.add_argument("phase", choices=["tune", "test", "tune_h", "test_h"])
     ap.add_argument("-n", type=int, default=6)
     ap.add_argument("--limit-tiles", type=int, default=None)
     ap.add_argument("--tag", default="")
@@ -104,6 +104,33 @@ def main():
                                      arms={k: GRIDS[k] for k in ("A0", "A1")}))
         run(jobs, tune_path, args.n)
         best_path.write_text(json.dumps(select([json.loads(x) for x in tune_path.open()]), indent=1))
+    elif args.phase in ("tune_h", "test_h"):  # E031b
+        best = json.loads(best_path.read_text())
+
+        def h_grid(lv):
+            b = best[f"L{lv}"]
+            return [{"a0": b["A0"]["params"], "a1": b["A1"]["params"], "cov": c} for c in (0.7, 0.8, 0.9, 0.95)]
+
+        if args.phase == "tune_h":
+            n = len(tiles(TUNE_AREA))
+            for ti in range(min(n, args.limit_tiles or n)):
+                for lv in range(4):
+                    for s in TUNE_SEEDS:
+                        jobs.append(dict(area=TUNE_AREA, tile=ti, level=lv, seed=s, arms={"H": h_grid(lv)}))
+            out = RUNS / f"tune_h{args.tag}.jsonl"
+            run(jobs, out, args.n)
+            (RUNS / f"best_h{args.tag}.json").write_text(json.dumps(select([json.loads(x) for x in out.open()]), indent=1))
+        else:
+            bh = json.loads((RUNS / f"best_h{args.tag}.json").read_text())
+            for area in TEST_AREAS:
+                n = len(tiles(area))
+                for ti in range(min(n, args.limit_tiles or n)):
+                    for lv in range(4):
+                        arms = {k: [best[f"L{lv}"][k]["params"]] for k in ("A0", "A1")} | \
+                               {"H": [bh[f"L{lv}"]["H"]["params"]]}
+                        for s in TEST_SEEDS:
+                            jobs.append(dict(area=area, tile=ti, level=lv, seed=s, arms=arms))
+            run(jobs, RUNS / f"test_h{args.tag}.jsonl", args.n)
     else:
         best = json.loads(best_path.read_text())
         for area in TEST_AREAS:

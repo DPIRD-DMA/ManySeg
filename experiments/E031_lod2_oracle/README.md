@@ -189,3 +189,27 @@ LoD2 does not get a trained roof-graph experiment on this evidence. ManySeg's pa
 the footprint (E030) plus a height model as input, with roofs from plane segmentation; a
 graph/segmentation hybrid is a candidate oracle (E031b) if LoD2 becomes a priority.
 
+
+
+# E031b: roof graph with a plane-segmentation fallback (pre-registered 2026-10-27 10:20)
+
+Suggested by the user after E031: one model with roof-graph heads and a building-mask head, the
+height model as input; decode with the graph where it works and fall back to plane segmentation
+where it does not. The fallback needs no extra head (A0 uses only the mask and the height model).
+
+**Arm H (hybrid):** per building (4-connected component of the mask), compute the share of its
+pixels covered by A1's faces whose representative point lies in it. If the share is at least
+`cov`, the building takes A1's faces; otherwise it takes A0's faces. A0 and A1 run with their
+frozen E031 parameters for that level (`runs/best.json`); only `cov` ∈ {0.7, 0.8, 0.9, 0.95} is
+tuned on delft (seeds 0–1, same objective as E031 amendment 1). Test: same tiles, levels, seeds
+and metrics as E031, with A0, A1 and H rerun together.
+
+**Decision rule** (E031's, with H in A1's place): H beats A0 at a level if, on both test areas,
+face F1 is higher by more than 2 pooled seed-SDs and at least 0.02 and height RMSE is no more
+than 0.05 m worse; H is viable if never more than 0.02 below A0 in face F1 nor more than 0.05 m
+worse in RMSE at levels 0–2. If H beats A0 at level 1 or 2 and is viable, a trained LoD2
+experiment (imagery + height model in; roof graph + mask out; this hybrid decoder) is worth
+running. Otherwise LoD2 stays with plane segmentation.
+
+## E031b results
+(pending)

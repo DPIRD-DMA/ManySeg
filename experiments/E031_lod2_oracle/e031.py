@@ -354,7 +354,43 @@ def decode_lod1(a: dict, p: dict) -> tuple[list, np.ndarray]:
     return faces, planes
 
 
-DECODERS = {"A0": decode_a0, "A1": decode_a1, "LoD1": decode_lod1}
+def decode_hybrid(a: dict, p: dict) -> tuple[list, np.ndarray]:
+    """E031b: per building (mask component), A1's faces if they cover at least ``cov`` of it,
+    else A0's faces. ``p`` = {"a0": params, "a1": params, "cov": float}."""
+    comp, n = ndimage.label(a["mask"] > 0.5)
+    f0, p0 = decode_a0(a, p["a0"])
+    f1, p1 = decode_a1(a, p["a1"])
+    if n == 0:
+        return [], np.zeros((0, 3))
+
+    def owner(f):
+        q = f.representative_point()
+        c, r = int(min(max(q.x, 0), TILE - 1)), int(min(max(q.y, 0), TILE - 1))
+        return int(comp[r, c])
+
+    o1 = [owner(f) for f in f1]
+    cover = np.zeros(n + 1)
+    if f1:
+        lab1 = rasterize([(f, i + 1) for i, f in enumerate(f1)], out_shape=(TILE, TILE), transform=IDENT,
+                         dtype="int32")
+        own = np.array([0] + o1)[lab1]  # building each covered pixel's face belongs to
+        hit = (lab1 > 0) & (own == comp)
+        cover = np.bincount(comp[hit], minlength=n + 1) / np.maximum(np.bincount(comp.ravel(), minlength=n + 1), 1)
+    use1 = cover >= p["cov"]
+    faces, planes = [], []
+    for f, pl, o in zip(f1, p1, o1):
+        if o > 0 and use1[o]:
+            faces.append(f)
+            planes.append(pl)
+    for f, pl in zip(f0, p0):
+        o = owner(f)
+        if o > 0 and not use1[o]:
+            faces.append(f)
+            planes.append(pl)
+    return faces, np.array(planes).reshape(-1, 3)
+
+
+DECODERS = {"A0": decode_a0, "A1": decode_a1, "LoD1": decode_lod1, "H": decode_hybrid}
 
 
 # --------------------------------------------------------------------------------------
