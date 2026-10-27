@@ -38,5 +38,13 @@ dataset: a win makes the tool an *option* for graph heads; a default needs a sec
 ## Budget
 6 runs × about 60–75 min on the local 4090 (12 GB capped service), queued after E032.
 
+## Amendment 1 (2026-10-27 12:10, before any E033 result): staged seeds
+At the user's request, to shorten iteration: every arm first runs **seed 0 only**. An arm goes on
+to seeds 1–2 only if its seed-0 **validation** C-IoU × detection F1 (the tuned decoder's val score)
+beats B2 seed 0's by more than 0.005; test is not looked at for this. The decision rule is
+unchanged and is applied only to arms with all 3 seeds; arms stopped after seed 0 are reported as
+"screened out on one seed", with no claim beyond that. Run order: B2e, B2w (E032), then B2d, B2s
+(E033), then the advanced arms' seeds 1–2.
+
 ## Results
 (pending)
