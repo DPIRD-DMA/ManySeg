@@ -480,4 +480,83 @@ around the ring's start scrambled the wall order (ring positions now stay unwrap
 files were appended across runs (each phase now writes fresh files).
 
 ## E035 results
-(pending)
+
+Status: **complete** (2026-10-27; code `da36b6a`). Tuned (`runs_35/best_35.json`): L0 thr_c 0.2,
+dev 1.5, agree 0.6, snap_r 3; L1–L3 thr_c 0.4, dev 3, agree 0.6, snap_r 3, all at the grid's
+edges. **By the rule B3 does not go to training: it never beats B2 at level 1 or 2.**
+
+**C-IoU × detection F1**
+
+| area | arm | L0 | L1 | L2 | L3 |
+|---|---|---|---|---|---|
+| murdoch | B0 | 0.883 ± 0.000 | 0.523 ± 0.009 | 0.231 ± 0.008 | 0.027 ± 0.001 |
+| murdoch | B2 | 0.971 ± 0.000 | 0.727 ± 0.017 | 0.352 ± 0.021 | 0.007 ± 0.006 |
+| murdoch | B3 | 0.927 ± 0.000 | 0.511 ± 0.010 | 0.178 ± 0.005 | 0.015 ± 0.001 |
+| northam | B0 | 0.931 ± 0.000 | 0.650 ± 0.018 | 0.285 ± 0.010 | 0.052 ± 0.001 |
+| northam | B2 | 0.986 ± 0.000 | 0.764 ± 0.021 | 0.477 ± 0.022 | 0.020 ± 0.010 |
+| northam | B3 | 0.966 ± 0.000 | 0.623 ± 0.023 | 0.211 ± 0.011 | 0.026 ± 0.001 |
+
+**C-IoU**
+
+| area | arm | L0 | L1 | L2 | L3 |
+|---|---|---|---|---|---|
+| murdoch | B0 | 0.898 ± 0.000 | 0.742 ± 0.005 | 0.535 ± 0.007 | 0.374 ± 0.006 |
+| murdoch | B2 | 0.978 ± 0.000 | 0.874 ± 0.014 | 0.722 ± 0.030 | 0.112 ± 0.034 |
+| murdoch | B3 | 0.933 ± 0.000 | 0.709 ± 0.010 | 0.394 ± 0.010 | 0.197 ± 0.006 |
+| northam | B0 | 0.939 ± 0.000 | 0.781 ± 0.007 | 0.525 ± 0.004 | 0.351 ± 0.004 |
+| northam | B2 | 0.988 ± 0.000 | 0.912 ± 0.007 | 0.750 ± 0.013 | 0.311 ± 0.091 |
+| northam | B3 | 0.974 ± 0.000 | 0.744 ± 0.014 | 0.382 ± 0.008 | 0.181 ± 0.004 |
+
+**detection F1**
+
+| area | arm | L0 | L1 | L2 | L3 |
+|---|---|---|---|---|---|
+| murdoch | B0 | 0.983 ± 0.000 | 0.697 ± 0.010 | 0.412 ± 0.012 | 0.066 ± 0.002 |
+| murdoch | B2 | 0.993 ± 0.000 | 0.832 ± 0.019 | 0.480 ± 0.026 | 0.012 ± 0.009 |
+| murdoch | B3 | 0.994 ± 0.000 | 0.700 ± 0.008 | 0.420 ± 0.010 | 0.067 ± 0.003 |
+| northam | B0 | 0.992 ± 0.000 | 0.830 ± 0.018 | 0.539 ± 0.017 | 0.146 ± 0.004 |
+| northam | B2 | 0.998 ± 0.000 | 0.838 ± 0.025 | 0.636 ± 0.018 | 0.028 ± 0.013 |
+| northam | B3 | 0.992 ± 0.000 | 0.829 ± 0.018 | 0.540 ± 0.019 | 0.148 ± 0.004 |
+
+**PoLiS (px)**
+
+| area | arm | L0 | L1 | L2 | L3 |
+|---|---|---|---|---|---|
+| murdoch | B0 | 0.237 ± 0.000 | 0.759 ± 0.018 | 1.394 ± 0.047 | 2.076 ± 0.063 |
+| murdoch | B2 | 0.028 ± 0.000 | 0.287 ± 0.047 | 0.728 ± 0.054 | 0.939 ± 0.385 |
+| murdoch | B3 | 0.127 ± 0.000 | 0.718 ± 0.021 | 1.466 ± 0.063 | 2.134 ± 0.053 |
+| northam | B0 | 0.191 ± 0.000 | 0.669 ± 0.026 | 1.256 ± 0.024 | 1.923 ± 0.033 |
+| northam | B2 | 0.006 ± 0.000 | 0.223 ± 0.030 | 0.651 ± 0.022 | 0.698 ± 0.115 |
+| northam | B3 | 0.064 ± 0.000 | 0.599 ± 0.032 | 1.309 ± 0.030 | 1.970 ± 0.042 |
+
+**N-ratio**
+
+| area | arm | L0 | L1 | L2 | L3 |
+|---|---|---|---|---|---|
+| murdoch | B0 | 0.908 ± 0.000 | 1.302 ± 0.012 | 2.085 ± 0.024 | 3.175 ± 0.112 |
+| murdoch | B2 | 0.975 ± 0.000 | 0.952 ± 0.014 | 1.136 ± 0.028 | 1.178 ± 0.150 |
+| murdoch | B3 | 1.052 ± 0.000 | 2.295 ± 0.076 | 4.678 ± 0.101 | 9.041 ± 0.318 |
+| northam | B0 | 1.006 ± 0.000 | 1.331 ± 0.023 | 2.220 ± 0.027 | 3.264 ± 0.030 |
+| northam | B2 | 0.992 ± 0.000 | 1.029 ± 0.014 | 1.291 ± 0.023 | 1.341 ± 0.275 |
+| northam | B3 | 1.017 ± 0.000 | 2.024 ± 0.076 | 4.435 ± 0.071 | 8.852 ± 0.063 |
+
+### Decision (E035 rule)
+
+* B3 beats B2 at: neither L1 nor L2; viable per level: {'L0': True, 'L1': True, 'L2': True}.
+* → **B3 does not go to training.**
+
+![B0, B2, B3 on a Northam street, perfect input and mild errors](e035_b3.png)
+
+### Interpretation
+* Closure works as designed: B3's detection F1 equals B0's at every level (its buildings come from
+  the instance heads), where B2 loses buildings (figure, mild errors: B2 drops two).
+* Its geometry fails for one identifiable reason: the decoder splits a wall wherever the mask
+  outline strays from the corner-to-corner chord, so a dent in the corrupted mask (an occlusion
+  notch) is traced with a cluster of vertices (figure, top-left of the large building). N-ratio
+  2.0–4.7 at levels 1–2, which drives C-IoU below B0's. The corners are not trusted enough: the
+  tuned parameters sit at the grid's edge (highest corner threshold, largest deviation, laxest
+  direction agreement), i.e. the decoder wanted to split even less.
+* With perfect input B3 is better than B0 (C-IoU 0.93 / 0.97 vs 0.90 / 0.94) but below B2.
+* Next: E035b, a corner-trusting decoder (split only at corner evidence or strong direction
+  disagreement; merge nearly collinear walls), pre-registered separately.
+
