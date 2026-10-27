@@ -54,6 +54,8 @@ def main():
                     help="B2 loss: base = E030; E032: w = decode-cost weighting, e = w + endpoint; "
                          "E033: d = distance-weighted vertex BCE, s = snap offset head")
     args = ap.parse_args()
+    if args.arm == "B0" and args.loss != "base":
+        ap.error("--loss options apply to --arm B2 only")
     out = HERE / "runs"
     out.mkdir(exist_ok=True)
     suffix = "" if args.loss == "base" else args.loss
