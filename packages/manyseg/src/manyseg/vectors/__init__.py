@@ -10,11 +10,14 @@ from .graph_tensor import (
     encode_graph_tensor,
     graph_from_tensor,
     graph_tensor_heads,
+    offset_field,
+    offset_field_from_mask,
     polygons_from_tensor,
+    snap_points,
     vertex_graph,
 )
 from .polygons import polygons_from_labels, to_geojson
 
 __all__ = ["VectorGraph", "bridge_ends", "encode_graph_tensor", "graph_chains", "graph_from_mask",
            "graph_from_tensor", "graph_tensor_heads", "polygons_from_labels", "polygons_from_tensor",
-           "to_geojson", "vertex_graph"]
+           "offset_field", "offset_field_from_mask", "snap_points", "to_geojson", "vertex_graph"]

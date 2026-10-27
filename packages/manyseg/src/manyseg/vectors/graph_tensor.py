@@ -99,6 +99,76 @@ def _on_border(a, b, shape, eps=1e-6) -> bool:
     return False
 
 
+def _nearest_within(xy: np.ndarray, shape: tuple[int, int], radius: float):
+    """Pixels within ``radius`` of any point of ``xy`` ``(V, 2)``: their rows, cols, nearest point
+    index and float32 squared distance (from the pixel centre). All points at once; ties go to
+    the lower point index, as in a loop over points with a strict "closer" test."""
+    H, W = shape
+    r = int(math.ceil(radius))
+    off = np.arange(-r, r + 1)
+    x, y = xy[:, 0], xy[:, 1]
+    cc = np.floor(x).astype(np.int64)[:, None, None] + off[None, None, :]
+    rr = np.floor(y).astype(np.int64)[:, None, None] + off[None, :, None]
+    cc, rr = np.broadcast_arrays(cc, rr)
+    d2 = (cc + 0.5 - x[:, None, None]) ** 2 + (rr + 0.5 - y[:, None, None]) ** 2
+    vi = np.broadcast_to(np.arange(len(xy))[:, None, None], d2.shape)
+    ok = (d2 <= radius ** 2) & (cc >= 0) & (cc < W) & (rr >= 0) & (rr < H)
+    cc, rr, d2, vi = cc[ok], rr[ok], d2[ok], vi[ok]
+    pix = rr * W + cc
+    order = np.lexsort((vi, d2.astype(np.float32), pix))  # by pixel, then distance, then point
+    pix, d2, vi, cc, rr = pix[order], d2[order], vi[order], cc[order], rr[order]
+    first = np.r_[True, pix[1:] != pix[:-1]]
+    return rr[first], cc[first], vi[first], d2[first].astype(np.float32)
+
+
+def offset_field(points: np.ndarray, shape: tuple[int, int], radius: float = 8.0):
+    """Offset targets towards point geometry (vertices, corners, object centres): for each pixel
+    within ``radius`` of a point, the vector ``(dx, dy)`` in pixels from the pixel centre to the
+    nearest point. Returns ``field`` ``(2, H, W)`` float32 and ``mask`` ``(H, W)`` bool. Train a
+    2-channel regression head on it (masked L1) and move detected points with
+    :func:`snap_points`: a prediction a few pixels off then lands on the true location."""
+    H, W = shape
+    field = np.zeros((2, H, W), np.float32)
+    mask = np.zeros((H, W), bool)
+    pts = np.asarray(points, np.float64).reshape(-1, 2)
+    if len(pts) == 0:
+        return field, mask
+    rr, cc, vi, _ = _nearest_within(pts, shape, radius)
+    mask[rr, cc] = True
+    field[0, rr, cc] = pts[vi, 0] - (cc + 0.5)
+    field[1, rr, cc] = pts[vi, 1] - (rr + 0.5)
+    return field, mask
+
+
+def offset_field_from_mask(geometry: np.ndarray, radius: float = 8.0):
+    """As :func:`offset_field` for raster geometry (line, boundary or point pixels, bool
+    ``(H, W)``): vectors to the centre of the nearest geometry pixel, within ``radius``."""
+    from scipy import ndimage
+
+    g = np.asarray(geometry, bool)
+    field = np.zeros((2,) + g.shape, np.float32)
+    if not g.any():
+        return field, np.zeros(g.shape, bool)
+    d, (ir, ic) = ndimage.distance_transform_edt(~g, return_indices=True)
+    rows, cols = np.indices(g.shape)
+    mask = d <= radius
+    field[0] = np.where(mask, ic - cols, 0)
+    field[1] = np.where(mask, ir - rows, 0)
+    return field, mask
+
+
+def snap_points(points: np.ndarray, field) -> np.ndarray:
+    """Move points ``(K, 2)`` ``(x, y)`` by a predicted offset field ``(2, H, W)`` (pixels), read
+    at each point's pixel; returns the snapped ``(K, 2)``."""
+    f = field.detach().float().cpu().numpy() if hasattr(field, "detach") else np.asarray(field)
+    pts = np.asarray(points, np.float64).reshape(-1, 2)
+    if len(pts) == 0:
+        return pts
+    c = np.clip(np.floor(pts[:, 0]).astype(int), 0, f.shape[2] - 1)
+    r = np.clip(np.floor(pts[:, 1]).astype(int), 0, f.shape[1] - 1)
+    return np.stack([c + 0.5 + f[0, r, c], r + 0.5 + f[1, r, c]], 1)
+
+
 def encode_graph_tensor(vg: VectorGraph, shape: tuple[int, int], *, sectors: int = SECTORS,
                         radius: float = 3.0, sigma: float = 1.5) -> dict[str, np.ndarray]:
     """Dense targets ``vertex`` (H, W), ``edge`` (S, H, W) in {0, 1}, ``vector`` (S, 2, H, W)
@@ -124,30 +194,13 @@ def encode_graph_tensor(vg: VectorGraph, shape: tuple[int, int], *, sectors: int
                 if not has[v, k]:
                     has[v, k], nb[v, k] = True, vg.xy[u]
                     break
-    # Nearest vertex per pixel within `radius`, all vertices at once (vectorised; ties go to the
-    # lower vertex index, as in a loop over vertices with a strict "closer" test).
     vertex = np.zeros((H, W), np.float32)
     edge = np.zeros((sectors, H, W), np.float32)
     vec = np.zeros((sectors, 2, H, W), np.float32)
     support = np.zeros((H, W), bool)
     if V == 0:
         return {"vertex": vertex, "edge": edge, "vector": vec, "support": support}
-    r = int(math.ceil(radius))
-    off = np.arange(-r, r + 1)
-    x, y = vg.xy[:, 0], vg.xy[:, 1]
-    cc = np.floor(x).astype(np.int64)[:, None, None] + off[None, None, :]
-    rr = np.floor(y).astype(np.int64)[:, None, None] + off[None, :, None]
-    cc, rr = np.broadcast_arrays(cc, rr)
-    d2 = (cc + 0.5 - x[:, None, None]) ** 2 + (rr + 0.5 - y[:, None, None]) ** 2
-    vi = np.broadcast_to(np.arange(V)[:, None, None], d2.shape)
-    ok = (d2 <= radius ** 2) & (cc >= 0) & (cc < W) & (rr >= 0) & (rr < H)
-    cc, rr, d2, vi = cc[ok], rr[ok], d2[ok], vi[ok]
-    pix = rr * W + cc
-    order = np.lexsort((vi, d2.astype(np.float32), pix))  # by pixel, then distance, then vertex
-    pix, d2, vi, cc, rr = pix[order], d2[order], vi[order], cc[order], rr[order]
-    first = np.r_[True, pix[1:] != pix[:-1]]
-    rr, cc, vi = rr[first], cc[first], vi[first]
-    best = d2[first].astype(np.float32)
+    rr, cc, vi, best = _nearest_within(vg.xy, (H, W), radius)
     support[rr, cc] = True
     vertex[rr, cc] = np.exp(-best / (2 * sigma ** 2))
     h = has[vi]  # (P, S)
@@ -202,7 +255,7 @@ def graph_from_tensor(vertex, edge, vector, *, vertex_threshold: float = 0.2,
                       edge_threshold: float = 0.5, link_radius: float = 10.0, gap: float = 25.0,
                       kernel: int = 3, snap_border: bool = True,
                       max_vertices: int | None = 5000,
-                      max_edge_length: float | None = 60.0) -> VectorGraph:
+                      max_edge_length: float | None = 60.0, snap=None) -> VectorGraph:
     """Decode a graph from ``vertex`` (H, W), ``edge`` (S, H, W) probabilities and ``vector``
     (S, 2, H, W) in pixels (numpy or torch). Defaults are E028's level-2 tuning for footprints.
 
@@ -211,7 +264,9 @@ def graph_from_tensor(vertex, edge, vector, *, vertex_threshold: float = 0.2,
     unbounded (E030: one 512² tile took > 10 GB). A 512² WHU tile has about 2,000 GT vertices
     at most. ``max_edge_length`` (px) drops longer edges: true edges are at most the encoding's
     vertex spacing (20 px) long, and long edges from noisy vectors cross each other quadratically
-    when polygonized.
+    when polygonized. ``snap`` (optional ``(2, H, W)`` predicted offset field, pixels, see
+    :func:`offset_field`) places each vertex at its peak pixel's centre plus the predicted
+    offset, instead of the sub-pixel parabola fit.
     """
     nx, _, cKDTree, _, _ = _deps()
     from .graph import bridge_ends
@@ -226,7 +281,7 @@ def graph_from_tensor(vertex, edge, vector, *, vertex_threshold: float = 0.2,
     if len(pi) == 0:
         return VectorGraph(np.zeros((0, 2)), np.zeros((0, 2), int))
     centre = np.stack([pi[:, 1] + 0.5, pi[:, 0] + 0.5], 1)  # vectors are relative to these
-    xy = _refine(vertex, pi)
+    xy = _refine(vertex, pi) if snap is None else snap_points(centre, snap)  # learned offsets win
     if snap_border:
         xy[:, 0] = np.where(xy[:, 0] < 1.5, 0.0, np.where(xy[:, 0] > W - 1.5, float(W), xy[:, 0]))
         xy[:, 1] = np.where(xy[:, 1] < 1.5, 0.0, np.where(xy[:, 1] > H - 1.5, float(H), xy[:, 1]))

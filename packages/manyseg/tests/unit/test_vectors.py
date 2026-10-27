@@ -223,3 +223,26 @@ def test_vectorised_encoder_matches_loop():
         a, b = encode_graph_tensor(vg, (512, 512)), _encode_loop_reference(vg, (512, 512))
         for k in a:
             np.testing.assert_array_equal(a[k], b[k], err_msg=f"trial {trial}, {k}")
+
+
+def test_offset_field_points_and_snapping():
+    from manyseg.vectors import offset_field, snap_points
+
+    pts = np.array([[20.3, 30.7], [40.0, 10.5]])
+    f, m = offset_field(pts, (64, 64), radius=6)
+    assert m[30, 20] and not m[0, 0]
+    # a peak found 4 px off the true point snaps back onto it
+    snapped = snap_points(np.array([[23.5, 32.5]]), f)
+    np.testing.assert_allclose(snapped[0], pts[0], atol=1e-5)
+    # outside the radius there is no target (and no movement)
+    assert np.allclose(snap_points(np.array([[60.5, 60.5]]), f), [[60.5, 60.5]])
+
+
+def test_offset_field_from_mask_lines():
+    from manyseg.vectors import offset_field_from_mask
+
+    g = np.zeros((32, 32), bool)
+    g[10, 5:25] = True
+    f, m = offset_field_from_mask(g, radius=4)
+    assert m[13, 12] and not m[20, 12]
+    assert f[1, 13, 12] == -3 and f[0, 13, 12] == 0  # straight up to the line
