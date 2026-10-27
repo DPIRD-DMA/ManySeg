@@ -360,3 +360,31 @@ decoder in `manyseg.vectors` (as an option combining both head sets).
 
 ## E028b results
 (pending)
+
+# E035: B3 corners + lines, oracle (pre-registered 2026-10-27 13:05)
+
+User's proposal after the vertex analysis (OPTIONS.md, Codex-reviewed): every outline pixel is "part
+of a line", true corners say "I am a corner", plus a wall direction. Built so that closure never
+depends on the corners: **B3 = B0's instance heads + a corner map (Gaussian, sigma 2 px, at
+vertices turning > 20°) + a direction field ((cos 2θ, sin 2θ) at outline pixels).** Decoder
+(`e035.py`): instances as B0 (E028's tuned B0 settings per level) → each instance's exact
+pixel-edge outline resampled every 1 px → corner peaks within `snap_r` snapped onto it split it
+into walls → a wall is split further at its farthest point while it strays more than `dev` px from
+the corner-to-corner chord or the mean predicted direction agrees with the chord less than
+`agree` → one line per wall (total least squares), consecutive lines intersected for the corners.
+A missed corner costs a split, not the building.
+
+Corruptions: E028's for the B0 channels and the corner map (with missed peaks on the corners);
+the direction field is zeroed under the same occlusion disks and gets Gaussian noise of std
+0.1 × the level's vector noise. B0, B2 and B3 see one corrupted footprint. Tuning: 16 settings
+(`thr_c` ∈ {0.2, 0.4}, `dev` ∈ {1.5, 3}, `agree` ∈ {0.6, 0.8}, `snap_r` ∈ {3, 6}) on innaloo, seeds
+0–1, by C-IoU × detection F1; test on murdoch + northam, seeds 0–4.
+
+**Decision:** B3 *beats* B2 / B0 at a level if C-IoU × detection F1 is higher on both test areas by
+> 2 pooled seed-SDs and ≥ 0.02. B3 goes to a trained WHU seed-0 screen (E030 setup, with B0's
+loss on its B0 heads plus BCE on the corner map and masked L1 on the direction field) if it beats
+B2 at level 1 or 2 and is not more than 0.02 below B0 on detection F1 at levels 0–2. Reported
+alongside: C-IoU, detection F1, PoLiS, N-ratio.
+
+## E035 results
+(pending)
