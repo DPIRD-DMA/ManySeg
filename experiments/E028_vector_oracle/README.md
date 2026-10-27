@@ -359,7 +359,92 @@ below B0's (each method's strength). Viable and beats → B2F is the default gra
 decoder in `manyseg.vectors` (as an option combining both head sets).
 
 ## E028b results
-(pending)
+
+Status: **complete** (2026-10-27; code `13ccc3b`; test restarted once single-threaded before any
+result was read). Tuned `cov`: 0.7 (0.8 for B2F at level 1). **B2F is not adopted: it never beats
+B2, and loses to it at level 2.**
+
+**C-IoU × detection F1**
+
+| area | arm | L0 | L1 | L2 | L3 |
+|---|---|---|---|---|---|
+| murdoch | B0 | 0.883 ± 0.000 | 0.524 ± 0.011 | 0.224 ± 0.006 | 0.027 ± 0.001 |
+| murdoch | B2 | 0.971 ± 0.000 | 0.726 ± 0.018 | 0.353 ± 0.020 | 0.007 ± 0.006 |
+| murdoch | B2F | 0.965 ± 0.000 | 0.686 ± 0.043 | 0.245 ± 0.007 | 0.027 ± 0.001 |
+| murdoch | B2M | 0.971 ± 0.000 | 0.713 ± 0.010 | 0.167 ± 0.004 | 0.011 ± 0.000 |
+| northam | B0 | 0.931 ± 0.000 | 0.651 ± 0.019 | 0.288 ± 0.008 | 0.051 ± 0.001 |
+| northam | B2 | 0.986 ± 0.000 | 0.764 ± 0.021 | 0.478 ± 0.022 | 0.019 ± 0.010 |
+| northam | B2F | 0.986 ± 0.000 | 0.791 ± 0.025 | 0.343 ± 0.012 | 0.052 ± 0.001 |
+| northam | B2M | 0.986 ± 0.000 | 0.801 ± 0.017 | 0.236 ± 0.006 | 0.024 ± 0.001 |
+
+**C-IoU**
+
+| area | arm | L0 | L1 | L2 | L3 |
+|---|---|---|---|---|---|
+| murdoch | B0 | 0.898 ± 0.000 | 0.744 ± 0.008 | 0.529 ± 0.006 | 0.374 ± 0.004 |
+| murdoch | B2 | 0.978 ± 0.000 | 0.874 ± 0.014 | 0.722 ± 0.030 | 0.114 ± 0.034 |
+| murdoch | B2F | 0.983 ± 0.000 | 0.819 ± 0.007 | 0.563 ± 0.015 | 0.374 ± 0.004 |
+| murdoch | B2M | 0.978 ± 0.000 | 0.836 ± 0.007 | 0.589 ± 0.014 | 0.253 ± 0.005 |
+| northam | B0 | 0.939 ± 0.000 | 0.781 ± 0.007 | 0.524 ± 0.005 | 0.350 ± 0.005 |
+| northam | B2 | 0.988 ± 0.000 | 0.912 ± 0.007 | 0.748 ± 0.014 | 0.292 ± 0.117 |
+| northam | B2F | 0.988 ± 0.000 | 0.854 ± 0.006 | 0.583 ± 0.007 | 0.350 ± 0.005 |
+| northam | B2M | 0.988 ± 0.000 | 0.844 ± 0.007 | 0.566 ± 0.006 | 0.222 ± 0.005 |
+
+**detection F1**
+
+| area | arm | L0 | L1 | L2 | L3 |
+|---|---|---|---|---|---|
+| murdoch | B0 | 0.983 ± 0.000 | 0.696 ± 0.010 | 0.403 ± 0.008 | 0.066 ± 0.001 |
+| murdoch | B2 | 0.993 ± 0.000 | 0.831 ± 0.021 | 0.482 ± 0.025 | 0.012 ± 0.010 |
+| murdoch | B2F | 0.982 ± 0.000 | 0.836 ± 0.048 | 0.419 ± 0.008 | 0.066 ± 0.001 |
+| murdoch | B2M | 0.993 ± 0.000 | 0.854 ± 0.010 | 0.281 ± 0.006 | 0.040 ± 0.001 |
+| northam | B0 | 0.992 ± 0.000 | 0.830 ± 0.020 | 0.546 ± 0.013 | 0.147 ± 0.003 |
+| northam | B2 | 0.998 ± 0.000 | 0.838 ± 0.025 | 0.639 ± 0.018 | 0.027 ± 0.013 |
+| northam | B2F | 0.999 ± 0.000 | 0.926 ± 0.025 | 0.586 ± 0.018 | 0.148 ± 0.003 |
+| northam | B2M | 0.999 ± 0.000 | 0.949 ± 0.012 | 0.419 ± 0.010 | 0.110 ± 0.001 |
+
+**PoLiS (px)**
+
+| area | arm | L0 | L1 | L2 | L3 |
+|---|---|---|---|---|---|
+| murdoch | B0 | 0.237 ± 0.000 | 0.759 ± 0.012 | 1.433 ± 0.033 | 2.100 ± 0.053 |
+| murdoch | B2 | 0.028 ± 0.000 | 0.287 ± 0.047 | 0.727 ± 0.053 | 0.898 ± 0.359 |
+| murdoch | B2F | 0.027 ± 0.000 | 0.473 ± 0.049 | 1.362 ± 0.045 | 2.100 ± 0.053 |
+| murdoch | B2M | 0.029 ± 0.000 | 0.393 ± 0.031 | 0.965 ± 0.058 | 1.494 ± 0.038 |
+| northam | B0 | 0.191 ± 0.000 | 0.660 ± 0.018 | 1.259 ± 0.028 | 1.925 ± 0.022 |
+| northam | B2 | 0.006 ± 0.000 | 0.223 ± 0.030 | 0.654 ± 0.019 | 0.751 ± 0.080 |
+| northam | B2F | 0.007 ± 0.000 | 0.405 ± 0.028 | 1.135 ± 0.028 | 1.922 ± 0.026 |
+| northam | B2M | 0.007 ± 0.000 | 0.366 ± 0.031 | 0.922 ± 0.036 | 1.457 ± 0.040 |
+
+**N-ratio**
+
+| area | arm | L0 | L1 | L2 | L3 |
+|---|---|---|---|---|---|
+| murdoch | B0 | 0.908 ± 0.000 | 1.299 ± 0.014 | 2.103 ± 0.063 | 3.192 ± 0.073 |
+| murdoch | B2 | 0.975 ± 0.000 | 0.952 ± 0.014 | 1.136 ± 0.026 | 1.143 ± 0.178 |
+| murdoch | B2F | 0.976 ± 0.000 | 1.105 ± 0.038 | 1.967 ± 0.088 | 3.192 ± 0.073 |
+| murdoch | B2M | 0.976 ± 0.000 | 1.053 ± 0.016 | 1.911 ± 0.093 | 6.082 ± 0.153 |
+| northam | B0 | 1.006 ± 0.000 | 1.326 ± 0.022 | 2.245 ± 0.021 | 3.289 ± 0.054 |
+| northam | B2 | 0.992 ± 0.000 | 1.029 ± 0.014 | 1.291 ± 0.023 | 1.420 ± 0.398 |
+| northam | B2F | 0.992 ± 0.000 | 1.171 ± 0.013 | 2.025 ± 0.027 | 3.286 ± 0.053 |
+| northam | B2M | 0.992 ± 0.000 | 1.203 ± 0.013 | 2.194 ± 0.035 | 6.499 ± 0.067 |
+
+### Decision (E028b rule)
+
+* B2F beats B2 at: neither L1 nor L2; viable per level: {'L0': True, 'L1': False, 'L2': False}.
+* → **B2F is not adopted.**
+
+### Interpretation
+* In this oracle B2 already detects buildings at least as well as B0 at levels 0–2 (detection F1
+  0.48 / 0.64 vs 0.40 / 0.55 at level 2), so falling back to B0 mostly *replaces* good graph
+  polygons with worse mask ones: the coverage-and-precision gate rejects many B2 buildings under
+  corruption (level 2 C-IoU × F1 0.25 / 0.34 vs B2's 0.35 / 0.48). Only at level 3, where B2
+  collapses, does the fallback help (0.027 / 0.052 vs 0.007 / 0.019).
+* B2M (diagnostic) does no better.
+* This differs from the roofs (E031b), where the fallback partner was a plane segmentation that
+  always covers the building and the graph failed much more often. The trained WHU models behave
+  differently again (there B2's detection F1 is far below B0's), so E030b on the trained models
+  is still informative.
 
 # E035: B3 corners + lines, oracle (pre-registered 2026-10-27 13:05)
 
