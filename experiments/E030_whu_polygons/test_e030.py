@@ -49,4 +49,9 @@ def test_endpoint_loss_rewards_correct_vectors():
     good.backward()
     assert vec.grad is not None and torch.isfinite(vec.grad).all()
     shifted = GraphTensorTask.endpoint_loss({"vector": vec.detach() + 2.0 / SPACING}, t)
-    assert good.item() < 0.7 < shifted.item(), (good.item(), shifted.item())
+    assert good.item() < 0.4 < shifted.item(), (good.item(), shifted.item())
+    # gradients stay bounded for endpoints near the target's cut-off (E032 amendment 1)
+    for off in (2.5, 2.9, 3.1, 4.0):
+        v = (vec.detach() + off / SPACING).requires_grad_()
+        GraphTensorTask.endpoint_loss({"vector": v}, t).backward()
+        assert v.grad.abs().max().item() < 1.0, (off, v.grad.abs().max().item())

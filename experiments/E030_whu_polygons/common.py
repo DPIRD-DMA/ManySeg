@@ -16,10 +16,11 @@ import torch
 import torch.nn.functional as F
 from shapely import affinity
 
-from manyseg.vectors import encode_graph_tensor, graph_tensor_heads, vertex_graph
+from manyseg.vectors import encode_graph_tensor, graph_tensor_heads, offset_field, vertex_graph
 
 TILE = 512
 SPACING = 20.0  # graph-tensor vertex spacing (px); the vector head predicts vector / SPACING
+SNAP_RADIUS = 8.0  # E033: snap offsets are trained within this radius (px), predicted / SNAP_RADIUS
 MEAN = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1) * 255
 STD = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1) * 255
 
@@ -71,11 +72,11 @@ class WHUTiles(torch.utils.data.Dataset):
     """Training / evaluation samples. ``arm`` "B0": (image, instance ids); "B2": (image, dict of
     graph-tensor targets + extent). ``augment``: a random dihedral transform per sample."""
 
-    def __init__(self, cache: Path, split: str, arm: str, augment: bool):
+    def __init__(self, cache: Path, split: str, arm: str, augment: bool, extras: tuple = ()):
         self.img = np.load(cache / f"{split}_img.npy", mmap_mode="r")
         self.inst = np.load(cache / f"{split}_inst.npy", mmap_mode="r")
         self.polys = load_polygons(cache / f"{split}_poly.npz") if arm == "B2" else None
-        self.arm, self.augment = arm, augment
+        self.arm, self.augment, self.extras = arm, augment, tuple(extras)  # E033: "vdist", "snap"
 
     def __len__(self) -> int:
         return len(self.img)
@@ -88,12 +89,25 @@ class WHUTiles(torch.utils.data.Dataset):
         if self.arm == "B0":
             return x, torch.from_numpy(inst.astype(np.int64))
         polys = [dihedral_polygon(p, d) for p in self.polys[i]]
-        t = encode_graph_tensor(vertex_graph(polys, SPACING, border=(TILE, TILE)), (TILE, TILE))
+        vg = vertex_graph(polys, SPACING, border=(TILE, TILE))
+        t = encode_graph_tensor(vg, (TILE, TILE))
         y = {"vertex": torch.from_numpy(t["vertex"]),
              "edge": torch.from_numpy(t["edge"].astype(np.uint8)),
              "vector": torch.from_numpy((t["vector"] / SPACING).reshape(-1, TILE, TILE).astype(np.float16)),
              "support": torch.from_numpy(t["support"]),
              "extent": torch.from_numpy((inst > 0).astype(np.uint8))}
+        if "vdist" in self.extras:  # distance (px) to the exact vertex pixels, for distance_weighted_bce
+            from manyseg_bench.losses import distance_map
+
+            g = np.zeros((TILE, TILE), bool)
+            if len(vg.xy):
+                c = np.clip(np.floor(vg.xy).astype(int), 0, TILE - 1)
+                g[c[:, 1], c[:, 0]] = True
+            y["vdist"] = torch.from_numpy(distance_map(g, 32.0).astype(np.float16))
+        if "snap" in self.extras:  # offsets to the nearest true vertex, / SNAP_RADIUS
+            f, m = offset_field(vg.xy, (TILE, TILE), SNAP_RADIUS)
+            y["snap"] = torch.from_numpy((f / SNAP_RADIUS).astype(np.float16))
+            y["snap_mask"] = torch.from_numpy(m)
         return x, y
 
 
@@ -133,7 +147,8 @@ class GraphTensorTask:
       centre (target vertex > 0.6) that have a true edge in sector k, the predicted vector
       (x SPACING) from the pixel centre gives an endpoint; the *target* vertex map is sampled
       there (bilinear, ``align_corners=False``, endpoints within half a pixel of the tile edge or outside it masked) and
-      -log(sample + 1e-4) is averaged. Sampling the fixed target cannot be gamed by raising the
+      1 - sample is averaged (-log(sample) exploded at the target's 3 px cut-off: E032
+      amendment 1). Sampling the fixed target cannot be gamed by raising the
       predicted vertex map (Codex review).
     """
 
@@ -141,11 +156,16 @@ class GraphTensorTask:
     primary_metric = "extent_iou"
     higher_is_better = True
 
-    def __init__(self, weighted: bool = False, endpoint: float = 0.0):
+    def __init__(self, weighted: bool = False, endpoint: float = 0.0, vertex_loss: str = "bce",
+                 snap: bool = False):
         self.weighted, self.endpoint = weighted, endpoint
+        self.vertex_loss, self.snap = vertex_loss, snap  # E033: "distance" / snap head
 
     def heads(self):
-        return b2_heads()
+        h = b2_heads()
+        if self.snap:
+            h["snap"] = {"type": "regression", "out_channels": 2}
+        return h
 
     def targets(self, y):
         return y
@@ -154,8 +174,11 @@ class GraphTensorTask:
         from manyseg_bench import losses
 
         tvx = t["vertex"].float()
-        lv = F.binary_cross_entropy_with_logits(out["vertex"][:, 0].float(), tvx,
-                                                weight=(1 + 10 * tvx) if self.weighted else None)
+        if self.vertex_loss == "distance":
+            lv = losses.distance_weighted_bce(out["vertex"], tvx, t["vdist"])
+        else:
+            lv = F.binary_cross_entropy_with_logits(out["vertex"][:, 0].float(), tvx,
+                                                    weight=(1 + 10 * tvx) if self.weighted else None)
         sup = t["support"].bool()
         if sup.any():
             e = out["edge"].float().permute(0, 2, 3, 1)[sup]  # (P, S)
@@ -172,6 +195,10 @@ class GraphTensorTask:
             le = lvec = out["edge"].sum() * 0
         lx = losses.dice_bce(out["extent"], t["extent"][:, None].float())
         total = lv + le + lvec + lx
+        if self.snap:
+            sm = t["snap_mask"].bool()[:, None].expand_as(out["snap"])
+            total = total + (F.smooth_l1_loss(out["snap"].float()[sm], t["snap"].float()[sm])
+                             if sm.any() else out["snap"].sum() * 0)
         if self.endpoint > 0:
             total = total + self.endpoint * self.endpoint_loss(out, t)
         return total
@@ -197,7 +224,7 @@ class GraphTensorTask:
         sel = m & inside
         if not sel.any():
             return out["vector"].sum() * 0
-        return -torch.log(samp[sel] + 1e-4).mean()
+        return (1 - samp[sel]).mean()  # bounded gradients (E032 amendment 1; -log exploded)
 
     def evaluator(self):
         return _GraphTensorEval(self)
@@ -225,7 +252,8 @@ def b2_probabilities(out: dict, i: int) -> dict[str, np.ndarray]:
     return {"vertex": torch.sigmoid(out["vertex"][i, 0].float()).cpu().numpy(),
             "edge": torch.sigmoid(out["edge"][i].float()).cpu().numpy(),
             "vector": (out["vector"][i].float() * SPACING).view(S, 2, TILE, TILE).cpu().numpy(),
-            "extent": torch.sigmoid(out["extent"][i, 0].float()).cpu().numpy()}
+            "extent": torch.sigmoid(out["extent"][i, 0].float()).cpu().numpy(),
+            **({"snap": (out["snap"][i].float() * SNAP_RADIUS).cpu().numpy()} if "snap" in out else {})}
 
 
 def b0_probabilities(out: dict, i: int) -> dict[str, np.ndarray]:

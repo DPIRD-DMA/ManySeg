@@ -59,8 +59,9 @@ def decode(arm: str, a: dict, p: dict, cache: dict) -> list:
         return polygons_from_labels(cache[key], simplify=p["simplify"], min_area=16)
     from manyseg.vectors import polygons_from_tensor
 
+    snap = a["snap"].astype(np.float32) if "snap" in a else None  # E033 snap head
     return polygons_from_tensor(a["vertex"].astype(np.float32), a["edge"].astype(np.float32),
-                                a["vector"].astype(np.float32), a["extent"].astype(np.float32),
+                                a["vector"].astype(np.float32), a["extent"].astype(np.float32), snap=snap,
                                 vertex_threshold=p["vertex_threshold"], link_radius=p["link_radius"],
                                 gap=p["gap"], simplify=p["simplify"], edge_threshold=0.5, kernel=3)
 
@@ -146,7 +147,7 @@ def main():
     arm = args.run[:2]  # decoder: "B0" or "B2" (E032's "B2w" / "B2e" decode as B2)
     run_arm = args.run.split("_")[0]  # experimental arm, kept in the results
     device = torch.device("cuda")
-    model = build(arm)
+    model = build(run_arm)
     model.load_state_dict(torch.load(HERE / "runs" / f"{args.run}.pt", map_location="cpu"))
     model.to(device).eval()
     t0 = time.time()

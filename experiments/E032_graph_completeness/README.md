@@ -38,5 +38,16 @@ are few; a borderline result is reported as inconclusive.
 6 runs (B2w, B2e × 3 seeds), about 75 min each including evaluation, on the local 4090 in the
 12 GB capped service, queued after E030.
 
+## Amendment 1 (2026-10-27 11:35, before any completed run)
+The first B2e run (seed 0) diverged: at epoch 10, training loss 20.3 and val extent IoU 0.14,
+where E030's B2 had about 0.7 and 0.87. It was stopped and discarded. The destination term's
+−log(sample + 1e-4) has gradients that grow as the sampled target value falls towards zero, which
+happens at the vertex blob's 3 px cut-off (about 70× the bounded version's on a synthetic check,
+more for values closer to zero). The term is now **1 − sample**: same optimum, bounded gradients.
+On 600 tiles × 3 epochs the corrected B2e trains normally (loss 4.18 → 2.53, extent IoU 0.33 →
+0.63). The cause is the most likely one, not proven (the run's per-term losses were not logged).
+Added: E030's training-failure check applies (val extent IoU below 0.5 at the end = broken run,
+fixed and rerun as an amendment).
+
 ## Results
 (pending)
