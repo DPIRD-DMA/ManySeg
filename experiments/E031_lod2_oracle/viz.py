@@ -51,7 +51,7 @@ def main():
         ax.imshow(np.stack([a["vertex"], a["edge"].max(0) * 0.6, a["mask"] * 0.3], -1).clip(0, 1))
         ax.set_title(f"L{lv}: graph tensor + mask")
         for c, arm in enumerate(("A0", "A1", "LoD1"), start=2):
-            p = best[f"L{lv}"][arm]["params"] if best else DEFAULT[arm]
+            p = best[f"L{lv}"][arm]["params"] if best and arm in best[f"L{lv}"] else DEFAULT[arm]
             faces, planes = E.DECODERS[arm](a, p)
             m = E.metrics(t, faces, planes)
             h, _ = E.height_map(faces, planes)
