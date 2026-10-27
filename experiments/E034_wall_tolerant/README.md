@@ -20,4 +20,9 @@ E032's paired rule (mean paired difference ≥ 0.02 and > 2 SDs, C-IoU not more 
 Detection F1, matched IoU, PoLiS and recall are reported alongside.
 
 ## Results
-(pending)
+
+Status: **complete: screened out on seed 0** (2026-10-27; first run OOM-killed by its own 12 GB
+cgroup cap at epoch ~15 and rerun from scratch with 8 loader workers and a 16 GB cap). Validation
+C-IoU × F1: B2 0.440, **B2t 0.411**. Test: B2t C-IoU 0.619, detection F1 0.708, C-IoU × F1 0.439,
+PoLiS 0.38 m (B2 0.613 / 0.750 / 0.460 / 0.39 m). Removing the penalty for on-wall vertices
+slightly sharpened geometry but lost more buildings. Single seed: "not promising".

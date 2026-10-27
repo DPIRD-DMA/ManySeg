@@ -50,4 +50,8 @@ unchanged and is applied only to arms with all 3 seeds; arms stopped after seed 
 B2d is dropped (same reason as E032's B2w). B2s runs after E034's B2t. Controls for seeds 1–2, if needed, are trained then (E030 amendment 3).
 
 ## Results
-(pending)
+
+Status: **complete: screened out on seed 0** (2026-10-27). Validation C-IoU × F1: B2 0.440,
+**B2s 0.423** (B2d dropped, amendment 2). Test: B2s C-IoU 0.612, detection F1 0.732, C-IoU × F1
+0.448, PoLiS 0.40 m (B2 0.613 / 0.750 / 0.460 / 0.39 m). The snap head did not improve vertex
+positions (PoLiS) or closure. Single seed: "not promising", no stronger claim.

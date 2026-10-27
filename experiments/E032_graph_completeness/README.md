@@ -61,4 +61,10 @@ unchanged and is applied only to arms with all 3 seeds; arms stopped after seed 
 B2w is dropped (it optimises the wrongly defined target: arbitrary densified points; see the vertex analysis in OPTIONS.md). B2e seed 0 (running) finishes and is screened. Controls for seeds 1–2, if needed, are trained then (E030 amendment 3).
 
 ## Results
-(pending)
+
+Status: **complete: screened out on seed 0** (2026-10-27). Validation C-IoU × F1 (tuned decoder),
+the screening metric: B2 0.440, **B2e 0.411** (B2w dropped, amendment 3). Test, for the record:
+B2e C-IoU 0.604, detection F1 0.706, C-IoU × F1 0.426 (B2 0.613 / 0.750 / 0.460), recall 0.81.
+The completeness losses (decode-cost weighting + bounded endpoint term) made closure slightly
+worse, not better; no seeds 1–2 (staged-seed rule). Single seed: "not promising", no stronger
+claim.
