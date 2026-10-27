@@ -16,7 +16,7 @@ import torch
 import torch.nn.functional as F
 from shapely import affinity
 
-from manyseg.vectors import encode_graph_tensor, graph_tensor_heads, offset_field, vertex_graph
+from manyseg.vectors import corner_targets, encode_graph_tensor, graph_tensor_heads, offset_field, vertex_graph
 
 TILE = 512
 SPACING = 20.0  # graph-tensor vertex spacing (px); the vector head predicts vector / SPACING
@@ -75,7 +75,7 @@ class WHUTiles(torch.utils.data.Dataset):
     def __init__(self, cache: Path, split: str, arm: str, augment: bool, extras: tuple = ()):
         self.img = np.load(cache / f"{split}_img.npy", mmap_mode="r")
         self.inst = np.load(cache / f"{split}_inst.npy", mmap_mode="r")
-        self.polys = load_polygons(cache / f"{split}_poly.npz") if arm == "B2" else None
+        self.polys = load_polygons(cache / f"{split}_poly.npz") if arm in ("B2", "B3") else None
         self.arm, self.augment, self.extras = arm, augment, tuple(extras)  # E033: "vdist", "snap"
 
     def __len__(self) -> int:
@@ -89,6 +89,12 @@ class WHUTiles(torch.utils.data.Dataset):
         if self.arm == "B0":
             return x, torch.from_numpy(inst.astype(np.int64))
         polys = [dihedral_polygon(p, d) for p in self.polys[i]]
+        if self.arm == "B3":  # corners + lines (E036): B0's instance ids + corner map + directions
+            ct = corner_targets(polys, (TILE, TILE))
+            return x, {"inst": torch.from_numpy(inst.astype(np.int64)),
+                       "corner": torch.from_numpy(ct["corner"]),
+                       "direction": torch.from_numpy(ct["direction"].astype(np.float16)),
+                       "direction_mask": torch.from_numpy(ct["direction_mask"])}
         vg = vertex_graph(polys, SPACING, border=(TILE, TILE))
         t = encode_graph_tensor(vg, (TILE, TILE))
         y = {"vertex": torch.from_numpy(t["vertex"]),
@@ -256,6 +262,58 @@ class _GraphTensorEval:
 
     def compute(self):
         return {"loss": self.loss / max(1, self.n), "extent_iou": self.inter / max(1, self.union)}
+
+
+class CornerLineTask:
+    """B3 (E036): bench InstanceTask on the instance ids (B0's loss) + BCE on the corner map (soft
+    Gaussian target, logits) + masked L1 on the direction field (outline pixels)."""
+
+    name = "corner_lines"
+    primary_metric = "pq"
+    higher_is_better = True
+
+    def __init__(self):
+        from manyseg_bench.tasks import InstanceTask
+
+        self.inner = InstanceTask(boundary_width=2.0)
+
+    def heads(self):
+        from manyseg.instances import instance_heads
+
+        return {**instance_heads(), "corner": {"type": "segmentation", "out_channels": 1},
+                "direction": {"type": "regression", "out_channels": 2}}
+
+    def targets(self, y):
+        return y
+
+    def loss(self, out, t):
+        li = self.inner.loss(out, self.inner.targets(t["inst"]))
+        lc = F.binary_cross_entropy_with_logits(out["corner"][:, 0].float(), t["corner"].float())
+        m = t["direction_mask"].bool()[:, None].expand_as(out["direction"])
+        ld = (F.l1_loss(out["direction"].float()[m], t["direction"].float()[m]) if m.any()
+              else out["direction"].sum() * 0)
+        return li + lc + ld
+
+    def evaluator(self):
+        task = self
+
+        class _Eval:
+            def __init__(self):
+                self.inner = task.inner.evaluator()
+
+            def update(self, out, y):
+                self.inner.update(out, y["inst"])
+
+            def compute(self):
+                return self.inner.compute()
+
+        return _Eval()
+
+
+def b3_probabilities(out: dict, i: int) -> dict[str, np.ndarray]:
+    return {**b0_probabilities(out, i),
+            "corner": torch.sigmoid(out["corner"][i, 0].float()).cpu().numpy(),
+            "direction": out["direction"][i].float().cpu().numpy()}
 
 
 def b2_probabilities(out: dict, i: int) -> dict[str, np.ndarray]:

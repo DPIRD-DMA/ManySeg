@@ -15,7 +15,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from common import DeviceLoader, WHUTiles, b0_probabilities, b2_probabilities, load_polygons
+from common import DeviceLoader, WHUTiles, b0_probabilities, b2_probabilities, b3_probabilities, load_polygons
 from train import build
 
 HERE = Path(__file__).resolve().parent
@@ -26,7 +26,9 @@ def grid(**axes) -> list[dict]:
     return [dict(zip(keys, v)) for v in itertools.product(*(axes[k] for k in keys))]
 
 
+B0_FIXED = dict(extent_threshold=0.6, boundary_threshold=0.5, seed_threshold=0.15)  # B0_s0's tuning (E036)
 GRIDS = {
+    "B3": grid(corner_threshold=[0.3, 0.5], big_dev=[4.0, 8.0], agree=[0.4, 0.6], merge_deg=[8.0, 15.0]),
     "B0": grid(extent_threshold=[0.4, 0.5, 0.6], boundary_threshold=[0.3, 0.5],
                seed_threshold=[0.15, 0.3], simplify=[1.0, 2.0]),
     "B2": grid(vertex_threshold=[0.1, 0.2, 0.3], link_radius=[6.0, 10.0], gap=[0.0, 25.0],
@@ -45,6 +47,19 @@ def _init(gt):
 
 
 def decode(arm: str, a: dict, p: dict, cache: dict) -> list:
+    if arm == "B3":
+        from manyseg.instances import instances_from_outputs
+        from manyseg.vectors import polygons_from_corners
+
+        if "labels" not in cache:
+            t = {k: torch.from_numpy(a[k].astype(np.float32))[None, None] for k in ("extent", "boundary", "distance")}
+            cache["labels"] = instances_from_outputs(
+                t["extent"], t["boundary"], t["distance"], logits=False,
+                extent_threshold=B0_FIXED["extent_threshold"], boundary_threshold=B0_FIXED["boundary_threshold"],
+                seed_threshold=B0_FIXED["seed_threshold"], min_size=16)[0]
+        return polygons_from_corners(cache["labels"], a["corner"].astype(np.float32), a["direction"].astype(np.float32),
+                                     corner_threshold=p["corner_threshold"], big_dev=p["big_dev"], agree=p["agree"],
+                                     merge_deg=p["merge_deg"], snap_radius=4.0, simplify=1.0, min_area=16)
     if arm == "B0":
         from manyseg.instances import instances_from_outputs
         from manyseg.vectors import polygons_from_labels
@@ -107,7 +122,7 @@ def run_split(model, arm, ds, gt, params, device, procs, chunk=48, limit=None):
     n = min(len(ds), limit or len(ds))
     accs = [dict.fromkeys(SUMS, 0.0) | {"tiles": 0} for _ in params]
     inter = union = 0
-    prob = b0_probabilities if arm == "B0" else b2_probabilities
+    prob = {"B0": b0_probabilities, "B3": b3_probabilities}.get(arm, b2_probabilities)
     dl = DeviceLoader(torch.utils.data.DataLoader(torch.utils.data.Subset(ds, range(n)), batch_size=16,
                                                   num_workers=4), device)
     with Pool(procs, initializer=_init, initargs=(gt,)) as pool:

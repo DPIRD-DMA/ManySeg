@@ -12,7 +12,7 @@ from pathlib import Path
 
 import torch
 
-from common import DeviceLoader, GraphTensorTask, WHUTiles, seed_everything
+from common import CornerLineTask, DeviceLoader, GraphTensorTask, WHUTiles, seed_everything
 from manyseg import create_model
 from manyseg.instances import instance_heads
 from manyseg_bench.providers.base import split_params
@@ -29,6 +29,8 @@ def task_for(run_arm: str):
     s = snap offset head, t = wall-tolerant vertex loss)."""
     if run_arm == "B0":
         return InstanceTask(boundary_width=2.0)
+    if run_arm == "B3":
+        return CornerLineTask()
     opts = run_arm[2:]
     return GraphTensorTask(weighted=bool(set(opts) & {"w", "e"}), endpoint=0.1 if "e" in opts else 0.0,
                            vertex_loss="distance" if "d" in opts else ("wall" if "t" in opts else "bce"),
@@ -36,14 +38,14 @@ def task_for(run_arm: str):
 
 
 def build(run_arm: str):
-    heads = instance_heads() if run_arm == "B0" else task_for(run_arm).heads()
+    heads = instance_heads() if run_arm == "B0" else task_for(run_arm).heads()  # B2* / B3
     model = create_model(backbone="resnet34.tv_in1k", in_channels=3, pretrained=True, heads=heads)
     return model
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--arm", choices=["B0", "B2"], required=True)
+    ap.add_argument("--arm", choices=["B0", "B2", "B3"], required=True)
     ap.add_argument("--seed", type=int, required=True)
     ap.add_argument("--cache", type=Path, required=True)
     ap.add_argument("--epochs", type=int, default=40)
@@ -56,8 +58,8 @@ def main():
                          "E033: d = distance-weighted vertex BCE, s = snap offset head; "
                          "E034: t = wall-tolerant vertex loss")
     args = ap.parse_args()
-    if args.arm == "B0" and args.loss != "base":
-        ap.error("--loss options apply to --arm B2 only")
+    if args.arm in ("B0", "B3") and args.loss != "base":
+        ap.error("--loss options apply to --arm B2 only")  # B0 / B3 use their own losses
     out = HERE / "runs"
     out.mkdir(exist_ok=True)
     suffix = "" if args.loss == "base" else args.loss
