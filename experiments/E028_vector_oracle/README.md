@@ -575,4 +575,79 @@ test areas, > 2 pooled SDs and ≥ 0.02) and its detection F1 is not more than 0
 levels 0–2.
 
 ## E035b results
-(pending)
+
+Status: **complete** (2026-10-27). Tuned: `thr_c` 0.3 (0.5 at L3), `big_dev` 4 (L0) / 8, `agree` 0.4,
+`merge_deg` 8 (L0–L1) / 15. **By the rule B3r does not go to training: it does not beat B2 at
+level 1 or 2.**
+
+**C-IoU × detection F1**
+
+| area | arm | L0 | L1 | L2 | L3 |
+|---|---|---|---|---|---|
+| murdoch | B0 | 0.883 ± 0.000 | 0.523 ± 0.009 | 0.231 ± 0.008 | 0.027 ± 0.001 |
+| murdoch | B2 | 0.971 ± 0.000 | 0.727 ± 0.017 | 0.352 ± 0.021 | 0.007 ± 0.006 |
+| murdoch | B3r | 0.938 ± 0.000 | 0.565 ± 0.008 | 0.264 ± 0.006 | 0.033 ± 0.002 |
+| northam | B0 | 0.931 ± 0.000 | 0.650 ± 0.018 | 0.285 ± 0.010 | 0.052 ± 0.001 |
+| northam | B2 | 0.986 ± 0.000 | 0.764 ± 0.021 | 0.477 ± 0.022 | 0.020 ± 0.010 |
+| northam | B3r | 0.969 ± 0.000 | 0.724 ± 0.016 | 0.369 ± 0.012 | 0.077 ± 0.002 |
+
+**C-IoU**
+
+| area | arm | L0 | L1 | L2 | L3 |
+|---|---|---|---|---|---|
+| murdoch | B0 | 0.898 ± 0.000 | 0.742 ± 0.005 | 0.535 ± 0.007 | 0.374 ± 0.006 |
+| murdoch | B2 | 0.978 ± 0.000 | 0.874 ± 0.014 | 0.722 ± 0.030 | 0.112 ± 0.034 |
+| murdoch | B3r | 0.944 ± 0.000 | 0.816 ± 0.004 | 0.644 ± 0.012 | 0.522 ± 0.006 |
+| northam | B0 | 0.939 ± 0.000 | 0.781 ± 0.007 | 0.525 ± 0.004 | 0.351 ± 0.004 |
+| northam | B2 | 0.988 ± 0.000 | 0.912 ± 0.007 | 0.750 ± 0.013 | 0.311 ± 0.091 |
+| northam | B3r | 0.977 ± 0.000 | 0.871 ± 0.004 | 0.686 ± 0.003 | 0.546 ± 0.006 |
+
+**detection F1**
+
+| area | arm | L0 | L1 | L2 | L3 |
+|---|---|---|---|---|---|
+| murdoch | B0 | 0.983 ± 0.000 | 0.697 ± 0.010 | 0.412 ± 0.012 | 0.066 ± 0.002 |
+| murdoch | B2 | 0.993 ± 0.000 | 0.832 ± 0.019 | 0.480 ± 0.026 | 0.012 ± 0.009 |
+| murdoch | B3r | 0.994 ± 0.000 | 0.693 ± 0.008 | 0.406 ± 0.007 | 0.063 ± 0.003 |
+| northam | B0 | 0.992 ± 0.000 | 0.830 ± 0.018 | 0.539 ± 0.017 | 0.146 ± 0.004 |
+| northam | B2 | 0.998 ± 0.000 | 0.838 ± 0.025 | 0.636 ± 0.018 | 0.028 ± 0.013 |
+| northam | B3r | 0.992 ± 0.000 | 0.829 ± 0.018 | 0.536 ± 0.018 | 0.142 ± 0.003 |
+
+**PoLiS (px)**
+
+| area | arm | L0 | L1 | L2 | L3 |
+|---|---|---|---|---|---|
+| murdoch | B0 | 0.237 ± 0.000 | 0.759 ± 0.018 | 1.394 ± 0.047 | 2.076 ± 0.063 |
+| murdoch | B2 | 0.028 ± 0.000 | 0.287 ± 0.047 | 0.728 ± 0.054 | 0.939 ± 0.385 |
+| murdoch | B3r | 0.143 ± 0.000 | 0.603 ± 0.016 | 1.351 ± 0.055 | 2.083 ± 0.103 |
+| northam | B0 | 0.191 ± 0.000 | 0.669 ± 0.026 | 1.256 ± 0.024 | 1.923 ± 0.033 |
+| northam | B2 | 0.006 ± 0.000 | 0.223 ± 0.030 | 0.651 ± 0.022 | 0.698 ± 0.115 |
+| northam | B3r | 0.071 ± 0.000 | 0.477 ± 0.021 | 1.170 ± 0.018 | 1.959 ± 0.041 |
+
+**N-ratio**
+
+| area | arm | L0 | L1 | L2 | L3 |
+|---|---|---|---|---|---|
+| murdoch | B0 | 0.908 ± 0.000 | 1.302 ± 0.012 | 2.085 ± 0.024 | 3.175 ± 0.112 |
+| murdoch | B2 | 0.975 ± 0.000 | 0.952 ± 0.014 | 1.136 ± 0.028 | 1.178 ± 0.150 |
+| murdoch | B3r | 0.971 ± 0.000 | 0.926 ± 0.016 | 1.122 ± 0.030 | 1.357 ± 0.049 |
+| northam | B0 | 1.006 ± 0.000 | 1.331 ± 0.023 | 2.220 ± 0.027 | 3.264 ± 0.030 |
+| northam | B2 | 0.992 ± 0.000 | 1.029 ± 0.014 | 1.291 ± 0.023 | 1.341 ± 0.275 |
+| northam | B3r | 0.990 ± 0.000 | 0.985 ± 0.017 | 1.264 ± 0.033 | 1.471 ± 0.028 |
+
+### Decision (E035b rule)
+
+* B3r beats B2 at: neither L1 nor L2; viable per level: {'L0': True, 'L1': True, 'L2': True}.
+* → **B3r does not go to training.**
+
+### Interpretation
+* The corner-trusting decoder fixes B3's failure: N-ratio is now about 1 (B3: 2.0–4.7), and it
+  keeps B0's closure (detection F1 equal to B0's at every level).
+* It beats the mask method B0 at every corrupted level on C-IoU × F1 (level 1: 0.565 / 0.724 vs
+  0.523 / 0.650; level 2: 0.264 / 0.369 vs 0.231 / 0.285; level 3: 0.033 / 0.077 vs 0.027 / 0.052),
+  with better C-IoU (L1 0.82 / 0.87 vs 0.74 / 0.78) and PoLiS (L1 0.60 / 0.48 vs 0.76 / 0.67 px).
+* It stays below B2 *in this oracle*, where B2's detection is at least B0's. Trained on WHU,
+  B2's detection is far below B0's (E030: 0.75 vs 0.85), a failure this oracle's synthetic
+  corruptions do not reproduce. The rule's reference arm (B2) was set before that was known; a
+  trained comparison of B3r against B0 would need its own pre-registration.
+
