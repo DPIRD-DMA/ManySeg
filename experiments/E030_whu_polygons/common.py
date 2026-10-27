@@ -104,6 +104,15 @@ class WHUTiles(torch.utils.data.Dataset):
                 c = np.clip(np.floor(vg.xy).astype(int), 0, TILE - 1)
                 g[c[:, 1], c[:, 0]] = True
             y["vdist"] = torch.from_numpy(distance_map(g, 32.0).astype(np.float16))
+        if "wall" in self.extras:  # E034: distance (px) to the true outline (graph edges)
+            from manyseg_bench.losses import distance_map
+            from rasterio.features import rasterize
+            from rasterio.transform import Affine
+
+            lines = [shapely.LineString([vg.xy[a], vg.xy[b]]) for a, b in vg.edges]
+            g = (rasterize([(ln, 1) for ln in lines], out_shape=(TILE, TILE), transform=Affine.identity(),
+                           all_touched=True, dtype="uint8").astype(bool) if lines else np.zeros((TILE, TILE), bool))
+            y["wall_dist"] = torch.from_numpy(distance_map(g, 8.0).astype(np.float16))
         if "snap" in self.extras:  # offsets to the nearest true vertex, / SNAP_RADIUS
             f, m = offset_field(vg.xy, (TILE, TILE), SNAP_RADIUS)
             y["snap"] = torch.from_numpy((f / SNAP_RADIUS).astype(np.float16))
@@ -159,7 +168,7 @@ class GraphTensorTask:
     def __init__(self, weighted: bool = False, endpoint: float = 0.0, vertex_loss: str = "bce",
                  snap: bool = False):
         self.weighted, self.endpoint = weighted, endpoint
-        self.vertex_loss, self.snap = vertex_loss, snap  # E033: "distance" / snap head
+        self.vertex_loss, self.snap = vertex_loss, snap  # E033: "distance" / snap head; E034: "wall"
 
     def heads(self):
         h = b2_heads()
@@ -176,6 +185,9 @@ class GraphTensorTask:
         tvx = t["vertex"].float()
         if self.vertex_loss == "distance":
             lv = losses.distance_weighted_bce(out["vertex"], tvx, t["vdist"])
+        elif self.vertex_loss == "wall":  # E034: no penalty for vertices placed on a true wall
+            w = ~((tvx == 0) & (t["wall_dist"].float() <= 1.5))
+            lv = F.binary_cross_entropy_with_logits(out["vertex"][:, 0].float(), tvx, weight=w.float())
         else:
             lv = F.binary_cross_entropy_with_logits(out["vertex"][:, 0].float(), tvx,
                                                     weight=(1 + 10 * tvx) if self.weighted else None)

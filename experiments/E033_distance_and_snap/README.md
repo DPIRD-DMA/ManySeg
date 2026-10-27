@@ -46,5 +46,8 @@ unchanged and is applied only to arms with all 3 seeds; arms stopped after seed 
 "screened out on one seed", with no claim beyond that. Run order: B2e, B2w (E032), then B2d, B2s
 (E033), then the advanced arms' seeds 1–2.
 
+## Amendment 2 (2026-10-27 12:45, agreed with the user after a Codex review of the options, `E032_graph_completeness/OPTIONS.md`; no result of the affected runs exists)
+B2d is dropped (same reason as E032's B2w). B2s runs after E034's B2t. Controls for seeds 1–2, if needed, are trained then (E030 amendment 3).
+
 ## Results
 (pending)

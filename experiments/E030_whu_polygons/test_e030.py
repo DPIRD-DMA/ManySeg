@@ -55,3 +55,40 @@ def test_endpoint_loss_rewards_correct_vectors():
         v = (vec.detach() + off / SPACING).requires_grad_()
         GraphTensorTask.endpoint_loss({"vector": v}, t).backward()
         assert v.grad.abs().max().item() < 1.0, (off, v.grad.abs().max().item())
+
+
+def test_wall_tolerant_vertex_loss_ignores_on_wall_predictions():
+    """E034: a vertex predicted on a true wall (not at a target point) costs nothing; one off the
+    outline costs as in BCE."""
+    import torch
+    from shapely.geometry import box
+
+    from common import SPACING, TILE, GraphTensorTask
+    from manyseg.vectors import encode_graph_tensor, vertex_graph
+
+    vg = vertex_graph([box(100.3, 120.2, 300.1, 170.4)], SPACING, border=(TILE, TILE))
+    g = encode_graph_tensor(vg, (TILE, TILE))
+    from manyseg_bench.losses import distance_map
+    from rasterio.features import rasterize
+    from rasterio.transform import Affine
+    import shapely
+
+    lines = [shapely.LineString([vg.xy[a], vg.xy[b]]) for a, b in vg.edges]
+    wall = rasterize([(ln, 1) for ln in lines], out_shape=(TILE, TILE), transform=Affine.identity(),
+                     all_touched=True, dtype="uint8").astype(bool)
+    t = {"vertex": torch.from_numpy(g["vertex"])[None], "wall_dist": torch.from_numpy(distance_map(wall, 8.0))[None]}
+    task = GraphTensorTask(vertex_loss="wall")
+
+    def vloss(extra_xy):
+        logit = torch.full((1, 1, TILE, TILE), -8.0)
+        logit[0, 0] = torch.where(t["vertex"][0] > 0.5, torch.tensor(8.0), logit[0, 0])
+        x, y = extra_xy
+        logit[0, 0, y, x] = 8.0
+        w = ~((t["vertex"] == 0) & (t["wall_dist"] <= 1.5))
+        return torch.nn.functional.binary_cross_entropy_with_logits(logit[:, 0], t["vertex"], weight=w.float())
+
+    on_wall = vloss((210, 120))  # on the top wall, between target points
+    off = vloss((210, 145))  # inside the building, off the outline
+    base = vloss((5, 5))  # far away
+    assert on_wall < off and abs(off - base) < 1e-6
+    assert task.vertex_loss == "wall"

@@ -85,6 +85,16 @@ workers, counts a tile whose decoding runs out of memory as an empty prediction
 (`failed_tiles`, reported); and the chain runs in a systemd scope capped at 12 GB, so a fault
 kills only this job. Nothing else changed.
 
+## Amendment 3 (2026-10-27 12:45, agreed with the user after a Codex review of the options, `E032_graph_completeness/OPTIONS.md`; no result of the affected runs exists): remaining seeds cancelled
+Seed 0 (test): B0 C-IoU 0.709, detection F1 0.850; B2 C-IoU 0.613, F1 0.750. Both gaps (about 0.1)
+are far larger than plausible seed variation, so B2's seeds 1–2 and B0's seed 2 are cancelled to
+free the GPU for redesigns of the graph method; B0 seed 1 (already running) finishes, for baseline
+variance. The registered 3-seed rule therefore cannot be applied: E030's result is reported as
+**one seed, B2 well below B0**, not as a full decision. E030b runs on seed 0 only. If a later arm
+advances to seeds 1–2, B2 control seeds 1–2 are trained then. Also added (post hoc, labelled as
+such): C-IoU on GT outlines cleaned of raster staircase vertices, and detection F1, matched IoU
+and PoLiS reported alongside, because the registered GT inflates vertex counts.
+
 ## Results
 (pending)
 

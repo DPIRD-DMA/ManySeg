@@ -26,12 +26,13 @@ HERE = Path(__file__).resolve().parent
 def task_for(run_arm: str):
     """Training task from the run's arm name: B0, B2, or B2 + E032 / E033 loss letters
     (w = decode-cost weighting, e = w + endpoint, d = distance-weighted vertex loss,
-    s = snap offset head)."""
+    s = snap offset head, t = wall-tolerant vertex loss)."""
     if run_arm == "B0":
         return InstanceTask(boundary_width=2.0)
     opts = run_arm[2:]
     return GraphTensorTask(weighted=bool(set(opts) & {"w", "e"}), endpoint=0.1 if "e" in opts else 0.0,
-                           vertex_loss="distance" if "d" in opts else "bce", snap="s" in opts)
+                           vertex_loss="distance" if "d" in opts else ("wall" if "t" in opts else "bce"),
+                           snap="s" in opts)
 
 
 def build(run_arm: str):
@@ -50,9 +51,10 @@ def main():
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--limit", type=int, default=None, help="smoke test: first N tiles per split")
     ap.add_argument("--tag", default="")
-    ap.add_argument("--loss", choices=["base", "w", "e", "d", "s"], default="base",
+    ap.add_argument("--loss", choices=["base", "w", "e", "d", "s", "t"], default="base",
                     help="B2 loss: base = E030; E032: w = decode-cost weighting, e = w + endpoint; "
-                         "E033: d = distance-weighted vertex BCE, s = snap offset head")
+                         "E033: d = distance-weighted vertex BCE, s = snap offset head; "
+                         "E034: t = wall-tolerant vertex loss")
     args = ap.parse_args()
     if args.arm == "B0" and args.loss != "base":
         ap.error("--loss options apply to --arm B2 only")
@@ -64,7 +66,7 @@ def main():
     device = torch.device("cuda")
 
     def loader(split, train_mode):
-        extras = tuple(x for x, f in (("vdist", "d"), ("snap", "s")) if f == args.loss)
+        extras = tuple(x for x, f in (("vdist", "d"), ("snap", "s"), ("wall", "t")) if f == args.loss)
         ds = WHUTiles(args.cache, split, args.arm, augment=train_mode, extras=extras)
         if args.limit:
             ds = torch.utils.data.Subset(ds, range(min(args.limit, len(ds))))
