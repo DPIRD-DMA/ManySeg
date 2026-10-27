@@ -34,6 +34,12 @@ def _trimmed_line(pts: np.ndarray, keep_px: float = 1.5):
     return c, u
 
 
+def _unit(dirs: np.ndarray, min_norm: float = 0.1) -> np.ndarray:
+    """Orientation only: unit vectors; near-zero ones (no evidence) become 0, agreement 0.5."""
+    n = np.linalg.norm(dirs, axis=1, keepdims=True)
+    return np.where(n > min_norm, dirs / np.maximum(n, 1e-6), 0.0)
+
+
 def _split(points: np.ndarray, dirs: np.ndarray, big_dev: float, agree: float) -> list[int]:
     if len(points) < 6:
         return []
@@ -86,7 +92,7 @@ def _polygon(ring: np.ndarray, corners: np.ndarray, direction: np.ndarray, *, sn
         return q if q.geom_type == "Polygon" else None
     c = np.clip(np.floor(ring[:, 0]).astype(int), 0, W - 1)
     r = np.clip(np.floor(ring[:, 1]).astype(int), 0, H - 1)
-    dirs = direction[:, r, c].T
+    dirs = _unit(direction[:, r, c].T)
     verts = []
     for a, b in zip(idx, idx[1:] + [idx[0] + K]):
         seg = np.arange(a, b + 1)

@@ -8,9 +8,14 @@ the trained baseline that matters, B0.
 ## Setup (E030's: WHU aerial 0.3 m, resnet34 U-Net, `fastai_like`, 40 epochs, batch 16,
 dihedral augmentation, 8 loader workers, decoder tuned on val, test once)
 **B3:** B0's instance heads (extent, boundary, distance; bench `InstanceTask` loss) + a `corner`
-head (BCE on Gaussian blobs, sigma 2 px, at vertices turning > 20° after a 1.5 px simplification of
+head (CenterNet focal loss, positives = the target's local maxima above 0.5, on Gaussian blobs, sigma 2 px, at vertices turning > 20° after a 1.5 px simplification of
 the GT polygon, so raster staircase jogs are not corners) + a 2-channel `direction` head (masked L1
-on `(cos 2θ, sin 2θ)` of the simplified walls within 1 px). Code: `manyseg.vectors.corner_targets`,
+on `(cos 2θ, sin 2θ)` of the simplified walls within 1 px); the three loss groups weighted 1. The
+decoder uses the direction's orientation only (unit-normalised; norm < 0.1 = no evidence).
+Pre-launch Codex review (notes/codex_e036.md) changed the corner loss from plain BCE (sparse
+target, constant-low optimum) and added the normalisation; corners on pixel edges peak at 0.94,
+so the default `>= 0.999` positive rule would have found none. At init on 16 WHU train tiles:
+instance loss 3.6, corner focal 2.3. Code: `manyseg.vectors.corner_targets`,
 `polygons_from_corners`; `E030_whu_polygons/train.py --arm B3`. Decoding: instances with B0 seed
 0's tuned thresholds (extent 0.6, boundary 0.5, seed 0.15), then `polygons_from_corners`, tuned on
 val over 16 settings (`corner_threshold` {0.3, 0.5}, `big_dev` {4, 8}, `agree` {0.4, 0.6},

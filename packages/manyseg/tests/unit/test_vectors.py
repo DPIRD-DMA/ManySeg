@@ -267,3 +267,17 @@ def test_polygons_from_corners_round_trip_and_dent():
     lab[20:24, 60:66] = 0  # a dent in the top wall
     q = max(polygons_from_corners(lab, t["corner"], t["direction"]), key=lambda q: q.intersection(polys[0]).area)
     assert len(q.exterior.coords) - 1 == 4
+
+
+
+def test_corner_split_ignores_direction_magnitude():
+    """Agreement uses orientation only: a weak field across a straight wall splits it like a
+    unit one; a zero field is no evidence (no split)."""
+    from manyseg.vectors.corners import _split, _unit
+
+    pts = np.stack([np.arange(20.0), np.zeros(20)], 1)
+    across = np.tile([-1.0, 0.0], (20, 1))  # (cos 2t, sin 2t) of a vertical wall
+    kw = dict(big_dev=8, agree=0.4)
+    assert _split(pts, _unit(across), **kw)
+    assert _split(pts, _unit(0.15 * across), **kw) == _split(pts, _unit(across), **kw)
+    assert _split(pts, _unit(0 * across), **kw) == []

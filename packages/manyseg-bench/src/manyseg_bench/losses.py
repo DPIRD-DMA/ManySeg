@@ -41,10 +41,13 @@ def masked_regression(pred: Tensor, target: Tensor, mask: Tensor | None = None,
     return (err * m).sum() / m.sum().clamp(min=1)
 
 
-def heatmap_focal(logits: Tensor, target: Tensor, alpha: float = 2.0, beta: float = 4.0) -> Tensor:
-    """CenterNet penalty-reduced focal loss for Gaussian centre heatmaps (logits in)."""
+def heatmap_focal(logits: Tensor, target: Tensor, alpha: float = 2.0, beta: float = 4.0,
+                  pos: Tensor | None = None) -> Tensor:
+    """CenterNet penalty-reduced focal loss for Gaussian centre heatmaps (logits in). ``pos``
+    (bool, like ``target``) marks the centre pixels; default ``target >= 0.999``, which misses
+    centres that fall between pixels (pass e.g. the target's local maxima then)."""
     p = logits.float().sigmoid().clamp(1e-6, 1 - 1e-6)
-    pos = target >= 0.999
+    pos = target >= 0.999 if pos is None else pos
     pos_loss = -((1 - p) ** alpha) * torch.log(p) * pos
     neg_loss = -((1 - target) ** beta) * (p ** alpha) * torch.log(1 - p) * (~pos)
     return (pos_loss.sum() + neg_loss.sum()) / pos.sum().clamp(min=1)

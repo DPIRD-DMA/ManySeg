@@ -265,8 +265,10 @@ class _GraphTensorEval:
 
 
 class CornerLineTask:
-    """B3 (E036): bench InstanceTask on the instance ids (B0's loss) + BCE on the corner map (soft
-    Gaussian target, logits) + masked L1 on the direction field (outline pixels)."""
+    """B3 (E036): bench InstanceTask on the instance ids (B0's loss) + CenterNet focal loss on the
+    corner map (soft Gaussian target; positives are its local maxima above 0.5, since corners on
+    pixel edges never reach 1 at a pixel centre) + masked L1 on the direction field (outline
+    pixels). All weights 1."""
 
     name = "corner_lines"
     primary_metric = "pq"
@@ -288,7 +290,11 @@ class CornerLineTask:
 
     def loss(self, out, t):
         li = self.inner.loss(out, self.inner.targets(t["inst"]))
-        lc = F.binary_cross_entropy_with_logits(out["corner"][:, 0].float(), t["corner"].float())
+        from manyseg_bench.losses import heatmap_focal
+
+        tc = t["corner"].float()
+        pos = (tc > 0.5) & (tc == F.max_pool2d(tc[:, None], 3, 1, 1)[:, 0])
+        lc = heatmap_focal(out["corner"][:, 0], tc, pos=pos)
         m = t["direction_mask"].bool()[:, None].expand_as(out["direction"])
         ld = (F.l1_loss(out["direction"].float()[m], t["direction"].float()[m]) if m.any()
               else out["direction"].sum() * 0)

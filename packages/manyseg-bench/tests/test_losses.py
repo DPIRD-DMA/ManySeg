@@ -39,3 +39,13 @@ def test_losses_differentiable():
     (losses.dice_bce(p, t) + losses.heatmap_focal(p, t * 0.5)
      + losses.masked_regression(p, t, t > 0)).backward()
     assert torch.isfinite(p.grad).all()
+
+
+def test_heatmap_focal_explicit_positives():
+    """Centres between pixels never reach 1; passing ``pos`` keeps the positive term."""
+    t = torch.zeros(1, 8, 8)
+    t[0, 3:5, 3:5] = 0.94
+    pos = t > 0.9
+    good = torch.where(pos, 4.0, -4.0)
+    assert losses.heatmap_focal(good, t, pos=pos) < losses.heatmap_focal(-good, t, pos=pos)
+    assert not (t >= 0.999).any()  # the default would find no positives here
