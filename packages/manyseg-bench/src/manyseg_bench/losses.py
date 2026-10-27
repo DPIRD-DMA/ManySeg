@@ -50,55 +50,69 @@ def heatmap_focal(logits: Tensor, target: Tensor, alpha: float = 2.0, beta: floa
     return (pos_loss.sum() + neg_loss.sum()) / pos.sum().clamp(min=1)
 
 
-def distance_to(geometry: Tensor, max_distance: float) -> Tensor:
-    """Euclidean distance (px) from each pixel to the nearest ``True`` pixel of ``geometry``
-    ``(B, H, W)`` bool, capped at ``max_distance`` (also for images with no geometry). Uses the
-    library's exact GPU distance transform."""
-    from manyseg.instances import edt
+def distance_map(geometry, max_distance: float = 32.0):
+    """Distance (px, float32) from each pixel to the nearest ``True`` pixel of a 2-D bool
+    ``geometry`` (numpy), capped at ``max_distance`` (also when there is no geometry). Linear
+    time (SciPy); meant for data loaders, since the distances depend only on the target."""
+    import numpy as np
+    from scipy import ndimage
 
-    return edt(geometry.bool()).clamp(max=max_distance)
+    g = np.asarray(geometry, bool)
+    if not g.any():
+        return np.full(g.shape, max_distance, np.float32)
+    return np.minimum(ndimage.distance_transform_edt(~g), max_distance).astype(np.float32)
 
 
-def distance_aware_bce(logits: Tensor, target: Tensor, geometry: Tensor | None = None, *,
-                       tolerance: float = 2.0, pull: float = 0.1, max_distance: float = 32.0,
-                       distance: Tensor | None = None) -> Tensor:
-    """BCE for sparse targets (points, vertices, lines, boundaries) that knows how far a wrong
-    prediction is from the true geometry.
+def _as_bhw(t: Tensor, name: str) -> Tensor:
+    if t.dim() == 4 and t.shape[1] == 1:
+        return t[:, 0]
+    if t.dim() != 3:
+        raise ValueError(f"{name} must be (B, H, W) or (B, 1, H, W), got {tuple(t.shape)}")
+    return t
 
-    Plain BCE charges a false positive the same whether it is 1 px or 100 px from a true point,
-    so a slightly shifted prediction is punished like a missing one plus a far-away false one.
-    Here, with ``D`` the distance (px) of each pixel to the nearest true element:
 
-    * false positives are weighted ``w(D) = 1 - exp(-D^2 / (2 tolerance^2))``: almost free next to
-      the truth, full cost far from it (CenterNet's penalty reduction, generalised from Gaussian
-      points to any geometry through the distance map);
-    * a pull term ``pull * sum(p * D') / max(sum(y), 1)`` per image, with ``D' = D / max_distance``:
-      predicted mass costs in proportion to its (capped) distance from the truth, so the further
-      away, the larger the loss and its gradient; it is zero on the truth and never rewards a
-      wrong pixel (normalising by the predicted mass instead would reward pixels closer than
-      average, i.e. near misses);
-    * true pixels are trained as in BCE (``-y log p``), which raises the correct location while
-      the two terms above lower the wrong ones.
+def distance_weighted_bce(logits: Tensor, target: Tensor, distance: Tensor, *,
+                          tolerance: float = 2.0, far_weight: float = 1.0,
+                          max_distance: float = 32.0) -> Tensor:
+    """BCE for sparse targets (points, vertices, lines, boundaries) whose false positives cost
+    more the further they are from the true geometry.
+
+    Plain BCE charges a false positive the same whether it is 1 px or 100 px from a true
+    element. Here, with ``D`` the distance (px) of each pixel to the nearest true element (from
+    :func:`distance_map`, computed on the *exact* geometry: point / vertex pixels, line pixels;
+    never a threshold of a soft target):
+
+    * inside the target (``y > 0``, e.g. a Gaussian blob) plain BCE, so a soft target is learned
+      as given;
+    * outside it (``y == 0``) the negative term is weighted ``w(D) = 1 - exp(-D^2 /
+      (2 tolerance^2))``: a false positive just next to the truth is cheap, one far away costs
+      full BCE (CenterNet's penalty reduction, generalised to any geometry by the distance map);
+    * plus ``far_weight * p * D / max_distance`` outside the target: an extra penalty that grows
+      with distance (capped at ``max_distance``). At ``D = max_distance`` it adds ``far_weight``
+      times the BCE gradient of a confident false positive; the default 1 doubles it there.
+
+    Both terms are averaged over pixels, like BCE, so the scale does not depend on image size or
+    on how much geometry there is, and an empty image costs what BCE would charge for its
+    predictions plus the capped penalty. This *suppresses* wrong predictions in proportion to
+    their distance; it does not move a prediction sideways towards the truth. For that, train an
+    offset field (vectors to the nearest true element) and snap predictions with it.
 
     Args:
-        logits: ``(B, 1, H, W)`` or ``(B, H, W)`` raw outputs.
-        target: same shape, in [0, 1] (binary or a soft blob such as a Gaussian heatmap).
-        geometry: bool ``(B, H, W)`` true elements (point / vertex pixels, line or boundary pixels);
-            default ``target >= 0.5``.
-        distance: precomputed ``D`` ``(B, H, W)`` (e.g. from the data loader) instead of
-            ``geometry``.
+        logits, target, distance: ``(B, H, W)`` or ``(B, 1, H, W)``; ``target`` in [0, 1] (binary
+            or a soft blob around each element), ``distance`` >= 0 in pixels.
     """
-    x = logits.float().reshape(logits.shape[0], *logits.shape[-2:])
-    y = target.float().reshape(x.shape)
-    if distance is None:
-        geometry = (y >= 0.5) if geometry is None else geometry.reshape(x.shape)
-        distance = distance_to(geometry, max_distance)
-    d = distance.float().clamp(max=max_distance)
-    w_neg = 1 - torch.exp(-d ** 2 / (2 * tolerance ** 2))
-    # BCE written out: -y log p - (1 - y) w log(1 - p), stable via logsigmoid
+    if tolerance <= 0 or max_distance <= 0 or far_weight < 0:
+        raise ValueError("need tolerance > 0, max_distance > 0, far_weight >= 0")
+    x = _as_bhw(logits, "logits").float()
+    y = _as_bhw(target, "target").float()
+    d = _as_bhw(distance, "distance").float()
+    if not (x.shape == y.shape == d.shape):
+        raise ValueError(f"shape mismatch: logits {tuple(x.shape)}, target {tuple(y.shape)}, "
+                         f"distance {tuple(d.shape)}")
+    d = d.clamp(0, max_distance)
+    outside = y == 0
+    w_neg = torch.where(outside, 1 - torch.exp(-d ** 2 / (2 * tolerance ** 2)), torch.ones_like(d))
     loss = -(y * F.logsigmoid(x) + (1 - y) * w_neg * F.logsigmoid(-x)).mean()
-    if pull > 0:
-        p = x.sigmoid()
-        per = (p * d / max_distance).flatten(1).sum(1) / y.flatten(1).sum(1).clamp(min=1)
-        loss = loss + pull * per.mean()
+    if far_weight > 0:
+        loss = loss + far_weight * (x.sigmoid() * (d / max_distance) * outside).mean()
     return loss
