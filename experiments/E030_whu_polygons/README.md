@@ -108,4 +108,17 @@ model with both head sets is a later training experiment. Rule as E030 (C-IoU pr
 F1 not more than 0.02 lower), against B2 (primary) and B0, paired by seed.
 
 ## E030b results
-(pending)
+
+Status: **complete for seed 0 only** (2026-10-27; E030 amendment 3 cancelled the other seeds, so
+the registered paired rule cannot be applied). Tuned coverage threshold 0.95: the graph was kept
+for 36% of buildings, the B0 model's polygons used for the rest.
+
+| seed 0, test | C-IoU | detection F1 | C-IoU × F1 | matched IoU | PoLiS (m) | N-ratio |
+|---|---|---|---|---|---|---|
+| B0 | 0.709 | 0.850 | 0.603 | 0.861 | 0.39 | 1.18 |
+| B2 | 0.613 | 0.750 | 0.460 | 0.854 | 0.39 | 0.49 |
+| B2F (B2 + B0 fallback, two models) | 0.643 | 0.814 | 0.524 | 0.857 | 0.39 | 0.70 |
+
+The fallback recovers part of B2's missing buildings (detection F1 +0.06) but stays below B0 on every
+column except PoLiS. On the trained models the graph method's closure failures are frequent enough
+that the best per-building gate hands most buildings to the mask model; one seed.
