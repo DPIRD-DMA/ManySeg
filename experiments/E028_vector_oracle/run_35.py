@@ -69,7 +69,7 @@ def work(job):
 
 def run(jobs, out, procs, best):
     t0 = time.time()
-    with out.open("a") as f, Pool(procs, initializer=_init, initargs=(best,)) as pool:
+    with out.open("w") as f, Pool(procs, initializer=_init, initargs=(best,)) as pool:
         for k, rows in enumerate(pool.imap_unordered(work, jobs), 1):
             for r in rows:
                 f.write(json.dumps(r) + "\n")

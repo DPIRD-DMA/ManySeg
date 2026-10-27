@@ -386,5 +386,13 @@ loss on its B0 heads plus BCE on the corner map and masked L1 on the direction f
 B2 at level 1 or 2 and is not more than 0.02 below B0 on detection F1 at levels 0–2. Reported
 alongside: C-IoU, detection F1, PoLiS, N-ratio.
 
+## E035 amendment 1 (2026-10-27 13:30, before any E035 result was read)
+A Codex code review found three bugs, fixed with regression tests before rerunning from scratch
+(the first run was stopped during its test phase and discarded): direction disagreement could not
+split a geometrically straight wall (the registered `agree` rule was inert; such a wall is now
+split at the change point of the per-point direction agreement); a split on the wall that wraps
+around the ring's start scrambled the wall order (ring positions now stay unwrapped); results
+files were appended across runs (each phase now writes fresh files).
+
 ## E035 results
 (pending)

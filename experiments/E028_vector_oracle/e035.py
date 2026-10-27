@@ -90,8 +90,18 @@ def _split(points: np.ndarray, dirs: np.ndarray, dev: float, agree: float) -> li
     k = int(np.argmax(off))
     if off[k] <= dev and agreement >= agree:
         return []
-    if off[k] <= 1.0:  # nothing to split on (direction noise only)
-        return []
+    if off[k] <= 1.0:
+        # geometrically straight but the directions disagree: split where the predicted direction
+        # changes most (the change point of the per-point agreement), if both sides have 3 points
+        if dirs is None or len(points) < 6:
+            return []
+        per = (1 + dirs[:, 0] * math.cos(2 * th) + dirs[:, 1] * math.sin(2 * th)) / 2
+        c = np.cumsum(per)
+        n = len(per)
+        ks = np.arange(3, n - 2)
+        left = c[ks - 1] / ks
+        right = (c[-1] - c[ks - 1]) / (n - ks)
+        k = int(ks[np.argmax(np.abs(left - right))])
     left = _split(points[: k + 1], None if dirs is None else dirs[: k + 1], dev, agree)
     right = _split(points[k:], None if dirs is None else dirs[k:], dev, agree)
     return left + [k] + [k + i for i in right]
@@ -122,13 +132,13 @@ def polygon_b3(ring: np.ndarray, corner_pts: np.ndarray, dir_field: np.ndarray, 
     # directions sampled at ring points (pixel under each point, nudged inside the image)
     rc = np.clip(np.floor(ring).astype(int), 0, E.TILE - 1)
     dirs = dir_field[:, rc[:, 1], rc[:, 0]].T  # (K, 2)
-    verts = []
+    verts = []  # unwrapped, increasing ring positions in [idx[0], idx[0] + K)
     for a, b in zip(idx, idx[1:] + [idx[0] + K]):
-        seg = np.arange(a, b + 1) % K
-        pts, ds = ring[seg], dirs[seg]
+        seg = np.arange(a, b + 1)
+        pts, ds = ring[seg % K], dirs[seg % K]
         cuts = _split(pts, ds, p["dev"], p["agree"])
-        verts += [seg[0]] + [seg[c] for c in cuts]
-    verts = [v for i, v in enumerate(verts) if v != verts[i - 1]]
+        verts += [a] + [a + c for c in cuts]
+    verts = sorted(set(verts))
     if len(verts) < 3:
         return None
     # fit a line to each wall's ring points, intersect consecutive lines for the final corners

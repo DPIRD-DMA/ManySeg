@@ -164,3 +164,25 @@ def test_refine_border_not_biased():
     hm = E.gaussian_points(np.array([[0.2, 2.5]]), sigma=2, shape=(8, 8))
     x, y = E._refine(hm, np.array([[2, 0]]))[0]
     assert x == pytest.approx(0.5) and y == pytest.approx(2.5, abs=0.05)
+
+
+def test_e035_direction_only_split_and_wraparound():
+    """Codex review regressions: direction disagreement splits a straight wall; a split on the
+    wall that wraps around the ring keeps the walls in order."""
+    import numpy as np
+    from shapely.geometry import box
+
+    import e035 as B
+
+    pts = np.array([[float(i), 0.0] for i in range(10)])
+    dirs = np.array([[1.0, 0.0]] * 5 + [[-1.0, 0.0]] * 5)  # horizontal, then vertical
+    assert B._split(pts, dirs, dev=3, agree=0.8) == [5]
+    # a square outline whose corner at the ring's start is not detected: the wrap-around wall
+    # must be split there, giving the square back
+    sq = np.asarray(box(10, 10, 60, 60).exterior.segmentize(1.0).coords)[:-1]
+    sq = np.roll(sq, 25, axis=0)  # ring starts mid-wall
+    corners = np.array([[60.0, 10.0], [60.0, 60.0], [10.0, 60.0]])  # (10, 10) missed
+    dirs_field = np.zeros((2, 512, 512), np.float32)
+    q = B.polygon_b3(np.vstack([sq, sq[:1]]), corners, dirs_field,
+                     {"snap_r": 3.0, "dev": 1.5, "agree": 0.0, "simplify": 1.0})
+    assert q is not None and abs(q.area - 2500) < 50 and len(q.exterior.coords) - 1 == 4, q
