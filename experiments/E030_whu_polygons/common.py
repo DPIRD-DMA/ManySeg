@@ -124,11 +124,25 @@ def b2_heads() -> dict:
 class GraphTensorTask:
     """B2 training task for the bench trainer: BCE vertex (soft Gaussian target, logits) + BCE
     edge on support pixels + smooth-L1 vector (/ SPACING) where the edge target is 1 + dice-BCE
-    extent. Validation reports the loss and the extent IoU."""
+    extent. Validation reports the loss and the extent IoU.
+
+    E032 options (off by default, so the E030 loss is unchanged):
+    * ``weighted``: vertex BCE weighted 1 + 10 x target; edge BCE with pos_weight 5 (missing a
+      vertex or edge costs a whole building at decode time; a false positive rarely does).
+    * ``endpoint``: weight of a destination loss. At pixels within ~1.5 px of a target vertex
+      centre (target vertex > 0.6) that have a true edge in sector k, the predicted vector
+      (x SPACING) from the pixel centre gives an endpoint; the *target* vertex map is sampled
+      there (bilinear, ``align_corners=False``, endpoints outside the tile masked) and
+      -log(sample + 1e-4) is averaged. Sampling the fixed target cannot be gamed by raising the
+      predicted vertex map (Codex review).
+    """
 
     name = "graph_tensor"
     primary_metric = "extent_iou"
     higher_is_better = True
+
+    def __init__(self, weighted: bool = False, endpoint: float = 0.0):
+        self.weighted, self.endpoint = weighted, endpoint
 
     def heads(self):
         return b2_heads()
@@ -139,11 +153,15 @@ class GraphTensorTask:
     def loss(self, out, t):
         from manyseg_bench import losses
 
-        lv = F.binary_cross_entropy_with_logits(out["vertex"][:, 0].float(), t["vertex"].float())
+        tvx = t["vertex"].float()
+        lv = F.binary_cross_entropy_with_logits(out["vertex"][:, 0].float(), tvx,
+                                                weight=(1 + 10 * tvx) if self.weighted else None)
         sup = t["support"].bool()
         if sup.any():
             e = out["edge"].float().permute(0, 2, 3, 1)[sup]  # (P, S)
-            le = F.binary_cross_entropy_with_logits(e, t["edge"].permute(0, 2, 3, 1)[sup].float())
+            pw = torch.full((e.shape[1],), 5.0, device=e.device) if self.weighted else None
+            le = F.binary_cross_entropy_with_logits(e, t["edge"].permute(0, 2, 3, 1)[sup].float(),
+                                                    pos_weight=pw)
             S = t["edge"].shape[1]
             on = t["edge"].bool()  # (B, S, H, W)
             pv = out["vector"].float().view(out["vector"].shape[0], S, 2, *out["vector"].shape[2:])
@@ -153,7 +171,31 @@ class GraphTensorTask:
         else:
             le = lvec = out["edge"].sum() * 0
         lx = losses.dice_bce(out["extent"], t["extent"][:, None].float())
-        return lv + le + lvec + lx
+        total = lv + le + lvec + lx
+        if self.endpoint > 0:
+            total = total + self.endpoint * self.endpoint_loss(out, t)
+        return total
+
+    @staticmethod
+    def endpoint_loss(out, t):
+        tv = t["vertex"].float()  # (B, H, W) target vertex map, fixed
+        B, H, W = tv.shape
+        S = t["edge"].shape[1]
+        m = (tv > 0.6)[:, None] & t["edge"].bool()  # (B, S, H, W): near a vertex centre, true edge
+        if not m.any():
+            return out["vector"].sum() * 0
+        v = out["vector"].float().view(B, S, 2, H, W) * SPACING  # pixels
+        ys, xs = torch.meshgrid(torch.arange(H, device=tv.device) + 0.5,
+                                torch.arange(W, device=tv.device) + 0.5, indexing="ij")
+        ex, ey = xs + v[:, :, 0], ys + v[:, :, 1]  # (B, S, H, W) endpoints, geometric (x, y)
+        inside = (ex >= 0) & (ex <= W) & (ey >= 0) & (ey <= H)
+        grid = torch.stack([2 * ex / W - 1, 2 * ey / H - 1], -1).view(B, S * H, W, 2)
+        samp = F.grid_sample(tv[:, None], grid, mode="bilinear", padding_mode="zeros",
+                             align_corners=False).view(B, S, H, W)
+        sel = m & inside
+        if not sel.any():
+            return out["vector"].sum() * 0
+        return -torch.log(samp[sel] + 1e-4).mean()
 
     def evaluator(self):
         return _GraphTensorEval(self)

@@ -142,7 +142,7 @@ def main():
     ap.add_argument("--procs", type=int, default=6)
     ap.add_argument("--limit", type=int, default=None, help="smoke test: first N tiles")
     args = ap.parse_args()
-    arm = args.run.split("_")[0]
+    arm = args.run[:2]  # "B0", "B2", or E032's "B2w" / "B2e"
     device = torch.device("cuda")
     model = build(arm)
     model.load_state_dict(torch.load(HERE / "runs" / f"{args.run}.pt", map_location="cpu"))

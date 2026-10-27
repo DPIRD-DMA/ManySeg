@@ -335,3 +335,27 @@ Stage 1 (roads, trained) shrinks to the mask baseline on City-Scale; it is lower
 (footprints, trained, WHU aerial): mask instances (B0) against the graph tensor (B2), pre-registered,
 is the experiment that decides whether ManySeg ships graph-tensor polygon heads. The metrics and the
 mask baselines are in `manyseg.vectors` / `manyseg_bench.evaluation.vectors` (stage 0).
+
+# E028b: decoder-only fixes for graph footprints (pre-registered 2026-10-27 11:00)
+
+Plan reviewed by Codex (`E032_graph_completeness/PLAN.md`; review applied). Same data, levels,
+seeds, tiles and metrics as E028; B0 and B2 frozen at their E028 settings (`runs/best.json`).
+Each tile is encoded for B0 and B2 with the same corruption draw.
+
+* **B2F (per-building fallback):** components of B2's extent mask (the single extent source).
+  A face belongs to the component it overlaps most. A component takes B2's faces if they cover
+  at least `cov` of it (recall) and at least 0.9 of their area lies in it (precision); otherwise
+  it takes B0's polygons that belong to it. Never both. `cov` ∈ {0.7, 0.8, 0.9, 0.95} tuned on
+  innaloo by C-IoU × detection F1.
+* **B2M (diagnostic only):** components failing that gate get their mask outline added to the
+  graph's edges before polygonizing. Not eligible for a decision (Codex: it is a mask fallback in
+  disguise).
+
+**Primary comparison: B2F vs B2.** B2F *beats* B2 if, on both test areas, C-IoU × detection F1 is
+higher by more than 2 pooled seed-SDs and at least 0.02 at level 1 or 2. It is *viable* if at
+levels 0–2 its C-IoU is never more than 0.02 below B2's and its detection F1 never more than 0.02
+below B0's (each method's strength). Viable and beats → B2F is the default graph footprint
+decoder in `manyseg.vectors` (as an option combining both head sets).
+
+## E028b results
+(pending)

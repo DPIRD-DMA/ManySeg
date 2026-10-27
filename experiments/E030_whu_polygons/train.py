@@ -39,10 +39,13 @@ def main():
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--limit", type=int, default=None, help="smoke test: first N tiles per split")
     ap.add_argument("--tag", default="")
+    ap.add_argument("--loss", choices=["base", "w", "e"], default="base",
+                    help="B2 loss (E032): base = E030; w = decode-cost weighting; e = w + endpoint")
     args = ap.parse_args()
     out = HERE / "runs"
     out.mkdir(exist_ok=True)
-    name = f"{args.arm}_s{args.seed}{args.tag}"
+    suffix = "" if args.loss == "base" else args.loss
+    name = f"{args.arm}{suffix}_s{args.seed}{args.tag}"
     seed_everything(args.seed)
     device = torch.device("cuda")
 
@@ -58,14 +61,15 @@ def main():
 
     model = build(args.arm)
     enc, dec = split_params(model, model.backbone)
-    task = InstanceTask(boundary_width=2.0) if args.arm == "B0" else GraphTensorTask()
+    task = InstanceTask(boundary_width=2.0) if args.arm == "B0" else GraphTensorTask(
+        weighted=args.loss in ("w", "e"), endpoint=0.1 if args.loss == "e" else 0.0)
     recipe = get_recipe("fastai_like", epochs=args.epochs, batch_size=args.batch_size,
                         eval_every=10)
     t0 = time.time()
     res = train(model, enc, dec, loader("train", True), loader("val", False), num_classes=1,
                 recipe=recipe, device=device, task=task)
     torch.save(model.state_dict(), out / f"{name}.pt")
-    res.update(arm=args.arm, seed=args.seed, recipe=recipe.to_dict(), wall_s=time.time() - t0,
+    res.update(arm=args.arm, loss=args.loss, seed=args.seed, recipe=recipe.to_dict(), wall_s=time.time() - t0,
                limit=args.limit)
     (out / f"{name}_train.json").write_text(json.dumps(res, indent=1, default=str))
     print(f"done {name}: {res['final_val']} in {res['wall_s'] / 60:.1f} min", flush=True)

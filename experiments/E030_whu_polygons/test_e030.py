@@ -30,3 +30,23 @@ def test_wkb_round_trip(tmp_path):
     back = load_polygons(tmp_path / "p.npz")
     assert [len(t) for t in back] == [2, 0, 1]
     assert all(a.equals(b) for ta, tb in zip(tiles, back) for a, b in zip(ta, tb))
+
+
+def test_endpoint_loss_rewards_correct_vectors():
+    """E032: perfect vectors land on target vertices (low loss); shifted ones do not; the
+    gradient reaches the vector head."""
+    import torch
+    from shapely.geometry import box
+
+    from common import SPACING, TILE, GraphTensorTask
+    from manyseg.vectors import encode_graph_tensor, vertex_graph
+
+    polys = [box(100.3, 120.2, 180.1, 170.4), box(300.2, 50.1, 340.3, 130.2)]
+    g = encode_graph_tensor(vertex_graph(polys, SPACING, border=(TILE, TILE)), (TILE, TILE))
+    t = {"vertex": torch.from_numpy(g["vertex"])[None], "edge": torch.from_numpy(g["edge"].astype("uint8"))[None]}
+    vec = torch.from_numpy((g["vector"] / SPACING).reshape(1, -1, TILE, TILE)).requires_grad_()
+    good = GraphTensorTask.endpoint_loss({"vector": vec}, t)
+    good.backward()
+    assert vec.grad is not None and torch.isfinite(vec.grad).all()
+    shifted = GraphTensorTask.endpoint_loss({"vector": vec.detach() + 2.0 / SPACING}, t)
+    assert good.item() < 0.7 < shifted.item(), (good.item(), shifted.item())

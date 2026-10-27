@@ -87,3 +87,15 @@ kills only this job. Nothing else changed.
 
 ## Results
 (pending)
+
+# E030b: per-building fallback on the trained models (pre-registered 2026-10-27 11:00)
+
+After E030 finishes: for each seed, B2F as in E028b, with that seed's B2 model for the graph and
+its extent, and that seed's B0 model for the fallback (`instances_from_outputs` →
+`polygons_from_labels`). `cov` tuned on val (C-IoU × detection F1), test decoded once. This is a
+**two-model ensemble** (about twice B0's or B2's inference cost) and is reported as such; a single
+model with both head sets is a later training experiment. Rule as E030 (C-IoU primary; detection
+F1 not more than 0.02 lower), against B2 (primary) and B0, paired by seed.
+
+## E030b results
+(pending)
