@@ -47,5 +47,45 @@ fields keep B0 (masks) and the "one representation" claim is limited to building
 * Analysis (`analyze45.py`): per test set, level and seed, pool counts over tiles; mean over seeds;
   apply the rule above.
 
-## Results
-(pending)
+## Results (17:45; Pawsey CPU job 51717785, 14 min on one 128-core node, ~30 core-h)
+Tuned on NL val: B0 thr 0.6 (0.4 at L0), thr_b 0.3, thr_s 0.15, **simplify 0.5** at every level;
+B3 thr_c 0.5 (0.3 at L0), big_dev 4, agree 0.6, merge_deg 8. Test, mean ± sd over 5 seeds:
+
+| test set | metric | arm | L0 | L1 | L2 | L3 |
+|---|---|---|---|---|---|---|
+| netherlands test | bf | B0 | 0.995 ± 0.000 | 0.862 ± 0.007 | 0.538 ± 0.017 | 0.263 ± 0.003 |
+| netherlands test | bf | B3 | 0.973 ± 0.000 | 0.818 ± 0.008 | 0.521 ± 0.018 | 0.249 ± 0.003 |
+| netherlands test | det_f1 | B0 | 0.966 ± 0.000 | 0.827 ± 0.008 | 0.447 ± 0.020 | 0.087 ± 0.001 |
+| netherlands test | det_f1 | B3 | 0.964 ± 0.000 | 0.821 ± 0.009 | 0.447 ± 0.020 | 0.087 ± 0.001 |
+| netherlands test | ciou | B0 | 0.337 ± 0.000 | 0.276 ± 0.001 | 0.220 ± 0.001 | 0.171 ± 0.002 |
+| netherlands test | ciou | B3 | 0.885 ± 0.000 | 0.677 ± 0.003 | 0.508 ± 0.004 | 0.331 ± 0.004 |
+| netherlands test | polis | B0 | 0.301 ± 0.000 | 1.051 ± 0.008 | 2.171 ± 0.070 | 3.236 ± 0.068 |
+| netherlands test | polis | B3 | 0.274 ± 0.000 | 1.225 ± 0.014 | 2.480 ± 0.086 | 3.586 ± 0.074 |
+| netherlands test | irr_recall | B0 | 0.974 ± 0.000 | 0.863 ± 0.006 | 0.568 ± 0.023 | 0.316 ± 0.005 |
+| netherlands test | irr_recall | B3 | 0.970 ± 0.000 | 0.855 ± 0.007 | 0.567 ± 0.023 | 0.317 ± 0.007 |
+| denmark test | bf | B0 | 0.981 ± 0.020 | 0.782 ± 0.018 | 0.471 ± 0.017 | 0.260 ± 0.002 |
+| denmark test | bf | B3 | 0.929 ± 0.020 | 0.739 ± 0.019 | 0.455 ± 0.017 | 0.249 ± 0.002 |
+| denmark test | det_f1 | B0 | 0.935 ± 0.026 | 0.624 ± 0.029 | 0.312 ± 0.017 | 0.100 ± 0.002 |
+| denmark test | det_f1 | B3 | 0.931 ± 0.026 | 0.620 ± 0.029 | 0.311 ± 0.017 | 0.100 ± 0.002 |
+| denmark test | ciou | B0 | 0.342 ± 0.000 | 0.261 ± 0.001 | 0.189 ± 0.001 | 0.137 ± 0.001 |
+| denmark test | ciou | B3 | 0.874 ± 0.000 | 0.681 ± 0.001 | 0.454 ± 0.003 | 0.262 ± 0.002 |
+| denmark test | polis | B0 | 0.480 ± 0.074 | 1.636 ± 0.099 | 3.216 ± 0.143 | 4.928 ± 0.047 |
+| denmark test | polis | B3 | 0.504 ± 0.076 | 1.915 ± 0.101 | 3.601 ± 0.142 | 5.326 ± 0.046 |
+| denmark test | irr_recall | B0 | 0.977 ± 0.018 | 0.884 ± 0.018 | 0.593 ± 0.029 | 0.384 ± 0.012 |
+| denmark test | irr_recall | B3 | 0.972 ± 0.018 | 0.878 ± 0.018 | 0.592 ± 0.028 | 0.385 ± 0.012 |
+
+B3 transfers to fields: **False**; B3 preferred for fields: **False**
+
+**Decision: B3 does not transfer to fields; fields keep B0 (masks).** Boundary F: B3 is 0.02-0.05
+below B0 even with perfect targets (L0) and 0.04 below at L1 on both test sets (rule allows 0.01);
+detection F1 and the irregular-field recall are equal. C-IoU is far higher for B3 (0.68 vs 0.28
+at L1) because B0's tuned outline keeps the pixel staircase (simplify 0.5 hugs a 1 px tolerance);
+PoLiS is slightly worse for B3.
+
+Why (visual check, Denmark test tile 3 at L0, `e045_l0.png` / `e045_spike2.png` in the session
+scratchpad): (1) curved and ragged field edges become straight walls between corners; (2) where
+fields touch, a neighbour's corner peak lies within the 4 px snap radius of this field's ring, so
+the outline snaps to it and makes an out-and-back spike. Buildings rarely touch, which fits B3
+working there. Possible follow-up (not registered): corner ownership per instance (a peak may only
+be used by the instance whose ring turns there). E046 tests the trained case.
+
