@@ -123,6 +123,12 @@ staircase by one pixel, and every moved step swaps two links; with a 1-px tolera
 disagreement is 0.000 on every task. This is aliasing of any hard one-pixel line target, not a
 P8-specific defect: a trained P8 would need a shift-tolerant (e.g. distance-weighted) link loss,
 which an oracle cannot test.
+*Calibration check (post hoc, 20 building tiles, +-0.25 px):* B0 extent pixels 0.014, **B0
+boundary pixels 0.281**, B2 edge pixels 0.105, B2 vertex pixels 0.170. The registered 5% rule
+would also have rejected B0's boundary head (which trains well; B0 is the best trained arm) and
+B2's targets, so it was mis-calibrated: P8's aliasing (0.34-0.46) is about 1.5x B0's boundary
+channel, a difference of degree. The registered verdict stands; a trained P8 would need its own
+pre-registration with a shift-tolerant link loss.
 
 ### A2 chain survival (diagnostic only, after the kill; user's direction-aware healing)
 (pending)
