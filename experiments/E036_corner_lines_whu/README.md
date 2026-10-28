@@ -93,7 +93,9 @@ Failure analysis (`failures.py`, `failures/summary.json`, `failures/*.png`; 200 
 2,699 buildings, failure = IoU < 0.75 vs regularised GT): B3 ok 85.7% (B0 + reg 82.3%); B3
 failures: mask too big/small 8.4% (B0 + reg 11.3%; 42% of these touch the tile edge), missed
 2.9% (3.1%), merged 1.6% (2.4%), split 1.0% (0.9%), **decoder 0.5%** (<1% of the IoU shortfall).
-Missed cases are mostly ambiguous labels; merges are attached carports/garages. Retuning B3's
-instance thresholds (18 settings) changes mean mask IoU by < 0.001 among the top five: the
-borrowed thresholds are not the cause. B3's remaining errors are the instance heads' and the
-labels', shared with B0.
+Missed cases are mostly ambiguous labels; merges are attached carports/garages. The categories
+are heuristic (each GT building picks its best prediction independently; priority missed ->
+merged -> split -> decoder -> mask), a descriptive attribution, not a decomposition.
+*Retracted (Codex review #1):* "retuning the instance thresholds does not matter". The sweep
+reported only the top five settings (spread 0.00104, not < 0.001), never scored the registered
+setting, and its per-building best-IoU objective can hide merges; see the threshold check below.

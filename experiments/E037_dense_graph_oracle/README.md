@@ -31,7 +31,10 @@ end on a zone boundary to the nearest end of the other kind, one-to-one, within 
 debugging on 4 Murdoch smoke tiles with rendered overlays: a pixel-level join made zig-zags and
 lost lines that cross the zone boundary repeatedly; keypoint zones alone left dual
 carriageways to the mask (ladder skeletons); 3 px merge zones were too thin (lines exited where
-the lanes still touched). With these rules R3 matched P8r on the 4 smoke tiles.
+the lanes still touched). With these rules R3 matched P8r on the 4 smoke tiles. (R3 therefore had development-set
+tuning the fixed P8 decoder did not; Codex review #10.) *Codex review fix:* R3's encoded
+node/link/offset targets are now zeroed outside the zones (they were full-tile; decoding was
+already zone-restricted, so results are unchanged).
 Footprints and roofs: P8 faces are kept only if mostly inside the building mask, which is part
 of the P8 tensor here as it is for B2 (Codex: a pure 11-channel P8 is too risky for areas).
 P8 decoder: nodes with confidence > 0.5; an edge where both reciprocal links > 0.5 ("AND");
@@ -115,9 +118,11 @@ square to the building). C-IoU x det F1 / PoLiS m: B0 0.870 / 0.146, B3r 0.939 /
 Roofs (face F1 / height RMSE m): A1 0.992 / 0.320, P8 0.994 / 0.268, P8r 0.995 / 0.253,
 P8g 0.994 / 0.267, P8rg 0.995 / 0.246.
 
-**L0 decision:** roads: every P8 arm and R3 **killed** (rule 1 junctions lost > 0.5%, rule 2
+**L0 decision:** roads: every P8 arm and R3 **killed** (rule 1 junction F1 0.967-0.983 < 0.995, rule 2
 APLS 0.024-0.043 below R2, rule 3 crossings: one node per pixel turns a crossing on a shared
-pixel into a false junction; R2 itself would fail rule 1 at 3.9%). Footprints and roofs: all
+pixel into a false junction; R2 itself would fail rule 1 with junction F1 0.976). *Codex review fix:*
+`analyze_a1.py` first implemented rule 1 as GT-junction recall with correct degree (> 0.5% lost);
+it now uses the registered junction F1; no verdict changed. Footprints and roofs: all
 P8 arms survive L0, and are the best arms at L0.
 
 ### A2 stability (positive-link disagreement, mean; rule: kill if > 0.05)
@@ -132,8 +137,10 @@ which an oracle cannot test.
 *Calibration check (post hoc, 20 building tiles, +-0.25 px):* B0 extent pixels 0.014, **B0
 boundary pixels 0.281**, B2 edge pixels 0.105, B2 vertex pixels 0.170. The registered 5% rule
 would also have rejected B0's boundary head (which trains well; B0 is the best trained arm) and
-B2's targets, so it was mis-calibrated: P8's aliasing (0.34-0.46) is about 1.5x B0's boundary
-channel, a difference of degree. The registered verdict stands; a trained P8 would need its own
+B2's targets. This is suggestive, not a calibration: it was computed ad hoc (not a committed
+script), and pixel-set disagreement of a heatmap is not structurally the same quantity as
+disagreement of a link set (one moved staircase step swaps two links but one boundary pixel)
+(Codex review #7). The registered verdict stands; a trained P8 would need its own
 pre-registration with a shift-tolerant link loss.
 
 ### A2 chain survival (diagnostic only, after the kill; user's direction-aware healing)
@@ -157,6 +164,10 @@ One-sided link loss is absorbed by the OR rule (buildings 0.98 at q 0.01). Heali
 missing pixels (it uses the neighbours' dangling links); links lost both ways leave no evidence,
 so bridging covers those. With bridge + heal every task stays within 0.02 of L0 at q = 0.01 (the
 registered rule-2 tolerance is 0.05; with the registered decoders alone, bridging only, node
-loss would fail it for buildings 0.062 and roads 0.070). Chain fragility, the main a-priori risk
-of the dense graph, is handled by the decoder; the remaining obstacles are overpasses (roads)
-and hard-target aliasing (all tasks).
+loss would fail it for buildings 0.062 and roads 0.070). *Scope (Codex review #8):* the healing
+decoder was added after the kill and selected from six decoders; the node-loss damage model keeps
+the neighbours' links pointing at the missing pixel, which is exactly the cue `heal()` uses. A
+trained model may drop a pixel together with its neighbours' links, leaving no cue. Supported:
+the OR rule absorbs one-sided link loss, healing repairs missing pixels when neighbour links
+survive, bridging repairs short two-sided gaps. Whether a trained model's errors look like this
+is untested.

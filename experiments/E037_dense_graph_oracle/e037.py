@@ -584,8 +584,9 @@ def encode_roads(t, rep: str) -> dict:
         zone = zone_mask(kp, shape) | merge_zone(t, shape)
         from rasterio.features import shapes as _shapes
         zpoly = unary_union([shapely.geometry.shape(gm) for gm, v in _shapes(zone.astype(np.uint8), mask=zone, transform=E.IDENT)])
-        return {"mask": E.road_mask(t), "node": enc.node, "link": enc.link, "offset": enc.offset,
-                "zone": zone, "zone_poly": zpoly, "_enc": enc}
+        # R3 targets exist only inside the zones (Codex E037 #2); the mask covers the rest
+        return {"mask": E.road_mask(t), "node": enc.node * zone, "link": enc.link * zone[None],
+                "offset": enc.offset * zone[None], "zone": zone, "zone_poly": zpoly, "_enc": enc}
     return E.encode(t, rep).arrays
 
 

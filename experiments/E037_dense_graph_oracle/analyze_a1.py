@@ -90,8 +90,8 @@ for key, arms in (("roads", ("P8", "P8r", "R3", "P8g", "P8rg", "R3g")), ("buildi
             continue
         m = out[(key, arm)]
         why = []
-        if key == "roads" and m["junction_lost_or_wrong"] > 0.005:
-            why.append(f"rule 1: junctions lost/wrong {m['junction_lost_or_wrong']:.4f} > 0.005")
+        if key == "roads" and m["junction_f1"] < 0.995:  # registered form (Codex E037 #3)
+            why.append(f"rule 1: junction F1 {m['junction_f1']:.4f} < 0.995")
         if key == "buildings" and m["ring_not_closed"] > 0.01:
             why.append(f"rule 1: rings not closed {m['ring_not_closed']:.4f} > 0.01")
         if key == "roofs" and m["face_not_closed"] > 0.01:
