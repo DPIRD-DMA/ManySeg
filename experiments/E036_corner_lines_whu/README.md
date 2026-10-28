@@ -29,3 +29,24 @@ GT outlines cleaned of staircase vertices (post hoc), detection F1, matched IoU,
 
 ## Budget
 One run (~2–2.5 h) on the shared 4090 after agreeing a slot with the Cloud-Aug session.
+
+## Results (seed 0, 2026-10-28)
+Trained 09:45-10:54 (40 epochs, final val PQ 0.649); decoder tuned on val over the 16 settings
+(best: corner_threshold 0.3, big_dev 4, agree 0.6, merge_deg 8), test once.
+
+| split | arm | C-IoU x F1 | C-IoU | det F1 | matched IoU | PoLiS m | N-ratio | TP / pred |
+|---|---|---|---|---|---|---|---|---|
+| val | B0 s0 | **0.628** | 0.736 | 0.853 | 0.878 | 0.370 | 1.14 | 14,382 / 16,931 |
+| val | B3 s0 | 0.482 | 0.581 | 0.829 | **0.884** | **0.344** | 0.44 | **14,606** / 18,436 |
+| test | B0 s0 | **0.603** | 0.709 | 0.850 | 0.861 | 0.391 | 1.18 | 41,099 / 48,751 |
+| test | B3 s0 | 0.505 | 0.609 | 0.828 | **0.867** | **0.364** | 0.48 | **41,623** / 52,576 |
+
+### Decision (registered screen)
+B3 val 0.482 is not above 0.6327 → **B3 does not advance; no seeds 1-2.**
+
+### Interpretation
+B3 loses on C-IoU's vertex-count term, not on overlap: its matched IoU and PoLiS are slightly
+better than B0's and it recovers more buildings, but it outputs 0.44x the vertices of WHU's
+raster-traced GT (B0: 1.14x), whose outlines keep many staircase vertices (E037). Its lower
+detection F1 comes from extra predictions (18,436 vs 16,931), plausibly because the registered
+decoder fixed B0's instance thresholds on B3's own, jointly trained heads.
