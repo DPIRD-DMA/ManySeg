@@ -123,3 +123,11 @@ floor of oracle faces on this input: missed and merged faces.
 Practical reading: one B3 model; decode faces with F0 for face recall, or F3 where straight
 outlines matter (C-IoU, corners); planes from the DSM per face (E043b robust fit).
 
+
+### End-to-end LoD2 demo (not a registered test)
+`mesh_demo47.py` -> `mesh3d_test.png`: E047b's F3 faces on two test tiles, robust planes from the
+input nDSM, vertices of different faces within 1.5 px snapped together, E043b's J2 join, rendered
+in 3D next to 3DBAG LoD2.2. Snapping raises shared vertices from 39 to 154 (leidscherijn tile 5)
+and 36 to 176 (staphorst tile 30); 67-68 step vertices remain (real height steps or plane
+disagreement). Visually the trained meshes reproduce 3DBAG's roof layout and heights at block
+scale. Snapping is not yet in the library or scored; a registered mesh test would add it.
