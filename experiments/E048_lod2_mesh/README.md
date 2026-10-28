@@ -47,3 +47,15 @@ vertices merge); (2) F3's straight walls leave cracks that vertex snapping only 
 closing them needs edge-level joining (a vertex of one face onto the edge of its neighbour, i.e.
 T-junctions), or decoding all faces of a building jointly as one planar graph.
 
+
+## E048b (registered 19:35, after E048's result): planar joining
+Edge-level joining for F3: each face is snapped (`shapely.snap`) to the union of its neighbours
+within r px; all outlines are noded together (`unary_union`) and re-polygonised; each cell goes
+to the original face covering most of it (cells covered < 50% by any face are dropped); a face's
+cells are merged. Neighbouring faces then share edges and vertices exactly (a planar partition),
+and J2 acts on every shared vertex. r tuned on val over {1.0, 1.5, 2.5} by seam closure.
+Rule as E048 against F3 without joining (seam closure +0.20, vertex z error <= +0.05 m, face F1
+>= -0.01, both areas); E048's snap shown alongside. Test once (`runs/e048b.json`).
+
+### E048b results
+(pending)

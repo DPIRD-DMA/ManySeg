@@ -57,6 +57,45 @@ def snap(faces, r: float):
     return out
 
 
+def planarize(faces, r: float):
+    """Snap faces onto their neighbours, node all outlines, re-polygonise, give each cell to the face
+    covering most of it (E048b)."""
+    if r <= 0 or len(faces) < 2:
+        return list(faces)
+    tree = shapely.STRtree(faces)
+    snapped: list = []  # sequential: each face snaps onto faces already placed (larger first)
+    order = sorted(range(len(faces)), key=lambda i: -faces[i].area)
+    placed: dict = {}
+    for i in order:
+        f = faces[i]
+        nb = [placed[j] for j in tree.query(f, predicate="dwithin", distance=r) if j in placed]
+        g = shapely.snap(f, shapely.union_all([n.exterior for n in nb]), r) if nb else f
+        g = g if g.is_valid else g.buffer(0)
+        placed[i] = g if g.geom_type == "Polygon" and g.area > 1 else f
+    snapped = [placed[i] for i in range(len(faces))]
+    cells = list(shapely.polygonize([shapely.union_all([g.exterior for g in snapped])]).geoms)
+    otree = shapely.STRtree(faces)
+    parts: dict = {}
+    for c in cells:
+        cand = otree.query(c, predicate="intersects")
+        if not len(cand):
+            continue
+        ov = [(faces[j].intersection(c).area, int(j)) for j in cand]
+        a, j = max(ov)
+        if a >= 0.5 * c.area:
+            parts.setdefault(j, []).append(c)
+    out = []
+    for j, f in enumerate(faces):
+        if j not in parts:
+            continue
+        u = shapely.union_all(parts[j])
+        if u.geom_type == "MultiPolygon":
+            u = max(u.geoms, key=lambda g: g.area)
+        if u.geom_type == "Polygon" and u.area > 1:
+            out.append(shapely.Polygon(u.exterior))
+    return out
+
+
 def seam_closure(faces, near: float = 2.0, on: float = 0.1, step: float = 0.5) -> tuple[int, int]:
     if len(faces) < 2:
         return 0, 0
@@ -100,8 +139,8 @@ def face_sets(split: str, sel: dict, model):
         yield i, out
 
 
-def score(t, faces, nd, r):
-    sf = snap(faces, r)
+def score(t, faces, nd, r, join=None):
+    sf = (join or snap)(faces, r)
     a = {"height": nd}
     P = e043.planes(sf, a, "robust")
     rings, st = e043.mesh(sf, P, "J2")
@@ -164,5 +203,47 @@ def main():
     print(json.dumps(res["decision"], indent=1))
 
 
+def main_b():
+    out = HERE / "runs" / "e048b.json"
+    if out.exists():
+        raise SystemExit(f"{out} exists (test once)")
+    ev = json.loads((E47 / "runs" / "eval_B3_s0_e150.json").read_text())
+    e48 = json.loads((HERE / "runs" / "e048.json").read_text())
+    model = T.build()
+    model.load_state_dict(torch.load(E47 / "runs" / "B3_s0_e150.pt", map_location="cpu"))
+    model = model.cuda().eval()
+    sel = {a: ev["selected"][a] for a in ("F0", "F3")}
+    res = {"model_sha256": ev["sha256"], "selected": sel, "snap_r": e48["r"]}
+    tiles = V._tiles("val")
+    nds = np.load(V.CACHE / "val_ndsm.npy", mmap_mode="r")
+    val = {r: [] for r in RADII}
+    for i, fs in face_sets("val", sel, model):
+        for r in RADII:
+            val[r].append(score(tiles[i], fs["F3"], np.asarray(nds[i], np.float32), r, planarize))
+    vp = {r: pooled(v) for r, v in val.items()}
+    r_best = max(RADII, key=lambda r: vp[r]["seam_closure"])
+    res["val"], res["r"] = {str(r): v for r, v in vp.items()}, r_best
+    print("val", {r: round(v["seam_closure"], 3) for r, v in vp.items()}, "-> r", r_best, flush=True)
+    tiles = V._tiles("test")
+    nds = np.load(V.CACHE / "test_ndsm.npy", mmap_mode="r")
+    acc: dict = {}
+    for i, fs in face_sets("test", sel, model):
+        nd = np.asarray(nds[i], np.float32)
+        for name, r, j in (("J2", 0.0, None), ("snap+J2", e48["r"], None), ("planar+J2", r_best, planarize)):
+            acc.setdefault((tiles[i].area, name), []).append(score(tiles[i], fs["F3"], nd, r, j))
+    res["test"] = {f"{a}|F3|{n}": pooled(v) for (a, n), v in acc.items()}
+    dec = {}
+    for area in ("leidscherijn", "staphorst"):
+        b, s_ = res["test"][f"{area}|F3|J2"], res["test"][f"{area}|F3|planar+J2"]
+        dec[area] = {"seam_gain": s_["seam_closure"] - b["seam_closure"], "z_change": s_["vertex_z_err"] - b["vertex_z_err"],
+                     "face_f1_change": s_["face_f1"] - b["face_f1"]}
+    res["decision"] = {"areas": dec, "planar_adopted": all(d["seam_gain"] >= 0.20 and d["z_change"] <= 0.05
+                                                           and d["face_f1_change"] >= -0.01 for d in dec.values())}
+    out.write_text(json.dumps(res, indent=1))
+    for k, v in res["test"].items():
+        print(k, {x: round(y, 3) for x, y in v.items()})
+    print(json.dumps(res["decision"], indent=1))
+
+
 if __name__ == "__main__":
-    main()
+    main_b() if sys.argv[1:] == ["b"] else main()
