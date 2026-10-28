@@ -1,0 +1,88 @@
+{
+ "buildings": 2699,
+ "tiles": 200,
+ "fail_below": 0.75,
+ "b3": {
+  "ok": {
+   "n": 2312,
+   "share_of_buildings": 0.8566135605779919,
+   "share_of_iou_shortfall": 0.5262442982243627
+  },
+  "missed": {
+   "n": 77,
+   "share_of_buildings": 0.02852908484623935,
+   "share_of_iou_shortfall": 0.17252801439543977
+  },
+  "mask": {
+   "n": 226,
+   "share_of_buildings": 0.08373471656168952,
+   "share_of_iou_shortfall": 0.20537468916996526
+  },
+  "split": {
+   "n": 28,
+   "share_of_buildings": 0.010374212671359764,
+   "share_of_iou_shortfall": 0.02780198558603832
+  },
+  "merged": {
+   "n": 43,
+   "share_of_buildings": 0.01593182660244535,
+   "share_of_iou_shortfall": 0.060242296673159515
+  },
+  "decoder": {
+   "n": 13,
+   "share_of_buildings": 0.004816598740274175,
+   "share_of_iou_shortfall": 0.007808715951034521
+  }
+ },
+ "b0_plus_regulariser": {
+  "ok": 0.8232678769914783,
+  "missed": 0.030752130418673584,
+  "mask": 0.11337532419414598,
+  "split": 0.008521674694331233,
+  "merged": 0.02408299370137088
+ },
+ "failures_touching_tile_border": {
+  "mask": 95,
+  "missed": 11,
+  "merged": 9,
+  "split": 11,
+  "decoder": 8
+ },
+ "threshold_sweep_mask_iou": [
+  {
+   "extent_threshold": 0.5,
+   "boundary_threshold": 0.3,
+   "seed_threshold": 0.15,
+   "mean_iou": 0.8368087654555345
+  },
+  {
+   "extent_threshold": 0.4,
+   "boundary_threshold": 0.3,
+   "seed_threshold": 0.15,
+   "mean_iou": 0.8366210724444677
+  },
+  {
+   "extent_threshold": 0.5,
+   "boundary_threshold": 0.7,
+   "seed_threshold": 0.3,
+   "mean_iou": 0.8358798625257748
+  },
+  {
+   "extent_threshold": 0.4,
+   "boundary_threshold": 0.7,
+   "seed_threshold": 0.3,
+   "mean_iou": 0.8357875310447291
+  },
+  {
+   "extent_threshold": 0.5,
+   "boundary_threshold": 0.5,
+   "seed_threshold": 0.3,
+   "mean_iou": 0.8357675580726729
+  }
+ ],
+ "registered_thresholds": {
+  "extent_threshold": 0.6,
+  "boundary_threshold": 0.5,
+  "seed_threshold": 0.15
+ }
+}

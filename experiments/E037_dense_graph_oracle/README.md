@@ -137,4 +137,26 @@ channel, a difference of degree. The registered verdict stands; a trained P8 wou
 pre-registration with a shift-tolerant link loss.
 
 ### A2 chain survival (diagnostic only, after the kill; user's direction-aware healing)
-(pending)
+P8rg (buildings 40 tiles, roofs 30, roads 20) and R3g (roads), 3 seeds; damage: independent
+one-sided link loss ("link"), runs of 3 links lost both ways ("link3"), missing node pixels whose
+neighbours still point at them ("node"). Decoders: AND/OR reciprocal rule, E028 end bridging
+(10 px), and the user's healing (`heal`: only ends with a dangling link heal, searching along the
+line's own direction, end-to-end or end-to-line). Primary metric (L0: buildings 0.990, roads APLS
+0.925, roofs face F1 0.995):
+
+| task | damage | q | OR | OR + bridge | OR + heal | OR + bridge + heal |
+|---|---|---|---|---|---|---|
+| buildings | node | 0.01 / 0.05 | 0.42 / 0.04 | 0.93 / 0.58 | 0.96 / 0.80 | **0.97 / 0.91** |
+| buildings | link3 | 0.01 / 0.05 | 0.73 / 0.25 | 0.98 / 0.86 | 0.73 / 0.25 | **0.98 / 0.86** |
+| roads | node | 0.01 / 0.05 | 0.12 / 0.01 | 0.86 / 0.27 | 0.92 / 0.88 | **0.92 / 0.90** |
+| roads | link3 | 0.01 / 0.05 | 0.46 / 0.05 | 0.90 / 0.68 | 0.46 / 0.05 | **0.90 / 0.68** |
+| roofs | node | 0.01 / 0.05 | 0.66 / 0.13 | 0.95 / 0.65 | 0.98 / 0.91 | **0.98 / 0.93** |
+| roofs | link3 | 0.01 / 0.05 | 0.86 / 0.47 | 0.97 / 0.88 | 0.86 / 0.47 | **0.97 / 0.88** |
+
+One-sided link loss is absorbed by the OR rule (buildings 0.98 at q 0.01). Healing is what saves
+missing pixels (it uses the neighbours' dangling links); links lost both ways leave no evidence,
+so bridging covers those. With bridge + heal every task stays within 0.02 of L0 at q = 0.01 (the
+registered rule-2 tolerance is 0.05; with the registered decoders alone, bridging only, node
+loss would fail it for buildings 0.062 and roads 0.070). Chain fragility, the main a-priori risk
+of the dense graph, is handled by the decoder; the remaining obstacles are overpasses (roads)
+and hard-target aliasing (all tasks).
