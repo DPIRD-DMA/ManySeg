@@ -88,4 +88,41 @@ arms runs after the registered A1.
 CPU only, systemd MemoryMax <= 12 GB, OMP_NUM_THREADS=1, <= 6 processes (E036 shares the box).
 
 ## Results
+
+### A1 (L0, perfect targets; 270 tiles: 68 road, 122 building, 80 roof)
+Roads (APLS / junction F1 / junctions lost or wrong-degree / crossings kept, of 285):
+
+| arm | APLS | junc F1 | lost/wrong | < 15 deg fail | crossings |
+|---|---|---|---|---|---|
+| R0 mask | 0.927 | 0.799 | 22.2% | 96% | 19 |
+| R2 graph (20 px) | **0.982** | 0.976 | 3.9% | 43% | **245** |
+| P8 / P8g | 0.946 | 0.967 | 2.1% | 33% / 29% | 23 |
+| P8r | 0.958 | **0.983** | **1.0%** | **9%** | 96 |
+| P8rg | 0.949 | 0.972 | 1.5% | 28% | 43 |
+| R3 / R3g | 0.948 / 0.939 | 0.983 / 0.972 | 1.0% / 1.5% | 9% / 28% | 96 / 43 |
+
+Footprints (C-IoU x det F1; OSM 0.5 m vector GT / WHU 0.3 m raster-traced GT): B0 0.900 / 0.652,
+B3r 0.949 / 0.921, B2 0.976 / 0.954, P8 0.985 / 0.996, P8r 0.987 / 0.996, P8g 0.985 / 0.996,
+P8rg 0.985 / 0.997. Rings not closed: 0.15-0.33% for every arm. WHU outlines are traced from
+rasters (vertices on pixel corners); P8 reproduces them vertex for vertex, which C-IoU's
+vertex-count term rewards, so the OSM column is the fair comparison (checked visually).
+Roofs (face F1 / height RMSE m): A1 0.992 / 0.320, P8 0.994 / 0.268, P8r 0.995 / 0.253,
+P8g 0.994 / 0.267, P8rg 0.995 / 0.246.
+
+**L0 decision:** roads: every P8 arm and R3 **killed** (rule 1 junctions lost > 0.5%, rule 2
+APLS 0.024-0.043 below R2, rule 3 crossings: one node per pixel turns a crossing on a shared
+pixel into a false junction; R2 itself would fail rule 1 at 3.9%). Footprints and roofs: all
+P8 arms survive L0, and are the best arms at L0.
+
+### A2 stability (positive-link disagreement, mean; rule: kill if > 0.05)
+Dihedral: DDA arms 0.06-0.14 (roads/roofs), geometric arms 0.002-0.02 (roads/roofs); buildings
+OSM 0.004 (geo) but WHU 0.39-0.77 (outlines on pixel edges: every floor() is a tie).
++-0.25 px shifts: **0.34-0.46 for every arm and task** -> by the registered rule **all P8 arms
+are killed**. Diagnosis (rendered): a quarter-pixel shift moves the steps of each rasterised
+staircase by one pixel, and every moved step swaps two links; with a 1-px tolerance the
+disagreement is 0.000 on every task. This is aliasing of any hard one-pixel line target, not a
+P8-specific defect: a trained P8 would need a shift-tolerant (e.g. distance-weighted) link loss,
+which an oracle cannot test.
+
+### A2 chain survival (diagnostic only, after the kill; user's direction-aware healing)
 (pending)
