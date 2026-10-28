@@ -90,3 +90,19 @@ def test_geo_raster_round_trips_and_is_stable():
     base = A.undirected_links(P.encode_p8(g, S, raster="geo").link)
     enc = P.encode_p8(A.transform_graph(g, A.dihedral(4, S[0])), S, raster="geo")
     assert A.disagreement(base, A.links_back(A.undirected_links(enc.link), A._inverse_k(4), S[0])) < 0.05
+
+
+def test_heal_bridges_missing_pixels_but_not_real_dead_ends():
+    import networkx as nx
+    enc = P.encode_p8(g_of([[(10.5, 64.5), (110.5, 64.5)], [(60.5, 64.5), (60.5, 120.5)]]), S, raster="geo")
+    node = enc.node.copy()
+    node[64, 40:42] = 0  # two missing pixels on the main road
+    node[66:68, 60] = 0  # the T-junction arm detached just below the junction
+    pg = P.pixel_graph(node, enc.link, enc.offset)
+    assert nx.number_connected_components(pg) == 3
+    healed = P.heal(pg.copy(), enc.link)
+    assert nx.number_connected_components(healed) == 1
+    # two real dead ends facing each other 6 px apart: no dangling links, so no join
+    enc2 = P.encode_p8(g_of([[(10.5, 30.5), (50.5, 30.5)], [(56.5, 30.5), (100.5, 30.5)]]), S, raster="geo")
+    pg2 = P.pixel_graph(enc2.node, enc2.link, enc2.offset)
+    assert nx.number_connected_components(P.heal(pg2.copy(), enc2.link)) == 2

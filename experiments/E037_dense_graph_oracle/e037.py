@@ -96,7 +96,7 @@ def dda(c0, c1) -> list:
     return [(int(math.floor(c0[0] + dr * k / n + 0.5)), int(math.floor(c0[1] + dc * k / n + 0.5))) for k in range(n + 1)]
 
 
-def geo_path(a, b, ca, cb) -> list:
+def geo_path(a, b, ca, cb, shape=None) -> list:
     """8-connected cells along the true segment a -> b (x, y): the end cells ``ca``/``cb`` (may be
     displaced), and in between, for each column (or row, along the major axis) the cell holding the
     true line at that column's centre; non-adjacent neighbours are filled with ``dda``. A one-pixel
@@ -115,6 +115,8 @@ def geo_path(a, b, ca, cb) -> list:
         for r in (rows if ca[0] <= cb[0] else reversed(rows)):
             x = a[0] + (r + 0.5 - a[1]) * dx / dy
             mid.append((r, int(math.floor(x))))
+    if shape is not None:  # lines on the tile edge (x or y == size) stay inside
+        mid = [(min(max(r, 0), shape[0] - 1), min(max(c, 0), shape[1] - 1)) for r, c in mid]
     cells = [ca] + mid + [cb]
     out = [cells[0]]
     for c in cells[1:]:
@@ -158,7 +160,7 @@ def encode_p8(g: nx.Graph, shape, displace: bool = False, raster: str = "dda") -
 
     def path(e):
         if raster == "geo":
-            return geo_path(xy[e[0]], xy[e[1]], cell[e[0]], cell[e[1]])
+            return geo_path(xy[e[0]], xy[e[1]], cell[e[0]], cell[e[1]], (H, W))
         return dda(cell[e[0]], cell[e[1]])
 
     occ: dict = {}  # cell -> {seg: count}
@@ -284,6 +286,80 @@ def pixel_graph(node, link, offset, *, thr: float = 0.5, rule: str = "and", regi
     return g
 
 
+def heal(pg: nx.Graph, link: np.ndarray, *, reach: float = 10.0, cone: float = 30.0, back: int = 5,
+         thr: float = 0.5) -> nx.Graph:
+    """Direction-aware gap healing (user's idea, E037 A2 extra decoder). Only *broken* ends heal:
+    pixel nodes of degree <= 1 that still have a link bit pointing at a pixel they are not joined
+    to (a real dead end has none). Search direction: the line's own direction over its last
+    ``back`` nodes (centre + offset), or the dangling link's direction for an isolated pixel. Join
+    to the nearest node within ``reach`` px inside a ``cone``-degree cone, preferring another
+    broken end that points back (within 45 deg); otherwise the middle of a line (a T-join)."""
+    H, W = link.shape[1:]
+    xy = {n: pg.nodes[n]["xy"] for n in pg}
+
+    def dangling(n):
+        r, c = n
+        out = []
+        for k, (dr, dc) in enumerate(DIRS):
+            m = (r + dr, c + dc)
+            if link[k, r, c] > thr and not pg.has_edge(n, m):
+                out.append(np.array([dc, dr], float))
+        return out
+
+    ends, dirs = [], {}
+    for n in pg:
+        if pg.degree(n) > 1:
+            continue
+        dl = dangling(n)
+        if not dl:
+            continue
+        d = None
+        if pg.degree(n) == 1:
+            prev, cur, k = n, next(iter(pg.neighbors(n))), 0
+            while k < back - 1 and pg.degree(cur) == 2:
+                nxt = [x for x in pg.neighbors(cur) if x != prev]
+                prev, cur, k = cur, nxt[0], k + 1
+            v = xy[n] - xy[cur]
+            if np.hypot(*v) > 1e-6:
+                d = v / np.hypot(*v)
+        if d is None:
+            v = np.mean(dl, 0)
+            if np.hypot(*v) < 1e-6:
+                continue
+            d = v / np.hypot(*v)
+        ends.append(n)
+        dirs[n] = d
+    if not ends:
+        return pg
+    nodes = list(pg)
+    tree = cKDTree(np.array([xy[n] for n in nodes]))
+    cos_cone, cos_back = math.cos(math.radians(cone)), math.cos(math.radians(45))
+    used = set()
+    for n in sorted(ends, key=lambda e: e):
+        if n in used:
+            continue
+        own = set(nx.single_source_shortest_path_length(pg, n, cutoff=back + 2))
+        best = None
+        for j in tree.query_ball_point(xy[n], reach):
+            m = nodes[j]
+            if m in own or m in used:
+                continue
+            v = xy[m] - xy[n]
+            dist = float(np.hypot(*v))
+            if dist < 1e-6 or (v @ dirs[n]) / dist < cos_cone:
+                continue
+            is_end = m in dirs and (dirs[m] @ (-v)) / dist >= cos_back
+            score = dist if is_end else 1.5 * dist
+            if best is None or score < best[0]:
+                best = (score, m, is_end)
+        if best is not None:
+            pg.add_edge(n, best[1])
+            used.add(n)
+            if best[2]:
+                used.add(best[1])
+    return pg
+
+
 def graph_to_chains(pg: nx.Graph):
     """Pixel graph -> (nodes {id: xy}, chains [(u, v, coords)]) between nodes of degree != 2;
     pure cycles get one node."""
@@ -328,6 +404,8 @@ def finish(pg: nx.Graph, simplify: float, min_len: float = 0.0) -> nx.Graph:
 
 def decode_p8_roads(a: dict, p: dict) -> nx.Graph:
     pg = pixel_graph(a["node"], a["link"], a["offset"], thr=p.get("thr", 0.5), rule=p.get("rule", "and"))
+    if p.get("heal"):
+        pg = heal(pg, a["link"])
     return E.bridge_ends(finish(pg, p.get("simplify", 1.0), p.get("min_len", 0.0)), p.get("gap", 0))
 
 
@@ -357,6 +435,8 @@ def faces_from_graph(g: nx.Graph, mask: np.ndarray, simplify: float, face_thr: f
 
 def decode_p8_faces(a: dict, p: dict) -> list:
     pg = pixel_graph(a["node"], a["link"], a["offset"], thr=p.get("thr", 0.5), rule=p.get("rule", "and"))
+    if p.get("heal"):
+        pg = heal(pg, a["link"])
     g = E.bridge_ends(finish(pg, 0.0), p.get("gap", 0))
     return faces_from_graph(g, a["mask"], p.get("simplify", 0.5))
 
