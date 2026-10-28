@@ -18,6 +18,7 @@ import torch
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "E030_whu_polygons"))
+sys.path.insert(0, str(HERE.parent / "E031_lod2_oracle"))  # unpickling e031.Tile
 from common import CornerLineTask, dihedral_array, seed_everything  # noqa: E402
 from manyseg import create_model  # noqa: E402
 from manyseg_bench.providers.base import split_params  # noqa: E402
