@@ -64,3 +64,16 @@ corruption seeds 5-9 (E043 used 0-4), same tiles, arms, parameters and code. Rul
 * Robust adopted over fit if its normal error is lower at L1-L3 and height RMSE within +0.02 m (J1).
 * J2 adopted if, for the chosen plane arm, false steps <= J1's x 0.8 at L1 and L2 and vertex z error
   <= J1's + 0.02 m.
+
+## E043b results (Pawsey job 51716439, 53 s; seeds 5-9; `runs/decision_e043b.json`)
+| arm | normal err L1 / L2 / L3 (deg) | false steps J1 -> J2 at L1 / L2 / L3 | vertex z err J1 / J2 at L2 (m) |
+|---|---|---|---|
+| fit | 1.77 / 8.51 / 11.68 | 5.7 / 13.0 / 7.1 (J1) | 0.652 |
+| robust | 1.39 / 5.19 / 8.74 | 5.4 -> 3.9 / 12.2 -> 7.5 / 7.2 -> 4.3 | 0.668 / 0.662 |
+| slope | **0.60 / 2.32 / 4.36** | 4.9 -> 3.5 / 11.3 -> 8.3 / 7.8 -> 6.2 | 0.668 / 0.667 |
+
+**Decision:** robust over fit: **adopted**; J2: **adopted** (false steps -28 to -41%, vertex error
+unchanged); slope rasters: **not adopted** - normal error -2.9 / -4.4 deg at L2 / L3 (-0.8 at L1)
+but false steps above the 10% allowance (L2 8.25 vs 8.23 allowed; L3 6.18 vs 4.71). Roof design:
+graph faces + robust height-only plane per face + J2 joining. Slope rasters remain an option where
+roof orientation matters more than step-wall artefacts.
