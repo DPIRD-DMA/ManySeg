@@ -209,7 +209,7 @@ def work(job: dict) -> list:
                 pred = (E.decode_r0 if arm == "R0" else E.decode_r2)(a, R0_P if arm == "R0" else R2_P)
             else:
                 a = P.encode_roads(t, arm)
-                pred = P.decode_r3(a, R3_P) if arm == "R3" else P.decode_p8_roads(a, P8_ROAD)
+                pred = P.decode_r3(a, R3_P) if arm.startswith("R3") else P.decode_p8_roads(a, P8_ROAD)
                 extra = _enc_stats(a)
             m = E.road_metrics(t, pred)
             m.update(junction_hits(t.graph, pred, 5.0 / t.gsd))
@@ -234,7 +234,7 @@ def work(job: dict) -> list:
                 faces, planes = e031.decode_a1(e031.encode(t), A1_P)
             else:
                 g = P.lines_to_graph(P.roof_lines(t.faces, e031.TILE))
-                enc = P.encode_p8(g, (e031.TILE, e031.TILE), displace=arm == "P8r")
+                enc = P.encode_p8(g, (e031.TILE, e031.TILE), **P.p8_opts(arm))
                 a = {"node": enc.node, "link": enc.link, "offset": enc.offset, "mask": t.mask.astype(np.float32), "_enc": enc}
                 faces = P.decode_p8_faces(a, {"simplify": 0.5})
                 planes = e031.planes_for(faces, t.height)
@@ -253,6 +253,7 @@ def main():
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--procs", type=int, default=6)
     ap.add_argument("--only", default=None)
+    ap.add_argument("--arms", default=None, help="override, e.g. P8g,P8rg,R3g (amendment 1)")
     ap.add_argument("--out", type=Path, default=HERE / "runs" / "a1.jsonl")
     args = ap.parse_args()
     args.out.parent.mkdir(exist_ok=True)
@@ -260,7 +261,8 @@ def main():
     jobs = []
     for k in keys:
         n = len(tiles(k))
-        jobs += [dict(key=k, tile=i, arms=ARMS[k]) for i in range(n if args.limit is None else min(n, args.limit))]
+        arms = ARMS[k] if not args.arms else tuple(a for a in args.arms.split(",") if a != "R3g" or k == "roads")
+        jobs += [dict(key=k, tile=i, arms=arms) for i in range(n if args.limit is None else min(n, args.limit))]
     print(f"{len(jobs)} jobs", flush=True)
     done = 0
     with open(args.out, "w") as f, Pool(args.procs, maxtasksperchild=4) as pool:

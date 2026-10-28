@@ -73,6 +73,17 @@ Reported vs chain length / perimeter alongside p^L. Seeds 0-2.
 Survivors go to A3 (amendment before any A3 result). If all P8 variants die, the link head is kept
 only inside R3-style zones.
 
+## Amendment 1 (2026-10-28 10:10, while A1 ran; no A1 result read)
+Writing the A2 stability check exposed a target-entropy problem in the registered rasteriser:
+the DDA path interpolates between the two *end cells*, so when an end vertex sits on a pixel
+boundary a flip moves that cell by one and the whole path shifts (toy lines: mean dihedral
+link disagreement 0.45, max 0.81). Added arms with a **geometric rasteriser** (`geo_path`): the
+end cells, and in between, per column (or row, along the major axis) the cell holding the true
+line at the column centre; gaps filled by DDA. Toy lines: disagreement 0.02 (max 0.11). New arms
+**P8g, P8rg** (all tasks) and **R3g** (roads), same decoders, same A1/A2 rules; the registered
+P8/P8r/R3 keep their rules (A2 stability will be reported for them as registered). A1 for the new
+arms runs after the registered A1.
+
 ## Compute
 CPU only, systemd MemoryMax <= 12 GB, OMP_NUM_THREADS=1, <= 6 processes (E036 shares the box).
 

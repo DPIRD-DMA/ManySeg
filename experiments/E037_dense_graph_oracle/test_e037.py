@@ -76,3 +76,17 @@ def test_square_ring_faces():
     from shapely.geometry import LineString
     faces = list(polygonize(unary_union([LineString([lines.nodes[u]["xy"], lines.nodes[v]["xy"]]) for u, v in lines.edges()])))
     assert len(faces) == 1 and faces[0].symmetric_difference(poly).area < 1.0
+
+
+def test_geo_raster_round_trips_and_is_stable():
+    import run_a2 as A
+    for line in ([(10.3, 20.7), (100.2, 20.7)], [(10.5, 10.5), (90.5, 70.2)], [(5.2, 100.1), (60.8, 7.4)]):
+        g = g_of([line])
+        enc = P.encode_p8(g, S, raster="geo")
+        out = P.finish(P.pixel_graph(enc.node, enc.link, enc.offset), 0.5)
+        xy = sorted(map(tuple, np.round([out.nodes[n]["xy"] for n in out if out.degree(n) == 1], 3)))
+        assert enc.collisions == 0 and np.allclose(xy, sorted(map(tuple, np.round(line, 3))), atol=1e-3)
+    g = g_of([[(10.3, 20.7), (100.2, 60.1), (30.0, 90.0)]])  # a vertex exactly on a pixel corner
+    base = A.undirected_links(P.encode_p8(g, S, raster="geo").link)
+    enc = P.encode_p8(A.transform_graph(g, A.dihedral(4, S[0])), S, raster="geo")
+    assert A.disagreement(base, A.links_back(A.undirected_links(enc.link), A._inverse_k(4), S[0])) < 0.05

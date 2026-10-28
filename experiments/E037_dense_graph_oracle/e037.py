@@ -96,6 +96,37 @@ def dda(c0, c1) -> list:
     return [(int(math.floor(c0[0] + dr * k / n + 0.5)), int(math.floor(c0[1] + dc * k / n + 0.5))) for k in range(n + 1)]
 
 
+def geo_path(a, b, ca, cb) -> list:
+    """8-connected cells along the true segment a -> b (x, y): the end cells ``ca``/``cb`` (may be
+    displaced), and in between, for each column (or row, along the major axis) the cell holding the
+    true line at that column's centre; non-adjacent neighbours are filled with ``dda``. A one-pixel
+    shift of an end cell only changes cells next to it."""
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    mid = []
+    if abs(dx) >= abs(dy) and dx != 0:
+        lo, hi = sorted((ca[1], cb[1]))
+        cols = range(lo + 1, hi)
+        for c in (cols if ca[1] <= cb[1] else reversed(cols)):
+            y = a[1] + (c + 0.5 - a[0]) * dy / dx
+            mid.append((int(math.floor(y)), c))
+    elif dy != 0:
+        lo, hi = sorted((ca[0], cb[0]))
+        rows = range(lo + 1, hi)
+        for r in (rows if ca[0] <= cb[0] else reversed(rows)):
+            x = a[0] + (r + 0.5 - a[1]) * dx / dy
+            mid.append((r, int(math.floor(x))))
+    cells = [ca] + mid + [cb]
+    out = [cells[0]]
+    for c in cells[1:]:
+        if c == out[-1]:
+            continue
+        if max(abs(c[0] - out[-1][0]), abs(c[1] - out[-1][1])) > 1:
+            out += dda(out[-1], c)[1:]
+        else:
+            out.append(c)
+    return out
+
+
 @dataclass
 class P8:
     node: np.ndarray
@@ -115,7 +146,7 @@ def _closest_offset(cell, a, b):
     return q[0] - cx, q[1] - cy
 
 
-def encode_p8(g: nx.Graph, shape, displace: bool = False) -> P8:
+def encode_p8(g: nx.Graph, shape, displace: bool = False, raster: str = "dda") -> P8:
     """Rasterise each GT segment as the DDA path between its end vertices' cells. ``displace``
     (P8r): each vertex, highest degree first, may move to one of its 9 neighbouring cells to
     minimise collisions on its incident segments; offsets still point at the true position."""
@@ -126,6 +157,8 @@ def encode_p8(g: nx.Graph, shape, displace: bool = False) -> P8:
     segs = [(min(u, v), max(u, v)) for u, v in g.edges()]
 
     def path(e):
+        if raster == "geo":
+            return geo_path(xy[e[0]], xy[e[1]], cell[e[0]], cell[e[1]])
         return dda(cell[e[0]], cell[e[1]])
 
     occ: dict = {}  # cell -> {seg: count}
@@ -454,13 +487,19 @@ def road_graph_px(t) -> nx.Graph:
     return nx.convert_node_labels_to_integers(g)  # E028 border nodes are tuples
 
 
+def p8_opts(rep: str) -> dict:
+    """Arm name -> encoder options: P8 / P8r / R3 (DDA, pre-registered) and their amendment-1
+    geometric-raster variants P8g / P8rg / R3g."""
+    return {"displace": rep.startswith(("P8r", "R3")), "raster": "geo" if rep.endswith("g") else "dda"}
+
+
 def encode_roads(t, rep: str) -> dict:
     shape = (E.TILE, E.TILE)
-    if rep in ("P8", "P8r"):
-        enc = encode_p8(road_graph_px(t), shape, displace=rep == "P8r")
+    if rep in ("P8", "P8r", "P8g", "P8rg"):
+        enc = encode_p8(road_graph_px(t), shape, **p8_opts(rep))
         return {"node": enc.node, "link": enc.link, "offset": enc.offset, "_enc": enc}
-    if rep == "R3":
-        enc = encode_p8(road_graph_px(t), shape, displace=True)
+    if rep in ("R3", "R3g"):
+        enc = encode_p8(road_graph_px(t), shape, **p8_opts(rep))
         kp = road_keypoints(t)
         zone = zone_mask(kp, shape) | merge_zone(t, shape)
         from rasterio.features import shapes as _shapes
@@ -472,8 +511,8 @@ def encode_roads(t, rep: str) -> dict:
 
 def encode_buildings(t, rep: str) -> dict:
     shape = (E.TILE, E.TILE)
-    if rep in ("P8", "P8r"):
-        enc = encode_p8(lines_to_graph(E.building_lines(t.polygons)), shape, displace=rep == "P8r")
+    if rep in ("P8", "P8r", "P8g", "P8rg"):
+        enc = encode_p8(lines_to_graph(E.building_lines(t.polygons)), shape, **p8_opts(rep))
         return {"node": enc.node, "link": enc.link, "offset": enc.offset,
                 "mask": (E.instance_raster(t.polygons) > 0).astype(np.float32), "_enc": enc}
     raise ValueError(rep)
