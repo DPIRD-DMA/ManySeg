@@ -43,5 +43,18 @@ keep B0. If seed 0 lands within 0.01 of either threshold, seed 1 of both arms de
   same way; absolute boundary precision is lowered by visible but unlabelled fields.
 * GPU nondeterminism (cuDNN) is not removed; seed 1 handles near-threshold cases as registered.
 
-## Results
-(pending)
+## Results (18:03; seed 0, NL test 388 chips)
+Training: B0 5.0 min, val PQ 0.418; B3 ~13 min (CPU-bound corner targets), val PQ 0.421.
+
+| arm | thresholds (extent/boundary/seed) | decoder setting | val boundary F | test boundary F | test P / R | test det F1 | C-IoU | PoLiS px |
+|---|---|---|---|---|---|---|---|---|
+| B0 | 0.6/0.3/0.3 | {'simplify': 0.5} | 0.592 | 0.592 | 0.617 / 0.569 | 0.593 | 0.262 | 1.62 |
+| B3 | 0.6/0.3/0.3 | {'corner_threshold': 0.5, 'big_dev': 4.0, 'agree': 0.6, 'merge_deg': 8.0} | 0.568 | 0.565 | 0.608 / 0.528 | 0.604 | 0.530 | 1.73 |
+
+B3 - B0: boundary F -0.027, detection F1 +0.011.
+**Decision: fields keep B0** (B3's boundary F is more than 0.01 below; not within 0.01 of a
+threshold, so no seed 1). This agrees with the E045 oracle. The B3-trained model's instance heads
+are as good as B0's (val PQ 0.421 vs 0.418, test detection F1 0.604 vs 0.593), so one B3-style
+model can serve fields as well, decoded with the mask outline (`polygons_from_labels`) instead
+of corners and lines (not tested on test; would be a new comparison).
+
