@@ -281,3 +281,17 @@ def test_corner_split_ignores_direction_magnitude():
     assert _split(pts, _unit(across), **kw)
     assert _split(pts, _unit(0.15 * across), **kw) == _split(pts, _unit(across), **kw)
     assert _split(pts, _unit(0 * across), **kw) == []
+
+
+def test_polygons_from_corners_never_drops_an_instance():
+    """Degenerate straightening (corners that merge into < 3 walls) falls back to the outline."""
+    from manyseg.vectors import polygons_from_corners
+
+    lab = np.zeros((100, 100), np.int32)
+    lab[20:60, 20:70] = 1
+    corner = np.zeros((100, 100), np.float32)
+    for r, c in ((20, 20), (20, 45), (20, 69)):  # three peaks on one straight wall
+        corner[r, c] = 1.0
+    direction = np.zeros((2, 100, 100), np.float32)
+    out = polygons_from_corners(lab, corner, direction, merge_deg=15.0)
+    assert len(out) == 1 and out[0].area > 0.9 * 40 * 50

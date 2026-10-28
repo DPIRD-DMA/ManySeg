@@ -87,9 +87,12 @@ def _polygon(ring: np.ndarray, corners: np.ndarray, direction: np.ndarray, *, sn
     if len(corners):
         d, j = cKDTree(ring).query(corners)
         idx = sorted({int(x) for x, dd in zip(j, d) if dd <= snap_radius})
-    if len(idx) < 3:
+    def fallback():  # the instance's own outline, simplified (never drop a building the mask found)
         q = shapely.Polygon(ring).buffer(0).simplify(simplify)
-        return q if q.geom_type == "Polygon" else None
+        return q if q.geom_type == "Polygon" and q.area > 1 else None
+
+    if len(idx) < 3:
+        return fallback()
     c = np.clip(np.floor(ring[:, 0]).astype(int), 0, W - 1)
     r = np.clip(np.floor(ring[:, 1]).astype(int), 0, H - 1)
     dirs = _unit(direction[:, r, c].T)
@@ -112,7 +115,7 @@ def _polygon(ring: np.ndarray, corners: np.ndarray, direction: np.ndarray, *, sn
                 merged = True
                 break
     if len(walls) < 3:
-        return None
+        return fallback()
     out = []
     for i in range(len(walls)):
         (p1, d1, _), (p2, d2, s2) = walls[i - 1], walls[i]
@@ -124,7 +127,7 @@ def _polygon(ring: np.ndarray, corners: np.ndarray, direction: np.ndarray, *, sn
         q = q.buffer(0)
         if q.geom_type == "MultiPolygon":
             q = max(q.geoms, key=lambda g: g.area)
-    return q if q.geom_type == "Polygon" and q.area > 1 else None
+    return q if q.geom_type == "Polygon" and q.area > 1 else fallback()
 
 
 def polygons_from_corners(labels, corner, direction, *, corner_threshold: float = 0.3,
@@ -133,8 +136,9 @@ def polygons_from_corners(labels, corner, direction, *, corner_threshold: float 
                           min_area: float = 16) -> list:
     """Straight-walled polygons from instance ``labels`` (H, W), a ``corner`` probability map
     (H, W) and a ``direction`` field (2, H, W) of ``(cos 2t, sin 2t)`` (numpy or torch). Defaults
-    are E035b's level-1/2 tuning. Instances with fewer than 3 snapped corners fall back to their
-    outline simplified by ``simplify`` px."""
+    are E035b's level-1/2 tuning. Instances with fewer than 3 snapped corners, or whose straightened
+    polygon degenerates (< 3 walls, invalid, empty), fall back to their outline simplified by
+    ``simplify`` px, so a building the instance mask found is never dropped."""
     shapely = _deps()[1]
     cp = corner.detach().float().cpu().numpy() if hasattr(corner, "detach") else np.asarray(corner, np.float32)
     dr = direction.detach().float().cpu().numpy() if hasattr(direction, "detach") else np.asarray(direction, np.float32)
