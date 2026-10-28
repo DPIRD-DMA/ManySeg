@@ -97,5 +97,29 @@ Every arm used the first setting of its grid. Test (48 tiles):
 
 Floor: 3DBAG faces + planes from the input nDSM give 0.80 / 0.55 m RMSE.
 
-### E047b (150 epochs)
-(pending)
+### E047b (150 epochs; decides)
+Training 13 min, val PQ 0.252 (E047: 0.142). Tuned on val (face F1 / (1 + RMSE)):
+A0 {'smooth': 0.5, 'tg': 0.03, 'tz': 0.5, 'min_px': 30, 'simplify': 1.0}; F0 thresholds {'extent_threshold': 0.4, 'boundary_threshold': 0.3, 'seed_threshold': 0.3}, {'simplify': 0.5};
+F3 thresholds {'extent_threshold': 0.4, 'boundary_threshold': 0.3, 'seed_threshold': 0.15}, {'corner_threshold': 0.5, 'big_dev': 4.0, 'agree': 0.6, 'merge_deg': 8.0}. Test (48 tiles):
+
+| arm | area | face F1 | height RMSE m | corner F1 | C-IoU | normal err deg |
+|---|---|---|---|---|---|---|
+| A0 | leidscherijn | 0.284 | 1.76 | 0.155 | 0.448 | 7.2 |
+| A0 | staphorst | 0.314 | 2.05 | 0.103 | 0.342 | 6.1 |
+| A0m | leidscherijn | 0.330 | 1.49 | 0.274 | 0.518 | 6.7 |
+| A0m | staphorst | 0.394 | 1.26 | 0.225 | 0.437 | 5.6 |
+| F0 | leidscherijn | 0.580 | 1.30 | 0.217 | 0.205 | 5.5 |
+| F0 | staphorst | 0.625 | 1.17 | 0.136 | 0.148 | 3.0 |
+| F3 | leidscherijn | 0.571 | 1.40 | 0.353 | 0.645 | 5.7 |
+| F3 | staphorst | 0.589 | 1.30 | 0.280 | 0.636 | 3.0 |
+
+**Decision: trained roof faces are viable** (F0: face F1 +0.30 / +0.31 over A0, RMSE -0.46 /
+-0.88 m; F3: +0.29 / +0.27, -0.36 / -0.74 m). **F3 is not preferred over F0**: face F1 -0.008 /
+-0.036, although corner F1 is +0.14 on both areas and C-IoU 0.64 vs 0.15-0.21 (F3's outlines are
+straight-walled with few vertices; F0's follow the pixel staircase). No margin within 0.02, so no
+second seed. A0m (A0 inside the learned mask) reaches only 0.33 / 0.39, so most of the gain is the
+learned partition into faces, not the learned building mask. Heights stay above the 0.55-0.80 m
+floor of oracle faces on this input: missed and merged faces.
+Practical reading: one B3 model; decode faces with F0 for face recall, or F3 where straight
+outlines matter (C-IoU, corners); planes from the DSM per face (E043b robust fit).
+
