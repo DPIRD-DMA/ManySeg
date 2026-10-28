@@ -1,0 +1,96 @@
+{
+ "heat": {
+  "L0": {
+   "thr_c": 0.3,
+   "big_dev": 4.0,
+   "agree": 0.4,
+   "merge_deg": 8.0,
+   "snap_r": 4.0
+  },
+  "L1": {
+   "thr_c": 0.3,
+   "big_dev": 8.0,
+   "agree": 0.4,
+   "merge_deg": 8.0,
+   "snap_r": 4.0
+  },
+  "L2": {
+   "thr_c": 0.3,
+   "big_dev": 8.0,
+   "agree": 0.4,
+   "merge_deg": 15.0,
+   "snap_r": 4.0
+  },
+  "L3": {
+   "thr_c": 0.5,
+   "big_dev": 8.0,
+   "agree": 0.4,
+   "merge_deg": 15.0,
+   "snap_r": 4.0
+  }
+ },
+ "field": {
+  "L0": {
+   "window": 5,
+   "big_dev": 4.0,
+   "agree": 0.6,
+   "merge_deg": 8.0,
+   "snap_r": 4.0
+  },
+  "L1": {
+   "window": 5,
+   "big_dev": 8.0,
+   "agree": 0.4,
+   "merge_deg": 8.0,
+   "snap_r": 4.0
+  },
+  "L2": {
+   "window": 15,
+   "big_dev": 8.0,
+   "agree": 0.4,
+   "merge_deg": 15.0,
+   "snap_r": 4.0
+  },
+  "L3": {
+   "window": 15,
+   "big_dev": 8.0,
+   "agree": 0.4,
+   "merge_deg": 8.0,
+   "snap_r": 4.0
+  }
+ },
+ "both": {
+  "L0": {
+   "thr_c": 0.3,
+   "window": 9,
+   "big_dev": 4.0,
+   "agree": 0.4,
+   "snap_r": 4.0,
+   "merge_deg": 8.0
+  },
+  "L1": {
+   "thr_c": 0.5,
+   "window": 9,
+   "big_dev": 8.0,
+   "agree": 0.4,
+   "snap_r": 4.0,
+   "merge_deg": 8.0
+  },
+  "L2": {
+   "thr_c": 0.5,
+   "window": 15,
+   "big_dev": 8.0,
+   "agree": 0.4,
+   "snap_r": 4.0,
+   "merge_deg": 8.0
+  },
+  "L3": {
+   "thr_c": 0.5,
+   "window": 15,
+   "big_dev": 8.0,
+   "agree": 0.4,
+   "snap_r": 4.0,
+   "merge_deg": 8.0
+  }
+ }
+}

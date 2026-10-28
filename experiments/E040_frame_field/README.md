@@ -39,5 +39,19 @@ all arms on the same corrupted draws.
   corner map).
 If neither holds, the frame field is not adopted for footprints (its road use is tested in E041).
 
-## Results
-(pending)
+## Results (2026-10-28)
+Tuned locally on Innaloo (worktree e040-b5691e8); test on Pawsey (job 51716087, 3 min; code
+vec-cc37971, identical decoders). C-IoU x F1 pooled over Murdoch + Northam (`runs/decision.json`):
+
+| arm | L0 | L1 | L2 | L3 |
+|---|---|---|---|---|
+| B0 | 0.900 | 0.570 | 0.251 | 0.036 |
+| heat (B3r) | **0.949** | **0.623** | 0.301 | 0.047 |
+| field | 0.909 | 0.601 | 0.305 | **0.050** |
+| both | **0.949** | 0.617 | **0.311** | 0.045 |
+
+**Decision:** field beats heat: no (-0.040 at L0, -0.022 at L1); both beats heat: no; heatmap
+redundant: no. The corner heatmap stays in the unified head set; frame-field corners are only
+marginally better under heavy corruption (L2-L3, < 0.01). Tuning picked the smallest smoothing
+window at L0-L1 (5) and the largest at L2-L3 (15). A B3 retrain with a frame-field head is not
+justified by this oracle.
