@@ -45,3 +45,14 @@ CPU decoding (6 processes, MemoryMax 14 GB) + one GPU pass per model; B3_s1 trai
 Val boundary F: B0 0.680, B0 + reg 0.618, B3 0.708. **Seed-0 screen: ADVANCE** (B3 - better
 baseline B0 = +0.018 >= 0.01; det F1 -0.021 >= -0.03). Seed 1 (B3_s1, B0_s1) runs next; the
 two-seed rule decides (`decide38.py`).
+
+### Seed 1 and decision (`runs/e038_s1.json`, `decide38.py`)
+| arm | boundary F | det F1 | C-IoU x F1 | matched IoU | PoLiS m | interior C-IoU x F1 |
+|---|---|---|---|---|---|---|
+| B0 s1 | 0.633 | **0.841** | 0.462 | 0.860 | 0.416 | 0.445 |
+| B0 + reg s1 | 0.577 | 0.835 | 0.578 | 0.847 | 0.446 | 0.596 |
+| B3 s1 | **0.659** | 0.830 | **0.627** | **0.866** | **0.384** | **0.615** |
+
+B3 minus the better baseline (B0 both times): +0.0183 (seed 0), +0.0258 (seed 1), mean +0.0221;
+detection F1 -0.021 / -0.011. **Two-seed rule: B3 PREFERRED** - B3 (corners + lines,
+`manyseg.vectors.polygons_from_corners`) replaces B0 + regulariser as the footprint default.
