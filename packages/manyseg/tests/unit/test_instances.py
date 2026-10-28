@@ -222,3 +222,13 @@ def test_edt_large_dimension_memory_bounded(monkeypatch):
     feat[0, 0, 0] = True
     d = T.edt(feat)
     assert d[0, 299, 6] == pytest.approx((299**2 + 6**2) ** 0.5)
+
+
+def test_connected_components_scipy_matches_torch():
+    pytest.importorskip("scipy")
+    from manyseg.instances.postprocess import _connected_components_torch, connected_components
+
+    g = torch.Generator().manual_seed(0)
+    for p in (0.3, 0.55, 0.7):
+        m = torch.rand(2, 70, 90, generator=g) < p
+        assert torch.equal(connected_components(m), _connected_components_torch(m))

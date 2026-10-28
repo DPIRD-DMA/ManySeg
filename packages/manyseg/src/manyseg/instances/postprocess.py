@@ -32,7 +32,35 @@ def connected_components(mask: Tensor, check_every: int = 8) -> Tensor:
     until nothing changes: every component ends with its largest pixel index. Pointer
     jumping (a pixel also takes the label of the pixel its label names, which is in the same
     component) lets long components converge in far fewer sweeps (E026: 18-44x on long or
-    field-like components) with the same result."""
+    field-like components) with the same result. On CPU with scipy installed, scipy's labelling
+    is mapped to the same ids (much faster on large components: 102 sweeps, ~9 s, for one 1024 px
+    tile of farm fields, E045)."""
+    if mask.device.type == "cpu":
+        try:
+            from scipy import ndimage
+        except ImportError:
+            ndimage = None
+        if ndimage is not None:
+            return _connected_components_scipy(mask, ndimage)
+    return _connected_components_torch(mask, check_every)
+
+
+def _connected_components_scipy(mask: Tensor, ndimage) -> Tensor:
+    import numpy as np
+
+    b, h, w = mask.shape
+    out = np.zeros((b, h, w), np.int64)
+    idx = np.arange(1, h * w + 1, dtype=np.int64).reshape(h, w)
+    for i in range(b):
+        lab, n = ndimage.label(mask[i].numpy())  # 4-connectivity
+        if n:
+            last = np.zeros(n + 1, np.int64)
+            np.maximum.at(last, lab.reshape(-1), idx.reshape(-1))
+            out[i] = np.where(lab > 0, last[lab], 0)
+    return torch.from_numpy(out)
+
+
+def _connected_components_torch(mask: Tensor, check_every: int = 8) -> Tensor:
     b, h, w = mask.shape
     lab = torch.arange(1, h * w + 1, device=mask.device).view(1, h, w).expand(b, h, w)
     lab = torch.where(mask, lab, 0)
