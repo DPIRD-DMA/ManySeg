@@ -54,6 +54,50 @@ def polygons_from_labels(labels, *, simplify: float = 1.0, min_area: float = 16,
     return out
 
 
+
+def planar_faces(polygons, tolerance: float = 2.5) -> list:
+    """Join separately decoded neighbouring faces into a planar partition (shared edges and
+    vertices), e.g. roof faces from :func:`polygons_from_corners` before a mesh join.
+
+    Faces are snapped, largest first, onto the faces already placed within ``tolerance`` px; all
+    outlines are noded together and re-polygonised; each cell goes to the input face covering
+    most of it (cells under 50% covered are dropped) and a face's cells are merged. Faces with no
+    cell are dropped; holes are not kept. Returned in input order. E048b (trained LoD2 faces):
+    seam closure 0.38 -> 0.72 (3DBAG's own faces: 0.79), heights better, face F1 unchanged.
+    """
+    shapely = _deps()[1]
+    faces = list(polygons)
+    if len(faces) < 2 or tolerance <= 0:
+        return faces
+    tree = shapely.STRtree(faces)
+    placed: dict = {}
+    for i in sorted(range(len(faces)), key=lambda k: -faces[k].area):
+        f = faces[i]
+        near = tree.query(f, predicate="dwithin", distance=tolerance)
+        nb = [placed[j] for j in near if j in placed]
+        g = shapely.snap(f, shapely.union_all([n.exterior for n in nb]), tolerance) if nb else f
+        g = g if g.is_valid else g.buffer(0)
+        placed[i] = g if g.geom_type == "Polygon" and g.area > 1 else f
+    lines = shapely.union_all([placed[i].exterior for i in range(len(faces))])
+    parts: dict = {}
+    for c in shapely.polygonize([lines]).geoms:
+        cand = tree.query(c, predicate="intersects")
+        if not len(cand):
+            continue
+        a, j = max((faces[int(k)].intersection(c).area, int(k)) for k in cand)
+        if a >= 0.5 * c.area:
+            parts.setdefault(j, []).append(c)
+    out = []
+    for j in range(len(faces)):
+        if j not in parts:
+            continue
+        u = shapely.union_all(parts[j])
+        if u.geom_type == "MultiPolygon":
+            u = max(u.geoms, key=lambda g: g.area)
+        if u.geom_type == "Polygon" and u.area > 1:
+            out.append(shapely.Polygon(u.exterior))
+    return out
+
 def _apply(transform, xy: np.ndarray) -> list:
     if transform is None:
         return xy.tolist()

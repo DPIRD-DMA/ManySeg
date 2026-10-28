@@ -17,7 +17,7 @@ from .graph_tensor import (
     snap_points,
     vertex_graph,
 )
-from .polygons import polygons_from_labels, to_geojson
+from .polygons import planar_faces, polygons_from_labels, to_geojson
 from .roads import graph_from_road_heads
 
 __all__ = [
@@ -32,6 +32,7 @@ __all__ = [
     "graph_tensor_heads",
     "offset_field",
     "offset_field_from_mask",
+    "planar_faces",
     "polygons_from_corners",
     "polygons_from_labels",
     "polygons_from_tensor",
