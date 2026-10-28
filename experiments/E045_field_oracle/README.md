@@ -89,3 +89,16 @@ the outline snaps to it and makes an out-and-back spike. Buildings rarely touch,
 working there. Possible follow-up (not registered): corner ownership per instance (a peak may only
 be used by the instance whose ring turns there). E046 tests the trained case.
 
+
+### Exploratory follow-up (val only, not registered): corner ownership
+`explore_own_corners.py`: each corner peak used only by the instance whose ring is nearest. NL val,
+every third tile, seed 0, E045's tuned settings, pooled boundary F:
+
+| level | B0 | B3 | B3 + ownership |
+|---|---|---|---|
+| L0 | 0.995 | 0.971 | 0.979 |
+| L1 | 0.863 | 0.816 | 0.819 |
+| L2 | 0.554 | 0.534 | 0.535 |
+
+Ownership removes some spikes (+0.008 at L0) but almost none of the gap at realistic levels: the
+deficit is mostly B3 straightening curved / ragged field edges. Not pursued; fields keep B0.
