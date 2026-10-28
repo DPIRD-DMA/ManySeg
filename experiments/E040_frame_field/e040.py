@@ -6,8 +6,8 @@ u = wall tangent, v = its normal, on a 1 px band around each GT edge (c2 = 0, c0
 
 Arms (all with B0's instances for closure, as B3r):
 * ``heat``  - B3r (E035b): corner heatmap + (cos 2t, sin 2t) line field.
-* ``field`` - no corner heatmap: corners where the outline switches from one frame direction to the
-              other (FFL's corner rule); wall test uses the frame direction nearest the outline.
+* ``field`` - no corner heatmap: corners where the frame axis nearest the outline turns by > 45 deg
+              (label-invariant form of FFL's corner rule); wall test uses that axis.
 * ``both``  - heatmap corners plus field corners; wall test uses the frame field.
 """
 
@@ -73,60 +73,57 @@ def frame_dirs(f: np.ndarray, r: np.ndarray, c: np.ndarray):
     return np.angle(u2) / 2, np.angle(v2) / 2, np.abs(c0)
 
 
-def ring_labels(ring: np.ndarray, f: np.ndarray, window: int, min_strength: float = 0.2):
-    """Per outline point: which frame direction (0 = u, 1 = v) is nearest the local tangent
-    (central difference over +-3 points), majority-smoothed over ``window``; and the chosen
-    direction as (cos 2t, sin 2t). Weak field (|c0| < min_strength) -> label -1, direction 0."""
+def ring_dirs(ring: np.ndarray, f: np.ndarray, min_strength: float = 0.2) -> np.ndarray:
+    """Per outline point: the frame direction (u or v) nearest the local tangent (central difference
+    over +-3 points), as (cos 2t, sin 2t); 0 where the field is weak. Label-free: (c0, c2) is an
+    unordered pair, so only the chosen *axis* is used, never which root was called u (Codex E040 #1).
+    The field is read at the strongest pixel of the point's 3x3 neighbourhood, the centre preferred
+    on ties (the traced outline sits ~0.5 px off the wall; heat gets the same policy, Codex #4)."""
     K = len(ring)
     H, W = f.shape[1:]
     rc = np.clip(np.floor(ring).astype(int), 0, W - 1)
-    # the traced mask outline sits ~0.5 px off the wall: sample the strongest field pixel in the
-    # 3x3 neighbourhood (smoke-tile fix: the pixel under the point often missed the 1 px band)
     strength = np.hypot(f[0], f[1])
-    best_r, best_c, best_s = rc[:, 1].copy(), rc[:, 0].copy(), np.full(K, -1.0)
+    best_r, best_c = rc[:, 1].copy(), rc[:, 0].copy()
+    best_s = strength[best_r, best_c].copy()
     for dr in (-1, 0, 1):
         for dc in (-1, 0, 1):
+            if dr == 0 and dc == 0:
+                continue
             r_ = np.clip(rc[:, 1] + dr, 0, H - 1); c_ = np.clip(rc[:, 0] + dc, 0, W - 1)
             sv = strength[r_, c_]
-            better = sv > best_s
+            better = sv > best_s + 1e-6
             best_r[better], best_c[better], best_s[better] = r_[better], c_[better], sv[better]
     tu, tv, s = frame_dirs(f, best_r, best_c)
     tan = ring[(np.arange(K) + 3) % K] - ring[(np.arange(K) - 3) % K]
     ta = np.arctan2(tan[:, 1], tan[:, 0])
-    du = np.abs(np.cos(ta - tu))
-    dv = np.abs(np.cos(ta - tv))
-    lab = np.where(du >= dv, 0, 1)
-    lab = np.where(s >= min_strength, lab, -1)
-    half = window // 2
-    sm = lab.copy()
-    for k in range(K):  # circular majority vote over known labels
-        w = lab[(np.arange(k - half, k + half + 1)) % K]
-        w = w[w >= 0]
-        if len(w):
-            sm[k] = int(np.round(w.mean()))
-    ang = np.where(sm == 0, tu, tv)
+    ang = np.where(np.abs(np.cos(ta - tu)) >= np.abs(np.cos(ta - tv)), tu, tv)
     dirs = np.stack([np.cos(2 * ang), np.sin(2 * ang)], 1)
-    dirs[sm < 0] = 0
-    return sm, dirs
+    dirs[s < min_strength] = 0
+    return dirs
 
 
-def field_corners(labels: np.ndarray) -> list[int]:
-    """Indices where the smoothed label switches between u and v (FFL's corner rule)."""
-    K = len(labels)
-    known = labels >= 0
+def field_corners(dirs: np.ndarray, window: int, min_turn: float = 45.0) -> list[int]:
+    """Corners where the chosen frame axis turns: smooth the (cos 2t, sin 2t) axis over ``window``
+    points (circular), compare the smoothed axes ``window // 2`` points before and after, and keep
+    local maxima of that turn above ``min_turn`` degrees (label-invariant version of FFL's rule)."""
+    K = len(dirs)
+    if K < 2 * window:
+        return []
+    h = window // 2
+    ker = np.ones(window)
+    sm = np.stack([np.convolve(np.r_[dirs[-h:, k], dirs[:, k], dirs[:h, k]], ker, "valid") for k in (0, 1)], 1)
+    a, b = sm[(np.arange(K) - h) % K], sm[(np.arange(K) + h) % K]
+    na, nb = np.hypot(*a.T), np.hypot(*b.T)
+    ok = (na > 1e-6) & (nb > 1e-6)
+    cos2 = np.where(ok, (a * b).sum(1) / np.maximum(na * nb, 1e-9), 1.0)
+    turn = np.degrees(np.arccos(np.clip(cos2, -1, 1)) / 2)  # axis angle difference, 0..90
     out = []
-    prev = None
-    for k in list(range(K)):
-        if not known[k]:
-            continue
-        if prev is not None and labels[k] != labels[prev]:
-            out.append(k)
-        prev = k
-    if out and known.any():  # wrap-around switch
-        first = int(np.argmax(known))
-        if labels[first] != labels[prev]:
-            out.append(first)
-    return sorted(set(out))
+    for k in np.argsort(-turn):
+        if turn[k] < min_turn:
+            break
+        if all(min(abs(k - o), K - abs(k - o)) > window for o in out):
+            out.append(int(k))
+    return sorted(out)
 
 
 def polygon_b3f(ring: np.ndarray, idx: list[int], dirs: np.ndarray, p: dict) -> Polygon | None:
@@ -159,8 +156,7 @@ def polygon_b3f(ring: np.ndarray, idx: list[int], dirs: np.ndarray, p: dict) -> 
                 merged = True
                 break
     if len(walls) < 3:
-        q = Polygon(ring).buffer(0).simplify(p["simplify"])
-        return q if q.geom_type == "Polygon" else None
+        return None  # as polygon_b3r (Codex E040 #2)
     out = []
     for i in range(len(walls)):
         (p1, d1, _), (p2, d2, s2) = walls[i - 1], walls[i]
@@ -175,6 +171,25 @@ def polygon_b3f(ring: np.ndarray, idx: list[int], dirs: np.ndarray, p: dict) -> 
     return q if q.geom_type == "Polygon" and q.area > 1 else None
 
 
+def strongest_3x3(d: np.ndarray) -> np.ndarray:
+    """Each pixel takes the (C, H, W) vector of the strongest pixel in its 3x3 neighbourhood
+    (centre preferred on ties): the same sampling policy for the heat arm's line field (Codex #4)."""
+    C, H, W = d.shape
+    n = np.hypot(*d[:2]) if C >= 2 else np.abs(d[0])
+    pad = np.pad(n, 1, constant_values=-1)
+    dp = np.pad(d, ((0, 0), (1, 1), (1, 1)))
+    best, out = n.copy(), d.copy()
+    for dr in (-1, 0, 1):
+        for dc in (-1, 0, 1):
+            if dr == 0 and dc == 0:
+                continue
+            nv = pad[1 + dr:1 + dr + H, 1 + dc:1 + dc + W]
+            better = nv > best + 1e-6
+            best = np.where(better, nv, best)
+            out[:, better] = dp[:, 1 + dr:1 + dr + H, 1 + dc:1 + dc + W][:, better]
+    return out
+
+
 def decode_b3f(a: dict, p: dict) -> list[Polygon]:
     """``p['mode']`` in {"field", "both"}; ``heat`` is E035b's decode_b3r."""
     lab = E._labels_b0(a, p["b0"])
@@ -184,8 +199,8 @@ def decode_b3f(a: dict, p: dict) -> list[Polygon]:
     for poly in exact:
         ring = np.asarray(shapely.segmentize(poly.exterior, 1.0).coords)
         ring_c = ring[:-1] if np.allclose(ring[0], ring[-1]) else ring
-        labels, dirs = ring_labels(ring_c, a["frame"], p["window"])
-        idx = field_corners(labels)
+        dirs = ring_dirs(ring_c, a["frame"])
+        idx = field_corners(dirs, p["window"])
         if len(pk):
             d, j = cKDTree(ring_c).query(pk)
             heat = [int(x) for x, dd in zip(j, d) if dd <= p["snap_r"]]

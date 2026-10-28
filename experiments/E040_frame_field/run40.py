@@ -43,8 +43,8 @@ def tiles(area):
 
 def decode(arm, a, p, p0):
     full = dict(p, b0=p0, kernel=3, simplify=p0["simplify"])
-    if arm == "heat":
-        return B.decode_b3r(a, full)
+    if arm == "heat":  # same 3x3 strongest-pixel sampling as the field arms (Codex E040 #4)
+        return B.decode_b3r(dict(a, direction=F.strongest_3x3(a["direction"])), full)
     return F.decode_b3f(a, dict(full, mode=arm, thr_c=p.get("thr_c", 0.3)))
 
 

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import math
 import sys
+from collections import defaultdict
 from pathlib import Path
 
 import networkx as nx
@@ -89,6 +90,16 @@ def corrupt_r4(tg, t, cfg: dict, seed: int) -> dict:
     return out
 
 
+def _clip(ln: LineString, parts: list, tree, inside: bool):
+    """``ln`` minus (or intersected with) the union of the zone ``parts`` it touches; only those
+    parts are unioned (speed fix: differencing against the whole multi-disk union dominated)."""
+    hit = tree.query(ln, predicate="intersects")
+    if len(hit) == 0:
+        return ln if not inside else LineString()
+    z = unary_union([parts[i] for i in hit]) if len(hit) > 1 else parts[int(hit[0])]
+    return ln.intersection(z) if inside else ln.difference(z)
+
+
 def _heading(line_coords: np.ndarray, at_end: bool, back: float = 6.0) -> np.ndarray:
     """Unit vector pointing *into* the zone from the arm's line (the end at the zone boundary)."""
     c = line_coords if at_end else line_coords[::-1]
@@ -126,7 +137,6 @@ def _refine_heading(h: np.ndarray, tip: np.ndarray, d: np.ndarray, back: float =
 
 def decode_r4(a: dict, p: dict) -> nx.Graph:
     surf = E.decode_r0({"mask": a["mask"]}, dict(p["r0"], gap=0))
-    E.CACHE.clear()
     H, W = a["mask"].shape
 
     def on_mask(q):  # keypoints live on the line support (smoke-tile fix: noise peaks off-road)
@@ -142,7 +152,6 @@ def decode_r4(a: dict, p: dict) -> nx.Graph:
         r0 = surf
     elif mode == "centre":
         line = E.decode_r0({"mask": a["line"]}, dict(p["r0"], thr=p["thr_line"], gap=0))
-        E.CACHE.clear()
         r0 = surface_heal(line, surf, 80.0)
     else:
         r0 = with_centrelines(surf, a, p, np.array([q for c, q in allk if c != "end"]).reshape(-1, 2))
@@ -150,30 +159,38 @@ def decode_r4(a: dict, p: dict) -> nx.Graph:
         return E.bridge_ends(r0 if p.get("mode") != "surface" else surf, p["gap"])
     zone = unary_union([Point(q).buffer(p["zr"]) for _, q in allk])
     zones = list(getattr(zone, "geoms", [zone]))
+    ztree0 = shapely.STRtree(zones)
     outside = []
     for u, v in r0.edges():
-        ln = LineString([r0.nodes[u]["xy"], r0.nodes[v]["xy"]]).difference(zone)
+        ln = _clip(LineString([r0.nodes[u]["xy"], r0.nodes[v]["xy"]]), zones, ztree0, inside=False)
         outside += [np.asarray(x.coords) for x in getattr(ln, "geoms", [ln]) if not x.is_empty and x.length > 0]
     segs = list(outside)
     bnd = [z.boundary for z in zones]
+    btree = shapely.STRtree(bnd)  # spatial index (speed fix; same results)
     arms = {i: [] for i in range(len(zones))}  # zone -> [(tip, heading)]
     tips_seen = set()
     for c in outside:
         for at_end in (False, True):
             tip = c[-1] if at_end else c[0]
             key = (round(tip[0], 3), round(tip[1], 3))
-            hits = [i for i, b in enumerate(bnd) if b.distance(Point(tip)) <= 0.5]
+            hits = sorted(int(i) for i in btree.query(Point(tip), predicate="dwithin", distance=0.5))
             if not hits or key in tips_seen:
                 continue
             tips_seen.add(key)
             h = _refine_heading(_heading(c, at_end), tip, a["direction"])
             arms[hits[0]].append((tip, h))
     cos_pair = math.cos(math.radians(p["pair_deg"]))
+    ztree = shapely.STRtree(zones)
+    inzone = {c: defaultdict(list) for c in CLASSES}
+    for c in CLASSES:
+        for q in peaks[c]:
+            for i in ztree.query(Point(q), predicate="within"):
+                inzone[c][int(i)].append(q)
     for i, z in enumerate(zones):
-        ks = {c: [q for q in peaks[c] if z.contains(Point(q))] for c in CLASSES}
         A = arms[i]
         if not A:
             continue
+        ks = {c: inzone[c][i] for c in CLASSES}
         if ks["junction"]:
             J = np.array(ks["junction"])
             for tip, _ in A:
@@ -217,13 +234,13 @@ def with_centrelines(surf: nx.Graph, a: dict, p: dict, kp: np.ndarray, r: float 
     if not art:
         return surf
     zone = unary_union([Point(q).buffer(r) for q in art])
+    parts = list(getattr(zone, "geoms", [zone]))
+    ptree = shapely.STRtree(parts)
     line = E.decode_r0({"mask": a["line"]}, dict(p["r0"], thr=p["thr_line"], gap=0, spur=5, min_len=0))
-    E.CACHE.clear()
     out_l, in_l = [], []
     for g_, keep_out, dst in ((surf, True, out_l), (line, False, in_l)):
         for u, v in g_.edges():
-            ln = LineString([g_.nodes[u]["xy"], g_.nodes[v]["xy"]])
-            ln = ln.difference(zone) if keep_out else ln.intersection(zone)
+            ln = _clip(LineString([g_.nodes[u]["xy"], g_.nodes[v]["xy"]]), parts, ptree, inside=not keep_out)
             dst += [np.asarray(x.coords) for x in getattr(ln, "geoms", [ln]) if not x.is_empty and x.length > 0 and x.geom_type == "LineString"]
     g = _graph(out_l + in_l)
     bnd = zone.boundary
@@ -265,6 +282,11 @@ def surface_heal(gl: nx.Graph, gs: nx.Graph, max_len: float = 80.0, snap: float 
             continue
         src = sn[j0]
         dist, paths = nx.single_source_dijkstra(gs, src, cutoff=max_len, weight="w")
+        # one bounded search along gl: the test below only asks whether gl's path is > 3 x L
+        # with L <= max_len, so a 3 x max_len cutoff gives identical answers (speed fix)
+        along_all = nx.single_source_dijkstra_path_length(
+            gl, e, cutoff=3 * max_len,
+            weight=lambda a_, b_, _: float(np.hypot(*(gl.nodes[a_]["xy"] - gl.nodes[b_]["xy"]))))
         best = None
         for t_, L in sorted(dist.items(), key=lambda kv: kv[1]):
             if L < 2 * snap:
@@ -277,10 +299,7 @@ def surface_heal(gl: nx.Graph, gs: nx.Graph, max_len: float = 80.0, snap: float 
                 continue
             if comp.get(tgt) != comp.get(e):
                 best = (t_, tgt); break
-            try:
-                along = nx.shortest_path_length(gl, e, tgt, weight=lambda a_, b_, _: float(np.hypot(*(gl.nodes[a_]["xy"] - gl.nodes[b_]["xy"]))))
-            except nx.NetworkXNoPath:
-                along = np.inf
+            along = along_all.get(tgt, np.inf)
             if along > 3 * L:
                 best = (t_, tgt); break
         if best is None:

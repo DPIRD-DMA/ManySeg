@@ -23,6 +23,16 @@ point's 3x3 neighbourhood (smoke-tile fix: the traced outline sits ~0.5 px off t
 Tuned on Innaloo per level (2 seeds, C-IoU x F1); tested on Murdoch + Northam, L0-L3, seeds 0-4,
 all arms on the same corrupted draws.
 
+## Amendment 1 (Codex review, before any tuning or test result)
+* Field corners are label-free: per outline point the frame axis nearest the tangent; corners where
+  that axis, smoothed over `window` points, turns > 45 deg (local maxima). The first version labelled
+  roots u/v, which flip arbitrarily between pixels (sqrt branch), creating false corners.
+* `polygon_b3f` returns nothing when < 3 walls remain, exactly as `polygon_b3r` (it fell back to the
+  outline, an unfair detection advantage).
+* The heat arm's line field is read with the same 3x3 strongest-pixel policy as the frame field.
+* Known limitation: at oblique corners the overlapping 1 px target bands keep the later edge's
+  frame (edge order); exact 90 deg corners are unaffected.
+
 ## Decision rule (fixed now; C-IoU x F1 pooled over the two test areas)
 * **field (or both) beats heat**: >= heat + 0.01 at L1 and at L2, and >= heat - 0.01 at L0.
 * **heatmap redundant**: field >= heat - 0.005 at L0, L1 and L2 (the unified head set can drop the
