@@ -27,5 +27,31 @@ gap. Validated on GT faces + planes: vertex error 0.007 m, 0 false steps.
 * J2 better: for robust, J2 vertex error <= J1's - 0.05 m and no more false steps, at L1 and L2.
 Also reported: false steps per arm (slope rasters may trade orientation for step errors).
 
-## Results
-(pending)
+## Results (Pawsey job 51716389, 20 s; first submission 51716204 failed on a quoting error before running)
+Means over 2 areas x 40 tiles x 5 seeds (`runs/decision.json`):
+
+| plane arm (J1) | normal err L1 / L2 / L3 (deg) | height RMSE L1 / L2 / L3 (m) | vertex z err L1 / L2 (m) | false steps L1 / L2 |
+|---|---|---|---|---|
+| fit | 1.72 / 8.50 / 11.77 | 1.128 / 2.000 / 2.787 | 0.266 / 0.666 | 5.9 / 12.8 |
+| robust (height only) | 1.32 / 5.17 / 8.88 | 1.134 / 2.011 / 2.787 | 0.255 / 0.687 | 5.5 / 12.2 |
+| slope (height + slopes) | **0.61 / 2.30 / 4.28** | 1.185 / 2.040 / 2.789 | 0.277 / 0.685 | 5.1 / 11.3 |
+
+J2 vs J1 (robust): false steps 5.5 -> 4.0 (L1), 12.2 -> 7.5 (L2), 7.3 -> 4.2 (L3); vertex z error
+unchanged (0.255 -> 0.261, 0.687 -> 0.681).
+
+### Decision (registered rules)
+* Slope rasters worth it: **no** - normal error drops by >= 1 deg at L2 and L3 (and 0.7 deg at L1),
+  but height RMSE does not drop by 0.05 m at any level.
+* Robust beats fit: **no** - height RMSE 0.006-0.011 m worse at L1-L2 (normal error 0.4-3.3 deg better).
+* J2 better: **no** - vertex error not 0.05 m lower (false steps 27-38% fewer).
+
+### Interpretation
+Height RMSE was the wrong primary measure for the plane question: all arms share the same decoded
+faces, so the RMSE is dominated by face errors (missed or merged buildings, ~1-2.8 m) and cannot
+move. On the measure the plane estimate controls - roof orientation - explicit slope rasters halve
+the error at every corrupted level (L2 8.5 -> 2.3 deg), and the robust eroded height fit gets about
+a third of that gain without extra outputs. J2 (moving shared vertices towards the plane
+intersection) removes about a third of false step walls at no cost in vertex height. A re-test
+with orientation as the primary (new pre-registration) is warranted before choosing; on this
+evidence the trained LoD2 design should keep a height head with a robust fit and consider two
+slope channels if roof orientation matters.
