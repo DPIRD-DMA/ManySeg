@@ -35,7 +35,7 @@ SUMS = ("bp_tp", "bp_n", "bg_tp", "bg_n", "tp", "n_gt", "n_pred", "ciou", "polis
 def boundary_counts(gt, pred, tol=1.0, step=0.5):
     def pts(polys):
         out = [shapely.line_interpolate_point(b, np.arange(0, b.length, step))
-               for p in polys for b in (p.exterior, *p.interiors)]
+               for p in polys for q in getattr(p, "geoms", [p]) for b in (q.exterior, *q.interiors)]
         if not out:
             return np.array([])
         a = np.concatenate(out)
@@ -43,8 +43,8 @@ def boundary_counts(gt, pred, tol=1.0, step=0.5):
         return a[(xy[:, 0] > 1) & (xy[:, 1] > 1) & (xy[:, 0] < TILE - 1) & (xy[:, 1] < TILE - 1)]
 
     pp, pg = pts(pred), pts(gt)
-    bg = shapely.union_all([p.boundary for p in gt]) if gt else None
-    bp = shapely.union_all([p.boundary for p in pred]) if pred else None
+    bg = shapely.union_all([q.boundary for p in gt for q in getattr(p, "geoms", [p])]) if gt else None
+    bp = shapely.union_all([q.boundary for p in pred for q in getattr(p, "geoms", [p])]) if pred else None
     tp_p = int((shapely.distance(pp, bg) <= tol).sum()) if len(pp) and bg is not None else 0
     tp_g = int((shapely.distance(pg, bp) <= tol).sum()) if len(pg) and bp is not None else 0
     return tp_p, len(pp), tp_g, len(pg)
@@ -114,6 +114,18 @@ def run(model, prob, arm, split, thr_list, settings, procs, limit):
     return [summarise(a) for a in accs]
 
 
+def decide(b0: dict, b3: dict) -> dict:
+    """README rule on seed-0 test results (boundary F, detection F1)."""
+    d_bf, d_det = b3["boundary_f"] - b0["boundary_f"], b3["det_f1"] - b0["det_f1"]
+    det_ok = d_det >= -0.03
+    preferred = det_ok and d_bf >= 0.01
+    adequate = det_ok and d_bf >= -0.01
+    near = abs(d_bf - 0.01) < 0.01 or abs(d_bf + 0.01) < 0.01 or abs(d_det + 0.03) < 0.01
+    verdict = "B3 preferred for fields" if preferred else ("B3 adequate" if adequate else "fields keep B0")
+    return {"b3_minus_b0_boundary_f": d_bf, "b3_minus_b0_det_f1": d_det, "det_ok": det_ok,
+            "preferred": preferred, "adequate": adequate, "verdict": verdict, "seed1_needed": near}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--b0", type=Path, required=True)
@@ -122,32 +134,45 @@ def main():
     ap.add_argument("--procs", type=int, default=6)
     ap.add_argument("--limit", type=int, default=None)
     args = ap.parse_args()
+    import hashlib
+
+    out = HERE / "runs" / f"eval_s{args.seed}{'_limit' if args.limit else ''}.json"
+    if out.exists():  # test once (Codex E046 #5)
+        raise SystemExit(f"{out} exists: the test split was already evaluated for this seed")
     dev = torch.device("cuda")
     res = {"seed": args.seed, "limit": args.limit}
+    models = {"B0": args.b0, "B3": args.b3}
     t0 = time.time()
-    for arm, path in (("B0", args.b0), ("B3", args.b3)):
+
+    def load(arm):
         m = build(arm)
-        m.load_state_dict(torch.load(path, map_location="cpu"))
-        m = m.to(dev).eval()
-        prob = b0_probabilities if arm == "B0" else b3_probabilities
-        # stage 1: instance thresholds (with simplify 1 / the first B3 setting); stage 2: the arm's grid
+        m.load_state_dict(torch.load(models[arm], map_location="cpu"))
+        return m.to(dev).eval(), (b0_probabilities if arm == "B0" else b3_probabilities)
+
+    for arm in ("B0", "B3"):  # tune both on val before any test evaluation
+        m, prob = load(arm)
+        # stage 1: instance thresholds (simplify 1 / the first B3 setting); stage 2: the arm's grid
         v1 = run(m, prob, arm, "val", THR, GRID[arm][:1] if arm == "B3" else [dict(simplify=1.0)], args.procs, args.limit)
         thr = THR[max(range(len(THR)), key=lambda j: v1[j]["boundary_f"])]
         v2 = run(m, prob, arm, "val", [thr], GRID[arm], args.procs, args.limit)
         k = max(range(len(v2)), key=lambda j: v2[j]["boundary_f"])
-        (test,) = run(m, prob, arm, "test", [thr], [GRID[arm][k]], args.procs, args.limit)
-        res[arm] = {"thr": thr, "params": GRID[arm][k], "val": v2[k], "test": test,
+        res[arm] = {"checkpoint": str(models[arm]), "sha256": hashlib.sha256(models[arm].read_bytes()).hexdigest(),
+                    "thr": thr, "params": GRID[arm][k], "val": v2[k],
                     "val_thr": [dict(THR[j], **v1[j]) for j in range(len(THR))],
                     "val_grid": [dict(GRID[arm][j], **v2[j]) for j in range(len(v2))]}
-        print(arm, "val", round(v2[k]["boundary_f"], 4), "test", round(test["boundary_f"], 4),
-              "det", round(test["det_f1"], 4), f"{time.time() - t0:.0f}s", flush=True)
+        print(arm, "val", round(v2[k]["boundary_f"], 4), f"{time.time() - t0:.0f}s", flush=True)
         del m
         torch.cuda.empty_cache()
-    t0_, t3 = res["B0"]["test"], res["B3"]["test"]
-    res["decision"] = {"b3_minus_b0_boundary_f": t3["boundary_f"] - t0_["boundary_f"],
-                       "b3_minus_b0_det_f1": t3["det_f1"] - t0_["det_f1"]}
-    out = HERE / "runs" / f"eval_s{args.seed}{'_limit' if args.limit else ''}.json"
+    for arm in ("B0", "B3"):
+        m, prob = load(arm)
+        (res[arm]["test"],) = run(m, prob, arm, "test", [res[arm]["thr"]], [res[arm]["params"]], args.procs, args.limit)
+        del m
+        torch.cuda.empty_cache()
+    res["decision"] = decide(res["B0"]["test"], res["B3"]["test"])
     out.write_text(json.dumps(res, indent=1))
+    for arm in ("B0", "B3"):
+        t = res[arm]["test"]
+        print(arm, "test boundary F", round(t["boundary_f"], 4), "det F1", round(t["det_f1"], 4))
     print(json.dumps(res["decision"], indent=1))
 
 

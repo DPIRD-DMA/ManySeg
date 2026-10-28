@@ -29,5 +29,16 @@ F1 is no more than 0.03 below; **B3 adequate** (one representation for buildings
 its boundary F is no more than 0.01 below B0 with the same detection condition; otherwise fields
 keep B0. If seed 0 lands within 0.01 of either threshold, seed 1 of both arms decides on the mean.
 
+## Amendment 1 (18:05, before any training; Codex review notes/codex_e046.md)
+* One accepted set of fields for both arms (`prepare46.instances`): each 4-connected piece of an
+  FTW id is its own instance; pieces < 16 px dropped; background-only holes filled; polygon =
+  exterior of the final pixels, DP 1 px; degenerate polygons removed from the mask too. On 300
+  chips polygon-vs-mask IoU median 0.957, 1st percentile 0.72 (thin fields lose area to DP;
+  the same GT for both arms).
+* `prepare46` aborts on any incomplete split; `evaluate46` tunes both arms on val before any
+  test, refuses to re-run a seed's test, records checkpoint hashes, and applies the rule above
+  in code (`decide`).
+* GPU nondeterminism (cuDNN) is not removed; seed 1 handles near-threshold cases as registered.
+
 ## Results
 (pending)
