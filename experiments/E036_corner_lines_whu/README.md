@@ -50,3 +50,22 @@ better than B0's and it recovers more buildings, but it outputs 0.44x the vertic
 raster-traced GT (B0: 1.14x), whose outlines keep many staircase vertices (E037). Its lower
 detection F1 comes from extra predictions (18,436 vs 16,931), plausibly because the registered
 decoder fixed B0's instance thresholds on B3's own, jointly trained heads.
+
+### Post hoc: staircase-cleaned GT (registered as post hoc; does not change the decision)
+300 evenly spaced val tiles (`posthoc.py`, `posthoc.json`, `posthoc_tiles.png`); GT outlines
+regularised with buildingregulariser 0.2.5 (parallel_threshold 3 px, simplify_tolerance 1.5 px,
+as E037). Added the obvious baseline **B0 + regulariser** (B0's polygons through the same tool).
+
+| arm | raw GT: C-IoU x F1 | regularised GT: C-IoU x F1 | C-IoU | matched IoU | PoLiS m | N-ratio | det F1 |
+|---|---|---|---|---|---|---|---|
+| B0 | **0.626** | 0.460 | 0.541 | 0.862 | 0.444 | 2.20 | **0.850** |
+| B0 + regulariser | 0.522 | **0.632** | 0.751 | 0.853 | 0.447 | 1.10 | 0.842 |
+| B3 | 0.482 | 0.628 | **0.760** | **0.868** | **0.400** | 0.85 | 0.825 |
+
+The winner depends on the GT's vertex convention: against raw (staircase) GT B0 wins; against
+regularised GT B3 ties with B0 + regulariser (whose output comes from the same tool as the GT)
+and has the best outline geometry (C-IoU, matched IoU, PoLiS), losing on detection F1. Renders:
+B3's walls are straighter; B0 + regulariser sometimes adds square notches; B3 sometimes cuts a
+corner on complex shapes; all three follow the mask where trees occlude a wall.
+Next if pursued (new pre-registration): B3 with its own tuned instance thresholds, judged on
+regularised GT against B0 + regulariser.

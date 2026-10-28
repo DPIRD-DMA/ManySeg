@@ -75,7 +75,7 @@ def main():
     gt_all = load_polygons(CACHE / "val_poly.npz")
     idx = list(range(0, len(ds), max(1, len(ds) // args.n)))[: args.n]
     acc = {(arm, g): dict(tp=0, n_gt=0, n_pred=0, ciou=0.0, miou=0.0, polis=0.0, snp=0, sng=0)
-           for arm in ("B0", "B3") for g in ("raw", "reg")}
+           for arm in ("B0", "B0+reg", "B3") for g in ("raw", "reg")}
     keep = {}
     for i in idx:
         x = (ds[i][0][None].to(dev).float() - MEAN.to(dev)) / STD.to(dev)
@@ -85,6 +85,7 @@ def main():
             o0, o3 = models["B0"](x), models["B3"](x)
         preds["B0"] = decode_b0(b0_probabilities(o0, 0), p0)[0]
         preds["B3"] = decode_b3(b3_probabilities(o3, 0), p3)
+        preds["B0+reg"] = regularise(preds["B0"])  # the obvious baseline: masks, then buildingregulariser
         for arm, pr in preds.items():
             for g, gp in gts.items():
                 m = polygon_metrics(gp, pr, gsd=0.3)
@@ -107,17 +108,20 @@ def main():
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     busy = sorted(keep, key=lambda k: -len(keep[k][1]["raw"]))[:3]
-    fig, axs = plt.subplots(3, 2, figsize=(14, 21))
+    fig, axs = plt.subplots(3, 3, figsize=(21, 21))
+    names = {"B0": "B0 masks", "B0+reg": "B0 masks + regulariser", "B3": "B3 corners + lines"}
     for row, i in zip(axs, busy):
         img, gts, preds = keep[i]
-        for ax, arm in zip(row, ("B0", "B3")):
+        big = max(gts["reg"], key=lambda q: q.area) if gts["reg"] else None
+        cx, cy = (big.centroid.x, big.centroid.y) if big is not None else (256, 256)
+        for ax, arm in zip(row, ("B0", "B0+reg", "B3")):
             ax.imshow(img)
-            for q in gts["raw"]:
+            for q in gts["reg"]:
                 c = np.asarray(q.exterior.coords); ax.plot(c[:, 0], c[:, 1], "c-", lw=3, alpha=0.6)
             for q in preds[arm]:
                 c = np.asarray(q.exterior.coords); ax.plot(c[:, 0], c[:, 1], "r.-", lw=1.2, ms=4)
-            ax.set_title(f"{'B0 masks' if arm == 'B0' else 'B3 corners + lines'} (red) vs WHU GT (cyan), val tile {i}")
-            ax.set_xlim(128, 384); ax.set_ylim(384, 128)
+            ax.set_title(f"{names[arm]} (red) vs regularised GT (cyan), tile {i}")
+            ax.set_xlim(cx - 45, cx + 45); ax.set_ylim(cy + 45, cy - 45)
     plt.savefig(args.out / "posthoc_tiles.png", dpi=55, bbox_inches="tight")
 
 
