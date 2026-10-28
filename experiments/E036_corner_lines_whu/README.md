@@ -99,3 +99,10 @@ merged -> split -> decoder -> mask), a descriptive attribution, not a decomposit
 *Retracted (Codex review #1):* "retuning the instance thresholds does not matter". The sweep
 reported only the top five settings (spread 0.00104, not < 0.001), never scored the registered
 setting, and its per-building best-IoU objective can hide merges; see the threshold check below.
+
+### Threshold check (Codex review #1)
+`thresholds.py`, `thresholds.json`: B3_s0 with 18 instance-threshold settings (extent {0.4, 0.5,
+0.6} x boundary {0.3, 0.5, 0.7} x seed {0.15, 0.3}), registered (0.6 / 0.5 / 0.15) included, on
+150 val tiles, scored one-to-one against DP GT (E038's metric code). The registered setting
+ranks 2nd of 18 by boundary F (0.7097 vs best 0.7099); its detection F1 is 0.824 vs the best
+0.827 (range 0.809-0.827). The borrowed thresholds are not why B3's detection F1 trails B0's.
