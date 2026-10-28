@@ -37,7 +37,7 @@ GRID = {
            for c, b, a, m in itertools.product((0.3, 0.5), (4.0, 8.0), (0.4, 0.6), (8.0, 15.0))],
 }
 SUMS = ("bp_tp", "bp_n", "bg_tp", "bg_n", "tp", "n_gt", "n_pred", "ciou", "miou", "polis", "snp", "sng",
-        "i_tp", "i_n_gt", "i_n_pred", "i_ciou")
+        "i_tp", "i_n_gt", "i_n_pred", "i_ciou", "i_miou", "i_polis", "i_snp", "i_sng")
 
 
 def gt_dp(polys):
@@ -54,8 +54,8 @@ def boundary_counts(gt, pred, tol=1.0, step=0.5):
         out = []
         for p in polys:
             for part in getattr(p, "geoms", [p]):
-                b = part.exterior
-                out.append(shapely.line_interpolate_point(b, np.arange(0, b.length, step)))
+                for b in (part.exterior, *part.interiors):  # holes are outlines too (Codex E038 #6)
+                    out.append(shapely.line_interpolate_point(b, np.arange(0, b.length, step)))
         if not out:
             return np.array([])
         a = np.concatenate(out)
@@ -63,8 +63,8 @@ def boundary_counts(gt, pred, tol=1.0, step=0.5):
         keep = (xy[:, 0] > 1) & (xy[:, 1] > 1) & (xy[:, 0] < TILE - 1) & (xy[:, 1] < TILE - 1)
         return a[keep]
     pp, pg = pts(pred), pts(gt)
-    bg = shapely.union_all([q.exterior for p in gt for q in getattr(p, "geoms", [p])]) if gt else None
-    bp = shapely.union_all([q.exterior for p in pred for q in getattr(p, "geoms", [p])]) if pred else None
+    bg = shapely.union_all([q.boundary for p in gt for q in getattr(p, "geoms", [p])]) if gt else None
+    bp = shapely.union_all([q.boundary for p in pred for q in getattr(p, "geoms", [p])]) if pred else None
     tp_p = int((shapely.distance(pp, bg) <= tol).sum()) if len(pp) and bg is not None else 0
     tp_g = int((shapely.distance(pg, bp) <= tol).sum()) if len(pg) and bp is not None else 0
     return tp_p, len(pp), tp_g, len(pg)
@@ -81,7 +81,9 @@ def metrics(gt, pred):
     gi = [g for g in gt if not touches_edge(g)]
     pi = [p for p in pred if not touches_edge(p)]
     mi = polygon_metrics(gi, pi, gsd=0.3)
-    out.update(i_tp=mi["tp"], i_n_gt=mi["n_gt"], i_n_pred=mi["n_pred"], i_ciou=mi["ciou"] * mi["tp"])
+    ti = mi["tp"]
+    out.update(i_tp=ti, i_n_gt=mi["n_gt"], i_n_pred=mi["n_pred"], i_ciou=mi["ciou"] * ti, i_miou=mi["miou"] * ti,
+               i_polis=(mi["polis"] * ti) if ti else 0.0, i_snp=mi.get("sum_n_pred", 0), i_sng=mi.get("sum_n_gt", 0))
     return out
 
 
@@ -130,6 +132,8 @@ def summarise(acc):
             "det_f1": det, "ciou_x_f1": acc["ciou"] / tp * det, "ciou": acc["ciou"] / tp, "miou": acc["miou"] / tp,
             "polis_m": acc["polis"] / tp, "n_ratio": acc["snp"] / max(1, acc["sng"]),
             "interior_det_f1": idet, "interior_ciou_x_f1": acc["i_ciou"] / max(1, acc["i_tp"]) * idet,
+            "interior_ciou": acc["i_ciou"] / max(1, acc["i_tp"]), "interior_miou": acc["i_miou"] / max(1, acc["i_tp"]),
+            "interior_polis_m": acc["i_polis"] / max(1, acc["i_tp"]), "interior_n_ratio": acc["i_snp"] / max(1, acc["i_sng"]),
             "tp": acc["tp"], "n_gt": acc["n_gt"], "n_pred": acc["n_pred"]}
 
 
@@ -192,12 +196,14 @@ def main():
         torch.cuda.empty_cache()
     t = {a: res[a]["test"] for a in ("B0", "B0reg", "B3")}
     best_base = max(t["B0"]["boundary_f"], t["B0reg"]["boundary_f"])
-    res["decision_seed0"] = {
+    res["seed_result"] = {
         "b3_minus_best_baseline_boundary_f": t["B3"]["boundary_f"] - best_base,
         "b3_det_f1_minus_b0": t["B3"]["det_f1"] - t["B0"]["det_f1"],
         "advance": bool(t["B3"]["boundary_f"] - best_base >= 0.01 and t["B3"]["det_f1"] >= t["B0"]["det_f1"] - 0.03),
     }
-    print(json.dumps(res["decision_seed0"], indent=1))
+    if args.seed != 0:
+        res["seed_result"].pop("advance")  # the seed-0 screen applies to seed 0 only; see decide38.py
+    print(json.dumps(res["seed_result"], indent=1))
     tag = "" if args.limit is None else f"_limit{args.limit}"
     (args.out / f"e038_s{args.seed}{tag}.json").write_text(json.dumps(res, indent=1, default=float))
 
