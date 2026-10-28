@@ -323,11 +323,20 @@ def graph_from_mask(prob, threshold: float = 0.5, *, spur: float = 10, gap: floa
 
 
 def _graph_from_skeleton(rr, cc, shape, *, spur, gap, simplify, min_length, scale) -> VectorGraph:
+    g = _nx_from_skeleton(rr, cc, shape, spur=spur, simplify=simplify, min_length=min_length)
+    bridge_ends(g, gap, shape)
+    vg = VectorGraph.from_networkx(g)
+    if scale != 1:
+        vg.xy = vg.xy / scale
+    return vg
+
+
+def _nx_from_skeleton(rr, cc, shape, *, spur, simplify, min_length):
+    """Skeleton pixels -> ``networkx`` graph (nodes carry ``xy``), before gap bridging."""
     nx, shapely = _deps()[:2]
-    p_shape = shape
     nodes, chains = _contract_short(*_skeleton_chains_rc(rr, cc))
     nodes, chains = _join_degree2(nodes, chains)
-    nodes, chains = _prune_spurs(nodes, chains, spur, p_shape)
+    nodes, chains = _prune_spurs(nodes, chains, spur, shape)
     g = nx.Graph()
     for n, q in nodes.items():
         g.add_node(n, xy=np.asarray(q, float))
@@ -349,11 +358,7 @@ def _graph_from_skeleton(rr, cc, shape, *, spur, gap, simplify, min_length, scal
         sub = g.subgraph(comp)
         if sum(float(np.hypot(*(g.nodes[a]["xy"] - g.nodes[b]["xy"]))) for a, b in sub.edges()) < min_length:
             g.remove_nodes_from(comp)
-    bridge_ends(g, gap, p_shape)
-    vg = VectorGraph.from_networkx(g)
-    if scale != 1:
-        vg.xy = vg.xy / scale
-    return vg
+    return g
 
 
 def graph_from_mask_blocks(prob, threshold: float = 0.5, *, block: int = 2048, halo: int = 256,

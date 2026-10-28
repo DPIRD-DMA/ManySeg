@@ -18,8 +18,24 @@ from .graph_tensor import (
     vertex_graph,
 )
 from .polygons import polygons_from_labels, to_geojson
+from .roads import graph_from_road_heads
 
-__all__ = ["VectorGraph", "bridge_ends", "corner_targets", "encode_graph_tensor", "graph_chains", "graph_from_mask",
-           "graph_from_tensor", "graph_tensor_heads", "polygons_from_corners", "polygons_from_labels",
-           "polygons_from_tensor",
-           "offset_field", "offset_field_from_mask", "snap_points", "to_geojson", "vertex_graph"]
+__all__ = [
+    "VectorGraph",
+    "bridge_ends",
+    "corner_targets",
+    "encode_graph_tensor",
+    "graph_chains",
+    "graph_from_mask",
+    "graph_from_road_heads",
+    "graph_from_tensor",
+    "graph_tensor_heads",
+    "offset_field",
+    "offset_field_from_mask",
+    "polygons_from_corners",
+    "polygons_from_labels",
+    "polygons_from_tensor",
+    "snap_points",
+    "to_geojson",
+    "vertex_graph",
+]
