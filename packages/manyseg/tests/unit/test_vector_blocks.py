@@ -106,3 +106,69 @@ def test_blocks_equal_global_with_instance_decoder():
         out = decode_blocks(f, labels, key, block=block, halo=halo, offset=off)
         st = out.pop("_stats")
         assert sorted(out.values()) == glob, (block, halo, off, st)
+
+
+def _scene_masks(out, shape):
+    """vectorise = (origin, mask) -> per-object scene masks."""
+    res = []
+    for o, m in out.values():
+        full = np.zeros(shape, bool)
+        full[o[0] : o[0] + m.shape[0], o[1] : o[1] + m.shape[1]] = m
+        res.append(full)
+    return res
+
+
+def _raw(mask, wf, origin):
+    return origin, mask.copy()
+
+
+def test_min_size_applies_to_merged_object():
+    """Codex blocks #1: a long thin object must not be dropped by per-window size filtering."""
+    m = np.zeros((60, 1000), np.float32)
+    m[30, 10:990] = 1  # 980 px, one pixel wide
+    m[5:8, 5:8] = 1  # 9 px, removed
+    out = decode_blocks({"mask": m}, _labels, _raw, block=100, halo=10, min_size=150)
+    out.pop("_stats")
+    (obj,) = _scene_masks(out, m.shape)
+    assert obj.sum() == 980
+
+
+def test_window_dependent_decoder_never_drops_or_duplicates():
+    """Codex blocks #2/#3: one corridor, seeds far apart; the decoder assigns each pixel to the
+    nearest *visible* seed, so windows disagree. Output must still be disjoint and cover all."""
+    H, W = 40, 900
+    m = np.zeros((H, W), np.float32)
+    m[10:30, 20:880] = 1
+    seeds = np.zeros((H, W), np.float32)
+    for c in (60, 300, 520, 840):
+        seeds[20, c] = 1
+
+    def dec(wf):
+        fg = wf["mask"] > 0.5
+        lab = np.zeros(fg.shape, np.int32)
+        if not wf["seed"].any():
+            return ndimage.label(fg)[0]
+        _, (ri, ci) = ndimage.distance_transform_edt(wf["seed"] == 0, return_indices=True)
+        sid = ndimage.label(wf["seed"] > 0)[0]
+        lab[fg] = sid[ri[fg], ci[fg]]
+        return lab
+
+    for block, halo, off in ((150, 20, (0, 0)), (128, 40, (0, 77)), (200, 5, (0, 13))):
+        out = decode_blocks(
+            {"mask": m, "seed": seeds}, dec, _raw, block=block, halo=halo, offset=off
+        )
+        out.pop("_stats")
+        objs = _scene_masks(out, m.shape)
+        cover = np.sum(objs, axis=0)
+        assert cover.max() == 1 and ((cover == 1) == (m > 0)).all(), (block, halo, off)
+
+
+def test_u_shape_that_leaves_a_window_is_one_object():
+    m = np.zeros((300, 300), np.float32)
+    m[20:30, 20:280] = 1
+    m[20:280, 20:30] = 1
+    m[20:280, 270:280] = 1  # a U open at the bottom: windows near the bottom see two arms
+    for block, halo, off in ((64, 8, (0, 0)), (100, 16, (37, 11))):
+        out = decode_blocks({"mask": m}, _labels, _raw, block=block, halo=halo, offset=off)
+        out.pop("_stats")
+        assert len(out) == 1, (block, halo, off)

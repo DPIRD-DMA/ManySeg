@@ -62,7 +62,6 @@ class _Piece:
     mask: np.ndarray  # bool, bbox-sized
     core: tuple[slice, slice]
     window: tuple[slice, slice]
-    complete: bool  # does not touch the window edge (scene edges excepted)
 
 
 def _crop(fields, sl):
@@ -96,20 +95,24 @@ def decode_blocks(
     block: int = 2048,
     halo: int = 256,
     offset: tuple[int, int] = (0, 0),
-    min_overlap: float = 0.5,
+    min_iou: float = 0.5,
+    min_size: int = 0,
 ) -> dict:
     """Decode a large scene block by block.
 
     ``fields``: name -> (H, W) or (C, H, W) array (numpy or memmap), already stitched.
-    ``decode_labels(window_fields) -> (h, w) int labels`` (0 = background) for one window.
+    ``decode_labels(window_fields) -> (h, w) int labels`` (0 = background) for one window. It must
+    not drop small objects itself (a window sees only part of a large object); use ``min_size``.
     ``vectorise(mask, fields_crop, origin) -> geometry`` for one object's boolean ``mask``,
     ``origin`` = (row, col) of the mask in the scene; geometry in scene pixel coords.
 
-    An object whose bbox lies inside one block's core and that does not touch the window edge is
-    vectorised by that block. Every other object becomes a *piece* in each block whose core it
-    reaches. Pieces from different blocks are the same object if their masks agree on the shared
-    area (overlap coefficient >= ``min_overlap``). A group that has a complete piece uses it;
-    otherwise its mask is the union of each piece's core pixels (cores partition the scene).
+    Each block decides only the pixels of its own core, so the output masks are disjoint and
+    cover every foreground core pixel exactly once. An object inside one core that does not touch
+    the window edge is vectorised by that block. Every other object becomes a *piece* (its core
+    pixels) in each block whose core it reaches; pieces from neighbouring blocks are one object if
+    their masks agree on the area both windows see (IoU >= ``min_iou``). Where window decodes
+    disagree (decoder reach beyond the halo) the result splits at the seam rather than merging
+    two objects or dropping one. Objects under ``min_size`` pixels are removed after merging.
     Returns {anchor (scene pixel index of the object's first pixel): geometry} plus ``"_stats"``.
     """
     if halo < 1:
@@ -117,6 +120,15 @@ def decode_blocks(
     any_field = next(iter(fields.values()))
     H, W = any_field.shape[-2:]
     out: dict = {}
+
+    def emit(m, r0, c0, crop):
+        if m.sum() < min_size:
+            return
+        a = _anchor(m, r0, c0, W)
+        if a in out:  # disjoint masks have distinct first pixels
+            raise RuntimeError(f"anchor collision at scene pixel {a}")
+        out[a] = vectorise(m, crop, (r0, c0))
+
     pieces: list[_Piece] = []
     blocks = block_grid((H, W), block, halo, offset)
     for bi, b in enumerate(blocks):
@@ -145,9 +157,7 @@ def decode_blocks(
                 and sl[1].stop <= cr[1].stop
             )
             if inside and not touches:
-                out[_anchor(m, r0 + sl[0].start, c0 + sl[1].start, W)] = vectorise(
-                    m, _crop(wf, sl), (r0 + sl[0].start, c0 + sl[1].start)
-                )
+                emit(m, r0 + sl[0].start, c0 + sl[1].start, _crop(wf, sl))
                 continue
             bbox = (
                 slice(r0 + sl[0].start, r0 + sl[0].stop),
@@ -156,8 +166,14 @@ def decode_blocks(
             reg = _inter(bbox, b.core)
             if reg is None or not _sub(m, bbox, reg).any():
                 continue  # another block's core holds all of it
-            pieces.append(_Piece(bi, bbox, m, b.core, b.window, not touches))
-    # group pieces from different blocks that agree on their shared area
+            pieces.append(_Piece(bi, bbox, m, b.core, b.window))
+    # candidate pairs: pieces from different blocks whose visible extents share a grid cell
+    cells: dict = {}
+    for i, p in enumerate(pieces):
+        reg = _inter(p.bbox, p.window)
+        for cy in range(reg[0].start // block, (reg[0].stop - 1) // block + 1):
+            for cx in range(reg[1].start // block, (reg[1].stop - 1) // block + 1):
+                cells.setdefault((cy, cx), []).append(i)
     parent = list(range(len(pieces)))
 
     def find(i):
@@ -166,47 +182,39 @@ def decode_blocks(
             i = parent[i]
         return i
 
-    order = sorted(range(len(pieces)), key=lambda i: pieces[i].bbox[0].start)
-    for x, i in enumerate(order):
-        a = pieces[i]
-        for j in order[x + 1 :]:
-            b_ = pieces[j]
-            if b_.bbox[0].start >= a.bbox[0].stop:
-                break
-            if a.block == b_.block:
-                continue
-            reg = _inter(a.bbox, b_.bbox)
-            reg = reg and _inter(reg, a.window)
-            reg = reg and _inter(reg, b_.window)
-            if reg is None:
-                continue
-            ma, mb = _sub(a.mask, a.bbox, reg), _sub(b_.mask, b_.bbox, reg)
-            inter = int((ma & mb).sum())
-            if inter and inter / min(int(ma.sum()), int(mb.sum())) >= min_overlap:
-                parent[find(i)] = find(j)
+    seen = set()
+    for members in cells.values():
+        for x, i in enumerate(members):
+            for j in members[x + 1 :]:
+                a, b_ = pieces[i], pieces[j]
+                if a.block == b_.block or (i, j) in seen:
+                    continue
+                seen.add((i, j))
+                reg = _inter(a.bbox, b_.bbox)
+                reg = reg and _inter(reg, a.window)
+                reg = reg and _inter(reg, b_.window)
+                if reg is None:
+                    continue
+                ma, mb = _sub(a.mask, a.bbox, reg), _sub(b_.mask, b_.bbox, reg)
+                inter = int((ma & mb).sum())
+                if inter and inter / int((ma | mb).sum()) >= min_iou:
+                    parent[find(i)] = find(j)
     groups: dict = {}
     for i, p in enumerate(pieces):
         groups.setdefault(find(i), []).append(p)
     for g in groups.values():
-        full = [p for p in g if p.complete]
-        if full:
-            p = min(full, key=lambda p: p.block)
-            bbox, m = p.bbox, p.mask
-        else:
-            r0, r1 = min(p.bbox[0].start for p in g), max(p.bbox[0].stop for p in g)
-            c0, c1 = min(p.bbox[1].start for p in g), max(p.bbox[1].stop for p in g)
-            canvas = np.zeros((r1 - r0, c1 - c0), bool)
-            for p in g:
-                reg = _inter(p.bbox, p.core)
-                if reg is not None:
-                    canvas[
-                        reg[0].start - r0 : reg[0].stop - r0, reg[1].start - c0 : reg[1].stop - c0
-                    ] |= _sub(p.mask, p.bbox, reg)
-            rows, cols = np.nonzero(canvas.any(1))[0], np.nonzero(canvas.any(0))[0]
-            bbox = (slice(r0 + rows[0], r0 + rows[-1] + 1), slice(c0 + cols[0], c0 + cols[-1] + 1))
-            m = canvas[rows[0] : rows[-1] + 1, cols[0] : cols[-1] + 1]
-        out[_anchor(m, bbox[0].start, bbox[1].start, W)] = vectorise(
-            m, _crop(fields, bbox), (bbox[0].start, bbox[1].start)
-        )
+        # union of each piece's core pixels (cores partition the scene)
+        r0, r1 = min(p.bbox[0].start for p in g), max(p.bbox[0].stop for p in g)
+        c0, c1 = min(p.bbox[1].start for p in g), max(p.bbox[1].stop for p in g)
+        canvas = np.zeros((r1 - r0, c1 - c0), bool)
+        for p in g:
+            reg = _inter(p.bbox, p.core)
+            canvas[reg[0].start - r0 : reg[0].stop - r0, reg[1].start - c0 : reg[1].stop - c0] |= (
+                _sub(p.mask, p.bbox, reg)
+            )
+        rows, cols = np.nonzero(canvas.any(1))[0], np.nonzero(canvas.any(0))[0]
+        bbox = (slice(r0 + rows[0], r0 + rows[-1] + 1), slice(c0 + cols[0], c0 + cols[-1] + 1))
+        m = canvas[rows[0] : rows[-1] + 1, cols[0] : cols[-1] + 1]
+        emit(m, bbox[0].start, bbox[1].start, _crop(fields, bbox))
     out["_stats"] = {"blocks": len(blocks), "pieces": len(pieces), "merged_objects": len(groups)}
     return out
