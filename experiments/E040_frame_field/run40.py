@@ -56,9 +56,9 @@ def work(job):
     p0 = json.loads(BEST028.read_text())[f"L{lv}"]["B0"]["params"]
     a = F.corrupt_b3f(F.encode_b3f(t), t, E.LEVELS[lv], job["seed"])
     rows = []
+    E.CACHE.clear()  # once per job: B0's instance labels depend only on p0 and are shared (speed fix)
     for arm, plist in job["arms"].items():
         for k, p in enumerate(plist):
-            E.CACHE.clear()
             t0 = time.perf_counter()
             pred = E.decode_b0(a, p0) if arm == "B0" else decode(arm, a, p, p0)
             m = E.polygon_metrics(t, pred)
