@@ -1,0 +1,39 @@
+{
+ "L0": {
+  "thr_k": 0.2,
+  "zr": 8.0,
+  "pair_deg": 150.0,
+  "thr_line": 0.3,
+  "mode": "mincost",
+  "cost_cap": 3.0,
+  "heal_cost": 40.0,
+  "heal_r": 50
+ },
+ "L1": {
+  "thr_k": 0.2,
+  "zr": 8.0,
+  "pair_deg": 150.0,
+  "thr_line": 0.3,
+  "mode": "mincost",
+  "cost_cap": 2.0,
+  "heal_cost": 60.0,
+  "heal_r": 60
+ },
+ "L2": {
+  "thr_k": 0.2,
+  "zr": 8.0,
+  "pair_deg": 150.0,
+  "thr_line": 0.3,
+  "mode": "mincost",
+  "cost_cap": 2.0,
+  "heal_cost": 60.0,
+  "heal_r": 60
+ },
+ "L3": {
+  "thr_k": 0.2,
+  "zr": 8.0,
+  "pair_deg": 150.0,
+  "thr_line": 0.3,
+  "mode": "surface"
+ }
+}

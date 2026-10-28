@@ -1,0 +1,91 @@
+{
+ "R0_L0": {
+  "apls": 0.9361713598225897,
+  "junction_f1": 0.7589756946244209,
+  "apls_murdoch": 0.8859271701392254,
+  "apls_northam": 0.9864155495059539,
+  "crossings_kept": 0.0
+ },
+ "R0_L1": {
+  "apls": 0.5720820276697618,
+  "junction_f1": 0.6514839677198617,
+  "apls_murdoch": 0.515140066809938,
+  "apls_northam": 0.6290239885295857,
+  "crossings_kept": 0.01875
+ },
+ "R0_L2": {
+  "apls": 0.21042817977815442,
+  "junction_f1": 0.3135449347739004,
+  "apls_murdoch": 0.17905007689184246,
+  "apls_northam": 0.2418062826644664,
+  "crossings_kept": 0.075
+ },
+ "R0_L3": {
+  "apls": 0.03583357954674592,
+  "junction_f1": 0.10981539080001838,
+  "apls_murdoch": 0.03624398106374645,
+  "apls_northam": 0.035423178029745386,
+  "crossings_kept": 0.15625
+ },
+ "R2_L0": {
+  "apls": 0.9847375432701344,
+  "junction_f1": 0.9759279933937812,
+  "apls_murdoch": 0.9774262803599733,
+  "apls_northam": 0.9920488061802957,
+  "crossings_kept": 0.9375
+ },
+ "R2_L1": {
+  "apls": 0.5135456376291596,
+  "junction_f1": 0.7948574784914181,
+  "apls_murdoch": 0.43883886073852807,
+  "apls_northam": 0.588252414519791,
+  "crossings_kept": 0.7
+ },
+ "R2_L2": {
+  "apls": 0.11818319372968848,
+  "junction_f1": 0.2183945608635291,
+  "apls_murdoch": 0.1155735639483623,
+  "apls_northam": 0.12079282351101468,
+  "crossings_kept": 0.38125
+ },
+ "R2_L3": {
+  "apls": 0.012539150209534477,
+  "junction_f1": 0.04754338694587791,
+  "apls_murdoch": 0.012825833660199477,
+  "apls_northam": 0.012252466758869481,
+  "crossings_kept": 0.31875
+ },
+ "R4_L0": {
+  "apls": 0.9828288451517654,
+  "junction_f1": 0.881392383970702,
+  "apls_murdoch": 0.9764430261679806,
+  "apls_northam": 0.9892146641355503,
+  "crossings_kept": 1.0
+ },
+ "R4_L1": {
+  "apls": 0.5528519612010697,
+  "junction_f1": 0.46605660668986804,
+  "apls_murdoch": 0.43704117560948796,
+  "apls_northam": 0.6686627467926514,
+  "crossings_kept": 0.3875
+ },
+ "R4_L2": {
+  "apls": 0.18626932408788074,
+  "junction_f1": 0.1555922916187127,
+  "apls_murdoch": 0.17352607800429665,
+  "apls_northam": 0.19901257017146484,
+  "crossings_kept": 0.26875
+ },
+ "R4_L3": {
+  "apls": 0.07696637969011177,
+  "junction_f1": 0.06177945124797686,
+  "apls_murdoch": 0.08807853273044855,
+  "apls_northam": 0.06585422664977499,
+  "crossings_kept": 0.275
+ },
+ "decision": {
+  "topology_gain": false,
+  "robustness_kept": false,
+  "viable": false
+ }
+}
