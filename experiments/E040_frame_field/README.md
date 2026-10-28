@@ -1,0 +1,33 @@
+# E040: Frame Field Learning's frame field as B3's direction head, oracle (pre-registered 2026-10-28 13:40)
+
+Why: the literature review (ManySeg-e028/notes/literature_unified_graphs.md) and the paper
+(Girard et al., CVPR 2021, arXiv 2004.14875) suggest a frame field: two unoriented directions per
+pixel as the complex coefficients (c0, c2) of z^4 + c2 z^2 + c0. One head can then carry walls,
+corners and (for roads) crossings. If the field also gives corners (FFL's rule: a corner is where
+the outline switches between the two frame directions), the unified head set loses the corner map.
+Approved by the user (13:19: queue the most promising approaches, write the code, Codex review).
+
+## Arms (E035b harness: OSM vector GT, E028 corruptions, B0's instances for closure)
+* **heat**: B3r as E035b (corner heatmap + (cos 2t, sin 2t) line field), its 16-setting grid.
+* **field**: no corner heatmap; corners where the majority-smoothed per-point frame label (u vs v
+  nearest the outline tangent, central difference over +-3 points) switches; wall test with the
+  frame direction nearest the outline. Grid: window {5, 9, 15} x big_dev {4, 8} x agree {0.4, 0.6}
+  x merge_deg {8, 15}.
+* **both**: heatmap corners plus field corners not within 3 outline points of one; wall test with
+  the frame field. Grid: thr_c {0.3, 0.5} x window {9, 15} x big_dev {4, 8} x agree {0.4, 0.6}.
+* **B0** reference (E028 settings).
+Targets: frame field on a 1 px band around every GT edge, u = edge tangent, v = normal (as FFL's
+buildings; c2 = 0, c0 = -e^{4i theta}); corrupted like the direction field (zeroed under occlusion
+disks, N(0, 0.1 x vec) per channel). Decoder samples the strongest field pixel in each outline
+point's 3x3 neighbourhood (smoke-tile fix: the traced outline sits ~0.5 px off the wall).
+Tuned on Innaloo per level (2 seeds, C-IoU x F1); tested on Murdoch + Northam, L0-L3, seeds 0-4,
+all arms on the same corrupted draws.
+
+## Decision rule (fixed now; C-IoU x F1 pooled over the two test areas)
+* **field (or both) beats heat**: >= heat + 0.01 at L1 and at L2, and >= heat - 0.01 at L0.
+* **heatmap redundant**: field >= heat - 0.005 at L0, L1 and L2 (the unified head set can drop the
+  corner map).
+If neither holds, the frame field is not adopted for footprints (its road use is tested in E041).
+
+## Results
+(pending)
