@@ -150,6 +150,9 @@ def decode_r4(a: dict, p: dict) -> nx.Graph:
     mode = p.get("mode", "hybrid")
     if mode == "surface":
         r0 = surf
+    elif mode == "mincost":  # R6 (E042)
+        line = E.decode_r0({"mask": a["line"]}, dict(p["r0"], thr=p["thr_line"], gap=0))
+        r0 = mincost_heal(line, a, p, peaks["end"])
     elif mode == "centre":
         line = E.decode_r0({"mask": a["line"]}, dict(p["r0"], thr=p["thr_line"], gap=0))
         r0 = surface_heal(line, surf, 80.0)
@@ -257,6 +260,70 @@ def with_centrelines(surf: nx.Graph, a: dict, p: dict, kp: np.ndarray, r: float 
                 break
             if k not in uo and m not in ui:
                 uo.add(k); ui.add(m); g.add_edge(eo[k], ei[m])
+    return g
+
+
+def mincost_heal(gl: nx.Graph, a: dict, p: dict, end_kp: np.ndarray) -> nx.Graph:
+    """R6 (E042): from each dead end of the centreline graph (not at the tile border, not within
+    ``zr`` of an end keypoint), run a geometric minimum-cost path search in a window of radius
+    ``heal_r`` over cost = -log(max(line, alpha * surface)) (centreline preferred, road surface a
+    weak corridor, off-road expensive) to the nearest pixel of a *different* part of the graph
+    (another component, or > 3x the straight distance away along the graph); the path is added if
+    its cost is below ``heal_cost``. Ordered paths first, edges second (Codex's R5 diagnosis)."""
+    from scipy.spatial import cKDTree
+    from skimage.graph import MCP_Geometric
+    H, W = a["line"].shape
+    R = int(p["heal_r"])
+    support = np.maximum(a["line"], p.get("alpha", 0.3) * a["mask"])
+    cost_full = np.minimum(-np.log(np.clip(support, 1e-3, 1.0)), p.get("cost_cap", 7.0)) + 0.05  # capped: occluded gaps stay crossable
+    g = gl.copy()
+    if g.number_of_nodes() == 0:
+        return g
+    comp = {n: k for k, c in enumerate(nx.connected_components(g)) for n in c}
+    etree = cKDTree(end_kp) if len(end_kp) else None
+    w = lambda u, v, _: float(np.hypot(*(g.nodes[u]["xy"] - g.nodes[v]["xy"])))  # noqa: E731
+    ends = [n for n in gl if gl.degree(n) == 1 and not E._near_border(gl.nodes[n]["xy"])
+            and (etree is None or etree.query(gl.nodes[n]["xy"])[0] > p["zr"])]
+    for e in ends:
+        x, y = g.nodes[e]["xy"]
+        r0, r1, c0, c1 = max(int(y) - R, 0), min(int(y) + R + 1, H), max(int(x) - R, 0), min(int(x) + R + 1, W)
+        # graph pixels in the window that belong to another part of the graph
+        along = nx.single_source_dijkstra_path_length(g, e, cutoff=3 * R, weight=w)
+        tgt = {}
+        for u, v in g.edges():
+            pu, pv = g.nodes[u]["xy"], g.nodes[v]["xy"]
+            L = float(np.hypot(*(pv - pu)))
+            for t in np.linspace(0, 1, max(int(L), 1) + 1):
+                q = pu + t * (pv - pu)
+                rr, cc = int(q[1]), int(q[0])
+                if not (r0 <= rr < r1 and c0 <= cc < c1):
+                    continue
+                n = u if t < 0.5 else v
+                straight = float(np.hypot(*(g.nodes[n]["xy"] - g.nodes[e]["xy"])))
+                if n == e or (comp.get(n) == comp.get(e) and along.get(n, np.inf) <= 3 * max(straight, 1.0)):
+                    continue
+                tgt[(rr - r0, cc - c0)] = n
+        if not tgt:
+            continue
+        mcp = MCP_Geometric(cost_full[r0:r1, c0:c1])
+        start = (min(max(int(y) - r0, 0), r1 - r0 - 1), min(max(int(x) - c0, 0), c1 - c0 - 1))
+        cum, _ = mcp.find_costs([start])
+        best = min(tgt, key=lambda k: cum[k])
+        if cum[best] > p["heal_cost"]:
+            continue
+        path = mcp.traceback(best)
+        prev = e
+        for k, (rr, cc) in enumerate(path[1:-1:3]):  # every 3rd pixel keeps the geometry, few nodes
+            nid = ("mc", e, k)
+            g.add_node(nid, xy=np.array([cc + c0 + 0.5, rr + r0 + 0.5]))
+            g.add_edge(prev, nid)
+            prev = nid
+        g.add_edge(prev, tgt[best])
+        comp_e, comp_t = comp.get(e), comp.get(tgt[best])
+        if comp_e != comp_t:  # merge components so later ends see the joined graph
+            for n, k in list(comp.items()):
+                if k == comp_t:
+                    comp[n] = comp_e
     return g
 
 
