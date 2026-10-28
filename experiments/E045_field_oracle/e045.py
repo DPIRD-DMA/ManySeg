@@ -3,7 +3,9 @@
 Each 1024 px tile is a 3 x 3 mosaic of 256 px FTW chips (10 m) at offsets 0 / 384 / 768 px, so
 128 px empty gutters separate chips (no fake contacts across chip edges). Ground truth = each
 field instance's traced outline, holes filled, simplified at 1 px (a vector-like outline, not the
-raster staircase: the E038 lesson). Pixel units throughout (gsd = 1, so PoLiS is in px = 10 m).
+raster staircase: the E038 lesson). Tiles carry gsd = 0.5 so E028's occlusion rate (per 100 m of
+outline, disks of 4-12 px) gives the same disks per pixel of outline as the building oracle
+(Codex E045 #1); metrics are reported in px.
 """
 
 from __future__ import annotations
@@ -26,6 +28,7 @@ DATA = Path(os.environ.get("E045_DATA", "$MANYSEG_BENCH_DATA/ftw"))
 OFFS = (0, 384, 768)
 SIMPLIFY = 1.0
 MIN_AREA = 16.0
+CORRUPT_GSD = 0.5
 
 
 def chip_polygons(path: Path) -> list[Polygon]:
@@ -50,7 +53,7 @@ def field_tiles(country: str, split: str, min_fields: int = 5) -> list[E.Tile]:
             for p in chip_polygons(DATA / country / "instance" / f"{aoi}.tif"):
                 polys.append(Polygon(np.asarray(p.exterior.coords) + [ox, oy]))
         if len(polys) >= min_fields:
-            tiles.append(E.Tile(f"{country}_{split}", "buildings", len(tiles), 0.0, 0.0, 1.0, polygons=polys))
+            tiles.append(E.Tile(f"{country}_{split}", "buildings", len(tiles), 0.0, 0.0, CORRUPT_GSD, polygons=polys))
     return tiles
 
 

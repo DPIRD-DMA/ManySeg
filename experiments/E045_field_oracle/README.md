@@ -36,5 +36,16 @@ fields keep B0 (masks) and the "one representation" claim is limited to building
 * E045 found `connected_components` slow on large CPU components (102 sweeps, ~9 s per tile);
   fixed in the library (scipy path, identical ids, commit dd0e06b) before any result.
 
+## Amendment 1 (17:30, before any tuning or test result; Codex review notes/codex_e045.md)
+* Corruption scale: E028's occlusion rate is per 100 m of outline with 4-12 px disks. Tiles now
+  carry gsd 0.5 m for corruption, so fields get the same disks per pixel of outline as the building
+  oracle (at the true 10 m, disks would cover most outlines; at gsd 1 there were ~10x fewer).
+  PoLiS is reported in px.
+* B0 now vectorises with the library's exact pixel-edge outline (`polygons_from_labels`) +
+  Douglas-Peucker, as B3 does before its corner step; E028's marching-squares contour cut each
+  pixel corner by half a pixel and favoured B3 for a reason unrelated to the representation.
+* Analysis (`analyze45.py`): per test set, level and seed, pool counts over tiles; mean over seeds;
+  apply the rule above.
+
 ## Results
 (pending)

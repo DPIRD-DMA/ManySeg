@@ -37,24 +37,27 @@ def work(job):
     import e028 as E
     import e035 as B
     import e045
+    from manyseg.vectors import polygons_from_labels
+    from shapely.geometry import Polygon
 
     t = tiles(tuple(job["key"]))[job["tile"]]
     a = B.corrupt_b3(B.encode_b3(t), t, E.LEVELS[job["level"]], job["seed"])
     rows = []
     for arm, p, pi in job["arms"]:
         t0 = time.perf_counter()
-        if arm == "B0":
-            pred = E.decode_b0(a, p)
+        if arm == "B0":  # exact pixel-edge outline + Douglas-Peucker, as the library (Codex E045 #2)
+            lab = E._labels_b0(a, p)
+            pred = [Polygon(q.exterior) for q in polygons_from_labels(lab, simplify=p["simplify"], min_area=1)]
         else:
             pred = B.decode_b3r(a, dict(p, b0=p["b0"], kernel=3, simplify=p["b0"]["simplify"]))
         dt = time.perf_counter() - t0
         m = E.polygon_metrics(t, pred)
         bp_tp, bp_n, bg_tp, bg_n = e045.boundary_counts(t.polygons, pred)
         irr = [g for g in t.polygons if e045.irregular(g)]
-        mi = E.polygon_metrics(E.Tile(t.area, t.task, t.index, 0, 0, 1.0, polygons=irr), pred) if irr else None
+        mi = E.polygon_metrics(E.Tile(t.area, t.task, t.index, 0, 0, t.gsd, polygons=irr), pred) if irr else None
         rows.append(dict(key=job["key"], tile=t.index, level=job["level"], seed=job["seed"], arm=arm, pidx=pi,
                          decode_s=dt, bp_tp=bp_tp, bp_n=bp_n, bg_tp=bg_tp, bg_n=bg_n,
-                         tp=m["tp"], n_gt=m["n_gt"], n_pred=m["n_pred"], ciou=m["ciou"], polis=m["polis"],
+                         tp=m["tp"], n_gt=m["n_gt"], n_pred=m["n_pred"], ciou=m["ciou"], polis=m["polis"] / t.gsd,
                          n_ratio=m["n_ratio"], irr_n=len(irr), irr_tp=mi["tp"] if mi else 0))
     return rows
 
