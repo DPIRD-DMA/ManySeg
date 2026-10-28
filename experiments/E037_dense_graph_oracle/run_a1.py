@@ -91,9 +91,25 @@ def whu_tiles() -> list:
     return [E.Tile("whu", "buildings", i, 0.0, 0.0, 0.3, polygons=list(polys[i])) for i in pick]
 
 
+def whu_reg_tiles() -> list:
+    """WHU val tiles with GT outlines regularised by buildingregulariser 0.2.5 (parallel_threshold
+    3 px, simplify_tolerance 1.5 px, no circles; chosen by a sweep, see README)."""
+    import geopandas as gpd
+    from buildingregulariser import regularize_geodataframe
+    out = []
+    for t in whu_tiles():
+        r = regularize_geodataframe(gpd.GeoDataFrame(geometry=t.polygons), parallel_threshold=3.0,
+                                    simplify_tolerance=1.5, allow_circles=False, num_cores=1)
+        polys = [q for g in r.geometry for q in getattr(g, "geoms", [g]) if q.is_valid and q.area > 1]
+        out.append(E.Tile("whu_reg", "buildings", t.index, 0.0, 0.0, 0.3, polygons=polys))
+    return out
+
+
 def tiles(key: str) -> list:
     if key not in _T:
-        if key == "roads":
+        if key == "buildings_reg":
+            _T[key] = whu_reg_tiles()
+        elif key == "roads":
             ts = []
             for a in OSM_AREAS:
                 ts += E.road_tiles(a, E.load_area(Path(os.environ["E028_DATA"]) / f"{a}.json"))
@@ -213,7 +229,7 @@ def work(job: dict) -> list:
                 extra = _enc_stats(a)
             m = E.road_metrics(t, pred)
             m.update(junction_hits(t.graph, pred, 5.0 / t.gsd))
-        elif key == "buildings":
+        elif key in ("buildings", "buildings_reg"):
             if arm == "B0":
                 pred = E.decode_b0(E.encode(t, "B0").arrays, B0_P)
             elif arm == "B2":
@@ -245,6 +261,7 @@ def work(job: dict) -> list:
 
 
 ARMS = {"roads": ("R0", "R2", "P8", "P8r", "R3"), "buildings": ("B0", "B2", "B3r", "P8", "P8r"),
+        "buildings_reg": ("B0", "B2", "B3r", "P8r", "P8rg"),
         "roofs": ("A1", "P8", "P8r")}
 
 
@@ -257,7 +274,7 @@ def main():
     ap.add_argument("--out", type=Path, default=HERE / "runs" / "a1.jsonl")
     args = ap.parse_args()
     args.out.parent.mkdir(exist_ok=True)
-    keys = [args.only] if args.only else list(ARMS)
+    keys = [args.only] if args.only else [k for k in ARMS if k != "buildings_reg"]
     jobs = []
     for k in keys:
         n = len(tiles(k))
