@@ -60,5 +60,26 @@ Both -> **the unified head set is viable for roads**; next step a trained City-S
 ## Compute
 CPU only, MemoryMax 12 GB, 6 processes, nice 10.
 
-## Results
-(pending)
+## Results (2026-10-28)
+Tuned locally on Innaloo (52 min, worktree e039-4fd9f01): L0 chose mode `centre` (thr_k 0.2, zr 8),
+L1-L3 chose `surface`; `hybrid` never won. Test (Murdoch + Northam, L0-L3, seeds 0-4) ran on Pawsey
+Setonix (job 51714535, 120 CPU, 2 min 46 s; code vec-5365cc3, decoder identical to the tuned
+version; all arms in one run). Pooled over both areas (`runs/decision.json`):
+
+| arm | APLS L0 / L1 / L2 / L3 | junction F1 L0 / L1 / L2 | crossings kept L0 / L1 / L2 |
+|---|---|---|---|
+| R0 mask | 0.937 / **0.572** / **0.210** / 0.036 | 0.759 / 0.651 / **0.314** | 0% / 2% / 8% |
+| R2 graph | **0.985** / 0.522 / 0.122 / 0.013 | **0.976** / **0.794** / 0.217 | 94% / 69% / **41%** |
+| R4 unified | 0.983 / 0.569 / 0.201 / **0.077** | 0.882 / 0.683 / 0.157 | **100%** / **76%** / 27% |
+
+### Decision (registered rule)
+Topology gain: junction F1 +0.123 at L0 but +0.032 at L1 (< +0.10) -> **fails**; robustness:
+APLS -0.003 at L1, -0.009 at L2 (>= -0.01) -> passes. **R4 is not viable by the rule.**
+
+### Interpretation
+R4 is the best compromise of the three: it keeps the most overpasses at L0-L1 (100% / 76%, more
+than the graph's 94% / 69%) and matches the mask's robustness (L1 APLS 0.569 vs 0.572, the graph
+0.522), but under corruption its junctions are no better than the mask's because tuning switches
+to the surface skeleton from L1 on (the thin centreline is too fragile). Next: a single decoder
+that keeps the centreline topology and heals its gaps by min-cost paths (R6; Codex's R5 diagnosis,
+notes/codex_r5_diagnosis.md).

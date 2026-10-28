@@ -1,0 +1,30 @@
+{
+ "L0": {
+  "thr_k": 0.2,
+  "zr": 8.0,
+  "pair_deg": 150.0,
+  "thr_line": 0.3,
+  "mode": "centre"
+ },
+ "L1": {
+  "thr_k": 0.4,
+  "zr": 8.0,
+  "pair_deg": 150.0,
+  "thr_line": 0.3,
+  "mode": "surface"
+ },
+ "L2": {
+  "thr_k": 0.2,
+  "zr": 12.0,
+  "pair_deg": 150.0,
+  "thr_line": 0.3,
+  "mode": "surface"
+ },
+ "L3": {
+  "thr_k": 0.2,
+  "zr": 8.0,
+  "pair_deg": 150.0,
+  "thr_line": 0.3,
+  "mode": "surface"
+ }
+}
