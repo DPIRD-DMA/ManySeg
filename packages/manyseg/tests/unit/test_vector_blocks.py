@@ -172,3 +172,36 @@ def test_u_shape_that_leaves_a_window_is_one_object():
         out = decode_blocks({"mask": m}, _labels, _raw, block=block, halo=halo, offset=off)
         out.pop("_stats")
         assert len(out) == 1, (block, halo, off)
+
+
+def _road_prob(seed=0, H=600, W=700):
+    rng = np.random.default_rng(seed)
+    img = np.zeros((H, W), np.uint8)
+    yy, xx = np.mgrid[0:H, 0:W]
+    for _ in range(25):  # thick segments: pixels within half-width of the segment
+        p, q = rng.integers(0, [W, H]).astype(float), rng.integers(0, [W, H]).astype(float)
+        d = q - p
+        t = np.clip(((xx - p[0]) * d[0] + (yy - p[1]) * d[1]) / max(d @ d, 1e-9), 0, 1)
+        img[np.hypot(xx - p[0] - t * d[0], yy - p[1] - t * d[1]) <= rng.integers(3, 12) / 2] = 255
+    for _ in range(40):  # specks (min_area) and a wide plaza (thinning reach)
+        r, c = rng.integers(0, H - 5), rng.integers(0, W - 5)
+        img[r : r + 3, c : c + 3] = 255
+    img[200:260, 300:400] = 255
+    p = img.astype(np.float32) / 255
+    return np.clip(p + ndimage.gaussian_filter(rng.normal(0, 0.3, p.shape), 2), 0, 1)
+
+
+def _edges(vg):
+    ends = (sorted([vg.xy[a], vg.xy[b]], key=tuple) for a, b in vg.edges)
+    return sorted(tuple(np.round(np.concatenate(e), 3)) for e in ends)
+
+
+def test_graph_blocks_equal_global():
+    from manyseg.vectors.graph import graph_from_mask, graph_from_mask_blocks
+
+    for seed in (0, 1):
+        p = _road_prob(seed)
+        g = graph_from_mask(p, 0.5, spur=10, gap=25, min_area=30)
+        for block, halo in ((128, 48), (200, 64), (256, 40)):
+            b = graph_from_mask_blocks(p, 0.5, block=block, halo=halo, spur=10, gap=25, min_area=30)
+            assert _edges(b) == _edges(g), (seed, block, halo)

@@ -124,19 +124,31 @@ _OFFS = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
 
 def _skeleton_chains(sk: np.ndarray):
     """Skeleton -> (nodes {id: xy}, chains [(u, v, coords)]), junction pixel clusters merged."""
+    return _skeleton_chains_rc(*np.nonzero(sk))
+
+
+def _skeleton_chains_rc(rr: np.ndarray, cc: np.ndarray):
+    """As :func:`_skeleton_chains` from skeleton pixel coordinates in raster order (sparse: memory
+    grows with the skeleton, not the scene)."""
     nx = _deps()[0]
-    rr, cc = np.nonzero(sk)
+    rr, cc = np.asarray(rr, np.int64), np.asarray(cc, np.int64)
     if len(rr) == 0:
         return {}, []
-    idx = -np.ones((sk.shape[0] + 2, sk.shape[1] + 2), np.int64)
-    idx[rr + 1, cc + 1] = np.arange(len(rr))
+    width = int(cc.max()) + 3
+    keys = (rr + 1) * width + (cc + 1)  # sorted: raster order
+
+    def idx(r, c):
+        k = (r + 1) * width + (c + 1)
+        j = np.minimum(np.searchsorted(keys, k), len(keys) - 1)
+        return np.where((keys[j] == k) & (c >= -1) & (c <= width - 3), j, -1)
+
     pg = nx.Graph()
     pg.add_nodes_from(range(len(rr)))
     for dr, dc in _OFFS:
-        nbr = idx[rr + 1 + dr, cc + 1 + dc]
+        nbr = idx(rr + dr, cc + dc)
         ok = nbr > np.arange(len(rr))
         if dr != 0 and dc != 0:  # drop a diagonal if a 4-neighbour path joins the same pixels
-            ok &= (idx[rr + 1 + dr, cc + 1] < 0) & (idx[rr + 1, cc + 1 + dc] < 0)
+            ok &= (idx(rr + dr, cc) < 0) & (idx(rr, cc + dc) < 0)
         pg.add_edges_from(zip(np.nonzero(ok)[0].tolist(), nbr[ok].tolist()))
     xy = np.stack([cc + 0.5, rr + 0.5], 1)
     cluster, nodes = {}, {}
@@ -306,9 +318,16 @@ def graph_from_mask(prob, threshold: float = 0.5, *, spur: float = 10, gap: floa
     if p.ndim != 2:
         raise ValueError(f"expected a (H, W) probability map, got shape {p.shape}")
     m = remove_small_objects(p > threshold, max_size=max(min_area - 1, 0))
-    nodes, chains = _contract_short(*_skeleton_chains(skeletonize(m)))
+    return _graph_from_skeleton(*np.nonzero(skeletonize(m)), p.shape, spur=spur, gap=gap,
+                                simplify=simplify, min_length=min_length, scale=scale)
+
+
+def _graph_from_skeleton(rr, cc, shape, *, spur, gap, simplify, min_length, scale) -> VectorGraph:
+    nx, shapely = _deps()[:2]
+    p_shape = shape
+    nodes, chains = _contract_short(*_skeleton_chains_rc(rr, cc))
     nodes, chains = _join_degree2(nodes, chains)
-    nodes, chains = _prune_spurs(nodes, chains, spur, p.shape)
+    nodes, chains = _prune_spurs(nodes, chains, spur, p_shape)
     g = nx.Graph()
     for n, q in nodes.items():
         g.add_node(n, xy=np.asarray(q, float))
@@ -330,8 +349,50 @@ def graph_from_mask(prob, threshold: float = 0.5, *, spur: float = 10, gap: floa
         sub = g.subgraph(comp)
         if sum(float(np.hypot(*(g.nodes[a]["xy"] - g.nodes[b]["xy"]))) for a, b in sub.edges()) < min_length:
             g.remove_nodes_from(comp)
-    bridge_ends(g, gap, p.shape)
+    bridge_ends(g, gap, p_shape)
     vg = VectorGraph.from_networkx(g)
     if scale != 1:
         vg.xy = vg.xy / scale
     return vg
+
+
+def graph_from_mask_blocks(prob, threshold: float = 0.5, *, block: int = 2048, halo: int = 256,
+                           spur: float = 10, gap: float = 0, simplify: float = 1.0,
+                           min_length: float = 20, min_area: int = 30,
+                           scale: float = 1.0) -> VectorGraph:
+    """:func:`graph_from_mask` for scenes too large to skeletonize at once (``prob`` may be a
+    memmap). Each window (core + ``halo``) is thresholded and skeletonized; its core's skeleton
+    pixels are kept, and one graph is built from the union. Equals the global result when
+    thinning's reach (about half the widest blob) and ``min_area`` are below ``halo``.
+    """
+    from .blocks import block_grid
+
+    remove_small_objects, skeletonize = _deps()[3:]
+    from scipy import ndimage
+
+    H, W = prob.shape[-2:]
+    rows, cols = [], []
+    for b in block_grid((H, W), block, halo):
+        w = np.asarray(prob[b.window[0], b.window[1]], np.float32) > threshold
+        r0, c0 = b.window[0].start, b.window[1].start
+        lab, n = ndimage.label(w)  # drop small blobs only where the window shows all of them
+        if n:
+            size = np.bincount(lab.reshape(-1), minlength=n + 1)
+            edge = np.zeros(n + 1, bool)
+            for side, inner in ((lab[0], r0 > 0), (lab[-1], r0 + w.shape[0] < H),
+                                (lab[:, 0], c0 > 0), (lab[:, -1], c0 + w.shape[1] < W)):
+                if inner:
+                    edge[side] = True
+            small = (size < min_area) & ~edge
+            small[0] = False
+            w &= ~small[lab]
+        sk = skeletonize(w)
+        cr = (slice(b.core[0].start - r0, b.core[0].stop - r0),
+              slice(b.core[1].start - c0, b.core[1].stop - c0))
+        r, c = np.nonzero(sk[cr])
+        rows.append(r + b.core[0].start)
+        cols.append(c + b.core[1].start)
+    rr, cc = np.concatenate(rows), np.concatenate(cols)
+    o = np.lexsort((cc, rr))
+    return _graph_from_skeleton(rr[o], cc[o], (H, W), spur=spur, gap=gap, simplify=simplify,
+                                min_length=min_length, scale=scale)
