@@ -14,7 +14,6 @@ import time
 from multiprocessing import Pool
 from pathlib import Path
 
-import numpy as np
 
 HERE = Path(__file__).resolve().parent
 RUNS = HERE / "runs"
