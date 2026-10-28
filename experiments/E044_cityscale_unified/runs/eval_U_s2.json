@@ -1,0 +1,195 @@
+{
+ "run": "U_s2",
+ "limit": null,
+ "r0_params": {
+  "thr": 0.3,
+  "spur": 30,
+  "gap": 25,
+  "simplify": 2,
+  "min_len": 20
+ },
+ "r4_params": {
+  "thr_k": 0.2,
+  "zr": 8.0,
+  "pair_deg": 150.0,
+  "thr_line": 0.3,
+  "mode": "surface"
+ },
+ "val_r0": {
+  "apls": 0.5403972029691299,
+  "junction_f1": 0.5329192793447,
+  "geo_f1": null,
+  "crossings_kept": 0.35177865612648224,
+  "cross_n": 253,
+  "tiles": 36
+ },
+ "val_r4": {
+  "apls": 0.5409562277098761,
+  "junction_f1": 0.5523711332386833,
+  "geo_f1": null,
+  "crossings_kept": 0.549407114624506,
+  "cross_n": 253,
+  "tiles": 36
+ },
+ "test_r0": {
+  "apls": 0.5549479568360577,
+  "junction_f1": 0.5061152550969745,
+  "geo_f1": null,
+  "crossings_kept": 0.3152965660770031,
+  "cross_n": 961,
+  "tiles": 108
+ },
+ "test_r4": {
+  "apls": 0.5603578355778405,
+  "junction_f1": 0.5328088891778218,
+  "geo_f1": null,
+  "crossings_kept": 0.5681581685744017,
+  "cross_n": 961,
+  "tiles": 108
+ },
+ "decision": {
+  "r4_minus_r0_apls": 0.005409878741782781,
+  "r4_minus_r0_junction_f1": 0.02669363408084724,
+  "r4_minus_r0_crossings": 0.2528616024973986,
+  "unified_heads_viable": false
+ },
+ "val_r4_grid": [
+  {
+   "thr_k": 0.2,
+   "zr": 8.0,
+   "pair_deg": 150.0,
+   "thr_line": 0.3,
+   "mode": "centre",
+   "apls": 0.5204452624485025,
+   "junction_f1": 0.5540857180420614,
+   "geo_f1": null,
+   "crossings_kept": 0.6205533596837944,
+   "cross_n": 253,
+   "tiles": 36
+  },
+  {
+   "thr_k": 0.2,
+   "zr": 8.0,
+   "pair_deg": 150.0,
+   "thr_line": 0.3,
+   "mode": "surface",
+   "apls": 0.5409562277098761,
+   "junction_f1": 0.5523711332386833,
+   "geo_f1": null,
+   "crossings_kept": 0.549407114624506,
+   "cross_n": 253,
+   "tiles": 36
+  },
+  {
+   "thr_k": 0.2,
+   "zr": 8.0,
+   "pair_deg": 150.0,
+   "thr_line": 0.5,
+   "mode": "centre",
+   "apls": 0.4878141525030386,
+   "junction_f1": 0.5490683246603596,
+   "geo_f1": null,
+   "crossings_kept": 0.6561264822134387,
+   "cross_n": 253,
+   "tiles": 36
+  },
+  {
+   "thr_k": 0.2,
+   "zr": 8.0,
+   "pair_deg": 150.0,
+   "thr_line": 0.5,
+   "mode": "surface",
+   "apls": 0.5409562277098761,
+   "junction_f1": 0.5523711332386833,
+   "geo_f1": null,
+   "crossings_kept": 0.549407114624506,
+   "cross_n": 253,
+   "tiles": 36
+  },
+  {
+   "thr_k": 0.4,
+   "zr": 8.0,
+   "pair_deg": 150.0,
+   "thr_line": 0.3,
+   "mode": "centre",
+   "apls": 0.5181939073890469,
+   "junction_f1": 0.5359360225397273,
+   "geo_f1": null,
+   "crossings_kept": 0.391304347826087,
+   "cross_n": 253,
+   "tiles": 36
+  },
+  {
+   "thr_k": 0.4,
+   "zr": 8.0,
+   "pair_deg": 150.0,
+   "thr_line": 0.3,
+   "mode": "surface",
+   "apls": 0.5408124723301637,
+   "junction_f1": 0.5380011972432521,
+   "geo_f1": null,
+   "crossings_kept": 0.35177865612648224,
+   "cross_n": 253,
+   "tiles": 36
+  },
+  {
+   "thr_k": 0.4,
+   "zr": 8.0,
+   "pair_deg": 150.0,
+   "thr_line": 0.5,
+   "mode": "centre",
+   "apls": 0.49236345512617735,
+   "junction_f1": 0.5309873774223794,
+   "geo_f1": null,
+   "crossings_kept": 0.4624505928853755,
+   "cross_n": 253,
+   "tiles": 36
+  },
+  {
+   "thr_k": 0.4,
+   "zr": 8.0,
+   "pair_deg": 150.0,
+   "thr_line": 0.5,
+   "mode": "surface",
+   "apls": 0.5408124723301637,
+   "junction_f1": 0.5380011972432521,
+   "geo_f1": null,
+   "crossings_kept": 0.35177865612648224,
+   "cross_n": 253,
+   "tiles": 36
+  },
+  {
+   "thr_k": 0.2,
+   "zr": 8.0,
+   "pair_deg": 150.0,
+   "thr_line": 0.3,
+   "mode": "mincost",
+   "cost_cap": 2.0,
+   "heal_cost": 60.0,
+   "heal_r": 60,
+   "apls": 0.5325832071192446,
+   "junction_f1": 0.49624513337235016,
+   "geo_f1": null,
+   "crossings_kept": 0.5889328063241107,
+   "cross_n": 253,
+   "tiles": 36
+  },
+  {
+   "thr_k": 0.4,
+   "zr": 8.0,
+   "pair_deg": 150.0,
+   "thr_line": 0.3,
+   "mode": "mincost",
+   "cost_cap": 2.0,
+   "heal_cost": 60.0,
+   "heal_r": 60,
+   "apls": 0.5308065800404244,
+   "junction_f1": 0.4783938894665418,
+   "geo_f1": null,
+   "crossings_kept": 0.35968379446640314,
+   "cross_n": 253,
+   "tiles": 36
+  }
+ ],
+ "wall_s": 120.53791785240173
+}

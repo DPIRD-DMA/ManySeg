@@ -55,3 +55,15 @@ Claim: R4 decoding of the unified heads is a safe default over R0 on the same mo
 same code (worktree e044-90736d4), same tuning and test protocol. R4 adopted as the default road
 decoder if, on test, for both seeds: R4 APLS >= R0 - 0.01, R4 junction F1 >= R0 - 0.01, and R4
 crossings kept >= R0 + 0.10. Otherwise R0 stays the default and the crossing heads stay optional.
+
+### E044b results (17:41)
+| seed | R0 tuned | APLS R0 / R4 | junction F1 R0 / R4 | crossings kept R0 / R4 | rule |
+|---|---|---|---|---|---|
+| 1 | thr 0.3, spur 30, gap 50 | 0.553 / 0.556 | 0.512 / 0.539 | 0.320 / 0.542 | pass |
+| 2 | thr 0.3, spur 30, gap 25 | 0.555 / 0.560 | 0.506 / 0.533 | 0.315 / 0.568 | pass |
+
+R4 tuned to surface mode (thr_k 0.2, thr_line 0.3) on both seeds, as on seed 0. Val mask IoU 0.515 / 0.516
+(seed 0: 0.508). **Decision: R4 (surface mode) is the default road decoder for the unified road
+heads**; it keeps ~23 points more of the overpasses with no loss of APLS or junction F1 (+0.02-0.03
+junction F1 on all three seeds, below E044's +0.05 bar). Next: move `decode_r4` (surface mode)
+from E039 into `manyseg.vectors`.
