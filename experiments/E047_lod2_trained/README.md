@@ -40,5 +40,15 @@ areas with height RMSE no worse than A0 + 0.10 m. **F3 preferred over F0** if it
 >= F0 + 0.02 on both areas and its corner F1 is not lower. Single seed screen; a second seed only
 if a decision lands within 0.02 of a threshold.
 
+## Amendment 1 (18:25, before any training; Codex review notes/codex_e047.md)
+* Decision: viability is judged per single trained arm (F0 or F3 must pass on both areas), and
+  the output reports whether any margin is within 0.02 (second-seed trigger).
+* Normal-angle error is pooled and reported (it was computed but dropped).
+* A tile with no valid DTM in its window takes its terrain from a padded (+96 m) DTM window
+  instead of the DSM median; `prepare47.py repair` fixes any tiles built before this change.
+* Test once per checkpoint: a ledger keyed by the checkpoint's SHA-256.
+* Diagnostic arm **A0m** (secondary, not in the rule): A0's plane segmentation inside the learned
+  roof extent (F0's tuned extent threshold), separating mask quality from face partitioning.
+
 ## Results
 (pending)

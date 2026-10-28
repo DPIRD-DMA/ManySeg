@@ -36,7 +36,8 @@ GRID = {"F0": [dict(simplify=s) for s in (0.5, 1.0, 2.0)],
         "F3": [dict(corner_threshold=c, big_dev=b, agree=a, merge_deg=m)
                for c, b, a, m in itertools.product((0.3, 0.5), (4.0, 8.0), (0.4, 0.6), (8.0, 15.0))]}
 MASK_M = 2.5  # A0's building mask: nDSM above this (m)
-SUMS = ("tp", "n_gt", "n_pred", "sq_err", "n_px", "corner_tp", "corner_gt", "corner_pred", "ciou_tp")
+SUMS = ("tp", "n_gt", "n_pred", "sq_err", "n_px", "corner_tp", "corner_gt", "corner_pred", "ciou_tp",
+        "normal_sum", "n_normal")
 
 
 def _tiles(split):
@@ -51,7 +52,8 @@ def _row(t, faces, planes):
     n = int(t.mask.sum())
     return dict(tp=m["tp"], n_gt=m["n_gt"], n_pred=m["n_pred"], sq_err=m["h_rmse"] ** 2 * n, n_px=n,
                 corner_tp=m["corner_tp"], corner_gt=m["corner_gt"], corner_pred=m["corner_pred"],
-                ciou_tp=m["ciou"] * m["tp"])
+                ciou_tp=m["ciou"] * m["tp"], n_normal=m["n_normal"],
+                normal_sum=m["normal_err_deg"] * m["n_normal"] if m["n_normal"] else 0.0)
 
 
 def summarise(acc):
@@ -59,7 +61,8 @@ def summarise(acc):
     rmse = float(np.sqrt(acc["sq_err"] / max(1, acc["n_px"])))
     return {"face_f1": f1, "h_rmse": rmse, "score": f1 * (1 - min(1.0, rmse)),
             "corner_f1": 2 * acc["corner_tp"] / max(1, acc["corner_gt"] + acc["corner_pred"]),
-            "ciou": acc["ciou_tp"] / max(1, acc["tp"]), "tp": acc["tp"], "n_gt": acc["n_gt"], "n_pred": acc["n_pred"]}
+            "ciou": acc["ciou_tp"] / max(1, acc["tp"]),
+            "normal_err_deg": acc["normal_sum"] / acc["n_normal"] if acc["n_normal"] else float("nan"), "tp": acc["tp"], "n_gt": acc["n_gt"], "n_pred": acc["n_pred"]}
 
 
 def work(item):
@@ -73,6 +76,12 @@ def work(item):
     if arm == "A0":
         for p in settings:
             rows.append(_row(t, *E.decode_a0(a, p)))
+        return rows
+    if arm == "A0m":  # diagnostic: A0's plane segmentation inside the learned roof extent
+        for thr in thr_list:
+            am = dict(a, mask=(prob["extent"].astype(np.float32) > thr["extent_threshold"]).astype(np.float32))
+            for p in settings:
+                rows.append(_row(t, *E.decode_a0(am, p)))
         return rows
     for thr in thr_list:
         tt = {k: torch.from_numpy(prob[k].astype(np.float32))[None, None] for k in ("extent", "boundary", "distance")}
@@ -130,18 +139,24 @@ def run(model, arm, split, thr_list, settings, procs, limit):
 
 
 def decide(test):
+    """README rule; viability per single trained arm (Codex E047 #1)."""
+    areas = ("leidscherijn", "staphorst")
     out = {}
-    for area in ("leidscherijn", "staphorst"):
-        a0, f0, f3 = (test[x]["areas"][area] for x in ("A0", "F0", "F3"))
-        best = f0 if f0["face_f1"] >= f3["face_f1"] else f3
-        out[area] = {"best_trained": "F0" if best is f0 else "F3",
-                     "face_f1_gain_vs_a0": best["face_f1"] - a0["face_f1"],
-                     "h_rmse_vs_a0": best["h_rmse"] - a0["h_rmse"],
-                     "f3_minus_f0_face_f1": f3["face_f1"] - f0["face_f1"],
-                     "f3_minus_f0_corner_f1": f3["corner_f1"] - f0["corner_f1"]}
-    viable = all(o["face_f1_gain_vs_a0"] >= 0.10 and o["h_rmse_vs_a0"] <= 0.10 for o in out.values())
-    f3 = all(o["f3_minus_f0_face_f1"] >= 0.02 and o["f3_minus_f0_corner_f1"] >= 0 for o in out.values())
-    return {"areas": out, "trained_faces_viable": viable, "f3_preferred": f3}
+    for arm in ("F0", "F3"):
+        g = {ar: test[arm]["areas"][ar]["face_f1"] - test["A0"]["areas"][ar]["face_f1"] for ar in areas}
+        h = {ar: test[arm]["areas"][ar]["h_rmse"] - test["A0"]["areas"][ar]["h_rmse"] for ar in areas}
+        out[arm] = {"face_f1_gain_vs_a0": g, "h_rmse_vs_a0": h,
+                    "viable": all(g[a] >= 0.10 and h[a] <= 0.10 for a in areas)}
+    d3 = {ar: test["F3"]["areas"][ar]["face_f1"] - test["F0"]["areas"][ar]["face_f1"] for ar in areas}
+    dc = {ar: test["F3"]["areas"][ar]["corner_f1"] - test["F0"]["areas"][ar]["corner_f1"] for ar in areas}
+    margins = [abs(v - 0.10) for arm in ("F0", "F3") for v in out[arm]["face_f1_gain_vs_a0"].values()]
+    margins += [abs(v - 0.10) for arm in ("F0", "F3") for v in out[arm]["h_rmse_vs_a0"].values()]
+    margins += [abs(v - 0.02) for v in d3.values()]
+    return {"arms": out, "f3_minus_f0_face_f1": d3, "f3_minus_f0_corner_f1": dc,
+            "trained_faces_viable": out["F0"]["viable"] or out["F3"]["viable"],
+            "viable_arms": [a for a in ("F0", "F3") if out[a]["viable"]],
+            "f3_preferred": all(d3[a] >= 0.02 and dc[a] >= 0 for a in areas),
+            "second_seed_needed": min(margins) < 0.02}
 
 
 def main():
@@ -152,12 +167,15 @@ def main():
     ap.add_argument("--limit", type=int, default=None)
     args = ap.parse_args()
     out = HERE / "runs" / f"eval_s{args.seed}{'_limit' if args.limit else ''}.json"
-    if out.exists():
-        raise SystemExit(f"{out} exists: test already evaluated for this seed")
+    sha = hashlib.sha256(args.model.read_bytes()).hexdigest()
+    ledger = HERE / "runs" / "test_ledger.json"  # test once per checkpoint (Codex E047 #4)
+    led = json.loads(ledger.read_text()) if ledger.exists() else {}
+    if out.exists() or (not args.limit and sha in led):
+        raise SystemExit(f"test already evaluated for this checkpoint / seed ({out}, {led.get(sha)})")
     m = build()
     m.load_state_dict(torch.load(args.model, map_location="cpu"))
     m = m.to("cuda").eval()
-    res = {"seed": args.seed, "model": str(args.model), "sha256": hashlib.sha256(args.model.read_bytes()).hexdigest()}
+    res = {"seed": args.seed, "model": str(args.model), "sha256": sha}
     t0 = time.time()
     sel = {}
     v, _ = run(None, "A0", "val", None, GRID_A0, args.procs, args.limit)
@@ -170,9 +188,12 @@ def main():
         k = max(range(len(v2)), key=lambda j: v2[j]["score"])
         sel[arm] = {"thr": thr, "params": GRID[arm][k], "val": v2[k]}
         print(arm, "val", {x: round(y, 3) for x, y in v2[k].items() if isinstance(y, float)}, f"{time.time() - t0:.0f}s", flush=True)
+    v, _ = run(m, "A0m", "val", [sel["F0"]["thr"]], GRID_A0, args.procs, args.limit)
+    k = max(range(len(v)), key=lambda j: v[j]["score"])
+    sel["A0m"] = {"thr": sel["F0"]["thr"], "params": GRID_A0[k], "val": v[k]}
     res["selected"] = sel
     test = {}
-    for arm in ("A0", "F0", "F3"):  # test once, after all tuning
+    for arm in ("A0", "F0", "F3", "A0m"):  # test once, after all tuning
         s = sel[arm]
         allm, areas = run(m, arm, "test", [s.get("thr")], [s["params"]], args.procs, args.limit)
         test[arm] = {"all": allm[0], "areas": {a: v[0] for a, v in areas.items()}}
@@ -180,6 +201,9 @@ def main():
     res["test"] = test
     res["decision"] = decide(test)
     out.write_text(json.dumps(res, indent=1))
+    if not args.limit:
+        led[sha] = str(out)
+        ledger.write_text(json.dumps(led, indent=1))
     print(json.dumps(res["decision"], indent=1))
 
 

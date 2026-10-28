@@ -92,8 +92,17 @@ def inputs(t) -> tuple[np.ndarray, np.ndarray]:
             rasters[cov] = r.read(1).astype(np.float32)
     dsm, dtm = rasters["dsm_05m"], rasters["dtm_05m"]
     bad = ~np.isfinite(dtm) | (np.abs(dtm) > 1e5)
-    if bad.all():
-        dtm = np.full_like(dtm, np.nanmedian(np.where(np.abs(dsm) > 1e5, np.nan, dsm)))
+    if bad.all():  # no terrain in the window: fill from a padded DTM window (Codex E047 #3)
+        pad = 96.0
+        pb = dict(x0=b["x0"] - pad, y0=b["y0"] - pad, x1=b["x1"] + pad, y1=b["y1"] + pad)
+        with rasterio.MemoryFile(_get(WCS.format(cov="dtm_05m", **pb), WEB / f"{key}_dtm_pad.tif")) as m, m.open() as r:
+            big = r.read(1).astype(np.float32)
+        bb = ~np.isfinite(big) | (np.abs(big) > 1e5)
+        if bb.all():
+            raise RuntimeError(f"{key}: no valid DTM within {pad} m")
+        big = big[tuple(ndimage.distance_transform_edt(bb, return_distances=False, return_indices=True))]
+        k = int(round(pad / 0.5))
+        dtm = big[k:k + dtm.shape[0], k:k + dtm.shape[1]]
     elif bad.any():
         dtm = dtm[tuple(ndimage.distance_transform_edt(bad, return_distances=False, return_indices=True))]
     nd = np.where(~np.isfinite(dsm) | (np.abs(dsm) > 1e5), 0, dsm - dtm)
@@ -127,5 +136,22 @@ def build():
         (CACHE / f"{split}_meta.json").write_text(json.dumps([[t.area, t.index, t.x0, t.y1] for t in tiles]))
 
 
+def repair():
+    """Recompute nDSM for tiles whose cached DTM was entirely invalid (built before the fix)."""
+    for split in SPLITS:
+        tiles = pickle.loads((CACHE / f"{split}_tiles.pkl").read_bytes())
+        nd = np.load(CACHE / f"{split}_ndsm.npy", mmap_mode="r+")
+        n = 0
+        for i, t in enumerate(tiles):
+            p = WEB / f"{t.area}/{int(t.x0)}_{int(t.y1)}_dtm_05m.tif"
+            with rasterio.open(p) as r:
+                d = r.read(1)
+            if (~np.isfinite(d) | (np.abs(d) > 1e5)).all():
+                nd[i] = inputs(t)[1]
+                n += 1
+        nd.flush()
+        print(split, "repaired", n, "of", len(tiles), flush=True)
+
+
 if __name__ == "__main__":
-    {"fetch3dbag": fetch3dbag, "build": build}[sys.argv[1]]()
+    {"fetch3dbag": fetch3dbag, "build": build, "repair": repair}[sys.argv[1]]()
