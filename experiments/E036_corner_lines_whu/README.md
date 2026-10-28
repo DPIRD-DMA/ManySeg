@@ -69,3 +69,31 @@ B3's walls are straighter; B0 + regulariser sometimes adds square notches; B3 so
 corner on complex shapes; all three follow the mask where trees occlude a wall.
 Next if pursued (new pre-registration): B3 with its own tuned instance thresholds, judged on
 regularised GT against B0 + regulariser.
+
+### Post hoc: straight-line GT, vertex-free boundary score, failure analysis (2026-10-28)
+User's point: B3 draws straight walls where WHU's raster-traced GT keeps staircases, so vertex-
+count metrics understate it. Third GT: Douglas-Peucker at 1.5 px (removes staircases without
+forcing right angles). Boundary F: points every 0.5 px along each outline matched within 1 px
+(0.3 m), no vertex term. 300 val tiles (`posthoc_dp.json`).
+
+| GT | arm | C-IoU x F1 | C-IoU | matched IoU | PoLiS m | boundary F | N-ratio | det F1 |
+|---|---|---|---|---|---|---|---|---|
+| raw | B0 | **0.626** | 0.733 | 0.877 | 0.369 | 0.716 | 1.14 | **0.854** |
+| raw | B0 + reg | 0.522 | 0.617 | 0.856 | 0.421 | 0.619 | 0.57 | 0.846 |
+| raw | B3 | 0.482 | 0.582 | **0.884** | **0.338** | **0.738** | 0.44 | 0.829 |
+| straight-line | B0 | 0.462 | 0.542 | 0.876 | 0.403 | 0.705 | 2.33 | **0.854** |
+| straight-line | B0 + reg | 0.612 | 0.723 | 0.856 | 0.453 | 0.616 | 1.17 | 0.846 |
+| straight-line | B3 | **0.651** | **0.785** | **0.882** | **0.360** | **0.728** | 0.91 | 0.830 |
+
+On every vertex-free measure B3 has the most accurate outlines, on all three GTs; it loses only
+C-IoU's vertex count against staircase GT and ~0.02 detection F1. The regulariser costs boundary
+accuracy (0.61-0.62 on every GT).
+
+Failure analysis (`failures.py`, `failures/summary.json`, `failures/*.png`; 200 val tiles,
+2,699 buildings, failure = IoU < 0.75 vs regularised GT): B3 ok 85.7% (B0 + reg 82.3%); B3
+failures: mask too big/small 8.4% (B0 + reg 11.3%; 42% of these touch the tile edge), missed
+2.9% (3.1%), merged 1.6% (2.4%), split 1.0% (0.9%), **decoder 0.5%** (<1% of the IoU shortfall).
+Missed cases are mostly ambiguous labels; merges are attached carports/garages. Retuning B3's
+instance thresholds (18 settings) changes mean mask IoU by < 0.001 among the top five: the
+borrowed thresholds are not the cause. B3's remaining errors are the instance heads' and the
+labels', shared with B0.
