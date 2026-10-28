@@ -11,8 +11,9 @@ Decoder (SAM-Road-style candidates + scoring, in our framework):
    ``r_cross`` of a crossing peak);
 3. score = mean road probability along the segment (``edge_src``: centreline band or surface) x
    frame-field agreement (max over u, v of cos^2 to the segment; 0.5 where the field is weak);
-4. greedy selection by score >= thr_e with degree caps (end 1, junction 6, others 2) and angular
-   suppression (no two edges at a node within 25 deg);
+4. edges must leave every non-junction node within 25 deg of that node's own road direction(s)
+   (frame field there); greedy selection by score >= thr_e with degree caps (end 1, junction 6,
+   others 2) and angular suppression (no two edges at a node within 25 deg);
 5. components < 20 px dropped; E028 end bridging.
 """
 
@@ -169,6 +170,28 @@ def decode_r5(a: dict, p: dict) -> nx.Graph:
     if len(nodes) < 2:
         return nx.Graph()
     cap = {"junction": 6, "end": 1, "band": 2}
+    # each non-junction node's own road direction(s) from the frame field (strongest 3x3 pixel);
+    # an edge must leave such a node within ``end_deg`` of one of them (smoke-tile fix: zig-zags
+    # between touching lanes and wrong pairings across crossings passed the along-segment average)
+    fr = a["frame"]
+    st = np.hypot(fr[0], fr[1])
+    ndir = []
+    for (x, y), kd in zip(nodes, kind):
+        r, c = int(np.clip(y, 0, H - 1)), int(np.clip(x, 0, W - 1))
+        r0, r1, c0, c1 = max(r - 1, 0), min(r + 2, H), max(c - 1, 0), min(c + 2, W)
+        k = int(np.argmax(st[r0:r1, c0:c1]))
+        rr, cc = r0 + k // (c1 - c0), c0 + k % (c1 - c0)
+        if kd == "junction" or st[rr, cc] < 0.2:
+            ndir.append(None)
+        else:
+            tu, tv, _ = FF.frame_dirs(fr, np.array([rr]), np.array([cc]))
+            ndir.append((float(tu[0]), float(tv[0])))
+    cos_end = math.cos(math.radians(p.get("end_deg", 25.0)))
+
+    def leaves_ok(k, th):
+        if ndir[k] is None:
+            return True
+        return max(abs(math.cos(th - ndir[k][0])), abs(math.cos(th - ndir[k][1]))) >= cos_end
     prob = a["line"] if p["edge_src"] == "line" else a["mask"]
     tree = cKDTree(nodes)
     cross_tree = cKDTree(pk["crossing"]) if len(pk["crossing"]) else None
@@ -181,6 +204,9 @@ def decode_r5(a: dict, p: dict) -> nx.Graph:
             seg = LineString([nodes[i], nodes[j]])
             across = min(seg.distance(shapely.Point(q)) for q in pk["crossing"]) <= p["r_cross"]
         if d > 2.2 * p["spacing"] and not across:  # greedy maxima can sit up to ~2x spacing apart
+            continue
+        th = math.atan2(nodes[j][1] - nodes[i][1], nodes[j][0] - nodes[i][0])
+        if not (leaves_ok(i, th) and leaves_ok(j, th)):
             continue
         sc = edge_score(nodes[i], nodes[j], prob, a["frame"])
         if sc >= p["thr_e"]:
