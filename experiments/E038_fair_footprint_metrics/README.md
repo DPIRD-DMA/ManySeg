@@ -34,4 +34,14 @@ both seeds. Otherwise B0 + reg stays the footprint default.
 CPU decoding (6 processes, MemoryMax 14 GB) + one GPU pass per model; B3_s1 training ~1.5 h.
 
 ## Results
-(pending)
+
+### Seed 0 (test, tuned on val; `runs/e038_s0.json`)
+| arm | setting | boundary F | det F1 | C-IoU x F1 | matched IoU | PoLiS m | N-ratio | interior C-IoU x F1 |
+|---|---|---|---|---|---|---|---|---|
+| B0 | simplify 1 px | 0.635 | **0.850** | 0.467 | 0.860 | 0.417 | 2.28 | 0.451 |
+| B0 + reg | pt 2, st 1.5 | 0.579 | 0.846 | 0.586 | 0.847 | 0.445 | 1.39 | 0.606 |
+| B3 | corner 0.5, big_dev 4, agree 0.4, merge 8 | **0.654** | 0.828 | **0.627** | **0.867** | **0.382** | 0.85 | **0.615** |
+
+Val boundary F: B0 0.680, B0 + reg 0.618, B3 0.708. **Seed-0 screen: ADVANCE** (B3 - better
+baseline B0 = +0.018 >= 0.01; det F1 -0.021 >= -0.03). Seed 1 (B3_s1, B0_s1) runs next; the
+two-seed rule decides (`decide38.py`).
