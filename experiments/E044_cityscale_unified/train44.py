@@ -74,7 +74,11 @@ def _bce_dice(logit, target):
 
 
 class RoadTask:
+    """``w``: loss weights (mask, line, kp, direction)."""
     name = "unified_roads"
+
+    def __init__(self, w=(1.0, 1.0, 1.0, 1.0)):
+        self.w = w
     primary_metric = "mask_iou"
     higher_is_better = True
 
@@ -89,14 +93,21 @@ class RoadTask:
         ll = _bce_dice(out["line"][:, 0].float(), t["line"].float())
         kp = t["kp"].float()
         pos = (kp > 0.5) & (kp == F.max_pool2d(kp, 3, 1, 1))
-        lk = sum(losses.heatmap_focal(out["kp"][:, c].float(), kp[:, c], pos=pos[:, c]) for c in range(3)) / 3
+        # one focal loss over all three channels, normalised by their total positives (floor 16): a
+        # channel with no positives in the batch (crossings are rare) was divided by 1, its summed
+        # negatives swamped the decoder and the mask collapsed (debug runs, README)
+        pl = out["kp"].float().sigmoid().clamp(1e-6, 1 - 1e-6)
+        pos_l = -((1 - pl) ** 2) * torch.log(pl) * pos
+        neg_l = -((1 - kp) ** 4) * (pl ** 2) * torch.log(1 - pl) * (~pos)
+        lk = (pos_l.sum() + neg_l.sum()) / pos.sum().clamp(min=16)
         d, pd = t["direction"].float(), out["direction"].float()
         m1 = (t["mask"] > 0.5)[:, None].expand(-1, 2, -1, -1)
         m2 = (d[:, 2:].abs().sum(1, keepdim=True) > 0).expand(-1, 2, -1, -1)
         ld = F.l1_loss(pd[:, :2][m1], d[:, :2][m1]) if m1.any() else pd.sum() * 0
         if m2.any():
             ld = ld + F.l1_loss(pd[:, 2:][m2], d[:, 2:][m2])
-        return lm + ll + lk + ld
+        w = self.w
+        return w[0] * lm + w[1] * ll + w[2] * lk + w[3] * ld
 
     def evaluator(self):
         task = self
@@ -134,6 +145,7 @@ def main():
     ap.add_argument("--workers", type=int, default=6)
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--tag", default="")
+    ap.add_argument("--w", default="1,1,1,1", help="loss weights mask,line,kp,direction")
     args = ap.parse_args()
     out = HERE / "runs"
     out.mkdir(exist_ok=True)
@@ -152,10 +164,10 @@ def main():
 
     model = build()
     enc, dec = split_params(model, model.backbone)
-    recipe = get_recipe("fastai_like", epochs=args.epochs, batch_size=args.batch_size, eval_every=5)
+    recipe = get_recipe("fastai_like", epochs=args.epochs, batch_size=args.batch_size, eval_every=min(5, args.epochs))
     t0 = time.time()
     res = train(model, enc, dec, loader("train", True), loader("val", False), num_classes=1, recipe=recipe,
-                device=device, task=RoadTask())
+                device=device, task=RoadTask(tuple(float(x) for x in args.w.split(","))))
     torch.save(model.state_dict(), out / f"{name}.pt")
     res.update(seed=args.seed, recipe=recipe.to_dict(), wall_s=time.time() - t0, limit=args.limit)
     (out / f"{name}_train.json").write_text(json.dumps(res, indent=1, default=str))

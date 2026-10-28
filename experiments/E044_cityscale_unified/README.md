@@ -21,6 +21,15 @@ positives (keypoints, CenterNet prior bias), masked L1 (direction), weights 1; f
   with R0's tuned settings inside, tuned on val by APLS.
 Test once on the 27 test regions (tiles with >= 10 GT edges): APLS, junction F1, crossings kept.
 
+## Amendment 1 (16:58, before any test result)
+The first full run collapsed (val mask IoU 0.0000 at epoch 5). Five-epoch debug runs: mask loss
+alone 0.474, + line 0.477, + direction 0.463, + keypoints at weight 0.1: 0.000. Cause: the focal
+keypoint loss was normalised per channel by its positives (clamped at 1); crossings are absent from
+most batches, so that channel's summed negatives were divided by 1 and swamped the decoder. Fixed:
+one focal loss over the three keypoint channels normalised by their total positives (floor 16);
+all four losses at weight 1 then reach val mask IoU 0.360 at epoch 5. Seeded augmentation and the
+workers-0 fix (Codex review) are also in.
+
 ## Decision rule (fixed now)
 Unified heads viable on real data if, on test: R4 APLS >= R0 - 0.01, R4 junction F1 >= R0 + 0.05,
 and R4 crossings kept >= R0 + 0.20. (Single seed: a screen; seeds 1-2 only if it passes.)
