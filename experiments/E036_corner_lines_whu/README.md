@@ -1,4 +1,4 @@
-# E036: corners + lines (B3), trained on WHU (DRAFT, not launched; awaiting the user's decision)
+# E036: corners + lines (B3), trained on WHU (pre-registered 2026-10-28 09:45; user approved)
 
 Why: E035b (oracle) showed the corner-trusting B3 decoder keeps B0's closure and beats B0's
 polygons at every corruption level, but its registered rule compared it with B2, which is the
@@ -21,9 +21,9 @@ instance loss 3.6, corner focal 2.3. Code: `manyseg.vectors.corner_targets`,
 val over 16 settings (`corner_threshold` {0.3, 0.5}, `big_dev` {4, 8}, `agree` {0.4, 0.6},
 `merge_deg` {8, 15}).
 
-## Decision (to be fixed before launch)
-Seed 0 first; compared with B0 seed 0 on val C-IoU × detection F1. If B3 is higher by more than
-0.005, seeds 1–2 for B3 and B0 (B0 seed 1 is already trained), then the paired rule (mean paired
+## Decision (fixed 2026-10-28 09:45, before launch)
+Seed 0 first; compared with B0 seed 0 on val C-IoU × detection F1 (B0_s0: 0.6277, from
+`e030-aadd0f2/.../runs/B0_s0_eval.json`). If B3 is higher by more than 0.005 (B3_s0 val > 0.6327), seeds 1–2 for B3 and B0 (B0 seed 1 is already trained; its evaluation is still to run), then the paired rule (mean paired
 difference ≥ 0.02 and > 2 SDs; detection F1 not more than 0.02 below B0). Also reported: C-IoU on
 GT outlines cleaned of staircase vertices (post hoc), detection F1, matched IoU, PoLiS, N-ratio.
 
