@@ -57,5 +57,19 @@ and J2 acts on every shared vertex. r tuned on val over {1.0, 1.5, 2.5} by seam 
 Rule as E048 against F3 without joining (seam closure +0.20, vertex z error <= +0.05 m, face F1
 >= -0.01, both areas); E048's snap shown alongside. Test once (`runs/e048b.json`).
 
-### E048b results
-(pending)
+### E048b results (19:45; 3 min, local)
+Val seam closure (F3, planar): r 1.0: 0.619, r 1.5: 0.652, r 2.5: 0.668 -> r = 2.5 px. Test, F3 faces (48 tiles):
+
+| area | join | seam closure | vertex z err m | false steps / shared | shared vertices | face F1 |
+|---|---|---|---|---|---|---|
+| leidscherijn | J2 | 0.384 | 0.683 | 0.150 | 794 | 0.570 |
+| leidscherijn | planar+J2 | 0.726 | 0.611 | 0.181 | 2957 | 0.565 |
+| leidscherijn | snap+J2 | 0.490 | 0.657 | 0.181 | 1750 | 0.570 |
+| staphorst | J2 | 0.385 | 0.510 | 0.167 | 658 | 0.589 |
+| staphorst | planar+J2 | 0.708 | 0.475 | 0.169 | 3353 | 0.591 |
+| staphorst | snap+J2 | 0.503 | 0.488 | 0.169 | 1797 | 0.589 |
+
+**Decision: planar joining adopted** (seam closure +0.34 / +0.32 to 0.73 / 0.71, against 0.79 for
+3DBAG's own faces; vertex z error -0.07 / -0.04 m; face F1 -0.004 / +0.003). Moved into the
+library as `manyseg.vectors.planar_faces`.
+

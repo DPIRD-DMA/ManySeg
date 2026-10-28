@@ -1,0 +1,134 @@
+{
+ "model_sha256": "8963e0294b92d3af06c26c057f101a30c76a3e9f243e7ceb146f233f15e89528",
+ "selected": {
+  "F0": {
+   "thr": {
+    "extent_threshold": 0.4,
+    "boundary_threshold": 0.3,
+    "seed_threshold": 0.3
+   },
+   "params": {
+    "simplify": 0.5
+   },
+   "val": {
+    "face_f1": 0.4271712031692907,
+    "h_rmse": 1.9120298416966832,
+    "score": 0.1466919044072711,
+    "corner_f1": 0.22936493462507584,
+    "ciou": 0.170513915433011,
+    "normal_err_deg": 6.686104155740592,
+    "tp": 6254.0,
+    "n_gt": 16724.0,
+    "n_pred": 12557.0
+   }
+  },
+  "F3": {
+   "thr": {
+    "extent_threshold": 0.4,
+    "boundary_threshold": 0.3,
+    "seed_threshold": 0.15
+   },
+   "params": {
+    "corner_threshold": 0.5,
+    "big_dev": 4.0,
+    "agree": 0.6,
+    "merge_deg": 8.0
+   },
+   "val": {
+    "face_f1": 0.42750558707237407,
+    "h_rmse": 2.0899580658311097,
+    "score": 0.13835320025852435,
+    "corner_f1": 0.2908914656425935,
+    "ciou": 0.5382602529765017,
+    "normal_err_deg": 6.778792796027194,
+    "tp": 6217.0,
+    "n_gt": 16724.0,
+    "n_pred": 12361.0
+   }
+  }
+ },
+ "snap_r": 2.5,
+ "val": {
+  "1.0": {
+   "seam_closure": 0.6186403263316296,
+   "vertex_z_err": 0.7670261744156431,
+   "false_steps_per_shared": 0.25223995061820764,
+   "shared_vertices": 53461,
+   "face_f1": 0.4273768968720966
+  },
+  "1.5": {
+   "seam_closure": 0.6517717389894954,
+   "vertex_z_err": 0.7685739250051102,
+   "false_steps_per_shared": 0.2621764657239726,
+   "shared_vertices": 48372,
+   "face_f1": 0.42601514108740535
+  },
+  "2.5": {
+   "seam_closure": 0.668296602247246,
+   "vertex_z_err": 0.7649084511084887,
+   "false_steps_per_shared": 0.26735614240492606,
+   "shared_vertices": 46122,
+   "face_f1": 0.42559636501325254
+  }
+ },
+ "r": 2.5,
+ "test": {
+  "leidscherijn|F3|J2": {
+   "seam_closure": 0.3836031927023945,
+   "vertex_z_err": 0.6825582270143266,
+   "false_steps_per_shared": 0.14987405541561713,
+   "shared_vertices": 794,
+   "face_f1": 0.569502948609941
+  },
+  "leidscherijn|F3|snap+J2": {
+   "seam_closure": 0.49025496352247044,
+   "vertex_z_err": 0.6566445694996079,
+   "false_steps_per_shared": 0.18057142857142858,
+   "shared_vertices": 1750,
+   "face_f1": 0.569502948609941
+  },
+  "leidscherijn|F3|planar+J2": {
+   "seam_closure": 0.7255738822448465,
+   "vertex_z_err": 0.6107532047401638,
+   "false_steps_per_shared": 0.181264795400744,
+   "shared_vertices": 2957,
+   "face_f1": 0.5651623787431463
+  },
+  "staphorst|F3|J2": {
+   "seam_closure": 0.38513626019870123,
+   "vertex_z_err": 0.510350935257221,
+   "false_steps_per_shared": 0.16717325227963525,
+   "shared_vertices": 658,
+   "face_f1": 0.5886259858862598
+  },
+  "staphorst|F3|snap+J2": {
+   "seam_closure": 0.5031044155189259,
+   "vertex_z_err": 0.4878253206113343,
+   "false_steps_per_shared": 0.1686143572621035,
+   "shared_vertices": 1797,
+   "face_f1": 0.589456205894562
+  },
+  "staphorst|F3|planar+J2": {
+   "seam_closure": 0.7081308889958243,
+   "vertex_z_err": 0.4752137209206003,
+   "false_steps_per_shared": 0.16940053683268716,
+   "shared_vertices": 3353,
+   "face_f1": 0.5914786967418546
+  }
+ },
+ "decision": {
+  "areas": {
+   "leidscherijn": {
+    "seam_gain": 0.341970689542452,
+    "z_change": -0.07180502227416274,
+    "face_f1_change": -0.004340569866794652
+   },
+   "staphorst": {
+    "seam_gain": 0.3229946287971231,
+    "z_change": -0.03513721433662065,
+    "face_f1_change": 0.0028527108555947978
+   }
+  },
+  "planar_adopted": true
+ }
+}
