@@ -106,6 +106,12 @@ B3r 0.949 / 0.921, B2 0.976 / 0.954, P8 0.985 / 0.996, P8r 0.987 / 0.996, P8g 0.
 P8rg 0.985 / 0.997. Rings not closed: 0.15-0.33% for every arm. WHU outlines are traced from
 rasters (vertices on pixel corners); P8 reproduces them vertex for vertex, which C-IoU's
 vertex-count term rewards, so the OSM column is the fair comparison (checked visually).
+*Regularised WHU GT (post hoc, user's suggestion):* the 100 WHU tiles' outlines regularised with
+buildingregulariser 0.2.5 (parallel_threshold 3 px, simplify_tolerance 1.5 px, no circles; a sweep
+of 0.5-6 px gave ~0.54x vertices at median IoU 0.95 vs the raw outline; it staircases walls not
+square to the building). C-IoU x det F1 / PoLiS m: B0 0.870 / 0.146, B3r 0.939 / 0.065, B2 0.947
+/ 0.013, P8r 0.982 / 0.010, P8rg 0.982 / 0.010. The raw GT's staircases cost B0 most (0.652 ->
+0.870); the ranking is unchanged.
 Roofs (face F1 / height RMSE m): A1 0.992 / 0.320, P8 0.994 / 0.268, P8r 0.995 / 0.253,
 P8g 0.994 / 0.267, P8rg 0.995 / 0.246.
 
