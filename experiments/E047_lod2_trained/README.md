@@ -50,5 +50,16 @@ if a decision lands within 0.02 of a threshold.
 * Diagnostic arm **A0m** (secondary, not in the rule): A0's plane segmentation inside the learned
   roof extent (F0's tuned extent threshold), separating mask quality from face partitioning.
 
+## Amendment 2 (18:40, before any training; visual check of prepared tiles)
+Rendering prepared tiles showed buildings in the imagery and nDSM without 3DBAG faces, from two
+causes, so windows were filtered (`prepare47.py filter`, `consistency47.py`, `prepare47.py consistency`):
+* Coverage: windows reaching outside the fetched 3DBAG tiles (outlines from the 3DBAG WFS) were
+  dropped: train 714 -> 579, val 97 -> 60, test 80 -> 66.
+* Time: 3DBAG (BAG 2025) vs the AHN survey: faces on flat ground (new builds) or smooth elevated
+  roofs without faces (demolished). A tile is kept if >= 90% of its face pixels have nDSM > 1.5 m
+  and smooth (5x5 std < 0.3 m) elevated (> 2.5 m) blobs >= 25 m^2 away from faces cover <= 10% of
+  the face area: train 579 -> 502, val 60 -> 59, test 66 -> 48 (leidscherijn 21, staphorst 27).
+The test set is therefore a subset of E031's windows; the decision rule is unchanged.
+
 ## Results
 (pending)

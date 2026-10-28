@@ -153,5 +153,76 @@ def repair():
         print(split, "repaired", n, "of", len(tiles), flush=True)
 
 
+def coverage(area: str):
+    """Union of the fetched 3DBAG tiles' outlines (RD New) for one area."""
+    import shapely
+    import urllib.parse
+
+    have = {p.name.split(".")[0].replace("-", "/") for p in (RAW / area).glob("*.city.json")}
+    faces = E.load_faces(RAW / area)
+    b = shapely.total_bounds(np.array([f["poly"] for f in faces]))
+    q = urllib.parse.urlencode({"service": "WFS", "version": "2.0.0", "request": "GetFeature",
+                                "typeNames": "BAG3D:tiles", "outputFormat": "application/json",
+                                "bbox": ",".join(map(str, b)) + ",EPSG:28992"})
+    feats = json.loads(subprocess.run(["curl", "-s", "-f", "--max-time", "120", f"{F.WFS}?{q}"],
+                                      capture_output=True, check=True).stdout)["features"]
+    polys = [shapely.geometry.shape(f["geometry"]) for f in feats if f["properties"]["tile_id"] in have]
+    if len(polys) != len(have):
+        raise RuntimeError(f"{area}: {len(polys)} outlines for {len(have)} fetched tiles")
+    return shapely.union_all(polys)
+
+
+def _subset(split: str, keep: list[int]):
+    tiles = pickle.loads((CACHE / f"{split}_tiles.pkl").read_bytes())
+    for name in ("img", "ndsm", "inst"):
+        a = np.load(CACHE / f"{split}_{name}.npy", mmap_mode="r")
+        out = np.lib.format.open_memmap(CACHE / f"{split}_{name}.tmp.npy", "w+", a.dtype, (len(keep),) + a.shape[1:])
+        for j, i in enumerate(keep):
+            out[j] = a[i]
+        out.flush()
+        del a, out
+        (CACHE / f"{split}_{name}.tmp.npy").replace(CACHE / f"{split}_{name}.npy")
+    kept = [tiles[i] for i in keep]
+    (CACHE / f"{split}_tiles.pkl").write_bytes(pickle.dumps(kept))
+    (CACHE / f"{split}_meta.json").write_text(json.dumps([[t.area, t.index, t.x0, t.y1] for t in kept]))
+    return tiles, kept
+
+
+def filter_consistency(min_support: float = 0.9, max_unlabelled: float = 0.1):
+    """Drop tiles where 3DBAG and the AHN nDSM disagree (consistency47.py; README amendment 2)."""
+    st = json.loads((CACHE / "consistency.json").read_text())
+    for split in SPLITS:
+        keep = [i for i, (fs, un) in enumerate(st[split]) if fs >= min_support and un <= max_unlabelled]
+        tiles, kept = _subset(split, keep)
+        print(split, "kept", len(kept), "of", len(tiles), {a: sum(t.area == a for t in kept) for a in {t.area for t in tiles}}, flush=True)
+    (CACHE / "consistency.json").rename(CACHE / "consistency_applied.json")
+
+
+def filter_coverage():
+    """Keep only windows fully inside the fetched 3DBAG coverage: outside it, buildings exist in
+    the imagery and nDSM but have no roof faces (visual check, README amendment 2)."""
+    import shapely
+
+    s = E.TILE * E.GSD
+    for split in SPLITS:
+        tiles = pickle.loads((CACHE / f"{split}_tiles.pkl").read_bytes())
+        cov = {a: coverage(a) for a in {t.area for t in tiles}}
+        keep = [i for i, t in enumerate(tiles)
+                if cov[t.area].buffer(0.5).contains(shapely.box(t.x0, t.y1 - s, t.x0 + s, t.y1))]
+        for name in ("img", "ndsm", "inst"):
+            a = np.load(CACHE / f"{split}_{name}.npy", mmap_mode="r")
+            out = np.lib.format.open_memmap(CACHE / f"{split}_{name}.tmp.npy", "w+", a.dtype, (len(keep),) + a.shape[1:])
+            for j, i in enumerate(keep):
+                out[j] = a[i]
+            out.flush()
+            del a, out
+            (CACHE / f"{split}_{name}.tmp.npy").replace(CACHE / f"{split}_{name}.npy")
+        kept = [tiles[i] for i in keep]
+        (CACHE / f"{split}_tiles.pkl").write_bytes(pickle.dumps(kept))
+        (CACHE / f"{split}_meta.json").write_text(json.dumps([[t.area, t.index, t.x0, t.y1] for t in kept]))
+        by = {a: sum(t.area == a for t in kept) for a in cov}
+        print(split, "kept", len(keep), "of", len(tiles), by, flush=True)
+
+
 if __name__ == "__main__":
-    {"fetch3dbag": fetch3dbag, "build": build, "repair": repair}[sys.argv[1]]()
+    {"fetch3dbag": fetch3dbag, "build": build, "repair": repair, "filter": filter_coverage, "consistency": filter_consistency}[sys.argv[1]]()
