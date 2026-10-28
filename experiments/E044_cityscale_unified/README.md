@@ -34,5 +34,24 @@ workers-0 fix (Codex review) are also in.
 Unified heads viable on real data if, on test: R4 APLS >= R0 - 0.01, R4 junction F1 >= R0 + 0.05,
 and R4 crossings kept >= R0 + 0.20. (Single seed: a screen; seeds 1-2 only if it passes.)
 
-## Results
-(pending)
+## Results (17:01; seed 0, 108 test tiles, 961 GT crossings)
+Training: 14.6 min; val mask IoU 0.0000 at epoch 5 (the mask switched on late in this run; the
+debug run reached 0.360), 0.42 at 10, 0.51 at 25-40 (final 0.508).
+Tuned on val: R0 thr 0.5, spur 30, gap 50, simplify 2; R4 mode surface, thr_k 0.2, thr_line 0.3.
+
+| arm | APLS | junction F1 | crossings kept |
+|---|---|---|---|
+| R0 | 0.555 | 0.512 | 0.339 |
+| R4 | 0.560 | 0.535 | 0.590 |
+| R4 - R0 | +0.005 (need >= -0.01: pass) | +0.024 (need >= +0.05: **fail**) | +0.251 (need >= +0.20: pass) |
+
+**Decision: not viable under the registered rule** (junction F1 gain 0.024 < 0.05). R4 lost on no
+metric and kept 25 points more of the overpasses, so it is a candidate default road decoder
+rather than a junction fix; that is a new claim, tested on fresh seeds in E044b below (seed 0
+excluded from it).
+
+## E044b (registered 17:05, after seeing seed 0; seed 0 is not evidence for it)
+Claim: R4 decoding of the unified heads is a safe default over R0 on the same model. Seeds 1 and 2,
+same code (worktree e044-90736d4), same tuning and test protocol. R4 adopted as the default road
+decoder if, on test, for both seeds: R4 APLS >= R0 - 0.01, R4 junction F1 >= R0 - 0.01, and R4
+crossings kept >= R0 + 0.10. Otherwise R0 stays the default and the crossing heads stay optional.
