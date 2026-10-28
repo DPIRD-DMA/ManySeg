@@ -61,5 +61,11 @@ causes, so windows were filtered (`prepare47.py filter`, `consistency47.py`, `pr
   the face area: train 579 -> 502, val 60 -> 59, test 66 -> 48 (leidscherijn 21, staphorst 27).
 The test set is therefore a subset of E031's windows; the decision rule is unchanged.
 
+## E047b (registered 18:40, after seeing E047's val PQ 0.14 and under-segmented terraces, before any test result)
+Training length: same data, model, losses and evaluation, **150 epochs** (seed 0, checkpoint
+`B3_s0_e150`, separate test ledger entry). E047's loss was still falling at epoch 40 (3.5 min of
+training on 502 tiles). The README rule applies unchanged to E047b; if E047 and E047b disagree,
+E047b (longer training) decides and the difference is reported.
+
 ## Results
 (pending)

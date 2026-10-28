@@ -166,7 +166,7 @@ def main():
     ap.add_argument("--procs", type=int, default=6)
     ap.add_argument("--limit", type=int, default=None)
     args = ap.parse_args()
-    out = HERE / "runs" / f"eval_s{args.seed}{'_limit' if args.limit else ''}.json"
+    out = HERE / "runs" / f"eval_{args.model.stem}{'_limit' if args.limit else ''}.json"
     sha = hashlib.sha256(args.model.read_bytes()).hexdigest()
     ledger = HERE / "runs" / "test_ledger.json"  # test once per checkpoint (Codex E047 #4)
     led = json.loads(ledger.read_text()) if ledger.exists() else {}
