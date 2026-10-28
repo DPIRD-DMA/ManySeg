@@ -81,7 +81,7 @@ for (k, arm), rs in sorted(by.items()):
 
 print("\n== L0 kill rules (README A1)")
 ref = {"roads": ("R2", "apls"), "buildings": ("B2", "ciou_x_f1"), "roofs": ("A1", "face_f1")}
-for key, arms in (("roads", ("P8", "P8r", "R3")), ("buildings", ("P8", "P8r")), ("roofs", ("P8", "P8r"))):
+for key, arms in (("roads", ("P8", "P8r", "R3", "P8g", "P8rg", "R3g")), ("buildings", ("P8", "P8r", "P8g", "P8rg")), ("roofs", ("P8", "P8r", "P8g", "P8rg"))):
     rarm, metric = ref[key]
     if (key, rarm) not in out:
         continue

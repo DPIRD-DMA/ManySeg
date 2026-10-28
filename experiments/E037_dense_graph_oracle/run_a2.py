@@ -170,12 +170,15 @@ def score(key, t, pred_or_faces):
     return e031.metrics(t, faces, e031.planes_for(faces, t.height))["face_f1"]
 
 
-def decode(key, arm, a, rule, gap):
+def decode(key, arm, a, rule, gap, heal=False):
     if key == "roads":
         if arm.startswith("R3"):
             return P.decode_r3(a, dict(R.R3_P, rule=rule, gap=gap))
-        return P.decode_p8_roads(a, dict(R.P8_ROAD, rule=rule, gap=gap))
-    return P.decode_p8_faces(a, {"simplify": 0.5, "rule": rule, "gap": gap})
+        return P.decode_p8_roads(a, dict(R.P8_ROAD, rule=rule, gap=gap, heal=heal))
+    return P.decode_p8_faces(a, {"simplify": 0.5, "rule": rule, "gap": gap, "heal": heal})
+
+
+DECODERS = (("and", 0, False), ("or", 0, False), ("and", 10, False), ("or", 10, False), ("or", 0, True), ("or", 10, True))
 
 
 def encode(key, arm, t):
@@ -198,14 +201,21 @@ def work_chain(job):
     rows = []
     l0 = score(key, t, decode(key, arm, a, "and", 0))
     for q in QS:
-        for corr in (False, True):
+        for kind in ("link", "link3", "node"):
             for seed in SEEDS:
-                rng = np.random.default_rng([seed, ti, int(q * 1e4), corr, hash(key) % 1000])
-                b = delete_links(a, q, corr, rng, region)
-                for rule in ("and", "or"):
-                    for gap in (0, 10):
-                        rows.append(dict(key=key, tile=ti, arm=arm, q=q, corr=corr, seed=seed, rule=rule, gap=gap,
-                                         l0=l0, score=score(key, t, decode(key, arm, b, rule, gap)), n_links=nlinks))
+                rng = np.random.default_rng([seed, ti, int(q * 1e4), len(kind), sum(map(ord, key))])
+                if kind == "node":  # missing pixels: their neighbours still point at them
+                    kill = (rng.random(a["node"].shape) < q) & (a["node"] > 0.5)
+                    if region is not None:
+                        kill &= region
+                    b = dict(a, node=np.where(kill, 0.0, a["node"]))
+                else:
+                    b = delete_links(a, q, kind == "link3", rng, region)
+                for rule, gap, hl in DECODERS:
+                    if hl and arm.startswith("R3"):
+                        continue
+                    rows.append(dict(key=key, tile=ti, arm=arm, q=q, kind=kind, seed=seed, rule=rule, gap=gap, heal=hl,
+                                     l0=l0, score=score(key, t, decode(key, arm, b, rule, gap, hl)), n_links=nlinks))
     return rows
 
 
