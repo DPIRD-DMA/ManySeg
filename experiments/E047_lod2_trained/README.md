@@ -79,4 +79,23 @@ numbers were seen before this amendment; the new objective is E031's documented 
 from them.
 
 ## Results
+
+### E047 (40 epochs; tuning degenerate, see amendment 3; not decision-grade)
+Training 3.5 min, val PQ 0.142 (under-segmentation 0.68: adjacent roof faces merged in terraces).
+Every arm used the first setting of its grid. Test (48 tiles):
+
+| arm | area | face F1 | height RMSE m | corner F1 | C-IoU | normal err deg |
+|---|---|---|---|---|---|---|
+| A0 | leidscherijn | 0.284 | 1.76 | 0.155 | 0.448 | 7.2 |
+| A0 | staphorst | 0.314 | 2.05 | 0.103 | 0.342 | 6.1 |
+| A0m | leidscherijn | 0.322 | 1.41 | 0.271 | 0.514 | 6.6 |
+| A0m | staphorst | 0.400 | 1.18 | 0.221 | 0.424 | 5.8 |
+| F0 | leidscherijn | 0.442 | 1.34 | 0.205 | 0.183 | 6.0 |
+| F0 | staphorst | 0.473 | 1.22 | 0.135 | 0.141 | 3.1 |
+| F3 | leidscherijn | 0.441 | 1.51 | 0.323 | 0.638 | 5.9 |
+| F3 | staphorst | 0.477 | 1.32 | 0.292 | 0.646 | 3.2 |
+
+Floor: 3DBAG faces + planes from the input nDSM give 0.80 / 0.55 m RMSE.
+
+### E047b (150 epochs)
 (pending)
