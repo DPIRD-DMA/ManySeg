@@ -21,7 +21,7 @@ E = M.E
 HERE = Path(__file__).resolve().parent
 RUNS = HERE / "runs"
 TEST_AREAS = ("leidscherijn", "staphorst")
-SEEDS = tuple(int(x) for x in os.environ.get("E043_SEEDS", "0,1,2,3,4").split(","))  # E043b: 5-9
+SEEDS = tuple(int(x) for x in os.environ.get("E043_SEEDS", "0,1,2,3,4").replace(":", ",").split(","))  # E043b: 5:6:7:8:9
 _T: dict = {}
 
 
