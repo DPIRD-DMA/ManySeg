@@ -48,7 +48,9 @@ class Tiles(torch.utils.data.Dataset):
         prob = np.asarray(self.prob[i]).astype(np.float32) / 255
         d = np.asarray(self.dir[i]).astype(np.float32) / 127
         if self.augment:
-            rng = np.random.default_rng()
+            # per-sample generator from the worker's torch seed (derived from the DataLoader's seeded
+            # generator) and the sample index: reproducible for a given --seed (Codex E044 #1)
+            rng = np.random.default_rng([torch.initial_seed() % 2 ** 32, i])
             if rng.random() < 0.5:  # horizontal flip
                 img, prob, d = img[..., ::-1], prob[..., ::-1], d[..., ::-1]
                 d = d * np.array([1, -1, 1, -1], np.float32)[:, None, None]
@@ -144,7 +146,7 @@ def main():
         if args.limit:
             ds = torch.utils.data.Subset(ds, range(min(args.limit, len(ds))))
         dl = torch.utils.data.DataLoader(ds, batch_size=args.batch_size, shuffle=train_mode, drop_last=train_mode,
-                                         num_workers=args.workers, pin_memory=True, persistent_workers=True,
+                                         num_workers=args.workers, pin_memory=True, persistent_workers=args.workers > 0,
                                          generator=torch.Generator().manual_seed(args.seed))
         return DeviceLoader(dl, device)
 

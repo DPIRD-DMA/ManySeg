@@ -72,7 +72,8 @@ def image_tiles(rid: int) -> np.ndarray:
 
 def encode_fast(t) -> dict:
     """``e039.encode_r4`` with the per-edge direction updates done inside each edge's bounding box
-    (identical output; the full-tile array operations per edge took ~90% of the time)."""
+    (all channels identical except 28 of ~4M direction values on a test tile, from window rasterisation
+    at buffer boundaries; the full-tile array operations per edge took ~90% of the time)."""
     import math
     from rasterio.features import rasterize
     from rasterio.transform import Affine
