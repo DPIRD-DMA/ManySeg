@@ -55,3 +55,12 @@ intersection) removes about a third of false step walls at no cost in vertex hei
 with orientation as the primary (new pre-registration) is warranted before choosing; on this
 evidence the trained LoD2 design should keep a height head with a robust fit and consider two
 slope channels if roof orientation matters.
+
+# E043b: plane and join choice with orientation as the primary measure (pre-registered 2026-10-28 16:40)
+E043 showed its height-RMSE criterion cannot move (shared faces dominate it). Re-test, fresh
+corruption seeds 5-9 (E043 used 0-4), same tiles, arms, parameters and code. Rules (fixed now):
+* Slope rasters adopted if, at >= 2 of L1-L3, slope's normal error <= robust's - 1 deg and its false
+  steps <= robust's x 1.10 (J2 both).
+* Robust adopted over fit if its normal error is lower at L1-L3 and height RMSE within +0.02 m (J1).
+* J2 adopted if, for the chosen plane arm, false steps <= J1's x 0.8 at L1 and L2 and vertex z error
+  <= J1's + 0.02 m.

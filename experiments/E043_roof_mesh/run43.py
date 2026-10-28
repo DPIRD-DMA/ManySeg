@@ -20,7 +20,8 @@ import e043 as M
 E = M.E
 HERE = Path(__file__).resolve().parent
 RUNS = HERE / "runs"
-TEST_AREAS, SEEDS = ("leidscherijn", "staphorst"), (0, 1, 2, 3, 4)
+TEST_AREAS = ("leidscherijn", "staphorst")
+SEEDS = tuple(int(x) for x in os.environ.get("E043_SEEDS", "0,1,2,3,4").split(","))  # E043b: 5-9
 _T: dict = {}
 
 
@@ -83,6 +84,16 @@ def main():
            "robust_beats_fit": all(g("robust", "J1", lv, "h_rmse") <= g("fit", "J1", lv, "h_rmse") for lv in (1, 2, 3)),
            "J2_better": all(g(a, "J2", lv, "vertex_z_err") <= g(a, "J1", lv, "vertex_z_err") - 0.05
                             and g(a, "J2", lv, "false_steps") <= g(a, "J1", lv, "false_steps") for a in ("robust",) for lv in (1, 2))}
+    if os.environ.get("E043_SEEDS"):  # E043b rules (README)
+        best_arm = "slope" if len([lv for lv in (1, 2, 3)
+                                   if g("slope", "J2", lv, "normal_err_deg") <= g("robust", "J2", lv, "normal_err_deg") - 1.0
+                                   and g("slope", "J2", lv, "false_steps") <= 1.10 * g("robust", "J2", lv, "false_steps")]) >= 2 else "robust"
+        dec = {"slope_adopted": best_arm == "slope",
+               "robust_over_fit": all(g("robust", "J1", lv, "normal_err_deg") < g("fit", "J1", lv, "normal_err_deg")
+                                      and g("robust", "J1", lv, "h_rmse") <= g("fit", "J1", lv, "h_rmse") + 0.02 for lv in (1, 2, 3)),
+               "J2_adopted": all(g(best_arm, "J2", lv, "false_steps") <= 0.8 * g(best_arm, "J1", lv, "false_steps")
+                                 and g(best_arm, "J2", lv, "vertex_z_err") <= g(best_arm, "J1", lv, "vertex_z_err") + 0.02 for lv in (1, 2)),
+               "plane_arm": best_arm}
     out["decision"] = dec
     print(json.dumps(dec, indent=1))
     (RUNS / f"decision{sfx}.json").write_text(json.dumps(out, indent=1))
