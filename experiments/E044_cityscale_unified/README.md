@@ -7,7 +7,7 @@ work (16:13) with remote/local compute as reasonable.
 
 ## Data and model
 City-Scale (Sat2Graph's 20 cities, 1 m/px): 144 train / 9 val / 27 test regions of 2048 px, each cut
-into four 1024 tiles (`data.py`). Targets (E039 `encode_r4`): road surface (6 m wide; City-Scale
+into four 1024 tiles (`data.py`). Targets (E039 `encode_r4` logic, `data.encode_fast`: per-edge updates restricted to the edge's bounding box, ~50x faster; on a test tile 28 of ~4M direction values differ from `encode_r4` (window rasterisation at buffer boundaries), all other channels identical): road surface (6 m wide; City-Scale
 has no widths), 3 px centreline, junction / end / crossing heatmaps (crossings = City-Scale's
 overpass annotations), two-mode (cos 2t, sin 2t) direction. One ResNet34 U-Net (`train44.py`),
 heads mask, line, kp (3), direction (4); losses BCE+Dice (mask, line), focal with explicit
