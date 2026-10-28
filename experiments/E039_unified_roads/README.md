@@ -34,6 +34,21 @@ Tuned on Innaloo per level (2 seeds) over thr_k {0.2, 0.4} x zr {8, 12} x pair_d
 gap {0, 25, 50}; R0 and R2 use E028's tuned parameters per level. Test: Murdoch and Northam,
 levels 0-3, seeds 0-4; R0, R2 and R4 decoded on the same corrupted draws.
 
+## Amendment 1 (2026-10-28 13:10, after smoke tiles only; no tuning or test result read)
+Rendered smoke tiles (Murdoch 1, 3, 5, 9 at L0-L2) changed the design before any full run:
+* **Lines head = thin centreline band (3 px)**, separate from the road surface (region): with the
+  surface as the line support, dual carriageways whose surfaces touch became ladders. This is the
+  road analogue of B3's outline channel.
+* Keypoint peaks are kept only on the road surface (noise peaks off-road flooded L1).
+* The thin centreline is fragile under corruption (its skeleton grows spurs that defeat gap
+  bridging: one tile, L1, APLS 0.07 -> 0.17 with bridging vs surface 0.17 -> 0.71), so the decoder
+  has three **modes**, chosen by tuning like any parameter: `centre` (centreline skeleton, dead
+  ends healed along the surface skeleton), `surface` (surface skeleton, as R0) and `hybrid`
+  (surface skeleton, replaced by the centreline within 15 px of branch points that no junction or
+  crossing keypoint explains). A tried "drop ladder rungs" rule was abandoned (it cut lanes).
+* Grid now thr_k {0.2, 0.4} x zr {8, 12} x mode {centre, surface, hybrid}; pair_deg 150, line
+  threshold 0.3, gap = R0's tuned gap per level (compute). Decision rule unchanged.
+
 ## Decision rule (fixed now)
 Pooled over the two test areas:
 1. **Topology gain**: R4 junction F1 >= R0's + 0.10 at L0 and at L1, and R4 keeps >= 50% of

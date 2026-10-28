@@ -1,0 +1,349 @@
+"""E039 R4: the unified head set on roads. Road mask + junction / end / crossing keypoint heatmaps +
+a two-mode (cos 2t, sin 2t) direction field; decoded as R0's skeleton graph outside keypoint zones
+and arm pairing inside them (README)."""
+
+from __future__ import annotations
+
+import math
+import sys
+from pathlib import Path
+
+import networkx as nx
+import numpy as np
+import shapely
+from rasterio.features import rasterize
+from scipy.sparse.csgraph import minimum_spanning_tree
+from shapely.geometry import LineString, Point
+from shapely.ops import unary_union
+
+HERE = Path(__file__).resolve().parent
+sys.path[:0] = [str(HERE.parent / "E028_vector_oracle"), str(HERE.parent / "E037_dense_graph_oracle")]
+import e028 as E  # noqa: E402
+
+CLASSES = ("junction", "end", "crossing")
+
+
+def _chains(g: nx.Graph) -> dict:
+    """Edge -> id of its degree-2 chain."""
+    out, k = {}, 0
+    for u, v in g.edges():
+        if frozenset((u, v)) in out:
+            continue
+        stack = [(u, v)]
+        while stack:
+            a, b = stack.pop()
+            e = frozenset((a, b))
+            if e in out:
+                continue
+            out[e] = k
+            for n in (a, b):
+                if g.degree(n) == 2:
+                    stack += [(n, m) for m in g.neighbors(n) if frozenset((n, m)) not in out]
+        k += 1
+    return out
+
+
+def encode_r4(t) -> E.Targets:
+    g = t.graph
+    S = (E.TILE, E.TILE)
+    arr = {"mask": E.road_mask(t)}
+    # lines head = thin centreline band (3 px), the road analogue of B3's outline channel: touching
+    # road surfaces (dual carriageways) stay separate centrelines (smoke-tile fix, README)
+    arr["line"] = rasterize([(LineString([g.nodes[u]["xy"], g.nodes[v]["xy"]]).buffer(1.5), 1) for u, v in g.edges()],
+                            out_shape=S, transform=E.IDENT, dtype="uint8").astype(np.float32)
+    pts = {
+        "junction": np.array([g.nodes[n]["xy"] for n in g if g.degree(n) >= 3]).reshape(-1, 2),
+        "end": np.array([g.nodes[n]["xy"] for n in g if g.degree(n) == 1 and not E._near_border(g.nodes[n]["xy"])]).reshape(-1, 2),
+        "crossing": np.array(t.crossings, float).reshape(-1, 2),
+    }
+    for c in CLASSES:
+        arr[c] = E.gaussian_points(pts[c], 2.0) if len(pts[c]) else np.zeros(S, np.float32)
+    d = np.zeros((4, *S), np.float32)  # mode 1: channels 0-1, mode 2: channels 2-3
+    owner = np.full(S, -1, np.int64)
+    ang1 = np.full(S, np.nan, np.float32)
+    cid = _chains(g)
+    for u, v, data in g.edges(data=True):
+        p, q = g.nodes[u]["xy"], g.nodes[v]["xy"]
+        th = math.atan2(q[1] - p[1], q[0] - p[0])
+        m = rasterize([(LineString([p, q]).buffer(data["width"] / 2), 1)], out_shape=S,
+                      transform=E.IDENT, dtype="uint8").astype(bool)
+        c = cid[frozenset((u, v))]
+        first = m & (owner < 0)
+        d[0][first], d[1][first] = math.cos(2 * th), math.sin(2 * th)
+        owner[first], ang1[first] = c, th
+        dang = np.abs(((ang1 - th) + math.pi / 2) % math.pi - math.pi / 2)
+        second = m & (owner >= 0) & (owner != c) & (dang > math.radians(20))
+        d[2][second], d[3][second] = math.cos(2 * th), math.sin(2 * th)
+    arr["direction"] = d
+    return E.Targets(arr, ("mask", "line") + CLASSES, {c: pts[c] for c in CLASSES if len(pts[c])})
+
+
+def corrupt_r4(tg, t, cfg: dict, seed: int) -> dict:
+    out = E.corrupt(tg, t, cfg, seed)
+    d = tg.arrays["direction"].copy()
+    if cfg["occ"] > 0:
+        d[:, E._disk_mask(E.occlusion_disks(t, cfg["occ"], seed))] = 0
+    if cfg["vec"] > 0:
+        d = d + E._rng(seed, t, "direction").normal(0, 0.1 * cfg["vec"], d.shape).astype(np.float32)
+    out["direction"] = d
+    return out
+
+
+def _heading(line_coords: np.ndarray, at_end: bool, back: float = 6.0) -> np.ndarray:
+    """Unit vector pointing *into* the zone from the arm's line (the end at the zone boundary)."""
+    c = line_coords if at_end else line_coords[::-1]
+    tip = c[-1]
+    L = LineString(c)
+    p = np.asarray(L.interpolate(max(L.length - back, 0)).coords[0])
+    v = tip - p
+    n = np.hypot(*v)
+    return v / n if n > 1e-6 else np.zeros(2)
+
+
+def _refine_heading(h: np.ndarray, tip: np.ndarray, d: np.ndarray, back: float = 6.0) -> np.ndarray:
+    """Direction-field axis nearest the skeleton heading, sampled over the last ``back`` px; sign
+    from the skeleton. Falls back to the skeleton heading where the field is weak."""
+    if not h.any():
+        return h
+    H, W = d.shape[1:]
+    best, best_dot = None, 0.0
+    for k in (0, 2):
+        vs = []
+        for s in np.linspace(0, back, 4):
+            x, y = tip - h * s
+            c, r = int(np.clip(x, 0, W - 1)), int(np.clip(y, 0, H - 1))
+            vs.append(d[k:k + 2, r, c])
+        cs = np.mean(vs, 0)
+        if np.hypot(*cs) < 0.3:
+            continue
+        th = 0.5 * math.atan2(cs[1], cs[0])
+        axis = np.array([math.cos(th), math.sin(th)])
+        dot = abs(float(axis @ h))
+        if dot > best_dot:
+            best, best_dot = axis * np.sign(axis @ h), dot
+    return best if best is not None and best_dot > math.cos(math.radians(30)) else h
+
+
+def decode_r4(a: dict, p: dict) -> nx.Graph:
+    surf = E.decode_r0({"mask": a["mask"]}, dict(p["r0"], gap=0))
+    E.CACHE.clear()
+    H, W = a["mask"].shape
+
+    def on_mask(q):  # keypoints live on the line support (smoke-tile fix: noise peaks off-road)
+        if not len(q):
+            return q
+        c = np.clip(q[:, 0].astype(int), 0, W - 1); r = np.clip(q[:, 1].astype(int), 0, H - 1)
+        return q[a["mask"][r, c] > p["r0"]["thr"]]
+
+    peaks = {c: on_mask(E._peaks(a[c], p["thr_k"], 5)) for c in CLASSES}
+    allk = [(c, q) for c in CLASSES for q in peaks[c]]
+    mode = p.get("mode", "hybrid")
+    if mode == "surface":
+        r0 = surf
+    elif mode == "centre":
+        line = E.decode_r0({"mask": a["line"]}, dict(p["r0"], thr=p["thr_line"], gap=0))
+        E.CACHE.clear()
+        r0 = surface_heal(line, surf, 80.0)
+    else:
+        r0 = with_centrelines(surf, a, p, np.array([q for c, q in allk if c != "end"]).reshape(-1, 2))
+    if not allk:
+        return E.bridge_ends(r0 if p.get("mode") != "surface" else surf, p["gap"])
+    zone = unary_union([Point(q).buffer(p["zr"]) for _, q in allk])
+    zones = list(getattr(zone, "geoms", [zone]))
+    outside = []
+    for u, v in r0.edges():
+        ln = LineString([r0.nodes[u]["xy"], r0.nodes[v]["xy"]]).difference(zone)
+        outside += [np.asarray(x.coords) for x in getattr(ln, "geoms", [ln]) if not x.is_empty and x.length > 0]
+    segs = list(outside)
+    bnd = [z.boundary for z in zones]
+    arms = {i: [] for i in range(len(zones))}  # zone -> [(tip, heading)]
+    tips_seen = set()
+    for c in outside:
+        for at_end in (False, True):
+            tip = c[-1] if at_end else c[0]
+            key = (round(tip[0], 3), round(tip[1], 3))
+            hits = [i for i, b in enumerate(bnd) if b.distance(Point(tip)) <= 0.5]
+            if not hits or key in tips_seen:
+                continue
+            tips_seen.add(key)
+            h = _refine_heading(_heading(c, at_end), tip, a["direction"])
+            arms[hits[0]].append((tip, h))
+    cos_pair = math.cos(math.radians(p["pair_deg"]))
+    for i, z in enumerate(zones):
+        ks = {c: [q for q in peaks[c] if z.contains(Point(q))] for c in CLASSES}
+        A = arms[i]
+        if not A:
+            continue
+        if ks["junction"]:
+            J = np.array(ks["junction"])
+            for tip, _ in A:
+                segs.append(np.array([tip, J[np.argmin(np.hypot(*(J - tip).T))]]))
+            if len(J) > 1:
+                D = np.hypot(*(J[:, None] - J[None]).transpose(2, 0, 1))
+                mst = minimum_spanning_tree(D).tocoo()
+                segs += [np.array([J[r], J[c]]) for r, c in zip(mst.row, mst.col)]
+        elif ks["crossing"]:
+            free = list(range(len(A)))
+            cand = sorted(((float(A[x][1] @ A[y][1]), x, y) for x in free for y in free if x < y))
+            used = set()
+            for dot, x, y in cand:  # most opposite first (dot near -1)
+                if dot > cos_pair:
+                    break
+                if x in used or y in used:
+                    continue
+                used |= {x, y}
+                segs.append(np.array([A[x][0], A[y][0]]))
+            C = np.array(ks["crossing"][0])
+            segs += [np.array([A[x][0], C]) for x in free if x not in used]
+        elif ks["end"]:
+            Q = np.array(ks["end"][0])
+            segs += [np.array([tip, Q]) for tip, _ in A]
+    g = _graph(segs)
+    for comp in list(nx.connected_components(g)):
+        if E.graph_length(g.subgraph(comp)) < 20:
+            g.remove_nodes_from(comp)
+    return E.bridge_ends(g, p["gap"])
+
+
+def with_centrelines(surf: nx.Graph, a: dict, p: dict, kp: np.ndarray, r: float = 15.0) -> nx.Graph:
+    """Robust base = road-surface skeleton. Where it branches with no junction/crossing keypoint
+    within ``zr`` (a mask artefact: touching parallel roads make ladders), replace it inside a
+    disk of radius ``r`` by the thin centreline channel's skeleton, joined in vector space
+    (smoke-tile design, README)."""
+    from scipy.spatial import cKDTree
+    tree = cKDTree(kp) if len(kp) else None
+    art = [surf.nodes[n]["xy"] for n in surf if surf.degree(n) >= 3
+           and (tree is None or tree.query(surf.nodes[n]["xy"])[0] > p["zr"])]
+    if not art:
+        return surf
+    zone = unary_union([Point(q).buffer(r) for q in art])
+    line = E.decode_r0({"mask": a["line"]}, dict(p["r0"], thr=p["thr_line"], gap=0, spur=5, min_len=0))
+    E.CACHE.clear()
+    out_l, in_l = [], []
+    for g_, keep_out, dst in ((surf, True, out_l), (line, False, in_l)):
+        for u, v in g_.edges():
+            ln = LineString([g_.nodes[u]["xy"], g_.nodes[v]["xy"]])
+            ln = ln.difference(zone) if keep_out else ln.intersection(zone)
+            dst += [np.asarray(x.coords) for x in getattr(ln, "geoms", [ln]) if not x.is_empty and x.length > 0 and x.geom_type == "LineString"]
+    g = _graph(out_l + in_l)
+    bnd = zone.boundary
+    deg = dict(g.degree())
+    eo = [n for n in g if deg[n] == 1 and bnd.distance(Point(g.nodes[n]["xy"])) <= 0.5]
+    ei = [n for n in g if deg[n] == 1 and bnd.distance(Point(g.nodes[n]["xy"])) <= 2.0 and n not in eo]
+    if eo and ei:
+        xo = np.array([g.nodes[n]["xy"] for n in eo]); xi = np.array([g.nodes[n]["xy"] for n in ei])
+        d = np.hypot(*(xo[:, None] - xi[None]).transpose(2, 0, 1))
+        uo, ui = set(), set()
+        for flat in np.argsort(d, axis=None):
+            k, m = divmod(int(flat), d.shape[1])
+            if d[k, m] > 6.0:
+                break
+            if k not in uo and m not in ui:
+                uo.add(k); ui.add(m); g.add_edge(eo[k], ei[m])
+    return g
+
+
+def surface_heal(gl: nx.Graph, gs: nx.Graph, max_len: float = 80.0, snap: float = 4.0) -> nx.Graph:
+    """Fallback to the robust channel: from each dead end of the centreline graph ``gl``, follow
+    the road-surface skeleton ``gs`` (shortest path, <= ``max_len`` px) to the nearest surface node
+    that lies on a *different* part of ``gl`` (another component, or > 3x the straight distance
+    away along ``gl``), and add that path. Paths must start at a dead end, so ladder rungs between
+    touching lanes (which join lanes mid-way) are never added (smoke-tile fix, README)."""
+    from scipy.spatial import cKDTree
+    if gl.number_of_nodes() == 0 or gs.number_of_nodes() == 0:
+        return gl
+    g = gl.copy()
+    ln = list(g); lxy = np.array([g.nodes[n]["xy"] for n in ln]); ltree = cKDTree(lxy)
+    sn = list(gs); sxy = np.array([gs.nodes[n]["xy"] for n in sn]); stree = cKDTree(sxy)
+    for u, v in gs.edges():
+        gs.edges[u, v]["w"] = float(np.hypot(*(gs.nodes[u]["xy"] - gs.nodes[v]["xy"])))
+    comp = {n: k for k, c in enumerate(nx.connected_components(g)) for n in c}
+    ends = [n for n in gl if gl.degree(n) == 1 and not E._near_border(gl.nodes[n]["xy"])]
+    for e in ends:
+        d0, j0 = stree.query(g.nodes[e]["xy"])
+        if d0 > snap:
+            continue
+        src = sn[j0]
+        dist, paths = nx.single_source_dijkstra(gs, src, cutoff=max_len, weight="w")
+        best = None
+        for t_, L in sorted(dist.items(), key=lambda kv: kv[1]):
+            if L < 2 * snap:
+                continue
+            dd, jj = ltree.query(gs.nodes[t_]["xy"])
+            if dd > snap:
+                continue
+            tgt = ln[jj]
+            if tgt == e:
+                continue
+            if comp.get(tgt) != comp.get(e):
+                best = (t_, tgt); break
+            try:
+                along = nx.shortest_path_length(gl, e, tgt, weight=lambda a_, b_, _: float(np.hypot(*(gl.nodes[a_]["xy"] - gl.nodes[b_]["xy"]))))
+            except nx.NetworkXNoPath:
+                along = np.inf
+            if along > 3 * L:
+                best = (t_, tgt); break
+        if best is None:
+            continue
+        path = paths[best[0]]
+        prev = e
+        for k, s_ in enumerate(path):
+            nid = ("heal", e, k)
+            g.add_node(nid, xy=np.asarray(gs.nodes[s_]["xy"], float))
+            g.add_edge(prev, nid)
+            prev = nid
+        g.add_edge(prev, best[1])
+    return g
+
+
+def _drop_rungs(g: nx.Graph, kp: np.ndarray, zr: float, max_len: float = 30.0):
+    """Nodes come from keypoints: a node of degree >= 3 with no keypoint within ``zr`` is a mask
+    artefact (ladder rungs between touching parallel roads); drop its shortest incident chain if
+    shorter than ``max_len`` px (smoke-tile fix, README)."""
+    from scipy.spatial import cKDTree
+    tree = cKDTree(kp) if len(kp) else None
+    for _ in range(3):
+        changed = False
+        for n in [n for n in g if g.degree(n) >= 3]:
+            if n not in g or g.degree(n) < 3:
+                continue
+            if tree is not None and tree.query(g.nodes[n]["xy"])[0] <= zr:
+                continue
+            best = None
+            for m in g.neighbors(n):  # walk each incident chain to its next branch node
+                path, prev, cur, L = [n, m], n, m, float(np.hypot(*(g.nodes[m]["xy"] - g.nodes[n]["xy"])))
+                while g.degree(cur) == 2:
+                    nxt = next(x for x in g.neighbors(cur) if x != prev)
+                    L += float(np.hypot(*(g.nodes[nxt]["xy"] - g.nodes[cur]["xy"])))
+                    prev, cur = cur, nxt
+                    path.append(cur)
+                    if L > max_len:
+                        break
+                if g.degree(cur) >= 3 and L <= max_len and (best is None or L < best[0]):
+                    best = (L, path)
+            if best is not None:
+                g.remove_edges_from(zip(best[1][:-1], best[1][1:]))
+                g.remove_nodes_from([x for x in best[1][1:-1] if g.degree(x) == 0])
+                changed = True
+        if not changed:
+            break
+
+
+def _graph(segs) -> nx.Graph:
+    """Polylines -> graph; coincident points merged; crossings of different lines are NOT noded."""
+    g = nx.Graph()
+    ids: dict = {}
+
+    def nid(q):
+        k = (round(float(q[0]), 3), round(float(q[1]), 3))
+        if k not in ids:
+            ids[k] = len(ids)
+            g.add_node(ids[k], xy=np.array([float(q[0]), float(q[1])]))
+        return ids[k]
+
+    for s in segs:
+        for u, v in zip(s[:-1], s[1:]):
+            a, b = nid(u), nid(v)
+            if a != b:
+                g.add_edge(a, b)
+    return g
