@@ -205,3 +205,17 @@ def test_graph_blocks_equal_global():
         for block, halo in ((128, 48), (200, 64), (256, 40)):
             b = graph_from_mask_blocks(p, 0.5, block=block, halo=halo, spur=10, gap=25, min_area=30)
             assert _edges(b) == _edges(g), (seed, block, halo)
+
+
+def test_graph_blocks_torch_and_empty():
+    """Codex 10-28 #2/#3: torch input (with grad) and zero-sized scenes."""
+    import torch
+    from manyseg.vectors.graph import graph_from_mask, graph_from_mask_blocks
+
+    p = _road_prob(0, 200, 240)
+    t = torch.from_numpy(p).requires_grad_(True)
+    a = graph_from_mask_blocks(t, 0.5, block=96, halo=48, spur=10, gap=25, min_area=30)
+    b = graph_from_mask(p, 0.5, spur=10, gap=25, min_area=30)
+    assert _edges(a) == _edges(b)
+    for shape in ((0, 10), (10, 0)):
+        assert len(graph_from_mask_blocks(np.zeros(shape, np.float32), 0.5).edges) == 0

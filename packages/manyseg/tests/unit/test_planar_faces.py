@@ -28,3 +28,17 @@ def test_far_faces_unchanged():
     a, b = shapely.box(0, 0, 10, 10), shapely.box(20, 0, 30, 10)
     out = planar_faces([a, b], tolerance=2.5)
     assert [p.equals(q) for p, q in zip(out, [a, b])] == [True, True]
+
+
+def test_face_cut_in_two_keeps_all_area():
+    """Codex 10-28 #1: an overlapping face cuts another in two; no covered area is lost."""
+    a, b = shapely.box(0, 0, 10, 10), shapely.box(4, -1, 6, 11)
+    out = planar_faces([a, b], tolerance=0.1)
+    assert shapely.union_all(out).area == pytest.approx(shapely.union_all([a, b]).area)
+    assert all(p.geom_type == "Polygon" for p in out)
+
+
+def test_multipolygon_input_is_split():
+    mp = shapely.MultiPolygon([shapely.box(0, 0, 2, 2), shapely.box(5, 0, 7, 2)])
+    out = planar_faces([mp, shapely.box(2.5, 0, 4.5, 2)], tolerance=1.0)
+    assert len(out) == 3 and all(p.geom_type == "Polygon" for p in out)

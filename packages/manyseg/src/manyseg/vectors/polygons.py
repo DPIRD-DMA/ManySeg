@@ -62,11 +62,15 @@ def planar_faces(polygons, tolerance: float = 2.5) -> list:
     Faces are snapped, largest first, onto the faces already placed within ``tolerance`` px; all
     outlines are noded together and re-polygonised; each cell goes to the input face covering
     most of it (cells under 50% covered are dropped) and a face's cells are merged. Faces with no
-    cell are dropped; holes are not kept. Returned in input order. E048b (trained LoD2 faces):
+    cell are dropped; holes are not kept. Returned in input order; MultiPolygon inputs are split
+    into their parts first, and a face whose cells come out disconnected (another face cut through
+    it) keeps its largest part in place with the other parts appended at the end, so no covered
+    area is lost. E048b (trained LoD2 faces):
     seam closure 0.38 -> 0.72 (3DBAG's own faces: 0.79), heights better, face F1 unchanged.
     """
     shapely = _deps()[1]
-    faces = list(polygons)
+    faces = [q for p in polygons for q in getattr(p, "geoms", [p])
+             if q.geom_type == "Polygon" and not q.is_empty]
     if len(faces) < 2 or tolerance <= 0:
         return faces
     tree = shapely.STRtree(faces)
@@ -87,16 +91,17 @@ def planar_faces(polygons, tolerance: float = 2.5) -> list:
         a, j = max((faces[int(k)].intersection(c).area, int(k)) for k in cand)
         if a >= 0.5 * c.area:
             parts.setdefault(j, []).append(c)
-    out = []
+    out, extra = [], []
     for j in range(len(faces)):
         if j not in parts:
             continue
         u = shapely.union_all(parts[j])
-        if u.geom_type == "MultiPolygon":
-            u = max(u.geoms, key=lambda g: g.area)
-        if u.geom_type == "Polygon" and u.area > 1:
-            out.append(shapely.Polygon(u.exterior))
-    return out
+        pieces = [g for g in getattr(u, "geoms", [u]) if g.geom_type == "Polygon" and g.area > 1]
+        pieces.sort(key=lambda g: -g.area)
+        if pieces:
+            out.append(shapely.Polygon(pieces[0].exterior))
+            extra += [shapely.Polygon(g.exterior) for g in pieces[1:]]
+    return out + extra
 
 def _apply(transform, xy: np.ndarray) -> list:
     if transform is None:

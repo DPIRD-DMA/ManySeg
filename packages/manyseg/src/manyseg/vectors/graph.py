@@ -375,7 +375,11 @@ def graph_from_mask_blocks(prob, threshold: float = 0.5, *, block: int = 2048, h
     remove_small_objects, skeletonize = _deps()[3:]
     from scipy import ndimage
 
+    if hasattr(prob, "detach"):  # as graph_from_mask (Codex 10-28 #2)
+        prob = prob.detach().float().cpu().numpy()
     H, W = prob.shape[-2:]
+    if H == 0 or W == 0:
+        return VectorGraph(np.zeros((0, 2)), np.zeros((0, 2), np.int64))
     rows, cols = [], []
     for b in block_grid((H, W), block, halo):
         w = np.asarray(prob[b.window[0], b.window[1]], np.float32) > threshold
