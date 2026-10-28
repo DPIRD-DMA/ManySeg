@@ -40,6 +40,8 @@ def task_for(run_arm: str):
 def build(run_arm: str):
     heads = instance_heads() if run_arm == "B0" else task_for(run_arm).heads()  # B2* / B3
     model = create_model(backbone="resnet34.tv_in1k", in_channels=3, pretrained=True, heads=heads)
+    if run_arm == "B3":  # CenterNet prior: corner head starts at p = 0.1, not 0.5 (focal loss ~200 at init)
+        torch.nn.init.constant_(model.heads.corner.conv.bias, -2.19)
     return model
 
 

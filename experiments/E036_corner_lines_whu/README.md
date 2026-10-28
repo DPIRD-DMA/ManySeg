@@ -15,7 +15,7 @@ decoder uses the direction's orientation only (unit-normalised; norm < 0.1 = no 
 Pre-launch Codex review (notes/codex_e036.md) changed the corner loss from plain BCE (sparse
 target, constant-low optimum) and added the normalisation; corners on pixel edges peak at 0.94,
 so the default `>= 0.999` positive rule would have found none. At init on 16 WHU train tiles:
-instance loss 3.6, corner focal 2.3. Code: `manyseg.vectors.corner_targets`,
+instance loss 3.6, corner focal 2.3 with the corner bias initialised to −2.19 (CenterNet prior, p = 0.1; without it the preflight epoch averaged loss 199). Code: `manyseg.vectors.corner_targets`,
 `polygons_from_corners`; `E030_whu_polygons/train.py --arm B3`. Decoding: instances with B0 seed
 0's tuned thresholds (extent 0.6, boundary 0.5, seed 0.15), then `polygons_from_corners`, tuned on
 val over 16 settings (`corner_threshold` {0.3, 0.5}, `big_dev` {4, 8}, `agree` {0.4, 0.6},
