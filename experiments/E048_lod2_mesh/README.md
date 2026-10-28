@@ -25,5 +25,25 @@ neighbouring buildings can lie 0.1-2 px apart without touching; 1.0 is not the t
 Snapping adopted (into `manyseg.vectors`) if, for F3 on both test areas: seam closure rises by
 >= 0.20, vertex z error worsens by <= 0.05 m and face F1 drops by <= 0.01. F0 reported alongside.
 
-## Results
-(pending)
+## Results (19:28; 3 min, local)
+Val seam closure (F3): r 1.0: 0.349, r 1.5: 0.383, r 2.5: 0.421 -> r = 2.5 px. Test (48 tiles):
+
+| area | faces | join | seam closure | vertex z err m | false steps / shared | shared vertices | face F1 |
+|---|---|---|---|---|---|---|---|
+| leidscherijn | F0 | J2 | 0.733 | 0.523 | 0.156 | 10690 | 0.574 |
+| leidscherijn | F0 | snap+J2 | 0.648 | 0.515 | 0.163 | 3190 | 0.563 |
+| leidscherijn | F3 | J2 | 0.384 | 0.683 | 0.150 | 794 | 0.570 |
+| leidscherijn | F3 | snap+J2 | 0.490 | 0.657 | 0.181 | 1750 | 0.570 |
+| staphorst | F0 | J2 | 0.681 | 0.397 | 0.151 | 13075 | 0.619 |
+| staphorst | F0 | snap+J2 | 0.614 | 0.400 | 0.164 | 3250 | 0.611 |
+| staphorst | F3 | J2 | 0.385 | 0.510 | 0.167 | 658 | 0.589 |
+| staphorst | F3 | snap+J2 | 0.503 | 0.488 | 0.169 | 1797 | 0.589 |
+
+**Decision: snapping not adopted** (F3 seam closure +0.107 / +0.118, below the +0.20 bar; vertex z
+error slightly better, face F1 unchanged). Two observations for the next design: (1) F0's
+pixel-edge outlines already close most seams (0.68 at staphorst vs 0.79 for 3DBAG's own faces),
+because neighbouring instances share exact pixel edges, and snapping makes F0 worse (its staircase
+vertices merge); (2) F3's straight walls leave cracks that vertex snapping only partly closes:
+closing them needs edge-level joining (a vertex of one face onto the edge of its neighbour, i.e.
+T-junctions), or decoding all faces of a building jointly as one planar graph.
+
