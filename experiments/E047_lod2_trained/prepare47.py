@@ -114,7 +114,7 @@ def build():
         img = np.lib.format.open_memmap(CACHE / f"{split}_img.npy", "w+", np.uint8, (len(tiles), 512, 512, 3))
         nd = np.lib.format.open_memmap(CACHE / f"{split}_ndsm.npy", "w+", np.float16, (len(tiles), 512, 512))
         inst = np.lib.format.open_memmap(CACHE / f"{split}_inst.npy", "w+", np.int32, (len(tiles), 512, 512))
-        with ThreadPoolExecutor(4) as ex:
+        with ThreadPoolExecutor(8) as ex:
             for i, (rgb, h) in enumerate(ex.map(inputs, tiles)):
                 img[i], nd[i] = rgb, h
                 f = tiles[i].faces
