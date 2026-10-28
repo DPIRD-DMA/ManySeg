@@ -59,7 +59,7 @@ def _row(t, faces, planes):
 def summarise(acc):
     f1 = 2 * acc["tp"] / max(1, acc["n_gt"] + acc["n_pred"])
     rmse = float(np.sqrt(acc["sq_err"] / max(1, acc["n_px"])))
-    return {"face_f1": f1, "h_rmse": rmse, "score": f1 * (1 - min(1.0, rmse)),
+    return {"face_f1": f1, "h_rmse": rmse, "score": f1 / (1.0 + rmse),  # E031's score (amendment 3)
             "corner_f1": 2 * acc["corner_tp"] / max(1, acc["corner_gt"] + acc["corner_pred"]),
             "ciou": acc["ciou_tp"] / max(1, acc["tp"]),
             "normal_err_deg": acc["normal_sum"] / acc["n_normal"] if acc["n_normal"] else float("nan"), "tp": acc["tp"], "n_gt": acc["n_gt"], "n_pred": acc["n_pred"]}

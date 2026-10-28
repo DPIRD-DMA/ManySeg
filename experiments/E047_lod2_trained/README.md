@@ -67,5 +67,16 @@ Training length: same data, model, losses and evaluation, **150 epochs** (seed 0
 training on 502 tiles). The README rule applies unchanged to E047b; if E047 and E047b disagree,
 E047b (longer training) decides and the difference is reported.
 
+## Amendment 3 (18:50, after E047's test result, before E047b's evaluation)
+E047's tuning objective `face F1 x (1 - min(1, RMSE / 1 m))` was 0 for every setting of every arm
+(all height RMSEs > 1 m), so val tuning silently took the first setting of each grid. The README
+named it "E031's score", but E031's amended score is `face F1 / (1 + RMSE)` (`e031.score`), which
+is used from now on. Why RMSEs exceed 1 m: even 3DBAG's own faces with planes fitted to the input
+nDSM give 0.80 m (leidscherijn) / 0.55 m (staphorst) RMSE (ground definition: median nDSM - GT
+offset -0.24 m; eaves and resampling at roof edges), so any imperfect partition saturated the cap.
+**E047 (40 epochs) is reported but not decision-grade; E047b decides.** Disclosure: E047's test
+numbers were seen before this amendment; the new objective is E031's documented one, not chosen
+from them.
+
 ## Results
 (pending)
