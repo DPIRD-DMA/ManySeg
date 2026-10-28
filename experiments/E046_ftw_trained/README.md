@@ -38,6 +38,9 @@ keep B0. If seed 0 lands within 0.01 of either threshold, seed 1 of both arms de
 * `prepare46` aborts on any incomplete split; `evaluate46` tunes both arms on val before any
   test, refuses to re-run a seed's test, records checkpoint hashes, and applies the rule above
   in code (`decide`).
+* Labels: FTW Netherlands labels arable land only (`crop_types: Bouwland` in the data config);
+  grassland parcels are background, as in the FTW benchmark. Both arms learn and are scored the
+  same way; absolute boundary precision is lowered by visible but unlabelled fields.
 * GPU nondeterminism (cuDNN) is not removed; seed 1 handles near-threshold cases as registered.
 
 ## Results
