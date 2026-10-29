@@ -1,4 +1,7 @@
-"""Prepared datasets are uint8 arrays cached on disk: images (N, H, W, C), masks (N, H, W)."""
+"""Prepared datasets are uint8 arrays cached on disk: images (N, H, W, C), masks (N, H, W).
+
+Targets encoded from geometry (vector-output tasks) are several label arrays per split,
+``{split}_masks.{name}.npy`` (e.g. ``corner``, ``direction``), loaded as a dict."""
 
 from __future__ import annotations
 
@@ -49,7 +52,7 @@ class DatasetInfo:
 @dataclass
 class Split:
     images: np.ndarray | dict[str, np.ndarray]  # (N, H, W, C) or {input: (N, H, W, C)}
-    masks: np.ndarray   # (N, H, W) uint8
+    masks: np.ndarray | dict[str, np.ndarray]  # (N, H, W) uint8, or {name: (N, [K,] H, W)}
     names: list[str]
     vectors: dict[str, np.ndarray] | None = None  # {name: (N, columns) float32}
 
@@ -61,23 +64,30 @@ def save_split(cache: Path, split: str, images, masks: np.ndarray, names: list[s
             np.save(cache / f"{split}_images.{k}.npy", v)
     else:
         np.save(cache / f"{split}_images.npy", images)
-    np.save(cache / f"{split}_masks.npy", masks)
+    if isinstance(masks, dict):
+        for k, v in masks.items():
+            np.save(cache / f"{split}_masks.{k}.npy", v)
+    else:
+        np.save(cache / f"{split}_masks.npy", masks)
     (cache / f"{split}_names.json").write_text(json.dumps(names))
 
 
 def load_split(cache: Path, split: str, mmap: bool = True) -> Split:
     mode = "r" if mmap else None
     masks, names = cache / f"{split}_masks.npy", cache / f"{split}_names.json"
+    mask_files = sorted(cache.glob(f"{split}_masks.*.npy"))
     single = cache / f"{split}_images.npy"
     multi = sorted(cache.glob(f"{split}_images.*.npy"))
-    if not masks.exists() or not names.exists() or not (single.exists() or multi):
+    if not (masks.exists() or mask_files) or not names.exists() or not (single.exists() or multi):
         raise FileNotFoundError(f"dataset split {split!r} not prepared in {cache}. "
                                 "Run `manyseg-bench prepare <dataset>`.")
     if single.exists():
         images = np.load(single, mmap_mode=mode)
     else:
         images = {f.name[len(split) + 8:-4]: np.load(f, mmap_mode=mode) for f in multi}
-    return Split(images, np.load(masks, mmap_mode=mode), json.loads(names.read_text()))
+    labels = (np.load(masks, mmap_mode=mode) if masks.exists() else
+              {f.name[len(split) + 7:-4]: np.load(f, mmap_mode=mode) for f in mask_files})
+    return Split(images, labels, json.loads(names.read_text()))
 
 
 def channel_stats(images: np.ndarray, chunk: int = 16) -> tuple[list[float], list[float]]:

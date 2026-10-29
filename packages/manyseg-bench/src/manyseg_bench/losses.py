@@ -42,15 +42,24 @@ def masked_regression(pred: Tensor, target: Tensor, mask: Tensor | None = None,
 
 
 def heatmap_focal(logits: Tensor, target: Tensor, alpha: float = 2.0, beta: float = 4.0,
-                  pos: Tensor | None = None) -> Tensor:
+                  pos: Tensor | None = None, min_pos: int = 1) -> Tensor:
     """CenterNet penalty-reduced focal loss for Gaussian centre heatmaps (logits in). ``pos``
     (bool, like ``target``) marks the centre pixels; default ``target >= 0.999``, which misses
-    centres that fall between pixels (pass e.g. the target's local maxima then)."""
+    centres that fall between pixels (pass e.g. the target's local maxima then). The summed loss
+    is divided by the number of positives, at least ``min_pos``."""
     p = logits.float().sigmoid().clamp(1e-6, 1 - 1e-6)
     pos = target >= 0.999 if pos is None else pos
     pos_loss = -((1 - p) ** alpha) * torch.log(p) * pos
     neg_loss = -((1 - target) ** beta) * (p ** alpha) * torch.log(1 - p) * (~pos)
-    return (pos_loss.sum() + neg_loss.sum()) / pos.sum().clamp(min=1)
+    return (pos_loss.sum() + neg_loss.sum()) / pos.sum().clamp(min=min_pos)
+
+
+def heatmap_peaks(target: Tensor, threshold: float = 0.5) -> Tensor:
+    """Positives of a Gaussian heatmap target ``(B, C, H, W)`` for :func:`heatmap_focal`: its
+    3 x 3 local maxima above ``threshold`` (a point on a pixel edge never reaches 1 at a pixel
+    centre, so ``target >= 0.999`` would miss it)."""
+    t = target.float()
+    return (t > threshold) & (t == F.max_pool2d(t, 3, 1, 1))
 
 
 def distance_map(geometry, max_distance: float = 32.0):

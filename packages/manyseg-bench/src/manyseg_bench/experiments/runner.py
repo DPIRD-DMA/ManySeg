@@ -27,7 +27,9 @@ def _select(split, info, subset: int | None = None):
         sl = slice(0, subset)
         split.images = ({k: v[sl] for k, v in split.images.items()}
                         if isinstance(split.images, dict) else split.images[sl])
-        split.masks, split.names = split.masks[sl], split.names[:subset]
+        split.masks = ({k: v[sl] for k, v in split.masks.items()}
+                       if isinstance(split.masks, dict) else split.masks[sl])
+        split.names = split.names[:subset]
     return split
 
 
@@ -229,6 +231,8 @@ def run_training(
 
     stack = spec.input_mode != "dict"
     common = dict(mean=mean, std=std, device=dev, stack=stack, **info_loader_kwargs(ds))
+    if task.direction_targets:  # direction fields: exact dihedral augmentation only
+        common.update(dihedral=True, directions=task.direction_targets)
     train_loader = GPULoader(train_split.images, train_split.masks, rec.batch_size, train=True,
                              seed=seed, vectors=train_split.vectors, **common)
     val = get_split("val")
