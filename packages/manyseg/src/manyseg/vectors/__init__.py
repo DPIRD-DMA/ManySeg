@@ -87,3 +87,9 @@ __all__ += [
     "roof_faces", "roof_mesh", "roof_planes", "roof_records", "write_records",
 ]
 # --- end block decoders ---
+
+# --- block-wise road graphs (vec/road-blocks) ---
+from .roads import RoadBlockDecoder  # noqa: E402
+
+__all__ += ["RoadBlockDecoder"]
+# --- end block-wise road graphs ---
