@@ -812,6 +812,23 @@ from manyseg.vectors import graph_tensor_heads, polygons_from_tensor
 Metrics (APLS, GEO precision / recall, junction F1, grade-separated crossings, C-IoU, PoLiS,
 N-ratio) are in `manyseg_bench.evaluation.vectors`.
 
+**Training presets.** Two trained models have head presets, target encoders and bench tasks with
+the experiments' losses. Both use built-in head types; the focal-loss heatmap heads start at
+`p = 0.1` (`bias_init = logit(0.1)`).
+
+| Preset | Heads | Targets | Bench task (`manyseg_bench.tasks`) | Decoding |
+| --- | --- | --- | --- | --- |
+| `corner_line_heads()`: footprints, fields, roof faces (B3; E036, E038, E047) | `extent`, `boundary`, `distance` (as `instance_heads`), `corner` (1), `direction` (2: `cos 2t`, `sin 2t`) | `instance_targets(ids, boundary_width=2)` + `corner_targets(polygons, shape)` | `CornerLineTask` (`"corner_lines"`): instance loss + CenterNet focal (corner) + masked L1 (direction on outlines); PQ | `instances_from_outputs` → `polygons_from_corners` |
+| `road_heads()`: roads (R4; E039, E044) | `mask` (1), `line` (1), `keypoints` (3: junction, end, crossing), `direction` (4: two modes) | `road_targets(graph, shape, crossings=, width=6)` | `RoadGraphTask` (`"roads"`): Dice + BCE (mask, line) + focal over the keypoints (positives floored at 16) + L1 (mode 1 on roads, mode 2 at crossings); mask IoU | `graph_from_road_heads` |
+
+Targets carry pixel widths, sigmas and angles, so augment them only with the 8 exact dihedral
+transforms (`manyseg.vectors.dihedral(a, d, direction=True)` for the direction fields: a quarter
+turn negates `(cos 2t, sin 2t)`, a flip negates `sin 2t`, a transpose `cos 2t`;
+`dihedral_geometry` / `dihedral_xy` move the polygons or graph to match). The bench does this
+itself for these tasks (`GPULoader(dihedral=True, directions=...)`), from a dataset cache whose
+labels are a dict of target arrays (`{split}_masks.{name}.npy`). Example:
+[`examples/vector_presets.py`](../examples/vector_presets.py).
+
 > **Evidence (E009, Sen1Floods11, leave-events-out):** FiLM beat metadata-as-channels (+1.3
 > water IoU, 2.9 SE, all folds); FiLM vs no metadata was +0.9 but under the 2 SE bar. Lat/lon added
 > nothing on held-out events. **E013 (CloudSEN12+, unseen locations):** FiLM with lat/lon, day of

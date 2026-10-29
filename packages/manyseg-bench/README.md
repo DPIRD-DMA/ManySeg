@@ -18,7 +18,8 @@ manyseg-bench evaluate runs/<run>.json --variants fp32,bf16,int8_weight_only
   fingerprints; remote-sensing weights fed their own pretraining normalisation.
 * **Tasks:** semantic and multi-label segmentation, instances (PQ, object F1), points (point
   F1, count MAE), image classification, multi-label classification and regression, binary
-  and semantic change detection, and time series. Datasets include Oxford Pet, Sen1Floods11,
+  and semantic change detection, time series, and vector-output training (corner-line
+  instances, unified roads; targets from geometry, dihedral augmentation of direction fields). Datasets include Oxford Pet, Sen1Floods11,
   CloudSEN12+, AI4Boundaries, OAM-TCD, PASTIS, EuroSAT, BigEarthNet v2, OSCD, LEVIR-CD and
   SECOND, with licence checks and leakage-safe splits.
 * **Provenance:** every result JSON records the environment, code version, GPU contention,

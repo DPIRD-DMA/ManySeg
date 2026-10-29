@@ -106,6 +106,14 @@ First release. Python 3.10–3.14, PyTorch ≥ 2.10, timm ≥ 1.0.20.
   E030.
 * `manyseg-bench`: `evaluation.vectors` with APLS, GEO, junction F1, crossing scores and polygon
   metrics (C-IoU, detection F1, PoLiS, N-ratio).
+* Training presets for the trained vector models: `corner_line_heads` (instance heads + `corner`
+  + `direction`) and `road_heads` (`mask`, `line`, `keypoints`, `direction`), focal-loss heatmap
+  heads starting at `p = 0.1`; `road_targets` (road graph → surface, centreline, junction / end /
+  crossing heatmaps, two-mode direction; identical to E044's encoder); `dihedral`,
+  `dihedral_xy`, `dihedral_geometry` (the 8 exact flips / rotations / transposes, with the
+  double-angle direction rule). `manyseg-bench`: `CornerLineTask` (`"corner_lines"`) and
+  `RoadGraphTask` (`"roads"`) with the E030 / E044 losses; `GPULoader` takes label dicts,
+  `dihedral=True` and `directions=`, and the runner uses them for tasks with direction targets.
 ### Performance (E026; values unchanged up to rounding)
 
 * bf16 autocast no longer carries float32 activations where CUDA runs an op in float32:
