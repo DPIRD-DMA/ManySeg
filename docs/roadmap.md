@@ -146,7 +146,7 @@ style edge classifiers) would be a separate optional module, never a head.
   supported by PyTorch). CI: Linux 3.10 / 3.14, Windows on PRs and nightly.
 * ✅ GPU fuzzer (CUDA vs CPU, bf16, `torch.compile`): found a PyTorch Inductor bug in dynamic
   nearest upsampling, worked around (`docs/upstream/`).
-* ⏳ README status line (currently "pre-alpha").
+* ✅ README status line and classifiers: alpha.
 * ✅ PyPI packaging for `manyseg` and `manyseg-bench` independently: metadata, licence and
   `py.typed` in each wheel, PyPI READMEs, `twine check` clean, and the `manyseg` wheel installs and
   runs alone (CI `package` job on PRs and nightly). Both names are free on PyPI. **Not

@@ -20,7 +20,8 @@ Any number of bands, several inputs at different resolutions, metadata, and many
   </picture>
 </p>
 
-> **Status: pre-alpha.** The API may still change before the first release.
+> **Status: alpha.** Before 1.0 the API may change between minor versions; every change is
+> listed in [`CHANGELOG.md`](https://github.com/DPIRD-DMA/ManySeg/blob/main/CHANGELOG.md).
 
 ## Install
 

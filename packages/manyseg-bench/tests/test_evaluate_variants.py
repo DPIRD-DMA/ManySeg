@@ -1,6 +1,8 @@
 """Re-evaluating a saved run under precision / int8 variants (E008)."""
 
 import json
+import shutil
+import sys
 
 import numpy as np
 import pytest
@@ -108,6 +110,8 @@ def test_int8_pt2e_handles_a_smaller_final_batch(saved_run, monkeypatch):
     assert 0.5 < ev["variants"]["int8_pt2e"]["test"]["agreement"] <= 1.0
 
 
+@pytest.mark.skipif(sys.platform == "win32" and shutil.which("cl") is None,
+                    reason="inductor's CPU backend needs MSVC (cl) on Windows")
 def test_compiled_int8_with_uneven_batches_and_failures_are_recorded(saved_run, monkeypatch):
     """Regression: torch.compile + inductor freezing on a dynamic-batch PT2E program crashed in
     dynamo, and one failing variant discarded every other variant's results."""
