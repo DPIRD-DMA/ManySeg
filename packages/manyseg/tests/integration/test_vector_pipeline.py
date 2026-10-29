@@ -91,9 +91,10 @@ ORIGIN = (155_123.37, 463_456.81)
 #   1 px, and acute hip-end tips narrower than the 2 x 2 px boundary band get no seed, so the
 #   face loses its tip (single-pass face IoU down to 0.75 on the large scenes). Roofs use the
 #   in-repo round trip's mean (``unit/test_vector_targets.py::test_roof_face_round_trip``:
-#   mean > 0.93) and no per-face or PoLiS floor (its min 0.88 is for its three houses; E028
-#   has no face numbers): per face, stitching is held to the single pass instead (agreement
-#   below), which is exact for roofs with absolute distance and merge="cut";
+#   mean > 0.93); its per-face 0.88 is for its three houses, so the per-face floor here is a
+#   regression guard below the worst single-pass face measured on these scenes (0.75, an
+#   acute tip), and there is no PoLiS bound (E028 has no face numbers). Per face, stitching is
+#   held to the single pass (agreement below), exact with absolute distance and merge="cut";
 # * roads R4: recall >= 0.999 and precision >= 1.0 of centreline length within 3 px, junctions
 #   within 4 px (E028 / E044 oracle level 0; ``unit/test_vector_targets.py``);
 # * per object: IoU >= ``min_iou`` (the round-trip tests' per-object floors), so one bad object
@@ -102,7 +103,7 @@ ORIGIN = (155_123.37, 463_456.81)
 #   in one block; E050b's metric): every object matched with IoU >= 0.99.
 THRESHOLDS = {
     "footprints": {"mean_iou": 0.989, "min_iou": 0.93, "polis_m": 0.074},
-    "roofs": {"mean_iou": 0.93, "min_iou": None, "polis_m": None},
+    "roofs": {"mean_iou": 0.93, "min_iou": 0.70, "polis_m": None},
     "fields": {"mean_iou": 0.972, "min_iou": 0.95, "polis_m": 0.237},
     "roads": {"recall": 0.999, "precision": 1.0, "tol_px": 3.0, "junction_px": 4.0},
 }
@@ -868,15 +869,32 @@ def read_files(run: Run):
     assert len(gdf) == len(gj)
     for a, b in zip(gj, gdf.geometry):
         assert a.equals_exact(b, 1e-6), "GeoJSON and GPKG disagree"
+    # the attributes too: the same columns and values in both files
+    props = [f["properties"] for f in fc["features"]]
+    for col in gdf.columns.drop("geometry"):
+        got = [p.get(col) for p in props]
+        want = gdf[col].tolist()
+        assert all(x == y or (isinstance(x, float) and np.isclose(x, y))
+                   for x, y in zip(got, want)), f"GeoJSON and GPKG disagree on {col!r}"
+    assert {k for p in props for k in p} == set(gdf.columns.drop("geometry"))
     return gj, gdf
 
 
-class Failures(list):
-    """Failed checks of one run, written out with diagnostics before failing the test."""
+class ChecksFailed(AssertionError):
+    """Failed checks of one run; ``kinds`` names each failed check."""
 
-    def check(self, ok, msg):
+    def __init__(self, msg, kinds):
+        super().__init__(msg)
+        self.kinds = set(kinds)
+
+
+class Failures(list):
+    """Failed checks of one run as (kind, message), written out with diagnostics before
+    failing the test."""
+
+    def check(self, ok, msg, kind="other"):
         if not ok:
-            self.append(msg)
+            self.append((kind, msg))
 
     def finish(self, tmp, run: Run, source_w, decoded_w, bad, *, lines=False):
         if not self:
@@ -884,7 +902,8 @@ class Failures(list):
         png = render(tmp / f"{run.task}_diagnostic.png", run.grid, source_w, decoded_w, bad,
                      lines=lines, title=f"{run.task} {run.merge} {run.opt.label} {run.grid}")
         gj = dump_bad(tmp / f"{run.task}_bad.geojson", bad)
-        pytest.fail("\n".join(self) + f"\ndiagnostics: {png}, {gj}")
+        raise ChecksFailed("\n".join(f"[{k}] {m}" for k, m in self)
+                           + f"\ndiagnostics: {png}, {gj}", [k for k, _ in self])
 
 
 def check_polygons(run: Run, tmp, *, agree_iou: float = 0.99):
@@ -892,9 +911,10 @@ def check_polygons(run: Run, tmp, *, agree_iou: float = 0.99):
     fails = Failures()
     # block decoding: the offset grid, ManyPred's grid and one block give the same records
     fails.check(_same_records(run.records, run.via_manypred),
-                "decode_scene and manypred.postprocess_blocks differ")
+                "decode_scene and manypred.postprocess_blocks differ", "blocks")
     fails.check(_same_records(run.records, run.extras["one_block"]),
-                "block decoding differs from a one-block decode of the stitched fields")
+                "block decoding differs from a one-block decode of the stitched fields",
+                "blocks")
     ids = [r["id"] for r in run.records]
     fails.check(len(set(ids)) == len(ids), "duplicate ids")
     gj, gdf = read_files(run)
@@ -908,25 +928,26 @@ def check_polygons(run: Run, tmp, *, agree_iou: float = 0.99):
     holes = run.task == "fields"  # the corners decoder returns outer rings (documented)
     rep = compare_polygons(run.task, source, decoded, seams, holes=holes, pixel=run.grid.pixel)
     s = rep.summary()
-    fails.check(not rep.missing, f"missing source objects {rep.missing}")
-    fails.check(not rep.extra, f"extra decoded objects {rep.extra}")
-    fails.check(not rep.split, f"split source objects {rep.split}")
-    fails.check(not rep.merged, f"decoded objects merging several sources {rep.merged}")
+    fails.check(not rep.missing, f"missing source objects {rep.missing}", "missing")
+    fails.check(not rep.extra, f"extra decoded objects {rep.extra}", "extra")
+    fails.check(not rep.split, f"split source objects {rep.split}", "split")
+    fails.check(not rep.merged, f"decoded objects merging several sources {rep.merged}",
+                "merged")
     fails.check(not rep.invalid, f"invalid / unclosed polygons {rep.invalid}")
-    fails.check(not rep.holes_lost, f"holes lost {rep.holes_lost}")
+    fails.check(not rep.holes_lost, f"holes lost {rep.holes_lost}", "holes")
     if holes:  # the holed field keeps its hole
         fails.check(sum(len(g.interiors) > 0 for g in decoded)
-                    >= sum(len(g.interiors) > 0 for g in source), "a hole was filled")
+                    >= sum(len(g.interiors) > 0 for g in source), "a hole was filled", "holes")
     fails.check(s["mean_iou"] >= th["mean_iou"],
                 f"mean IoU {s['mean_iou']:.4f} < {th['mean_iou']} (seam objects "
                 f"{rep.summary(True)['mean_iou']:.4f}, others "
-                f"{rep.summary(False)['mean_iou']:.4f})")
+                f"{rep.summary(False)['mean_iou']:.4f})", "mean_iou")
     low = [i for i, v in rep.ious.items() if th["min_iou"] is not None and v < th["min_iou"]]
     fails.check(not low, f"objects under IoU {th['min_iou']}: "
-                         f"{[(i, round(rep.ious[i], 3)) for i in low]}")
+                         f"{[(i, round(rep.ious[i], 3)) for i in low]}", "min_iou")
     fails.check(th["polis_m"] is None or s["mean_polis_m"] <= th["polis_m"],
                 f"mean PoLiS {s['mean_polis_m']:.3f} m > {th['polis_m']} m (worst Hausdorff "
-                f"{s['max_hausdorff_px']:.2f} px)")
+                f"{s['max_hausdorff_px']:.2f} px)", "polis")
     far = (sorted(rep.polis, key=rep.polis.get)[-3:]
            if th["polis_m"] is not None and s["mean_polis_m"] > th["polis_m"] else [])
     # stitching vs one whole-scene encoding decoded in one pass (E050b's agreement)
@@ -935,7 +956,7 @@ def check_polygons(run: Run, tmp, *, agree_iou: float = 0.99):
     fails.check(not (agr.missing or agr.extra or agr.split or agr.merged or changed),
                 f"stitched decode differs from the single pass: changed {changed} "
                 f"(seam: {sorted(set(changed) & agr.seam)}), missing {agr.missing}, "
-                f"extra {agr.extra}, split {agr.split}, merged {agr.merged}")
+                f"extra {agr.extra}, split {agr.split}, merged {agr.merged}", "agreement")
     if run.task == "roofs":
         _check_planes(run, gdf, rep, decoded, source, fails)
     bad = ([source[i] for i in rep.missing + rep.split + low + far]
@@ -983,14 +1004,16 @@ def check_roads(run: Run, tmp):
     m = compare_roads(source, decoded, run.extras["points"], run.grid)
     fails.check(m["recall"] >= th["recall"], f"recall {m['recall']:.4f} < {th['recall']}")
     fails.check(m["precision"] >= th["precision"],
-                f"precision {m['precision']:.4f} < {th['precision']}")
+                f"precision {m['precision']:.4f} < {th['precision']}", "precision")
     j = m["junctions"]
     fails.check(j["source"] == j["decoded"] == j["matched"] and j["degree_ok"],
                 f"junctions {j}")
     fails.check(not m["overpass_junction"], "the overpass became a junction")
     fails.check(m["dead_end_px"] <= th["junction_px"], f"dead end off by {m['dead_end_px']} px")
-    fails.check(m["components"][0] == m["components"][1], f"components {m['components']}")
-    fails.check(abs(m["length_ratio"] - 1) <= 0.01, f"length ratio {m['length_ratio']:.4f}")
+    fails.check(m["components"][0] == m["components"][1], f"components {m['components']}",
+                "components")
+    fails.check(abs(m["length_ratio"] - 1) <= 0.01, f"length ratio {m['length_ratio']:.4f}",
+                "length")
     single = [shapely.LineString(pixel_to_world(p, tf)) for p in run.single.polylines()]
     px = run.grid.pixel
     agree = (_covered(decoded, single, 0.5 * px, px), _covered(single, decoded, 0.5 * px, px))
@@ -1016,38 +1039,84 @@ def _interior_edges(grid: Grid) -> np.ndarray:
     return e
 
 
+def _clipped(run: Run) -> list:
+    """Per window: ``(mask, dist)``, the (H, W) pixels inside the window of the instances it
+    clips (with pixels outside it or on its edge pixels), and each pixel's distance to the
+    window's interior edges (inf where it has none). From the whole-scene instance map: where
+    that tile's encoding can see an instance differently."""
+    lab = run.extras["instances"]
+    H, W = lab.shape
+    out = []
+    yy, xx = np.mgrid[0:H, 0:W] + 0.5
+    for t, b, lft, r in run.grid.windows:
+        inside = np.zeros((H, W), bool)
+        inside[t:b, lft:r] = True
+        # a polygon can cross an edge without a pixel centre beyond it (a corner 0.01 px
+        # past the edge is clipped too): count instances reaching the edge's last pixel
+        core = np.zeros((H, W), bool)
+        core[t + (t > 0) : b - (b < H), lft + (lft > 0) : r - (r < W)] = True
+        ids = np.intersect1d(np.unique(lab[inside]), np.unique(lab[~core]))
+        ids = ids[ids > 0]
+        dist = np.full((H, W), np.inf)
+        for edge, limit, d in ((t, 0, yy - t), (b, H, b - yy), (lft, 0, xx - lft),
+                               (r, W, r - xx)):
+            if edge != limit:
+                dist = np.minimum(dist, d)
+        out.append((inside & np.isin(lab, ids), dist))
+    return out
+
+
+def _supplying(run: Run) -> list:
+    """Per window, the (H, W) pixels whose stitched value it contributes to: its owner pixels
+    with ``merge="cut"``, all it covers with ``"blend"``."""
+    H, W = run.grid.shape
+    out = []
+    for i, (t, b, lft, r) in enumerate(run.grid.windows):
+        if run.merge == "cut":
+            m = run.owner == i
+        else:
+            m = np.zeros((H, W), bool)
+            m[t:b, lft:r] = True
+        out.append(m)
+    return out
+
+
 def invariance(run: Run, band_px: float = 7.0) -> dict:
-    """Where the stitched targets differ from one whole-scene encoding, against where they
-    may: ``band`` (pixels within ``band_px`` of an interior window edge: a polygon or road
-    clipped by the tile gets corners, walls, keypoints and a border there; a Gaussian reaches
-    3 sigma = 6 px), ``corners`` (direction where two walls' bands overlap at a corner: the
-    wall drawn last wins and clipping changes the ring's first vertex) and ``cut`` (instances
-    crossing an interior window edge: per-tile distance)."""
+    """Where the stitched targets differ from one whole-scene encoding (``diffs``), and the
+    zones where they may: ``band`` (pixels within ``band_px`` of an interior window edge: an
+    object clipped by the tile gets corners, walls, keypoints and a border there; a Gaussian
+    reaches 3 sigma = 6 px), ``corners`` (direction where two walls' bands overlap at a
+    corner: the wall drawn last wins and clipping changes the ring's first vertex) and, for
+    instance tasks, over the windows that supply a pixel and clip its instance: ``clipped``
+    (those pixels) and ``far`` (those whose whole-scene distance reaches that window's edge,
+    the only ones where an absolute distance can change)."""
     from scipy import ndimage
 
     edges = _interior_edges(run.grid)
-    band = ndimage.distance_transform_edt(~edges) <= band_px
-    out = {"band": band}
+    out = {"band": ndimage.distance_transform_edt(~edges) <= band_px}
     if "corner" in run.whole_fields:
         out["corners"] = ndimage.binary_dilation(run.whole_fields["corner"][0] >= 0.5,
                                                  iterations=2)
     if "instances" in run.extras:
-        lab = run.extras["instances"]
-        crossing = np.unique(lab[edges & (lab > 0)])
-        out["cut"] = np.isin(lab, crossing[crossing > 0])
-    diffs = {}
-    for k, v in run.fields.items():
-        d = np.abs(v - run.whole_fields[k]).max(0) > 1e-5
-        diffs[k] = d
-    out["diffs"] = diffs
+        d_whole = run.whole_fields["distance"][0]
+        clipped = np.zeros(run.grid.shape, bool)
+        far = np.zeros(run.grid.shape, bool)
+        for (mask, dist), supply in zip(_clipped(run), _supplying(run)):
+            m = mask & supply
+            clipped |= m
+            # absolute distance = 1 + distance to the nearest edge pixel; the tile misses the
+            # edge pixels beyond its edge and has none along it, all >= dist - 1 px away
+            far |= m & (d_whole + 1 >= dist)
+        out["clipped"], out["far"] = clipped, far
+    out["diffs"] = {k: np.abs(v - run.whole_fields[k]).max(0) > 1e-5
+                    for k, v in run.fields.items()}
     return out
 
 
 def check_invariance(run: Run):
     """Stitched targets vs one whole-scene encoding: equal except where :func:`invariance`
     allows. With ``merge="cut"`` and overlap / 2 above the band, the band is never stitched
-    in (each pixel comes from the window it is deepest in), so only the distance of
-    instances crossing a window edge and directions at corner pixels may differ."""
+    in (each pixel comes from the window it is deepest in)."""
     from scipy.ndimage import binary_dilation
 
     inv = invariance(run)
@@ -1057,18 +1126,14 @@ def check_invariance(run: Run):
     for k, d in diffs.items():
         allowed = allowed_any.copy()
         if k == "direction" and "corners" in inv:
-            # at corners (and blended around them), and on the walls of polygons clipped by
-            # a tile: corner_targets simplifies the clipped ring (Douglas-Peucker, 1.5 px),
-            # which can pick other vertices than on the whole ring
-            allowed |= inv["corners"] | binary_dilation(inv["cut"], iterations=2)
+            # at corners (and blended around them), and on the walls of a polygon the
+            # supplying tile clips: corner_targets simplifies the clipped ring
+            # (Douglas-Peucker, 1.5 px), which can keep other vertices than the whole ring
+            allowed |= inv["corners"] | binary_dilation(inv["clipped"], iterations=2)
         if k == "distance":
-            if run.opt.distance == "normalized":
-                allowed |= inv["cut"]
-            else:
-                # absolute: a tile's value differs only where the nearest edge of the
-                # instance lies outside the tile, at least overlap / 2 px away (cut)
-                far = run.whole_fields["distance"][0] >= run.grid.overlap / 2
-                allowed |= inv["cut"] & (far | ~np.asarray(cut_drops_band))
+            # normalised: the clipped instance's maximum differs, so all of it may;
+            # absolute: only where its nearest edge can lie beyond the tile
+            allowed |= inv["clipped"] if run.opt.distance == "normalized" else inv["far"]
         bad = d & ~allowed
         assert not bad.any(), (
             f"{run.task} {run.merge} {run.opt.label}: '{k}' differs from the whole-scene "
@@ -1096,8 +1161,10 @@ TASKS = ["footprints", "fields", "roofs", "roads"]
 NORMALISED_SEAMS = ("normalised distance on fields: seam errors (the stitched distance jumps "
                     "where tiles normalise an instance differently: fields split, merged or "
                     "reshaped at seams) and, in the single pass too, seeds lost in narrow parts "
-                    "(seed threshold 0.3 of the instance maximum: extra pieces); "
-                    "distance='absolute' removes both")
+                    "(seed threshold 0.3 of the instance maximum: extra pieces); on the large "
+                    "scenes the holed field loses its hole and the block decode differs from a "
+                    "one-block decode and from postprocess_blocks (the distance jumps let "
+                    "the watershed reach past the halo); distance='absolute' removes all of it")
 NORMALISED_ROOFS = ("per-tile normalised distance: roof faces in the overlap reshaped under "
                     "blend; distance='absolute' removes it")
 
@@ -1109,7 +1176,7 @@ ACUTE_TIPS = ("decoder limit, also in the single pass: the 45-degree tip of a hi
 BORDER_BRIDGE = ("library issue, also in the single pass: two roads leaving the top scene edge "
                  "48 px apart skeletonise to ends 3.25 px from the border, just past "
                  "bridge_ends' 3 px border margin, and are joined by a 49 px road along the "
-                 "edge (precision 0.985)")
+                 "edge (precision 0.985), which also joins the overpass to the network")
 # (task, merge, distance, str(grid)) of the slow tier that fail for these reasons
 _ORACLE = {
     ("roofs", "cut", "normalized", "700x1000-p256-o32-s0,0"): ACUTE_TIPS,
@@ -1147,11 +1214,12 @@ class ExpectedFailure(AssertionError):
 
 
 # what the failure message of each expected failure must say
-_SIGNATURE = {NORMALISED_SEAMS: ("differs from the single pass", "extra decoded objects",
-                                  "split source objects"),
-              NORMALISED_ROOFS: ("differs from the single pass",),
-              ACUTE_TIPS: ("extra decoded objects",),
-              BORDER_BRIDGE: ("precision",)}
+# the only checks each expected failure may fail; any other failed check fails the test
+_ALLOWED = {NORMALISED_SEAMS: {"agreement", "extra", "split", "merged", "missing", "mean_iou",
+                               "min_iou", "polis", "holes", "blocks"},
+            NORMALISED_ROOFS: {"agreement", "extra", "split", "merged", "missing", "mean_iou"},
+            ACUTE_TIPS: {"extra"},
+            BORDER_BRIDGE: {"precision", "components", "length"}}
 
 
 def _params(grids):
@@ -1181,8 +1249,8 @@ def _run_checks(task, merge, distance, grid, tmp_path):
             check_roads(run, tmp_path)
         else:
             check_polygons(run, tmp_path)
-    except pytest.fail.Exception as e:
-        if reason and any(k in str(e) for k in _SIGNATURE[reason]):
+    except ChecksFailed as e:
+        if reason and e.kinds <= _ALLOWED[reason]:
             raise ExpectedFailure(str(e)) from None
         raise
 
@@ -1192,6 +1260,18 @@ def test_pipeline(task, merge, distance, grid, tmp_path):
     """CRS vectors -> per-tile targets -> ManyPred (cut / blend) -> block decoding -> GeoJSON /
     GPKG -> the source vectors again, on a small scene (CPU, seconds)."""
     _run_checks(task, merge, distance, grid, tmp_path)
+
+
+@pytest.mark.parametrize("merge", ["cut", "blend"])
+@pytest.mark.parametrize("task", ["footprints", "roofs"])
+def test_pipeline_tile_edges_ignore(task, merge, tmp_path):
+    """The experimental tile-invariant corner targets (``tile_edges="ignore"``, with absolute
+    distance) through the same pipeline: same checks, so the option cannot break stitching
+    or decoding unnoticed (``seam_study`` measures it changes nothing at seams)."""
+    grid = grid_for(task, FAST)
+    run = pipeline(task, grid, merge, tmp_path, Options("absolute", "ignore"))
+    check_invariance(run)
+    check_polygons(run, tmp_path)
 
 
 SLOW = [Grid((700, 1000), 256, 32, block=333, halo=64, offset=(101, 157)),
