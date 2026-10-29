@@ -280,9 +280,9 @@ def _prune_spurs(nodes, chains, spur, shape, passes=2):
 
 
 def bridge_ends(g, gap: float, shape):
-    """Join mutually-nearest dangling ends (degree 1, not within ``BORDER_MARGIN`` = 5 px of the image border) of
-    the ``networkx`` graph ``g`` (nodes carry ``xy``) closer than ``gap`` px, unless a path
-    shorter than ``3 * gap`` already joins them.
+    """Join mutually-nearest dangling ends (degree 1, not within ``BORDER_MARGIN`` = 5 px of
+    the image border) of the ``networkx`` graph ``g`` (nodes carry ``xy``) closer than ``gap``
+    px, unless a path shorter than ``3 * gap`` already joins them.
 
     **Modifies** ``g`` **in place** (adds edges) and returns it, for chaining; copy it first
     (``g.copy()``) to keep the original."""
