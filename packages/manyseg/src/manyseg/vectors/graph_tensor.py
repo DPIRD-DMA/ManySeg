@@ -18,6 +18,7 @@ import math
 
 import numpy as np
 
+from ..utils._peaks import peak_pixels, refine
 from .graph import VectorGraph, _deps
 
 SECTORS = 6
@@ -210,49 +211,6 @@ def encode_graph_tensor(vg: VectorGraph, shape: tuple[int, int], *, sectors: int
     return {"vertex": vertex, "edge": edge, "vector": vec, "support": support}
 
 
-def _peak_pixels(hm: np.ndarray, threshold: float, kernel: int) -> np.ndarray:
-    """(row, col) local maxima above ``threshold`` (max filter), then greedy suppression within
-    the kernel radius, strongest first (a plateau otherwise gives several tied peaks)."""
-    from scipy import ndimage
-
-    cKDTree = _deps()[2]
-    keep = (hm == ndimage.maximum_filter(hm, size=kernel, mode="nearest")) & (hm > threshold)
-    pts = np.argwhere(keep)
-    if len(pts) < 2:
-        return pts
-    pts = pts[np.argsort(-hm[keep], kind="stable")]
-    tree = cKDTree(pts)
-    alive = np.ones(len(pts), bool)
-    for i in range(len(pts)):
-        if alive[i]:
-            for j in tree.query_ball_point(pts[i], (kernel // 2) * 1.5):
-                if j > i:
-                    alive[j] = False
-    return pts[alive]
-
-
-def _refine(hm: np.ndarray, pix: np.ndarray, origin: tuple[int, int] = (0, 0)) -> np.ndarray:
-    """Sub-pixel ``(x, y)``: per-axis parabola through the log heatmap (exact for a Gaussian),
-    clipped to +-1 px; no offset on an axis whose neighbour is outside the image. ``origin``
-    (row, col) shifts the result into scene coordinates (integer shift before the offset, so
-    the floats equal a scene-wide call)."""
-    if len(pix) == 0:
-        return np.zeros((0, 2))
-    H, W = hm.shape
-    lg = np.log(np.clip(hm, 1e-4, None))
-    r, c = pix[:, 0], pix[:, 1]
-
-    def offset(lo, mid, hi):
-        den = lo - 2 * mid + hi
-        ok = den < -1e-9
-        return np.clip(np.where(ok, 0.5 * (lo - hi) / np.where(ok, den, -1), 0), -1, 1)
-
-    inx, iny = (c > 0) & (c < W - 1), (r > 0) & (r < H - 1)
-    dx = np.where(inx, offset(lg[r, np.maximum(c - 1, 0)], lg[r, c], lg[r, np.minimum(c + 1, W - 1)]), 0)
-    dy = np.where(iny, offset(lg[np.maximum(r - 1, 0), c], lg[r, c], lg[np.minimum(r + 1, H - 1), c]), 0)
-    return np.stack([c + origin[1] + 0.5 + dx, r + origin[0] + 0.5 + dy], 1)
-
-
 def graph_from_tensor(vertex, edge, vector, *, vertex_threshold: float = 0.2,
                       edge_threshold: float = 0.5, link_radius: float = 10.0, gap: float = 25.0,
                       kernel: int = 3, snap_border: bool = True,
@@ -276,14 +234,14 @@ def graph_from_tensor(vertex, edge, vector, *, vertex_threshold: float = 0.2,
     vertex, edge, vector = (a.detach().float().cpu().numpy() if hasattr(a, "detach") else np.asarray(a)
                             for a in (vertex, edge, vector))
     H, W = vertex.shape
-    pi = _peak_pixels(vertex, vertex_threshold, kernel)  # strongest first
+    pi = peak_pixels(vertex, vertex_threshold, kernel)  # strongest first
     if max_vertices is not None:
         pi = pi[:max_vertices]
     g = nx.Graph()
     if len(pi) == 0:
         return VectorGraph(np.zeros((0, 2)), np.zeros((0, 2), int))
     centre = np.stack([pi[:, 1] + 0.5, pi[:, 0] + 0.5], 1)  # vectors are relative to these
-    xy = _refine(vertex, pi) if snap is None else snap_points(centre, snap)  # learned offsets win
+    xy = refine(vertex, pi) if snap is None else snap_points(centre, snap)  # learned offsets win
     if snap_border:
         xy[:, 0] = np.where(xy[:, 0] < 1.5, 0.0, np.where(xy[:, 0] > W - 1.5, float(W), xy[:, 0]))
         xy[:, 1] = np.where(xy[:, 1] < 1.5, 0.0, np.where(xy[:, 1] > H - 1.5, float(H), xy[:, 1]))

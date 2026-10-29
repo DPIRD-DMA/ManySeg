@@ -17,8 +17,8 @@ import math
 
 import numpy as np
 
+from ..utils._peaks import peak_pixels, refine
 from .graph import _deps
-from .graph_tensor import _peak_pixels, _refine
 from .polygons import _outline
 
 
@@ -183,10 +183,10 @@ def _corner_peaks(corner: np.ndarray, threshold: float = 0.3, kernel: int = 3,
     ``(row, col)`` pixels and sub-pixel ``(x, y)``, both shifted by ``origin`` (the array's
     position in a larger scene; integer shifts keep the values identical to a scene-wide call
     for peaks a few pixels inside the array)."""
-    pix = _peak_pixels(corner, threshold, kernel)
+    pix = peak_pixels(corner, threshold, kernel)
     if len(pix) == 0:
         return np.zeros((0, 2), np.int64), np.zeros((0, 2))
-    return pix + np.asarray(origin, pix.dtype), _refine(corner, pix, origin)
+    return pix + np.asarray(origin, pix.dtype), refine(corner, pix, origin)
 
 
 def corner_targets(polygons, shape: tuple[int, int], *, tolerance: float = 1.5, turn_deg: float = 20.0,
