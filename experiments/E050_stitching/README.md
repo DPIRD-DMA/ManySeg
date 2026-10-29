@@ -83,3 +83,19 @@ Metric: face agreement F1 with the single-pass decode over **all faces** (zones 
 settings), plus the overlap-zone value. Rule: more context helps if a setting raises all-face F1
 by >= 0.01 over (512, 128) with the same merge; the smallest setting that does is recommended as
 the roof default. Cost reported as the number of model patches per scene.
+
+### E050b results (12:25; `runs/e050b.json`; 4 roof test scenes, 2048 px)
+Face agreement F1 with the single pass, all faces (overlap zone in brackets); patches per scene:
+
+| tiles (patch / overlap) | patches | blend | midline |
+|---|---|---|---|
+| 512 / 128 (E050) | 25 | 0.945 (0.915) | 0.944 (0.913) |
+| 512 / 256 | 49 | 0.960 (0.959) | 0.975 (0.976) |
+| 1024 / 256 | 9 | 0.979 (0.978) | **0.987** (0.988) |
+| 1024 / 512 | 9 | 0.984 (0.985) | 0.988 (0.991) |
+
+**Decision:** more context helps (rule met by every larger setting); the smallest helping setting is
+1024 / 256 (+0.034 blend, +0.043 midline), which is ManyPred's default scale (1000 / 300). E050's
+roof gap was the small 512 px tiles. With enough context the midline cut also beats blend on roofs
+(+0.008 at 1024 / 256, +0.015 at 512 / 256), so a cut helps both tasks once tiles are large enough
+(not a pre-registered comparison for roofs; E050's rule was judged at 512 / 128).
