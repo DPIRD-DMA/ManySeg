@@ -6,12 +6,13 @@ repository, with a generated model card listing the inputs, heads and the licenc
 pretrained weights the model started from. ``manyseg.load("hf-hub:org/name")`` downloads and
 loads it (``"hf-hub:org/name@revision"`` for a branch, tag or commit), as timm names Hub models;
 :func:`manyseg.read_metadata` takes the same names. Downloads are cached by ``huggingface_hub``
-(a timm dependency), and ``HF_TOKEN`` or ``hf auth login`` give access to private
-repositories.
+(a timm dependency), and ``token=``, ``HF_TOKEN`` or a stored login (``hf auth login``;
+``huggingface-cli login`` before huggingface_hub 0.34) give access to private repositories.
 """
 
 from __future__ import annotations
 
+import re
 import tempfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -65,7 +66,8 @@ def push_to_hub(model: DenseModel, repo_id: str, *, normalize: Any = None,
             existing card, perhaps edited on the Hub, is kept); a string is uploaded as the
             card; False uploads no card.
         revision: The branch to push to, created from the main branch if it does not exist
-            (default: the main branch). Load it as ``"hf-hub:org/name@<revision>"``.
+            (default: the main branch). Load it as ``"hf-hub:org/name@<revision>"``. Tags and
+            commits can be loaded but not pushed to.
         token: A Hub token with write access (default: ``HF_TOKEN`` or the stored login).
     """
     from huggingface_hub import HfApi
@@ -73,13 +75,14 @@ def push_to_hub(model: DenseModel, repo_id: str, *, normalize: Any = None,
     from .io import read_metadata, save
 
     split_name(repo_id)  # validates the name before anything is written
+    if revision is not None and re.fullmatch(r"[0-9a-f]{40}", revision):
+        raise ValueError(f"revision={revision!r} is a commit; push to a branch name.")
     with tempfile.TemporaryDirectory() as tmp:
         path = save(model, Path(tmp) / FILENAME, normalize=normalize, activations=activations,
                     classes=classes, bands=bands, extra=extra)
         api = HfApi(token=token, library_name="manyseg")
         api.create_repo(repo_id, private=private, exist_ok=True)
-        if revision is not None:  # a commit to a missing branch fails; a new repo has main
-            api.create_branch(repo_id, branch=revision, exist_ok=True)
+        _ensure_branch(api, repo_id, revision)
         if model_card is True and not api.file_exists(repo_id, "README.md", revision=revision):
             model_card = card(read_metadata(path), repo_id, license=license, revision=revision)
         if isinstance(model_card, str):
@@ -87,6 +90,25 @@ def push_to_hub(model: DenseModel, repo_id: str, *, normalize: Any = None,
         info = api.upload_folder(repo_id=repo_id, folder_path=tmp, revision=revision,
                                  commit_message=commit_message)
     return str(getattr(info, "commit_url", info))
+
+
+def _ensure_branch(api, repo_id: str, revision: str | None) -> None:
+    """Make ``revision`` a branch a commit can go to. A commit to a missing branch fails, a
+    branch is created from main, and a new repository is empty (main has no commit yet), so
+    main first gets a ``.gitattributes`` commit when needed."""
+    if revision is None or revision == "main":
+        return
+    refs = api.list_repo_refs(repo_id)
+    branches = {b.name for b in refs.branches}
+    if revision in branches:
+        return
+    if revision in {t.name for t in refs.tags}:
+        raise ValueError(f"revision={revision!r} is a tag of {repo_id}; push to a branch name.")
+    if "main" not in branches:
+        api.upload_file(path_or_fileobj=b"*.safetensors filter=lfs diff=lfs merge=lfs -text\n",
+                        path_in_repo=".gitattributes", repo_id=repo_id,
+                        commit_message="Initial commit")
+    api.create_branch(repo_id, branch=revision, exist_ok=True)
 
 
 def _cell(value: Any) -> str:
@@ -109,6 +131,8 @@ def _heads(meta: Mapping[str, Any]) -> dict[str, dict]:
         cfg = dict(heads.get(name) or {})
         cfg.setdefault("type", "segmentation")
         cfg.setdefault("scope", "image" if cfg["type"] == "classification" else "pixel")
+        if cfg.get("uncertainty") and cfg.get("out_channels"):
+            cfg["out_channels"] = f"{2 * cfg['out_channels']} (mean, log-variance)"
         out[name] = cfg
     return out
 
@@ -170,7 +194,8 @@ def card(meta: Mapping[str, Any], repo_id: str, *, license: str | None = None,
             lines.append(f"| `{_cell(key)}` | {kind} | `{shape}` | {desc} |")
         lines += [""] + [f"* {n}" for n in notes] + ([""] if notes else [])
     lines += ["Normalisation (a ManyPred normalisation spec): "
-              + (f"`{_json(norm)}`" if norm else "**not stored**: ask the model's author."), ""]
+              + (f"`{_json(norm)}`" if norm is not None else "**not stored**: ask the model's "
+                 "author."), ""]
 
     classes = meta.get("classes")
     lines += ["## Outputs", "",

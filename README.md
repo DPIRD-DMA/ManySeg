@@ -245,11 +245,12 @@ Hub names as timm does:
 ```python
 manyseg.push_to_hub(model, "your-org/water", activations={"logits": "softmax"},
                     normalize=[{"type": "scale", "value": 10000}], license="mit",
-                    revision="v1")                  # optional: a branch, created if needed
+                    revision="v1")                  # optional: a branch name, created if needed
 model = manyseg.load("hf-hub:your-org/water@v1")   # token=... for a private repository
 ```
 
-Both use `HF_TOKEN` or a stored `hf auth login` when no `token=` is given.
+Both use `HF_TOKEN` or a stored `hf auth login` when no `token=` is given. Tags and commits
+can be loaded (`@<tag>`, `@<sha>`) but not pushed to.
 
 Don't save the whole model with `torch.save(model)`: that pickle refers to ManySeg's internal
 module paths, so it breaks when a later version moves or renames a class, and loading it

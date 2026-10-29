@@ -136,15 +136,17 @@ def save(model: DenseModel, path: str | Path, *, normalize: Any = None,
             raise ValueError(f"Head {name!r} applies {model.heads[name].activation} itself; its "
                              f"output is the prediction, so its activation is 'none'.")
         acts[name] = act
-    # a single-input model's input has no name: bands=[...] (a mapping is not checked)
+    # a single-input model's input has no name, so its bands can only be a list
     image_inputs = [n for n, c in (config.get("inputs") or {None: {}}).items()
                     if c.get("kind", "image") != "vector"]
     for arg, value, names, what in (("classes", classes, heads, "head"),
                                     ("bands", bands, image_inputs, "input")):
         if value is None:
             continue
+        if isinstance(value, Mapping) and names == [None]:
+            raise ValueError(f"This model has one unnamed input: pass {arg}=[...].")
         if isinstance(value, Mapping):
-            unknown = [k for k in value if k not in names and names != [None]]
+            unknown = [k for k in value if k not in names]
             if unknown:
                 raise ValueError(f"{arg} given for unknown {what}s {unknown}; {what}s: {names}.")
         elif isinstance(value, str) or len(names) != 1:

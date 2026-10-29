@@ -133,7 +133,8 @@ First release. Python 3.10–3.14, PyTorch ≥ 2.10, timm ≥ 1.0.20.
   `read_metadata` take `"hf-hub:org/name[@revision]"` and `token=`. `huggingface_hub`
   (already a timm dependency) is now a direct one.
 * `manyseg.save` rejects `classes` / `bands` given as one list for a model with several heads
-  / inputs, and mapping keys that name no head / input, instead of storing them unchecked.
+  / inputs (and a mapping for a single-input model, whose input has no name), and mapping
+  keys that name no head / input, instead of storing them unchecked.
 * `torch.compile(dynamic=True)`, `manyseg.export.export_model` (dynamic size; dynamic batch
   with `dynamic_batch=True`; dynamic date count except for `concat` / `diff` aggregation) and
   ONNX; int8 quantisation (`manyseg.quantize`, extra `quant`); FSDP2

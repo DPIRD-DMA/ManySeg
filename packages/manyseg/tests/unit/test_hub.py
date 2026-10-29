@@ -12,11 +12,13 @@ from manyseg import create_model, hub
 
 class FakeHub:
     """HfApi and hf_hub_download over ``root/<org>/<name>/<branch>``, with the real Hub's rules
-    that matter here: a new repository has a main branch, a commit to a missing branch fails,
-    and a private repository needs the uploader's token to download."""
+    that matter here: a new repository is empty (main has no commit until the first one), a
+    commit to a missing branch other than main fails, a branch is created from main, and a
+    private repository needs the uploader's token to download."""
 
     def __init__(self, root: Path, token: str | None = None):
         self.root, self.token, self.created, self.commits = root, token, {}, []
+        self.tags: dict[str, set] = {}
 
     def repo(self, repo_id, revision=None):
         return self.root / repo_id / (revision or "main")
@@ -25,11 +27,27 @@ class FakeHub:
     def create_repo(self, repo_id, private=True, exist_ok=False):
         if repo_id not in self.created:
             self.created[repo_id] = private
-            self.repo(repo_id).mkdir(parents=True)
+            (self.root / repo_id).mkdir(parents=True)
+
+    def list_repo_refs(self, repo_id):
+        from types import SimpleNamespace as NS
+
+        return NS(branches=[NS(name=p.name) for p in (self.root / repo_id).iterdir()],
+                  tags=[NS(name=t) for t in self.tags.get(repo_id, ())])
 
     def create_branch(self, repo_id, branch, exist_ok=False):
+        from huggingface_hub.errors import RevisionNotFoundError
+
+        if not self.repo(repo_id).exists():
+            raise RevisionNotFoundError(f"{repo_id}: main has no commit", response=None)
         if not self.repo(repo_id, branch).exists():
             shutil.copytree(self.repo(repo_id), self.repo(repo_id, branch))
+
+    def upload_file(self, path_or_fileobj, path_in_repo, repo_id, commit_message=""):
+        dest = self.repo(repo_id)
+        dest.mkdir(exist_ok=True)
+        (dest / path_in_repo).write_bytes(path_or_fileobj)
+        self.commits.append((repo_id, None, commit_message, [path_in_repo]))
 
     def file_exists(self, repo_id, filename, revision=None):
         return (self.repo(repo_id, revision) / filename).exists()
@@ -38,6 +56,8 @@ class FakeHub:
         from huggingface_hub.errors import RevisionNotFoundError
 
         dest = self.repo(repo_id, revision)
+        if revision in (None, "main"):
+            dest.mkdir(exist_ok=True)  # the first commit creates main
         if not dest.exists():
             raise RevisionNotFoundError(f"{repo_id}@{revision}", response=None)
         shutil.copytree(folder_path, dest, dirs_exist_ok=True)
@@ -127,7 +147,8 @@ def test_existing_card_is_kept(fake_hub):
 
 
 def test_revision_creates_the_branch(fake_hub):
-    push(revision="v1")  # the real Hub refuses a commit to a missing branch
+    push(revision="v1")  # a new, empty repository: main gets a first commit, then the branch
+    assert fake_hub.commits[0][2:] == ("Initial commit", [".gitattributes"])
     assert manyseg.read_metadata("hf-hub:org/water@v1", token="hf_secret")["heads"] == [
         "water", "depth"]
     assert 'manyseg.load("hf-hub:org/water@v1")' in (
@@ -135,7 +156,34 @@ def test_revision_creates_the_branch(fake_hub):
     with pytest.raises(FileNotFoundError):
         manyseg.load("hf-hub:org/water", token="hf_secret")  # nothing on main
     push(revision="v1")  # an existing branch is reused
-    assert len(fake_hub.commits) == 2
+    assert len(fake_hub.commits) == 3
+    push(revision="main")
+    assert fake_hub.file_exists("org/water", "model.safetensors")
+
+
+def test_revision_on_existing_main(fake_hub):
+    push()
+    push(revision="dev")
+    assert [c[1] for c in fake_hub.commits] == [None, "dev"]  # no extra initial commit
+
+
+def test_tags_and_commits_cannot_be_pushed_to(fake_hub):
+    push()
+    fake_hub.tags["org/water"] = {"v1"}
+    with pytest.raises(ValueError, match="is a tag"):
+        push(revision="v1")
+    with pytest.raises(ValueError, match="is a commit"):
+        push(revision="0123456789abcdef0123456789abcdef01234567")
+
+
+def test_card_uncertainty_channels_and_empty_normalisation():
+    meta = {"create_model": {"in_channels": 3, "heads": {
+                "height": {"type": "regression", "out_channels": 1, "uncertainty": True}}},
+            "heads": ["height"], "activations": {"height": "none"}, "normalize": [],
+            "format": 2}
+    text = hub.card(meta, "org/h")
+    assert "| `height` | regression | pixel | 2 (mean, log-variance) | none | — |" in text
+    assert "Normalisation (a ManyPred normalisation spec): `[]`" in text
 
 
 def test_card_multi_input_vector_timeseries_and_image_heads():
@@ -205,6 +253,8 @@ def test_list_classes_or_bands_need_one_head_or_input(tmp_path):
         manyseg.save(model, tmp_path / "m.safetensors", classes=["dry", "water"], **acts)
     with pytest.raises(ValueError, match="unknown heads"):
         manyseg.save(model, tmp_path / "m.safetensors", classes={"lake": ["a"]}, **acts)
+    with pytest.raises(ValueError, match="one unnamed input"):
+        manyseg.save(model, tmp_path / "m.safetensors", bands={"typo": ["R", "G", "B"]}, **acts)
     two = create_model(pretrained=False, num_classes=2, inputs={
         "s2": {"in_channels": 4, "backbone": "resnet18"},
         "s1": {"in_channels": 2, "backbone": "resnet18"}})
