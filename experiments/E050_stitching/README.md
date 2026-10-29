@@ -50,3 +50,28 @@ its primary metric is >= blend + 0.01, and its guard is no worse than blend - 0.
 over all faces; roads: length F1 in the overlap zone). If both tasks prefer a cut, ManyPred gets a
 `merge="seam"` option for vector outputs (blend stays the default for plain rasters).
 Single run (decoding is deterministic; predictions are fixed by the checkpoints).
+
+## Results (11:30; worktree e050-1a096fa; `runs/e050.json`; 27 road scenes, 4 roof scenes)
+Tuned on val: roads seam mu 0.1, seam_obj mu 0.1 lambda 1; roofs seam mu 0.5, seam_obj mu 0.5 lambda 1.
+Test, agreement F1 with the single-pass decode (overlap zone; single-coverage zone in brackets):
+
+| arm | roads junction F1 | roads length F1 | roofs face F1 | roofs all faces |
+|---|---|---|---|---|
+| blend | 0.954 (0.972) | 0.977 (0.978) | 0.915 (0.976) | 0.945 |
+| midline | 0.971 (0.972) | 0.979 (0.978) | 0.913 (0.976) | 0.944 |
+| seam | **0.972** (0.973) | 0.979 (0.978) | 0.914 (0.976) | 0.945 |
+| seam_obj | 0.971 (0.973) | 0.978 (0.978) | 0.910 (0.976) | 0.942 |
+
+Field error vs the single pass in the overlap zone (roads mask MAE): blend 0.0026, cuts 0.0006
+(single-coverage floor 0.0003); roofs extent MAE: blend 0.0038, cuts 0.0035-0.0038 (floor 0.0006).
+
+**Decision:** roads: a cut is preferred (seam +0.018 junction F1, guard +0.002); roofs: not preferred
+(seam -0.001). The rule needed both, so ManyPred's default does not change on this evidence.
+
+Reading: for roads, any cut removes the seam effect (overlap-zone agreement equals the
+single-coverage floor; blending averages junction / direction fields and loses junctions); the
+min-cost seam adds nothing over the plain midline cut and object avoidance nothing over either.
+For roofs, no stitching closes the gap (0.91 in overlaps vs 0.98 elsewhere): every overlap pixel of
+a 512 px patch with 128 overlap lies within 128 px of some patch edge, so the predictions there
+lack context whichever patch is used. That points to patch size / overlap (context), not the merge
+rule; not tested here. Figures: status page, section "Stitching".
