@@ -142,8 +142,8 @@ def test_point_task_calibrates_by_default():
 
 def test_point_task_density_activation():
     """E011c: density_activation reaches the head preset; counts report a signed bias."""
-    assert "activation" not in PointTask(density=True).heads()["density"]
-    h = PointTask(density=True, density_activation="softplus").heads()["density"]
+    assert "activation" not in PointTask(density=True, density_activation=None).heads()["density"]
+    h = PointTask(density=True).heads()["density"]
     assert h["activation"] == "softplus" and h["bias_init"] == -4.0
     y = torch.zeros(1, 32, 32, dtype=torch.long)
     y[0, 4:10, 4:10] = 1

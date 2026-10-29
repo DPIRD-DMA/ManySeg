@@ -280,9 +280,10 @@ class PointTask(Task):
                  thresholds: tuple[float, ...] = (0.05, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5, 0.6,
                                                   0.7),
                  density_scale: float = 100.0, head_scale: float = 1, decoders=None,
-                 density_activation: str | None = None) -> None:
+                 density_activation: str | None = "softplus") -> None:
         self.offsets, self.density, self.sigma, self.kind = offsets, density, sigma, heatmap
-        # density_activation: passed to manyseg.points.density_head (None or "softplus"; E011c)
+        # density_activation: passed to manyseg.points.density_head; "softplus" since E011c,
+        # None for E011's raw head
         self.density_activation = density_activation
         self.head_scale, self.decoders = head_scale, decoders
         _with_scale({}, head_scale)  # validate early

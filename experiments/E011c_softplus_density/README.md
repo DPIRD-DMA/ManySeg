@@ -120,5 +120,8 @@ on the drone data. The raw head stays available as `activation=None`.
 
 ## Deviations from the pre-registration
 * None in protocol, arms, seeds or rule.
+* After the runs, `run.sh`'s plain arm was made explicit (`"density_activation": null`), and
+  E011's `run.sh` likewise, so both still reproduce the raw head under the new default. The
+  runs above used the registered script, where the plain arm was the then-default raw head.
 * The visual check could not be repeated on the final models: the full runs did not use
   `--save-model` (as in E011), so only the 1-epoch preflight models were rendered.

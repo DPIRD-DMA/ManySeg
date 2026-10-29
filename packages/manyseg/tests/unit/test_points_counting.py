@@ -23,8 +23,8 @@ from manyseg.points import (
 
 
 def test_density_head_activation():
-    assert "activation" not in density_head()["density"]  # default unchanged (E011 setup)
-    assert density_head(activation="softplus")["density"]["activation"] == "softplus"
+    assert density_head()["density"]["activation"] == "softplus"  # default since E011c
+    assert "activation" not in density_head(activation=None)["density"]  # E011's raw head
     m = create_model(backbone="resnet18", pretrained=False,
                      heads=density_head("unet", activation="softplus"))
     assert m(torch.randn(1, 3, 37, 45))["density"].min() >= 0

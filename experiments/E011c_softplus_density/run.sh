@@ -5,7 +5,7 @@ set -u
 export MANYSEG_BENCH_DATA="$MANYSEG_BENCH_DATA"
 RECIPE=${RECIPE:-fastai_like}
 EXP=${OUT_ROOT:-.}/experiments/E011c_softplus_density
-PLAIN='{"density": true}'
+PLAIN='{"density": true, "density_activation": null}'  # explicit since the default changed
 SOFT='{"density": true, "density_activation": "softplus"}'
 mb() { uv run manyseg-bench "$@"; }
 if [ -n "${PREFLIGHT:-}" ]; then
