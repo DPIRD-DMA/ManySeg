@@ -8,8 +8,6 @@ nx = pytest.importorskip("networkx")
 pytest.importorskip("shapely")
 pytest.importorskip("scipy")
 
-from shapely.geometry import Polygon, box  # noqa: E402
-
 from manyseg_bench.evaluation.vectors import (  # noqa: E402
     apls,
     crossing_score,
@@ -18,6 +16,7 @@ from manyseg_bench.evaluation.vectors import (  # noqa: E402
     junction_f1,
     polygon_metrics,
 )
+from shapely.geometry import Polygon, box  # noqa: E402
 
 
 def graph(points, edges, shift=(0.0, 0.0)):
@@ -101,7 +100,8 @@ def test_crossing_score():
 def test_polygon_metrics():
     gt = [box(0, 0, 10, 10), box(20, 0, 30, 10), box(50, 50, 60, 60)]
     m = polygon_metrics(gt, gt)
-    assert m["det_f1"] == 1.0 and m["ciou"] == pytest.approx(1.0) and m["polis"] == pytest.approx(0.0)
+    assert m["det_f1"] == 1.0 and m["ciou"] == pytest.approx(1.0)
+    assert m["polis"] == pytest.approx(0.0)
     # same footprint with an extra collinear vertex in the prediction: N 5 vs 4
     extra = Polygon([(0, 0), (5, 0), (10, 0), (10, 10), (0, 10)])
     m = polygon_metrics([gt[0]], [extra])

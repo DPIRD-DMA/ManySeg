@@ -112,7 +112,8 @@ def _polygon(ring: np.ndarray, corners: np.ndarray, direction: np.ndarray, *, sn
     while merged and len(walls) > 3:
         merged = False
         for i in range(len(walls)):
-            if math.degrees(math.acos(min(1.0, abs(float(walls[i - 1][1] @ walls[i][1]))))) < merge_deg:
+            cos = min(1.0, abs(float(walls[i - 1][1] @ walls[i][1])))
+            if math.degrees(math.acos(cos)) < merge_deg:
                 del walls[i]
                 merged = True
                 break
@@ -141,8 +142,12 @@ def polygons_from_corners(labels, corner, direction, *, corner_threshold: float 
     are E035b's level-1/2 tuning. Instances with fewer than 3 snapped corners, or whose straightened
     polygon degenerates (< 3 walls, invalid, empty), fall back to their outline simplified by
     ``simplify`` px, so a building the instance mask found is never dropped."""
-    cp = corner.detach().float().cpu().numpy() if hasattr(corner, "detach") else np.asarray(corner, np.float32)
-    dr = direction.detach().float().cpu().numpy() if hasattr(direction, "detach") else np.asarray(direction, np.float32)
+    def _np(a):
+        if hasattr(a, "detach"):
+            return a.detach().float().cpu().numpy()
+        return np.asarray(a, np.float32)
+
+    cp, dr = _np(corner), _np(direction)
     from scipy import ndimage
 
     peaks = _corner_peaks(cp, corner_threshold, kernel)[1]
@@ -189,7 +194,8 @@ def _corner_peaks(corner: np.ndarray, threshold: float = 0.3, kernel: int = 3,
     return pix + np.asarray(origin, pix.dtype), refine(corner, pix, origin)
 
 
-def corner_targets(polygons, shape: tuple[int, int], *, tolerance: float = 1.5, turn_deg: float = 20.0,
+def corner_targets(polygons, shape: tuple[int, int], *, tolerance: float = 1.5,
+                   turn_deg: float = 20.0,
                    sigma: float = 2.0, line_width: float = 1.0):
     """Training targets for :func:`polygons_from_corners` from polygons (pixel coordinates):
     ``corner`` (H, W) Gaussian blobs at vertices turning more than ``turn_deg`` after a
@@ -231,6 +237,7 @@ def corner_targets(polygons, shape: tuple[int, int], *, tolerance: float = 1.5, 
         if cs >= ce or rs >= re:
             continue
         yy, xx = np.mgrid[rs:re, cs:ce]
-        g = np.exp(-((xx + 0.5 - x) ** 2 + (yy + 0.5 - y) ** 2) / (2 * sigma ** 2)).astype(np.float32)
+        d2 = (xx + 0.5 - x) ** 2 + (yy + 0.5 - y) ** 2
+        g = np.exp(-d2 / (2 * sigma ** 2)).astype(np.float32)
         np.maximum(corner[rs:re, cs:ce], g, out=corner[rs:re, cs:ce])
     return {"corner": corner, "direction": direction, "direction_mask": mask}

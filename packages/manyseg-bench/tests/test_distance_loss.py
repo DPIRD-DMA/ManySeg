@@ -7,9 +7,8 @@ import numpy as np
 import pytest
 import torch
 import torch.nn.functional as F
-from scipy import ndimage
-
 from manyseg_bench.losses import distance_map, distance_weighted_bce
+from scipy import ndimage
 
 H = W = 64
 
@@ -40,23 +39,32 @@ def test_distance_map_matches_scipy_and_caps():
 
 def test_far_miss_costs_more_than_near_miss_points():
     target, d = blob(32.0, 32.0), point_distance(32.0, 32.0)
-    exact, near, mid, far = (distance_weighted_bce(logit(blob(c, 32.0)), target, d) for c in (32.0, 36.0, 40.0, 48.0))
+    exact, near, mid, far = (distance_weighted_bce(logit(blob(c, 32.0)), target, d)
+                             for c in (32.0, 36.0, 40.0, 48.0))
     assert exact < near < mid < far
     # plain BCE cannot tell 8 px from 16 px apart; this loss can, more so with a larger far_weight
     b_mid = F.binary_cross_entropy_with_logits(logit(blob(40.0, 32.0)), target)
     b_far = F.binary_cross_entropy_with_logits(logit(blob(48.0, 32.0)), target)
     assert abs(b_mid - b_far) < 0.05 * b_far
     gaps = [(distance_weighted_bce(logit(blob(48.0, 32.0)), target, d, far_weight=w)
-             - distance_weighted_bce(logit(blob(40.0, 32.0)), target, d, far_weight=w)).item() for w in (0.0, 1.0, 4.0)]
+             - distance_weighted_bce(logit(blob(40.0, 32.0)), target, d, far_weight=w)).item()
+            for w in (0.0, 1.0, 4.0)]
     assert gaps[0] < gaps[1] < gaps[2] and gaps[1] > 0
 
 
 def test_lines():
-    g = np.zeros((H, W), bool); g[30, 5:60] = True
-    target, d = torch.from_numpy(g[None].astype(np.float32)), torch.from_numpy(distance_map(g))[None]
-    near = torch.zeros(1, H, W); near[:, 33, 5:60] = 1
-    far = torch.zeros(1, H, W); far[:, 50, 5:60] = 1
-    lo = lambda m: logit(m * 0.98 + 0.01)
+    g = np.zeros((H, W), bool)
+    g[30, 5:60] = True
+    target = torch.from_numpy(g[None].astype(np.float32))
+    d = torch.from_numpy(distance_map(g))[None]
+    near = torch.zeros(1, H, W)
+    near[:, 33, 5:60] = 1
+    far = torch.zeros(1, H, W)
+    far[:, 50, 5:60] = 1
+
+    def lo(m):
+        return logit(m * 0.98 + 0.01)
+
     assert distance_weighted_bce(lo(near), target, d) < distance_weighted_bce(lo(far), target, d)
 
 
@@ -64,8 +72,10 @@ def test_scale_independent_of_image_size_and_empty_images():
     """Pixel means: an empty image costs about plain BCE, not thousands (review issue 1)."""
     z = torch.zeros(1, 512, 512)  # p = 0.5 everywhere
     empty = distance_weighted_bce(z, torch.zeros(1, 512, 512), torch.full((1, 512, 512), 32.0))
-    assert abs(empty.item() - (math.log(2) + 0.5)) < 1e-4  # BCE at p = 0.5 + capped penalty, far_weight 1
-    small = distance_weighted_bce(torch.zeros(1, 64, 64), torch.zeros(1, 64, 64), torch.full((1, 64, 64), 32.0))
+    # BCE at p = 0.5 + capped penalty, far_weight 1
+    assert abs(empty.item() - (math.log(2) + 0.5)) < 1e-4
+    small = distance_weighted_bce(torch.zeros(1, 64, 64), torch.zeros(1, 64, 64),
+                                  torch.full((1, 64, 64), 32.0))
     assert abs(empty.item() - small.item()) < 1e-5
 
 
@@ -80,7 +90,9 @@ def test_far_pixels_pushed_down_harder_and_soft_optimum():
     z = torch.zeros(1, H, W, requires_grad=True)
     opt = torch.optim.Adam([z], lr=0.1)
     for _ in range(400):
-        opt.zero_grad(); distance_weighted_bce(z, target, d).backward(); opt.step()
+        opt.zero_grad()
+        distance_weighted_bce(z, target, d).backward()
+        opt.step()
     p = torch.sigmoid(z)[0]
     assert abs(p[32, 32].item() - target[0, 32, 32].item()) < 0.05
     assert abs(p[32, 34].item() - target[0, 32, 34].item()) < 0.05
@@ -92,5 +104,6 @@ def test_validation():
         distance_weighted_bce(t, t, t, tolerance=0)
     with pytest.raises(ValueError):
         distance_weighted_bce(t, t, torch.zeros(1, 1, H + 1, W))
-    out = distance_weighted_bce(t[:, None], t[:, None], torch.full((1, 1, H, W), 3.0))  # (B, 1, H, W) accepted
+    # (B, 1, H, W) accepted
+    out = distance_weighted_bce(t[:, None], t[:, None], torch.full((1, 1, H, W), 3.0))
     assert math.isfinite(out.item())

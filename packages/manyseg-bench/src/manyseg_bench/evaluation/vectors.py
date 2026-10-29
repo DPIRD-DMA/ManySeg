@@ -218,7 +218,8 @@ def geo_f1(gt, pred, gsd: float = 1.0, *, buffer_m: float = 5.0) -> dict:
         return {"geo_p": 0.0, "geo_r": 0.0, "geo_f1": 0.0}
     prec = float((_dist_to_graph(sp, gt) <= buffer_m / gsd).mean())
     rec = float((_dist_to_graph(sg, pred) <= buffer_m / gsd).mean())
-    return {"geo_p": prec, "geo_r": rec, "geo_f1": 0.0 if prec + rec == 0 else 2 * prec * rec / (prec + rec)}
+    f1 = 0.0 if prec + rec == 0 else 2 * prec * rec / (prec + rec)
+    return {"geo_p": prec, "geo_r": rec, "geo_f1": f1}
 
 
 def _junctions(g) -> np.ndarray:
@@ -267,7 +268,8 @@ def crossing_score(crossings, pred, gsd: float = 1.0, *, junction_m: float = 8.0
 def graph_metrics(gt, pred, gsd: float = 1.0) -> dict:
     """APLS, GEO precision / recall / F1 and junction F1 in one dict."""
     gt, pred = _graph(gt), _graph(pred)
-    return {"apls": apls(gt, pred, gsd), "junction_f1": junction_f1(gt, pred, gsd), **geo_f1(gt, pred, gsd)}
+    return {"apls": apls(gt, pred, gsd), "junction_f1": junction_f1(gt, pred, gsd),
+            **geo_f1(gt, pred, gsd)}
 
 
 # --------------------------------------------------------------------------------------

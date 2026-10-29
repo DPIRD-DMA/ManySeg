@@ -8,9 +8,8 @@ pytest.importorskip("shapely")
 pytest.importorskip("networkx")
 pytest.importorskip("skimage")
 
-from shapely.geometry import Polygon, box  # noqa: E402
-
 from manyseg.vectors import VectorGraph, graph_from_mask, polygons_from_labels, to_geojson  # noqa: E402
+from shapely.geometry import Polygon, box  # noqa: E402
 
 
 def road_grid(size=400, lines=(100, 200, 300), width=6):
@@ -93,7 +92,8 @@ def test_polygons_from_corners_round_trip_and_dent():
     """Perfect targets give exact polygons; a dent in the instance mask does not add corners."""
     from manyseg.vectors import corner_targets, polygons_from_corners
 
-    polys = [box(20, 20, 120, 80), Polygon([(150, 150), (250, 150), (250, 200), (200, 200), (200, 250), (150, 250)])]
+    polys = [box(20, 20, 120, 80),
+             Polygon([(150, 150), (250, 150), (250, 200), (200, 200), (200, 250), (150, 250)])]
     t = corner_targets(polys, (300, 300))
     lab = np.zeros((300, 300), np.int32)
     lab[20:80, 20:120] = 1
@@ -106,7 +106,8 @@ def test_polygons_from_corners_round_trip_and_dent():
         assert p.intersection(q).area / p.union(q).area > 0.98
         assert len(q.exterior.coords) == len(p.exterior.coords)
     lab[20:24, 60:66] = 0  # a dent in the top wall
-    q = max(polygons_from_corners(lab, t["corner"], t["direction"]), key=lambda q: q.intersection(polys[0]).area)
+    q = max(polygons_from_corners(lab, t["corner"], t["direction"]),
+            key=lambda q: q.intersection(polys[0]).area)
     assert len(q.exterior.coords) - 1 == 4
 
 

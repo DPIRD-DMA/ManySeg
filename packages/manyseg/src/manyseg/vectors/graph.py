@@ -14,7 +14,6 @@ grade separation: two roads that cross on a bridge become a junction.
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 
 import numpy as np
@@ -152,7 +151,8 @@ def _skeleton_chains_rc(rr: np.ndarray, cc: np.ndarray):
         pg.add_edges_from(zip(np.nonzero(ok)[0].tolist(), nbr[ok].tolist()))
     xy = np.stack([cc + 0.5, rr + 0.5], 1)
     cluster, nodes = {}, {}
-    for ci, comp in enumerate(nx.connected_components(pg.subgraph([n for n in pg if pg.degree(n) >= 3]))):
+    hubs = pg.subgraph([n for n in pg if pg.degree(n) >= 3])
+    for ci, comp in enumerate(nx.connected_components(hubs)):
         comp = list(comp)
         for n in comp:
             cluster[n] = ("j", ci)
@@ -170,7 +170,8 @@ def _skeleton_chains_rc(rr: np.ndarray, cc: np.ndarray):
             path = [start, nb]
             while path[-1] not in cluster:
                 cur, prev = path[-1], path[-2]
-                nxt = [n for n in pg.neighbors(cur) if n != prev and frozenset((cur, n)) not in seen]
+                nxt = [n for n in pg.neighbors(cur)
+                       if n != prev and frozenset((cur, n)) not in seen]
                 if not nxt:
                     break
                 seen.add(frozenset((cur, nxt[0])))
@@ -178,7 +179,8 @@ def _skeleton_chains_rc(rr: np.ndarray, cc: np.ndarray):
             if path[-1] in cluster:
                 u, v = cluster[path[0]], cluster[path[-1]]
                 chains.append((u, v, np.concatenate([[nodes[u]], xy[path[1:-1]], [nodes[v]]])))
-    rest = [n for n in pg if n not in cluster and not any(frozenset((n, m)) in seen for m in pg.neighbors(n))]
+    rest = [n for n in pg if n not in cluster
+            and not any(frozenset((n, m)) in seen for m in pg.neighbors(n))]
     restg = pg.subgraph(rest)
     for comp in nx.connected_components(restg):  # closed loops without junctions or ends
         comp = list(comp)
@@ -248,7 +250,8 @@ def _join_degree2(nodes, chains):
             a1, b1, c1 = b1, a1, c1[::-1]
         if a2 != n2:
             a2, b2, c2 = b2, a2, c2[::-1]
-        chains = [c for i, c in enumerate(chains) if i not in ids] + [(a1, b2, np.concatenate([c1, c2[1:]]))]
+        chains = [c for i, c in enumerate(chains) if i not in ids]
+        chains.append((a1, b2, np.concatenate([c1, c2[1:]])))
         nodes.pop(n2, None)
 
 
@@ -356,7 +359,9 @@ def _nx_from_skeleton(rr, cc, shape, *, spur, simplify, min_length):
     g.remove_nodes_from([n for n in list(g) if g.degree(n) == 0])
     for comp in list(nx.connected_components(g)):
         sub = g.subgraph(comp)
-        if sum(float(np.hypot(*(g.nodes[a]["xy"] - g.nodes[b]["xy"]))) for a, b in sub.edges()) < min_length:
+        xy = g.nodes
+        length = sum(float(np.hypot(*(xy[a]["xy"] - xy[b]["xy"]))) for a, b in sub.edges())
+        if length < min_length:
             g.remove_nodes_from(comp)
     return g
 

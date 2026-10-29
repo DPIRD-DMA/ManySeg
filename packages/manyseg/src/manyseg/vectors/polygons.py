@@ -210,7 +210,8 @@ def to_geojson(geoms, transform=None, properties: list[dict] | dict | None = Non
             or hasattr(geoms, "detach")):
         geoms = list(geoms)  # a generator is read once
     if isinstance(geoms, VectorGraph):
-        feats = [{"type": "LineString", "coordinates": _apply(transform, p)} for p in geoms.polylines()]
+        feats = [{"type": "LineString", "coordinates": _apply(transform, p)}
+                 for p in geoms.polylines()]
     elif hasattr(geoms, "geom_type") or (rows := _point_rows(geoms)) is None:
         feats = []
         for p in ([geoms] if hasattr(geoms, "geom_type") else geoms):
@@ -228,4 +229,5 @@ def to_geojson(geoms, transform=None, properties: list[dict] | dict | None = Non
         feats = [{"type": "Point", "coordinates": c} for c in _apply(transform, rows)]
     props = _properties(properties, len(feats))
     return {"type": "FeatureCollection",
-            "features": [{"type": "Feature", "geometry": g, "properties": pr} for g, pr in zip(feats, props)]}
+            "features": [{"type": "Feature", "geometry": g, "properties": pr}
+                         for g, pr in zip(feats, props)]}
