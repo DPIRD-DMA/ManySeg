@@ -23,17 +23,30 @@ from ..utils._peaks import maxima_mask
 from ..utils.resolution import scale_factor, to_input_coords
 
 
+def blur_radius(sigma: float) -> int:
+    """Radius in pixels of :func:`find_peaks`' ``smooth_sigma`` blur: ``max(1, ceil(3 sigma))``
+    (0 without a blur)."""
+    return max(1, math.ceil(3 * sigma)) if sigma > 0 else 0
+
+
 def _gaussian_blur(x: Tensor, sigma: float) -> Tensor:
-    """Separable Gaussian blur of ``(B, H, W)`` (radius ``ceil(3 sigma)``, replicate padding,
-    float32 internally)."""
-    r = max(1, math.ceil(3 * sigma))
+    """Separable Gaussian blur of ``(B, H, W)`` (radius :func:`blur_radius`, replicate padding,
+    float32 internally).
+
+    A sum over the kernel taps in a fixed order (not ``conv2d``): every output pixel is the same
+    sequence of float operations on its neighbourhood whatever the image size, so a crop gives
+    bit-identical values away from its edges. Block decoding (:mod:`manyseg.points.blocks`)
+    relies on this to equal a whole-scene :func:`find_peaks` exactly, ties included."""
+    r = blur_radius(sigma)
     t = torch.arange(-r, r + 1, device=x.device, dtype=torch.float32)
     k = torch.exp(-t ** 2 / (2 * sigma ** 2))
-    k = k / k.sum()
-    y = x.float()[:, None]
-    y = F.conv2d(F.pad(y, (r, r, 0, 0), mode="replicate"), k.view(1, 1, 1, -1))
-    y = F.conv2d(F.pad(y, (0, 0, r, r), mode="replicate"), k.view(1, 1, -1, 1))
-    return y[:, 0]
+    k = (k / k.sum()).tolist()
+    y = x.float()
+    h, w = y.shape[-2:]
+    p = F.pad(y[:, None], (r, r, 0, 0), mode="replicate")[:, 0]
+    y = sum((k[i] * p[..., i:i + w] for i in range(1, 2 * r + 1)), k[0] * p[..., 0:w])
+    p = F.pad(y[:, None], (0, 0, r, r), mode="replicate")[:, 0]
+    return sum((k[i] * p[:, i:i + h] for i in range(1, 2 * r + 1)), k[0] * p[:, 0:h])
 
 
 def _squeeze(t: Tensor, name: str, like: Tensor | None = None) -> Tensor:

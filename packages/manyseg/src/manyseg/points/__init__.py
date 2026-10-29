@@ -23,3 +23,11 @@ __all__ = ["calibrate_threshold", "centers_from_instances", "count_from_density"
            "density_head", "density_loss", "density_map", "find_peaks", "gaussian_heatmap",
            "group_by_offsets", "heatmap_from_instances", "offset_targets", "panoptic_labels",
            "point_heads", "points_from_boxes"]
+
+# --- geo coordinates and large-scene block decoding ---
+from .blocks import DensityBlockDecoder, PointBlockDecoder, SceneCount, ScenePoints  # noqa: E402
+from .geo import points_from_xy, points_to_xy  # noqa: E402
+
+__all__ += ["DensityBlockDecoder", "PointBlockDecoder", "SceneCount", "ScenePoints",
+            "points_from_xy", "points_to_xy"]
+# --- end geo coordinates and large-scene block decoding ---

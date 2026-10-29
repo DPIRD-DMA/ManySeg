@@ -158,8 +158,8 @@ def _tile_filter(geoms, transform, shape, src_crs, dst_crs):
 
 
 def _parts(g, kind: str) -> list:
-    """Polygon / LineString parts of any geometry (collections and multipart split)."""
-    want = ("Polygon",) if kind == "polygons" else ("LineString", "LinearRing")
+    """Polygon / LineString / Point parts of any geometry (collections and multipart split)."""
+    want = {"polygons": ("Polygon",), "points": ("Point",)}.get(kind, ("LineString", "LinearRing"))
     if g.geom_type in want:
         return [g]
     if hasattr(g, "geoms"):
@@ -173,6 +173,8 @@ def _kind(g) -> str | None:
         return "polygons"
     if t in ("LineString", "LinearRing"):
         return "lines"
+    if t == "Point":
+        return "points"
     if t == "GeometryCollection":
         kinds = {_kind(p) for p in g.geoms} - {None}
         return kinds.pop() if len(kinds) == 1 else ("mixed" if kinds else None)
@@ -199,7 +201,8 @@ def to_pixels(features, transform, shape: tuple[int, int], *, crs=None, raster_c
             vertices are reprojected (rasterio / PROJ; edges stay straight, so densify long
             edges first if the projections differ strongly). When either is unknown the
             features are taken to be in the raster's CRS.
-        kind: ``"polygons"`` or ``"lines"``; inferred when ``None`` (mixed inputs raise).
+        kind: ``"polygons"``, ``"lines"`` or ``"points"``; inferred when ``None`` (mixed inputs
+            raise).
         min_area, min_length: drop clipped parts at or below this size (px² / px; the default
             drops only empty and degenerate parts).
         return_index: also return, per output part, the index of its source feature.
@@ -209,10 +212,22 @@ def to_pixels(features, transform, shape: tuple[int, int], *, crs=None, raster_c
     ``LineString``\\ s; a line that leaves and re-enters the tile becomes two parts. Vertices
     are kept exactly where a geometry lies inside the tile, so lines that share a vertex in the
     source data (a junction) still share it in pixels.
+
+    Points (``Point`` / ``MultiPoint``, split into one row per point) come back as one
+    ``(N, 2)`` float64 array of pixel ``(x, y)`` (pixel corners at integers, so the centre of
+    pixel ``(row, col)`` is ``(col + 0.5, row + 0.5)``), not a list of geometries. A point is
+    kept when ``0 <= x < W`` and ``0 <= y < H`` (the pixel it falls in is in the tile; a point
+    on the right or bottom edge belongs to the next tile; within float rounding of an edge it
+    can go either way). ``min_area`` / ``min_length`` do not apply. For :mod:`manyseg.points`
+    targets, which are ``(y, x)`` with centres at integers, convert with
+    :func:`manyseg.points.points_from_xy`::
+
+        xy = to_pixels(trees_gdf, transform, (H, W), raster_crs=crs, kind="points")
+        hm = gaussian_heatmap([points_from_xy(xy)], (H, W), sigma=2)   # (1, 1, H, W)
     """
     shapely = _deps()[1]
-    if kind not in (None, "polygons", "lines"):
-        raise ValueError(f"kind must be 'polygons', 'lines' or None, got {kind!r}")
+    if kind not in (None, "polygons", "lines", "points"):
+        raise ValueError(f"kind must be 'polygons', 'lines', 'points' or None, got {kind!r}")
     H, W = shape
     geoms, fcrs = _geometries(features)
     src = crs if crs is not None else fcrs
@@ -221,12 +236,21 @@ def to_pixels(features, transform, shape: tuple[int, int], *, crs=None, raster_c
     if kind is None:
         kinds = {_kind(geoms[i]) for i in idx} - {None}
         if len(kinds) > 1 or "mixed" in kinds:
-            raise ValueError("features mix polygons and lines; pass kind= to pick one")
+            raise ValueError("features mix polygons, lines or points; pass kind= to pick one")
+        if not kinds:  # nothing in the tile: points still come back as an empty array
+            every = {_kind(g) for g in geoms if g is not None} - {None}
+            kinds = every if every == {"points"} else set()
         kind = kinds.pop() if kinds else "polygons"
     sel = [geoms[i] for i in idx]
     if reproject:
         sel = _reproject(sel, src, raster_crs)
     sel = world_to_pixel(sel, transform) if sel else []
+    if kind == "points":
+        rows = [(i, q.x, q.y) for i, g in zip(idx, sel) for q in _parts(g, kind)]
+        a = np.asarray(rows, np.float64).reshape(-1, 3)
+        inside = (a[:, 1] >= 0) & (a[:, 1] < W) & (a[:, 2] >= 0) & (a[:, 2] < H)
+        xy, index = a[inside, 1:], a[inside, 0].astype(np.int64)
+        return (xy, index) if return_index else xy
     tile = shapely.box(0, 0, W, H)
     out, index = [], []
     for i, g in zip(idx, sel):

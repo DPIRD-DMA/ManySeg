@@ -869,6 +869,41 @@ encode synthetic vectors and decode the targets with the shipped decoders
 > 0.98 with the same vertex count, roof faces > 0.99, fields > 0.97, roads within 3 px with
 both junctions kept and the overpass left uncrossed.
 
+**Points (trees, animals, wells) in a CRS and over large scenes.** `manyseg.points` works in
+`(y, x)` with pixel centres at integers; `manyseg.vectors` in `(x, y)` with pixel corners at
+integers. Convert only with `points_to_xy` (`xy = yx[:, ::-1] + 0.5`) and `points_from_xy`, its
+inverse: a swap or a half-pixel shift survives any round trip within one convention.
+`to_geojson` refuses torch tensors for that reason.
+
+```python
+from manyseg.points import PointBlockDecoder, find_peaks, gaussian_heatmap, points_from_xy, points_to_xy
+from manyseg.vectors import to_geojson, to_pixels
+
+# Training targets from labelled points in a CRS
+xy = to_pixels(trees_gdf, transform, shape, raster_crs=crs, kind="points")  # (N, 2), in the tile
+hm = gaussian_heatmap([points_from_xy(xy)], shape, sigma=2.0)               # (1, 1, H, W)
+
+# One tile: peaks -> GeoJSON Points with scores
+((yx, scores),) = find_peaks(torch.sigmoid(out["heatmap"]), threshold=0.3)
+fc = to_geojson(points_to_xy(yx), transform, properties={"score": scores.numpy()})
+
+# A stitched scene, block by block (halo >= dec.reach = kernel // 2 + blur radius)
+dec = PointBlockDecoder(threshold=0.3, kernel=5, smooth_sigma=1.0, offsets="offset")
+# ManyPred: postprocess_blocks(fields, dec, combine=dec.combine, halo=256)
+pts = dec.combine([dec(crop(fields, b.window), b, scene) for b in blocks], scene)  # ScenePoints
+fc = pts.to_geojson()  # through scene.transform; pts.points (y, x), pts.xy (x, y), pts.scores
+```
+
+`PointBlockDecoder` runs `find_peaks` on each window and keeps the peaks whose pixel lies in the
+block's core; with a halo of at least `reach` it equals a whole-scene `find_peaks` exactly (same
+peaks, scores and plateaus; tested on seams, corners, scene edges and several grids) and raises
+when a block's halo is smaller on a side that is not the scene edge. Offsets (`dy, dx`) are added
+at the peak, so a refined point may sit just outside its core. Results are sorted by score, ties
+in raster order; `max_points` applies to the whole scene. `DensityBlockDecoder` sums a density
+field over each core (`SceneCount`: total and per-block counts; no halo needed).
+`to_pixels(kind="points")` keeps `0 <= x < W`, `0 <= y < H`, so a point on a shared tile edge
+goes to one tile (within float rounding of the edge it can go either way).
+
 > **Evidence (E009, Sen1Floods11, leave-events-out):** FiLM beat metadata-as-channels (+1.3
 > water IoU, 2.9 SE, all folds); FiLM vs no metadata was +0.9 but under the 2 SE bar. Lat/lon added
 > nothing on held-out events. **E013 (CloudSEN12+, unseen locations):** FiLM with lat/lon, day of
