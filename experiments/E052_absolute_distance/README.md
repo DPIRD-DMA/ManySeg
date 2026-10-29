@@ -29,3 +29,19 @@ Mean over seeds 0 and 1 on test, A - N:
 No further seeds. Roof faces (CornerLineTask) are not tested here: whatever the result, their
 default follows the shared `instance_targets` default only if the user agrees, and this is
 reported as untested for roofs.
+
+## Results (23:00; NL test 388 chips; GPU otherwise idle)
+Training ~5 min per run. N_s0 reproduces E046's B0 (test boundary F 0.592, detection F1 0.593).
+
+| run | thresholds (extent/boundary/seed) | simplify | val boundary F | test boundary F | test P / R | test det F1 | C-IoU | PoLiS px |
+|---|---|---|---|---|---|---|---|---|
+| N_s0 | 0.6/0.3/0.3 | 0.5 | 0.592 | 0.592 | 0.617 / 0.569 | 0.593 | 0.262 | 1.62 |
+| N_s1 | 0.4/0.3/0.3 | 0.5 | 0.590 | 0.586 | 0.614 / 0.561 | 0.582 | 0.260 | 1.57 |
+| A_s0 | 0.4/0.3/3.0 px | 0.5 | 0.597 | 0.596 | 0.607 / 0.585 | 0.592 | 0.263 | 1.53 |
+| A_s1 | 0.4/0.3/3.0 px | 0.5 | 0.604 | 0.599 | 0.627 / 0.573 | 0.599 | 0.265 | 1.56 |
+
+Mean A - N: boundary F +0.008, detection F1 +0.008, C-IoU +0.003, PoLiS -0.05 px.
+**Decision (rule above): absolute becomes the default for fields.** Notes: every A run chose the
+largest seed threshold in its grid (3 px), so a larger one might do better still (a grid edge;
+it can only favour A). The absolute loss is larger in scale (final train loss 2.2 vs 1.0, the
+distance term in px) with no harm seen. Roof faces untested.
