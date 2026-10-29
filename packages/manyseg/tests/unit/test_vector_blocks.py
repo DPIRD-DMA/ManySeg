@@ -166,6 +166,18 @@ def test_whole_view_separates_instances_a_window_joins():
         assert _canon(r["geometry"] for r in out) == _canon(ref), (block, halo, out.stats)
 
 
+def test_thin_diagonal_object_merges_sparsely():
+    """Codex review #2: a long staircase line spanning many blocks is one object; the merge
+    works on its pixels, not on dense canvases over its bounding box."""
+    n = 900
+    m = np.zeros((n, n), np.float32)
+    r = np.arange(n)
+    m[r, r] = 1
+    m[r[:-1], r[1:]] = 1  # 4-connected staircase
+    out = decode_scene({"mask": m}, MaskDecoder(min_size=0), 100, 12, offset=(37, 0))
+    assert len(out) == 1 and out[0]["pixels"] == int(m.sum()) and out[0]["id"] == 0
+
+
 def test_u_shape_that_leaves_a_window_is_one_object():
     m = np.zeros((300, 300), np.float32)
     m[20:30, 20:280] = 1
@@ -428,8 +440,27 @@ def test_registry_and_halo_check():
         block_decoder("rivers")
     with pytest.raises(ValueError):
         block_decoder("footprints", method="graph")
+    f = _terraces()
     with pytest.raises(ValueError):
-        decode_scene(_terraces(), block_decoder("roofs"), 128, 8)
+        decode_scene(f, block_decoder("roofs"), 128, 8)
+    b = block_grid(400, 500, 128, 8)[5]  # as ManyPred would call it, without decode_scene
+    t, bt, lf, rt = b.window
+    with pytest.raises(ValueError, match="halo"):
+        block_decoder("footprints")({k: v[..., t:bt, lf:rt] for k, v in f.items()}, b,
+                                    Scene(400, 500))
+
+
+def test_decode_scene_checks_offset_grids_and_scene_size():
+    """Codex review #3 / #4: an offset grid splits a scene smaller than one block; a scene that
+    does not match the fields would give wrong anchors."""
+    f = _terraces()
+    with pytest.raises(ValueError, match="halo"):
+        decode_scene(f, block_decoder("footprints"), 4096, 4, offset=(200, 0))
+    with pytest.raises(ValueError, match="scene"):
+        decode_scene(f, block_decoder("footprints"), 200, 40, scene=Scene(400, 1000))
+
+
+def test_roads_registry_entry():
     try:
         from manyseg.vectors.roads import RoadBlockDecoder  # noqa: F401
     except ImportError:

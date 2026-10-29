@@ -126,11 +126,14 @@ def decode_scene(fields, decoder, block: int = 4096, halo: int = 256, *, scene=N
         raise ValueError(f"fields must share (H, W), got {shapes}")
     H, W = next(iter(shapes.values()))
     scene = scene if scene is not None else Scene(H, W)
+    if (scene.height, scene.width) != (H, W):
+        raise ValueError(f"scene is {scene.height} x {scene.width}, fields are {H} x {W}")
+    grid = block_grid(H, W, block, halo, offset)
     need = getattr(decoder, "min_halo", 0)
-    if halo < need and max(H, W) > block:
+    if halo < need and len(grid) > 1:
         raise ValueError(f"halo {halo} is below this decoder's minimum {need}")
     results = []
-    for b in block_grid(H, W, block, halo, offset):
+    for b in grid:
         t, bt, lt, rt = b.window
         wf = {k: np.asarray(v[..., t:bt, lt:rt]) for k, v in fields.items()}
         results.append(decoder({k: v if v.ndim == 3 else v[None] for k, v in wf.items()},
@@ -237,13 +240,6 @@ def _merge_pieces(pieces: list, min_iou: float) -> list[tuple[Box, np.ndarray, l
         reg = _inter(p.bbox, region)
         return 0 if reg is None else int(_sub(p.mask, p.bbox, reg).sum())
 
-    def place(p, box, region=None):  # (slices into a ``box`` canvas, mask) of ``p`` in region
-        reg = _inter(p.bbox, box if region is None else _inter(box, region))
-        if reg is None:
-            return None
-        sl = (slice(reg[0] - box[0], reg[1] - box[0]), slice(reg[2] - box[2], reg[3] - box[2]))
-        return sl, _sub(p.mask, p.bbox, reg)
-
     boxes = [shapely.box(p.bbox[2], p.bbox[0], p.bbox[3], p.bbox[1]) for p in pieces]
     tree = shapely.STRtree(boxes)
     for i, a in enumerate(pieces):
@@ -271,35 +267,53 @@ def _merge_pieces(pieces: list, min_iou: float) -> list[tuple[Box, np.ndarray, l
         view.append(v if pieces[v].margin >= 0 else -1)
     views = sorted((v for v in view if v >= 0), key=lambda v: (pieces[v].margin, -pieces[v].block))
     vtree = shapely.STRtree([boxes[v] for v in views]) if views else None
+    def pixels(p, region):  # scene (row, col) of p's mask pixels inside ``region``
+        reg = _inter(p.bbox, region)
+        if reg is None:
+            return np.zeros((0, 2), np.int64)
+        return np.argwhere(_sub(p.mask, p.bbox, reg)) + (reg[0], reg[2])
+
+    def hits(p, rc, region=None):  # which of the scene pixels ``rc`` p's mask holds (in region)
+        box = p.bbox if region is None else _inter(p.bbox, region)
+        if box is None:
+            return np.zeros(len(rc), bool)
+        ok = ((rc[:, 0] >= box[0]) & (rc[:, 0] < box[1]) & (rc[:, 1] >= box[2])
+              & (rc[:, 1] < box[3]))
+        ok[ok] = p.mask[rc[ok, 0] - p.bbox[0], rc[ok, 1] - p.bbox[2]]
+        return ok
+
     out = []
     for g, idx in enumerate(members):
-        bb = [pieces[i].bbox for i in idx] + ([pieces[view[g]].bbox] if view[g] >= 0 else [])
-        box = (min(b[0] for b in bb), max(b[1] for b in bb), min(b[2] for b in bb),
-               max(b[3] for b in bb))
-        q = shapely.box(box[2], box[0], box[3], box[1])
-        win = np.full((box[1] - box[0], box[3] - box[2]), -1, np.int64)
-        for i in tree.query(q, predicate="intersects").tolist():  # core block's object
-            p = pieces[i]
-            pl = place(p, box, p.core)
-            if pl is not None:
-                win[pl[0]][pl[1]] = gid[i]
-        if vtree is not None:
-            best = np.full(win.shape, -1, np.int64)  # most central claimant
-            own = np.zeros(win.shape, bool)  # the core block's object claims it itself
-            for k in sorted(vtree.query(q, predicate="intersects").tolist()):  # by priority
-                pl = place(pieces[views[k]], box)
-                if pl is not None:
-                    vg = gid[views[k]]
-                    best[pl[0]][pl[1]] = vg
-                    own[pl[0]] |= pl[1] & (win[pl[0]] == vg)
-            win = np.where((best >= 0) & ~own & (win >= 0), best, win)
-        mine = win == g
-        rows, cols = np.nonzero(mine.any(1))[0], np.nonzero(mine.any(0))[0]
-        if not len(rows):
+        # candidate pixels (sparse: never a dense canvas over a large, thin object's box): its
+        # core pixels and those its whole view claims
+        rc = [pixels(pieces[i], pieces[i].core) for i in idx]
+        if view[g] >= 0:
+            rc.append(pixels(pieces[view[g]], pieces[view[g]].bbox))
+        rc = np.unique(np.concatenate(rc).reshape(-1, 2), axis=0)
+        if not len(rc):
             continue
-        tight = (box[0] + rows[0], box[0] + rows[-1] + 1, box[2] + cols[0], box[2] + cols[-1] + 1)
-        out.append((tight, mine[rows[0] : rows[-1] + 1, cols[0] : cols[-1] + 1],
-                    [pieces[i] for i in idx]))
+        box = (int(rc[:, 0].min()), int(rc[:, 0].max()) + 1, int(rc[:, 1].min()),
+               int(rc[:, 1].max()) + 1)
+        q = shapely.box(box[2], box[0], box[3], box[1])
+        owner = np.full(len(rc), -1, np.int64)  # object of each core pixel (core block's view)
+        for i in tree.query(q, predicate="intersects").tolist():
+            owner[hits(pieces[i], rc, pieces[i].core)] = gid[i]
+        if vtree is not None:
+            best = np.full(len(rc), -1, np.int64)  # most central claimant
+            own = np.zeros(len(rc), bool)  # the core block's object claims it itself
+            for k in sorted(vtree.query(q, predicate="intersects").tolist()):  # by priority
+                h = hits(pieces[views[k]], rc)
+                best[h] = gid[views[k]]
+                own |= h & (owner == gid[views[k]])
+            owner = np.where((best >= 0) & ~own & (owner >= 0), best, owner)
+        rc = rc[owner == g]
+        if not len(rc):
+            continue
+        tight = (int(rc[:, 0].min()), int(rc[:, 0].max()) + 1, int(rc[:, 1].min()),
+                 int(rc[:, 1].max()) + 1)
+        m = np.zeros((tight[1] - tight[0], tight[3] - tight[2]), bool)
+        m[rc[:, 0] - tight[0], rc[:, 1] - tight[2]] = True
+        out.append((tight, m, [pieces[i] for i in idx]))
     return out
 
 
@@ -450,9 +464,17 @@ class InstanceBlockDecoder:
         from scipy import ndimage
 
         wt, wb, wl, wr = block.window
+        R, e = self.margin, block.scene_edges
+        ct, cb, cl, cr = block.core
+        halo = min([ct - wt] * (not e[0]) + [wb - cb] * (not e[1]) + [cl - wl] * (not e[2])
+                   + [wr - cr] * (not e[3]) + [1 << 30])
+        if halo < self.min_halo:
+            raise ValueError(f"halo {halo} is below this decoder's minimum {self.min_halo}")
+        if wb > scene.height or wr > scene.width:
+            raise ValueError(f"window {block.window} is outside the scene "
+                             f"({scene.height} x {scene.width})")
         lab = self.labels(fields, (wt, wl), scene.width)
         ctx = self._context(fields, (wt, wl))
-        R, e = self.margin, block.scene_edges
         complete, pieces, partial, outside = [], [], [], []
         for k, sl in enumerate(ndimage.find_objects(lab), start=1):
             if sl is None:
@@ -693,13 +715,15 @@ class RoofBlockDecoder(InstanceBlockDecoder):
         nan_planes = 0
         clusters = self._clusters(faces)
         for cl in clusters:
-            x0, y0, x1, y1 = _bounds([faces[i] for i in cl])
-            # joined faces stay within ``tolerance`` of the raw ones; planes read + erode + 1
-            box = _grow((int(y0), int(math.ceil(y1)), int(x0), int(math.ceil(x1))),
-                        math.ceil(self.tolerance) + self.erode + 2, lim)
-            h = _paste(box, [c for i in cl for c in crops[i]])
-            out = self._join([anchors[i] for i in cl], [faces[i] for i in cl], h,
-                             (box[0], box[2]))
+            cc = [c for i in cl for c in crops[i]]
+
+            def height(face, cc=cc):  # crop around one joined face (planes read + erode + 1)
+                x0, y0, x1, y1 = face.bounds
+                box = _grow((int(y0), math.ceil(y1), int(x0), math.ceil(x1)), self.erode + 2,
+                            lim)
+                return _paste(box, cc), (box[0], box[2])
+
+            out = self._join([anchors[i] for i in cl], [faces[i] for i in cl], height, None)
             nan_planes += sum(not np.isfinite(o["plane"]).all() for o in out)
             records += out
         records.sort(key=lambda rec: (rec["id"], rec["part"]))
@@ -707,11 +731,6 @@ class RoofBlockDecoder(InstanceBlockDecoder):
                                  "merged_objects": len(merged), "resolved_in_blocks": len(done),
                                  "joined_in_combine": len(faces), "combine_clusters": len(clusters),
                                  "nan_planes": nan_planes})
-
-
-def _bounds(geoms) -> tuple[float, float, float, float]:
-    b = np.array([g.bounds for g in geoms])
-    return float(b[:, 0].min()), float(b[:, 1].min()), float(b[:, 2].max()), float(b[:, 3].max())
 
 
 # ---------------------------------------------------------------- registry and output

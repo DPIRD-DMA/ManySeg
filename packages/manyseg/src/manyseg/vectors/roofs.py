@@ -121,7 +121,9 @@ def roof_records(anchors, faces, height, origin: tuple[int, int] = (0, 0), *,
                  tolerance: float = 2.5, erode: int = 2, trim: float = 0.2,
                  mesh: str | None = "J2") -> list[dict]:
     """Join roof ``faces`` (one per instance, keyed by ``anchors``) with :func:`planar_faces`,
-    fit planes from ``height`` (top-left pixel at scene ``origin``) and mesh them. Faces enter
+    fit planes from ``height`` (top-left pixel at scene ``origin``; or a callable
+    ``height(face) -> (array, origin)`` giving a crop around each joined face) and mesh them.
+    Faces enter
     the join in anchor order. Records sorted by ``(id, part)``: ``id`` = the instance's anchor,
     ``part`` 0 (or 1.. for pieces :func:`planar_faces` split off), ``geometry``, ``plane``
     ``(a, b, c)`` and, unless ``mesh`` is None, ``mesh`` ((K, 3) ring, :func:`roof_mesh`)."""
@@ -131,7 +133,11 @@ def roof_records(anchors, faces, height, origin: tuple[int, int] = (0, 0), *,
     anchors = [anchors[i] for i in order]
     joined = _planar_faces([faces[i] for i in order], tolerance)
     geoms = [g for _, _, g in joined]
-    P = roof_planes(geoms, height, origin, erode=erode, trim=trim)
+    if callable(height):
+        P = np.array([face_plane(g, *height(g), erode=erode, trim=trim) for g in geoms])
+        P = P.reshape(-1, 3)
+    else:
+        P = roof_planes(geoms, height, origin, erode=erode, trim=trim)
     rings = roof_mesh(geoms, P, join=mesh) if mesh else [None] * len(geoms)
     out = []
     for (j, part, g), p, ring in zip(joined, P, rings):
