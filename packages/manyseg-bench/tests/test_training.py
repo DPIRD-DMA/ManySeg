@@ -333,4 +333,7 @@ def test_evaluate_pad_last_gives_the_same_metrics():
     a = evaluate(m, ld, 3, torch.device("cpu"), "fp32")
     b = evaluate(m, ld, 3, torch.device("cpu"), "fp32", pad_last=True)
     assert seen == [4, 4, 2, 4, 4, 4]  # the padded pass runs the short batch at full size
-    assert a == pytest.approx(b)
+    # pytest 9.2's approx refuses nested values (per-class `iou` is a list)
+    assert a.keys() == b.keys()
+    for k in a:
+        assert a[k] == pytest.approx(b[k]), k
