@@ -2,7 +2,8 @@
 
 Pipeline: foreground = extent > t_e; seeds = foreground & boundary < t_b & distance > t_s;
 markers = connected components of the seeds; then markers grow back over the foreground:
-``backend="skimage"`` uses seeded watershed on ``-distance`` (``pip install manyseg[instances]``);
+``backend="skimage"`` uses seeded watershed on ``-distance``, markers of equal distance leaving
+the queue in raster order (``pip install manyseg[instances]``);
 ``backend="torch"`` (no extra dependencies, GPU-capable) grows all markers at equal speed through
 4-connected foreground (ties -> larger label), which splits a symmetric boundary band exactly.
 
@@ -24,9 +25,15 @@ def _neighbour_max(lab: Tensor) -> Tensor:
 
 
 @torch.no_grad()
-def connected_components(mask: Tensor, check_every: int = 8) -> Tensor:
+def connected_components(mask: Tensor, check_every: int = 8, *,
+                         origin: tuple[int, int] | None = None,
+                         scene_width: int | None = None) -> Tensor:
     """4-connected component labels for a bool ``(B, H, W)`` mask (0 = background). Torch only;
     labels are not sequential (see :func:`relabel_sequential`).
+
+    ``origin`` = (row, col) of the mask in a larger scene of width ``scene_width``: labels are
+    then scene pixel indices (``(row + r) * scene_width + col + c + 1``) instead of array ones,
+    so a window labels and orders its components as a decode of the whole scene would.
 
     Each pixel starts with its own index and takes the largest label among its neighbours
     until nothing changes: every component ends with its largest pixel index. Pointer
@@ -35,14 +42,52 @@ def connected_components(mask: Tensor, check_every: int = 8) -> Tensor:
     field-like components) with the same result. On CPU with scipy installed, scipy's labelling
     is mapped to the same ids (much faster on large components: 102 sweeps, ~9 s, for one 1024 px
     tile of farm fields, E045)."""
+    lab = None
     if mask.device.type == "cpu":
         try:
             from scipy import ndimage
         except ImportError:
             ndimage = None
         if ndimage is not None:
-            return _connected_components_scipy(mask, ndimage)
-    return _connected_components_torch(mask, check_every)
+            lab = _connected_components_scipy(mask, ndimage)
+    if lab is None:
+        lab = _connected_components_torch(mask, check_every)
+    return lab if origin is None else _scene_index(lab, origin, scene_width)
+
+
+def _scene_index(lab: Tensor, origin: tuple[int, int], scene_width: int | None) -> Tensor:
+    """Array pixel index + 1 -> scene pixel index + 1 (monotone: raster order is kept)."""
+    w = lab.shape[-1]
+    if scene_width is None or scene_width < origin[1] + w:
+        raise ValueError(f"scene_width {scene_width} must cover origin {origin} + width {w}")
+    p = lab.long() - 1
+    out = (origin[0] + p // w) * scene_width + origin[1] + p % w + 1
+    return torch.where(lab > 0, out, 0)
+
+
+def anchor_labels(labels: Tensor, origin: tuple[int, int] = (0, 0),
+                  scene_width: int | None = None) -> Tensor:
+    """Relabel each instance of ``(B, H, W)`` (or ``(H, W)``) ``labels`` with its *anchor* + 1:
+    the scene pixel index of its first pixel in raster order (``origin`` / ``scene_width`` as in
+    :func:`connected_components`; default: the array is the scene). The ids do not depend on
+    the window a scene was decoded in. int64, 0 stays background."""
+    import numpy as np
+
+    one = labels.dim() == 2
+    lab = (labels[None] if one else labels).cpu().numpy()
+    b, h, w = lab.shape
+    if scene_width is None and tuple(origin) != (0, 0):
+        raise ValueError("anchor_labels needs scene_width with a non-zero origin")
+    sw = w if scene_width is None else scene_width
+    out = np.zeros(lab.shape, np.int64)
+    for i in range(b):
+        u, first = np.unique(lab[i].reshape(-1), return_index=True)  # first = raster order
+        r, c = first // w, first % w
+        ids = (origin[0] + r) * sw + origin[1] + c + 1
+        ids[u == 0] = 0
+        out[i] = ids[np.searchsorted(u, lab[i])]
+    t = torch.from_numpy(out)
+    return t[0] if one else t
 
 
 def _connected_components_scipy(mask: Tensor, ndimage) -> Tensor:
@@ -103,6 +148,24 @@ def relabel_sequential(labels: Tensor) -> Tensor:
     return out
 
 
+def _marker_order(image, markers):
+    """``image`` as float64 with marker pixels lowered by a few float64 ulps, more for pixels
+    earlier in raster order. skimage's watershed starts all markers at age 0, so it orders
+    equal-valued markers by heap internals that depend on the whole array; with this
+    nudge they leave the queue in raster order, the same in a window as in the whole scene.
+    The nudge stays below a quarter of a float32 ulp, so no other order changes (``image`` is
+    float32 here) and plateaus still fill first in, first out."""
+    import numpy as np
+
+    out = image.astype(np.float64)
+    idx = np.flatnonzero(markers)
+    if len(idx) >= 1 << 26:
+        raise ValueError("too many marker pixels for the raster-order nudge")
+    v = out.reshape(-1)[idx]
+    out.reshape(-1)[idx] = v - np.spacing(np.abs(v)) * (len(idx) - np.arange(len(idx)))
+    return out
+
+
 def _ensure_seed_per_component(fg: Tensor, seeds: Tensor, dist: Tensor) -> Tensor:
     """Give every foreground component without a seed one seed at its distance maximum.
 
@@ -149,6 +212,9 @@ def instances_from_outputs(
     seed_threshold: float = 0.25,
     min_size: int = 0,
     backend: str = "auto",
+    origin: tuple[int, int] | None = None,
+    scene_width: int | None = None,
+    ids: str = "sequential",
 ) -> Tensor:
     """Integer instance label map ``(B, H, W)`` (0 = background, ids 1..K per image).
 
@@ -164,13 +230,22 @@ def instances_from_outputs(
         seed_threshold: Seeds need a predicted distance above this.
         min_size: Instances smaller than this many pixels are removed (0 keeps all).
         backend: ``"skimage"`` (watershed), ``"torch"`` or ``"auto"`` (skimage if installed).
+        origin: ``(row, col)`` of these arrays in a larger scene of width ``scene_width``
+            (block-wise decoding). Tie-breaks then follow scene pixel indices, so an instance
+            that lies well inside the window gets the same pixels as in a whole-scene decode.
+        scene_width: Width of that scene (required with ``origin``).
+        ids: ``"sequential"`` (1..K per image) or ``"anchor"``: anchor + 1, the scene pixel
+            index of the instance's first pixel in raster order (:func:`anchor_labels`), the
+            same id whatever window the scene was decoded in.
     """
+    if ids not in ("sequential", "anchor"):
+        raise ValueError(f"ids must be sequential|anchor, got {ids!r}")
     fg = _foreground(extent, logits, extent_threshold)
     bnd = boundary[:, 0].sigmoid() if logits else boundary[:, 0]
     dist = distance[:, 0].float()
     seeds = fg & (bnd < boundary_threshold) & (dist > seed_threshold)
     seeds = _ensure_seed_per_component(fg, seeds, dist)
-    markers = connected_components(seeds)
+    markers = connected_components(seeds, origin=origin, scene_width=scene_width)
     if backend == "auto":
         try:
             import skimage  # noqa: F401
@@ -182,9 +257,10 @@ def instances_from_outputs(
         from skimage.segmentation import watershed
 
         out = torch.stack([
-            torch.from_numpy(watershed(-dist[i].cpu().numpy(), markers[i].cpu().numpy(),
+            torch.from_numpy(watershed(_marker_order(-dist[i].cpu().numpy(), mk), mk,
                                        mask=fg[i].cpu().numpy())).to(markers)
             for i in range(markers.shape[0])
+            for mk in [markers[i].cpu().numpy()]
         ])
     elif backend == "torch":
         out = grow_labels(markers, fg)
@@ -192,7 +268,9 @@ def instances_from_outputs(
         raise ValueError(f"backend must be auto|torch|skimage, got {backend!r}")
     if min_size > 0:
         for i in range(out.shape[0]):
-            ids, counts = torch.unique(out[i], return_counts=True)
-            small = ids[(counts < min_size) & (ids > 0)]
+            u, counts = torch.unique(out[i], return_counts=True)
+            small = u[(counts < min_size) & (u > 0)]
             out[i][torch.isin(out[i], small)] = 0
+    if ids == "anchor":
+        return anchor_labels(out, origin or (0, 0), scene_width)
     return relabel_sequential(out)
