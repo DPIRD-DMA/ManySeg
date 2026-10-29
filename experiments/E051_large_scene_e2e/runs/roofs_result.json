@@ -1,0 +1,16 @@
+{
+ "task": "roofs",
+ "shape": [
+  4096,
+  4096
+ ],
+ "hook_s": 92.27311563491821,
+ "whole_decode_s": 32.22251224517822,
+ "block_decode_s": 85.29898023605347,
+ "n_hook": 5537,
+ "n_whole": 5537,
+ "n_blocks": 5537,
+ "same_keys": true,
+ "geom_equal": 5537,
+ "plane_max_diff": 0.0
+}

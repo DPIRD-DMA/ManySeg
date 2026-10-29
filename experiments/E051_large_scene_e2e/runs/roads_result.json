@@ -1,0 +1,16 @@
+{
+ "task": "roads",
+ "shape": [
+  2048,
+  2048
+ ],
+ "hook_s": 12.673384666442871,
+ "whole_decode_s": 5.597795009613037,
+ "block_decode_s": 5.7428929805755615,
+ "nodes_hook": 2398,
+ "nodes_whole": 2398,
+ "edges_hook": 2658,
+ "edges_whole": 2658,
+ "nodes_equal": true,
+ "edges_equal": true
+}
