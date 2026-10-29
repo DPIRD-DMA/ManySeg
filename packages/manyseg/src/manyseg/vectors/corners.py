@@ -19,7 +19,7 @@ import numpy as np
 
 from .graph import _deps
 from .graph_tensor import _peak_pixels, _refine
-from .polygons import polygons_from_labels
+from .polygons import _outline
 
 
 def _trimmed_line(pts: np.ndarray, keep_px: float = 1.5):
@@ -75,7 +75,9 @@ def _intersect(p1, d1, p2, d2):
 
 
 def _polygon(ring: np.ndarray, corners: np.ndarray, direction: np.ndarray, *, snap_radius: float,
-             big_dev: float, agree: float, merge_deg: float, simplify: float):
+             big_dev: float, agree: float, merge_deg: float, simplify: float,
+             origin: tuple[int, int] = (0, 0)):
+    """``origin``: (row, col) of ``direction`` in the coordinates of ``ring`` and ``corners``."""
     shapely = _deps()[1]
     cKDTree = _deps()[2]
     H, W = direction.shape[1:]
@@ -93,8 +95,8 @@ def _polygon(ring: np.ndarray, corners: np.ndarray, direction: np.ndarray, *, sn
 
     if len(idx) < 3:
         return fallback()
-    c = np.clip(np.floor(ring[:, 0]).astype(int), 0, W - 1)
-    r = np.clip(np.floor(ring[:, 1]).astype(int), 0, H - 1)
+    c = np.clip(np.floor(ring[:, 0]).astype(int) - origin[1], 0, W - 1)
+    r = np.clip(np.floor(ring[:, 1]).astype(int) - origin[0], 0, H - 1)
     dirs = _unit(direction[:, r, c].T)
     verts = []
     for a, b in zip(idx, idx[1:] + [idx[0] + K]):
@@ -139,18 +141,52 @@ def polygons_from_corners(labels, corner, direction, *, corner_threshold: float 
     are E035b's level-1/2 tuning. Instances with fewer than 3 snapped corners, or whose straightened
     polygon degenerates (< 3 walls, invalid, empty), fall back to their outline simplified by
     ``simplify`` px, so a building the instance mask found is never dropped."""
-    shapely = _deps()[1]
     cp = corner.detach().float().cpu().numpy() if hasattr(corner, "detach") else np.asarray(corner, np.float32)
     dr = direction.detach().float().cpu().numpy() if hasattr(direction, "detach") else np.asarray(direction, np.float32)
-    peaks = _refine(cp, _peak_pixels(cp, corner_threshold, kernel))
+    from scipy import ndimage
+
+    peaks = _corner_peaks(cp, corner_threshold, kernel)[1]
+    lab = labels.detach().cpu().numpy() if hasattr(labels, "detach") else np.asarray(labels)
+    if lab.ndim != 2:
+        raise ValueError(f"expected a (H, W) label map, got shape {lab.shape}")
     out = []
-    for poly in polygons_from_labels(labels, simplify=0.0, min_area=min_area):
-        ring = np.asarray(shapely.segmentize(poly.exterior, 1.0).coords)
-        q = _polygon(ring, peaks, dr, snap_radius=snap_radius, big_dev=big_dev, agree=agree,
-                     merge_deg=merge_deg, simplify=simplify)
+    for i, sl in enumerate(ndimage.find_objects(lab.astype(np.int64)), start=1):
+        if sl is None:
+            continue
+        q = _instance_polygon(lab[sl] == i, sl[0].start, sl[1].start, peaks, dr,
+                              snap_radius=snap_radius, big_dev=big_dev, agree=agree,
+                              merge_deg=merge_deg, simplify=simplify, min_area=min_area)
         if q is not None:
             out.append(q)
     return out
+
+
+def _instance_polygon(mask: np.ndarray, y0: int, x0: int, peaks: np.ndarray,
+                      direction: np.ndarray, origin: tuple[int, int] = (0, 0), *,
+                      snap_radius: float, big_dev: float, agree: float, merge_deg: float,
+                      simplify: float, min_area: float):
+    """:func:`polygons_from_corners` for one instance: bool ``mask`` with its top-left pixel at
+    scene ``(y0, x0)``, ``peaks`` (x, y) and ``direction`` with its top-left pixel at scene
+    ``origin`` (row, col). None if the outline is under ``min_area`` or degenerates."""
+    shapely = _deps()[1]
+    poly = _outline(mask, y0, x0).simplify(0.0)
+    if poly.geom_type != "Polygon" or poly.area < min_area:
+        return None
+    ring = np.asarray(shapely.segmentize(poly.exterior, 1.0).coords)
+    return _polygon(ring, peaks, direction, snap_radius=snap_radius, big_dev=big_dev,
+                    agree=agree, merge_deg=merge_deg, simplify=simplify, origin=origin)
+
+
+def _corner_peaks(corner: np.ndarray, threshold: float = 0.3, kernel: int = 3,
+                 origin: tuple[int, int] = (0, 0)):
+    """Corner peaks of a (H, W) heatmap as used by :func:`polygons_from_corners`: integer
+    ``(row, col)`` pixels and sub-pixel ``(x, y)``, both shifted by ``origin`` (the array's
+    position in a larger scene; integer shifts keep the values identical to a scene-wide call
+    for peaks a few pixels inside the array)."""
+    pix = _peak_pixels(corner, threshold, kernel)
+    if len(pix) == 0:
+        return np.zeros((0, 2), np.int64), np.zeros((0, 2))
+    return pix + np.asarray(origin, pix.dtype), _refine(corner, pix, origin)
 
 
 def corner_targets(polygons, shape: tuple[int, int], *, tolerance: float = 1.5, turn_deg: float = 20.0,

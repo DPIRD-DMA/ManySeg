@@ -381,9 +381,9 @@ def graph_from_mask_blocks(prob, threshold: float = 0.5, *, block: int = 2048, h
     if H == 0 or W == 0:
         return VectorGraph(np.zeros((0, 2)), np.zeros((0, 2), np.int64))
     rows, cols = [], []
-    for b in block_grid((H, W), block, halo):
-        w = np.asarray(prob[b.window[0], b.window[1]], np.float32) > threshold
-        r0, c0 = b.window[0].start, b.window[1].start
+    for b in block_grid(H, W, block, halo):
+        r0, r1, c0, c1 = b.window
+        w = np.asarray(prob[r0:r1, c0:c1], np.float32) > threshold
         lab, n = ndimage.label(w)  # drop small blobs only where the window shows all of them
         if n:
             size = np.bincount(lab.reshape(-1), minlength=n + 1)
@@ -396,11 +396,10 @@ def graph_from_mask_blocks(prob, threshold: float = 0.5, *, block: int = 2048, h
             small[0] = False
             w &= ~small[lab]
         sk = skeletonize(w)
-        cr = (slice(b.core[0].start - r0, b.core[0].stop - r0),
-              slice(b.core[1].start - c0, b.core[1].stop - c0))
-        r, c = np.nonzero(sk[cr])
-        rows.append(r + b.core[0].start)
-        cols.append(c + b.core[1].start)
+        t, bt, lf, rt = b.inner
+        r, c = np.nonzero(sk[t:bt, lf:rt])
+        rows.append(r + b.core[0])
+        cols.append(c + b.core[2])
     rr, cc = np.concatenate(rows), np.concatenate(cols)
     o = np.lexsort((cc, rr))
     return _graph_from_skeleton(rr[o], cc[o], (H, W), spur=spur, gap=gap, simplify=simplify,

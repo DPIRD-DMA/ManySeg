@@ -1,86 +1,197 @@
-"""Block-wise vector decoding of large scenes (experimental; design note ManySeg-e028/notes/
-tile_edges_manypred.md, option (c)).
+"""Block decoders: vectors from large stitched scenes, block by block (experimental).
 
-Dense fields (already stitched, e.g. by ManyPred) are decoded in windows = core + halo; the cores
-partition the scene. An object inside one core that does not touch its window edge is vectorised
-by that block alone. Larger objects are matched across blocks on the area their windows share
-and either taken from a block that sees them whole or rebuilt from each block's core pixels, then
-vectorised once. Objects are keyed by their anchor (first scene pixel in raster order), so the
-output does not depend on the block grid, provided the window decoder labels an object the same
-way as a global decode (true when its tie-breaks follow raster order and its reach is below the
-halo; tested for connected components and ``instances_from_outputs``).
+Contract with ManyPred: ``ManySeg-e028/notes/large_scene_vectors_contract.md`` §2-3; design:
+``notes/tile_edges_manypred.md`` option (c). ManySeg never imports ManyPred: blocks and scenes
+are duck-typed (``index``, ``core``, ``window``, ``scene_edges``; ``height``, ``width``,
+``transform``, ``crs``), and :func:`decode_scene` is an in-memory driver with the same calls::
+
+    dec = block_decoder("footprints")
+    records = decode_scene(fields, dec, block=4096, halo=256)       # or, with ManyPred:
+    records = postprocess_blocks(fields, dec, combine=dec.combine, block=4096, halo=256)
+    write_records(records, "buildings.gpkg", scene)
+
+Dense fields (already stitched) are decoded in windows = core + halo; the cores partition the
+scene. Every object is keyed by its *anchor*, the scene pixel index of its first pixel in raster
+order, which no block grid changes. An instance that lies inside one core and keeps a margin
+from its window edge is vectorised by that block alone; its result is a small record. Every
+other instance becomes a *piece* in each block whose core it reaches: its pixels in the window
+plus the field crops its vectorisation needs. ``combine`` joins pieces of neighbouring blocks
+whose masks agree on the area both windows see (IoU >= ``min_iou``), shares out the pieces' core
+pixels (cores partition the scene, so nothing is duplicated or dropped; a block that sees an
+instance whole settles which pixels are its own) and vectorises each object once. The output
+equals a whole-scene decode provided the window decoder labels an instance the same way as a
+global decode: tie-breaks follow scene pixel indices (``origin`` in
+:func:`manyseg.instances.instances_from_outputs`) and the decoder's reach stays below the halo.
+Where windows disagree beyond that, an object may split at a seam, but no pixel is lost or
+claimed twice.
+
+Roofs: faces are joined with :func:`planar_faces` before their planes are fitted, which couples
+neighbouring faces. A *cluster* (faces linked by gaps up to the join tolerance) is the unit:
+a block resolves a cluster (join, planes, mesh) when every face in it is settled there (complete,
+away from the window edge and from any instance the window sees only in part, by more than the
+join tolerance plus the largest distance a face strays from its mask) and the cluster's anchor
+(its smallest face anchor) lies in its core. The other faces travel with a height crop and are
+joined in ``combine`` cluster by cluster, so the result equals :func:`roof_faces` on the whole
+scene.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import math
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Protocol
 
 import numpy as np
-from scipy import ndimage
+
+from .graph import _deps
+
+Box = tuple[int, int, int, int]  # (top, bottom, left, right), half-open, scene pixels
 
 
-@dataclass
+@dataclass(frozen=True)
 class Block:
-    core: tuple[slice, slice]
-    window: tuple[slice, slice]
+    """One block of a :func:`block_grid` (attribute names as ManyPred's ``Block``)."""
+
+    index: int  # row-major position in the grid
+    core: Box  # cores partition the scene
+    window: Box  # core grown by the halo on every side, clipped to the scene
+    scene_edges: tuple[bool, bool, bool, bool]  # window top / bottom / left / right on the edge
+
+    @property
+    def inner(self) -> Box:
+        """The core in window coordinates."""
+        t, l0 = self.window[0], self.window[2]
+        return (self.core[0] - t, self.core[1] - t, self.core[2] - l0, self.core[3] - l0)
 
 
-def block_grid(
-    shape: tuple[int, int], block: int, halo: int, offset: tuple[int, int] = (0, 0)
-) -> list[Block]:
-    """Cores tile the scene (the first row / column of cores may be shortened by ``offset``);
+@dataclass(frozen=True)
+class Scene:
+    """Scene size and georeferencing (attribute names as ManyPred's ``Scene``)."""
+
+    height: int
+    width: int
+    transform: Any = None  # affine pixel (x, y) -> world, rasterio / affine.Affine order
+    crs: Any = None
+
+
+def block_grid(height: int, width: int, block: int = 4096, halo: int = 256,
+               offset: tuple[int, int] = (0, 0)) -> list[Block]:
+    """Row-major blocks whose cores tile the scene in ``block`` px steps (the last row and
+    column are shorter; ``offset`` shortens the first ones instead, for grid-invariance tests);
     windows extend each core by ``halo`` px, clipped to the scene."""
-    H, W = shape
+    if block < 1 or halo < 0:
+        raise ValueError(f"need block >= 1 and halo >= 0, got {block}, {halo}")
 
     def cuts(n, o):
         o = o % block
-        edges = [0] + list(range(o if o else block, n, block)) + [n]
-        return sorted(set(edges))
+        return sorted({0, n, *range(o if o else block, n, block)})
 
+    rs, cs = cuts(height, offset[0]), cuts(width, offset[1])
     out = []
-    rs, cs = cuts(H, offset[0]), cuts(W, offset[1])
     for r0, r1 in zip(rs[:-1], rs[1:]):
         for c0, c1 in zip(cs[:-1], cs[1:]):
-            out.append(
-                Block(
-                    (slice(r0, r1), slice(c0, c1)),
-                    (
-                        slice(max(r0 - halo, 0), min(r1 + halo, H)),
-                        slice(max(c0 - halo, 0), min(c1 + halo, W)),
-                    ),
-                )
-            )
+            w = (max(r0 - halo, 0), min(r1 + halo, height), max(c0 - halo, 0),
+                 min(c1 + halo, width))
+            edges = (w[0] == 0, w[1] == height, w[2] == 0, w[3] == width)
+            out.append(Block(len(out), (r0, r1, c0, c1), w, edges))
     return out
 
 
+class BlockDecoder(Protocol):
+    """Decodes one window (``fields``: name -> (C, h, w) arrays cropped to ``block.window``)
+    into a picklable result; ``combine`` merges the results of all blocks in grid order."""
+
+    def __call__(self, fields: dict[str, np.ndarray], block, scene) -> Any: ...
+
+    def combine(self, results: list, scene) -> Any: ...
+
+
+class Records(list):
+    """``list[dict]`` of decoded objects sorted by ``id`` (the anchor), with ``stats``."""
+
+    def __init__(self, items=(), stats: dict | None = None):
+        super().__init__(items)
+        self.stats = stats or {}
+
+
+def decode_scene(fields, decoder, block: int = 4096, halo: int = 256, *, scene=None,
+                 offset: tuple[int, int] = (0, 0)):
+    """Decode a scene held in memory (or as memmaps) block by block: ``decoder(window_fields,
+    block, scene)`` per block in grid order, then ``decoder.combine(results, scene)``, as
+    ManyPred's ``postprocess_blocks`` does (no ManyPred needed). ``fields``: name -> (H, W) or
+    (C, H, W) array-likes sharing (H, W). ``block`` >= the scene size decodes it in one piece."""
+    shapes = {k: tuple(np.shape(v))[-2:] for k, v in fields.items()}
+    if len(set(shapes.values())) != 1:
+        raise ValueError(f"fields must share (H, W), got {shapes}")
+    H, W = next(iter(shapes.values()))
+    scene = scene if scene is not None else Scene(H, W)
+    if (scene.height, scene.width) != (H, W):
+        raise ValueError(f"scene is {scene.height} x {scene.width}, fields are {H} x {W}")
+    grid = block_grid(H, W, block, halo, offset)
+    need = getattr(decoder, "min_halo", 0)
+    if halo < need and len(grid) > 1:
+        raise ValueError(f"halo {halo} is below this decoder's minimum {need}")
+    results = []
+    for b in grid:
+        t, bt, lt, rt = b.window
+        wf = {k: np.asarray(v[..., t:bt, lt:rt]) for k, v in fields.items()}
+        results.append(decoder({k: v if v.ndim == 3 else v[None] for k, v in wf.items()},
+                               b, scene))
+    return decoder.combine(results, scene)
+
+
+# ---------------------------------------------------------------- pieces and their merge
+
 @dataclass
 class _Piece:
-    """One block's view of an object that crosses its core boundary."""
+    """One block's view of an instance that crosses its core or nears its window edge."""
 
     block: int
-    bbox: tuple[slice, slice]  # scene coords of ``mask``
-    mask: np.ndarray  # bool, bbox-sized
-    core: tuple[slice, slice]
-    window: tuple[slice, slice]
+    bbox: Box  # scene box of ``mask``
+    mask: np.ndarray  # bool, the instance's pixels in the window
+    core: Box
+    window: Box
+    crops: dict = field(default_factory=dict)  # name -> ((row, col), array) field crops
+    peaks: tuple | None = None  # (pix (N, 2) scene row / col, xy (N, 2)) near the core pixels
+    margin: int = -1  # gap to the window edge (not the scene edge) if the window sees it whole
 
 
-def _crop(fields, sl):
-    return {
-        k: (v[..., sl[0], sl[1]] if v.ndim == 3 else v[sl[0], sl[1]]) for k, v in fields.items()
-    }
+@dataclass
+class _Pending:
+    """A roof face its owner could not join (its cluster reaches outside what it sees whole)."""
+
+    anchor: int
+    face: Any
+    crop: tuple  # ((row, col), height crop)
 
 
-def _inter(a: tuple[slice, slice], b: tuple[slice, slice]):
-    rr = slice(max(a[0].start, b[0].start), min(a[0].stop, b[0].stop))
-    cc = slice(max(a[1].start, b[1].start), min(a[1].stop, b[1].stop))
-    return (rr, cc) if rr.start < rr.stop and cc.start < cc.stop else None
+@dataclass
+class BlockResult:
+    """What a block decoder returns for one block (picklable)."""
+
+    index: int
+    records: list  # finished objects (small)
+    pieces: list  # _Piece: instances finished in ``combine``
+    pending: list = field(default_factory=list)  # roofs: _Pending faces
+    resolved: list = field(default_factory=list)  # roofs: anchors of faces in ``records``
+    stats: dict = field(default_factory=dict)
 
 
-def _sub(m: np.ndarray, bbox, region):
-    return m[
-        region[0].start - bbox[0].start : region[0].stop - bbox[0].start,
-        region[1].start - bbox[1].start : region[1].stop - bbox[1].start,
-    ]
+def _inter(a: Box | None, b: Box | None) -> Box | None:
+    if a is None or b is None:
+        return None
+    r = (max(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), min(a[3], b[3]))
+    return r if r[0] < r[1] and r[2] < r[3] else None
+
+
+def _sub(m: np.ndarray, box: Box, region: Box) -> np.ndarray:
+    return m[region[0] - box[0] : region[1] - box[0], region[2] - box[2] : region[3] - box[2]]
+
+
+def _grow(box: Box, d: int, limit: Box) -> Box:
+    return (max(box[0] - d, limit[0]), min(box[1] + d, limit[1]), max(box[2] - d, limit[2]),
+            min(box[3] + d, limit[3]))
 
 
 def _anchor(mask: np.ndarray, r0: int, c0: int, W: int) -> int:
@@ -88,93 +199,36 @@ def _anchor(mask: np.ndarray, r0: int, c0: int, W: int) -> int:
     return (r0 + fr // mask.shape[1]) * W + (c0 + fr % mask.shape[1])
 
 
-def decode_blocks(
-    fields: dict,
-    decode_labels,
-    vectorise,
-    block: int = 2048,
-    halo: int = 256,
-    offset: tuple[int, int] = (0, 0),
-    min_iou: float = 0.5,
-    min_size: int = 0,
-) -> dict:
-    """Decode a large scene block by block.
+def _paste(box: Box, crops, fill=np.nan) -> np.ndarray:
+    """Canvas over scene ``box`` from ``(origin, array)`` crops ((C, h, w) or (h, w));
+    pixels no crop covers get ``fill``."""
+    a0 = crops[0][1]
+    lead = a0.shape[:-2]
+    out = np.full(lead + (box[1] - box[0], box[3] - box[2]), fill, np.float32)
+    for (r, c), a in crops:
+        reg = _inter(box, (r, r + a.shape[-2], c, c + a.shape[-1]))
+        if reg is not None:
+            out[..., reg[0] - box[0] : reg[1] - box[0], reg[2] - box[2] : reg[3] - box[2]] = (
+                a[..., reg[0] - r : reg[1] - r, reg[2] - c : reg[3] - c])
+    return out
 
-    ``fields``: name -> (H, W) or (C, H, W) array (numpy or memmap), already stitched.
-    ``decode_labels(window_fields) -> (h, w) int labels`` (0 = background) for one window. It must
-    not drop small objects itself (a window sees only part of a large object); use ``min_size``.
-    ``vectorise(mask, fields_crop, origin) -> geometry`` for one object's boolean ``mask``,
-    ``origin`` = (row, col) of the mask in the scene; geometry in scene pixel coords.
 
-    Each block decides only the pixels of its own core, so the output masks are disjoint and
-    cover every foreground core pixel exactly once. An object inside one core that does not touch
-    the window edge is vectorised by that block. Every other object becomes a *piece* (its core
-    pixels) in each block whose core it reaches; pieces from neighbouring blocks are one object if
-    their masks agree on the area both windows see (IoU >= ``min_iou``). Where window decodes
-    disagree (decoder reach beyond the halo) the result splits at the seam rather than merging
-    two objects or dropping one. Objects under ``min_size`` pixels are removed after merging.
-    Returns {anchor (scene pixel index of the object's first pixel): geometry} plus ``"_stats"``.
+def _merge_pieces(pieces: list, min_iou: float) -> list[tuple[Box, np.ndarray, list]]:
+    """Join pieces into objects: (box, mask, pieces) per object, masks disjoint.
+
+    Pieces of different blocks are one object if their masks agree (IoU >= ``min_iou``) on
+    the whole area both windows see. The pixels to share out are every piece's *core* pixels
+    (cores partition the scene), so nothing is dropped or duplicated. A pixel claimed by no
+    *whole view* (a piece whose window sees the instance with a margin, ``margin`` >= 0) goes
+    to the object its core block's piece belongs to; a claimed pixel goes to that object too
+    if its whole view claims it, else to the claimant with the most central view. When windows
+    decode an instance alike (its reach is below the halo) all rules agree; when they do not
+    (a window that misses a large neighbour's seeds joins two instances), a whole view from
+    another block still separates them.
     """
-    if halo < 1:
-        raise ValueError("halo must be >= 1: pieces are matched on the area their windows share")
-    any_field = next(iter(fields.values()))
-    H, W = any_field.shape[-2:]
-    out: dict = {}
-
-    def emit(m, r0, c0, crop):
-        if m.sum() < min_size:
-            return
-        a = _anchor(m, r0, c0, W)
-        if a in out:  # disjoint masks have distinct first pixels
-            raise RuntimeError(f"anchor collision at scene pixel {a}")
-        out[a] = vectorise(m, crop, (r0, c0))
-
-    pieces: list[_Piece] = []
-    blocks = block_grid((H, W), block, halo, offset)
-    for bi, b in enumerate(blocks):
-        wf = _crop(fields, b.window)
-        lab = decode_labels(wf)
-        r0, c0 = b.window[0].start, b.window[1].start
-        wh, ww = lab.shape
-        cr = (
-            slice(b.core[0].start - r0, b.core[0].stop - r0),
-            slice(b.core[1].start - c0, b.core[1].stop - c0),
-        )
-        for k, sl in enumerate(ndimage.find_objects(lab), start=1):
-            if sl is None:
-                continue
-            m = lab[sl] == k
-            touches = (
-                (r0 > 0 and sl[0].start == 0)
-                or (c0 > 0 and sl[1].start == 0)
-                or (r0 + wh < H and sl[0].stop == wh)
-                or (c0 + ww < W and sl[1].stop == ww)
-            )
-            inside = (
-                sl[0].start >= cr[0].start
-                and sl[0].stop <= cr[0].stop
-                and sl[1].start >= cr[1].start
-                and sl[1].stop <= cr[1].stop
-            )
-            if inside and not touches:
-                emit(m, r0 + sl[0].start, c0 + sl[1].start, _crop(wf, sl))
-                continue
-            bbox = (
-                slice(r0 + sl[0].start, r0 + sl[0].stop),
-                slice(c0 + sl[1].start, c0 + sl[1].stop),
-            )
-            reg = _inter(bbox, b.core)
-            if reg is None or not _sub(m, bbox, reg).any():
-                continue  # another block's core holds all of it
-            pieces.append(_Piece(bi, bbox, m, b.core, b.window))
-    # candidate pairs: pieces from different blocks whose visible extents share a grid cell
-    cells: dict = {}
-    for i, p in enumerate(pieces):
-        reg = _inter(p.bbox, p.window)
-        for cy in range(reg[0].start // block, (reg[0].stop - 1) // block + 1):
-            for cx in range(reg[1].start // block, (reg[1].stop - 1) // block + 1):
-                cells.setdefault((cy, cx), []).append(i)
-    parent = list(range(len(pieces)))
+    shapely = _deps()[1]
+    n = len(pieces)
+    parent = list(range(n))
 
     def find(i):
         while parent[i] != i:
@@ -182,39 +236,625 @@ def decode_blocks(
             i = parent[i]
         return i
 
-    seen = set()
-    for members in cells.values():
-        for x, i in enumerate(members):
-            for j in members[x + 1 :]:
-                a, b_ = pieces[i], pieces[j]
-                if a.block == b_.block or (i, j) in seen:
-                    continue
-                seen.add((i, j))
-                reg = _inter(a.bbox, b_.bbox)
-                reg = reg and _inter(reg, a.window)
-                reg = reg and _inter(reg, b_.window)
-                if reg is None:
-                    continue
-                ma, mb = _sub(a.mask, a.bbox, reg), _sub(b_.mask, b_.bbox, reg)
-                inter = int((ma & mb).sum())
-                if inter and inter / int((ma | mb).sum()) >= min_iou:
-                    parent[find(i)] = find(j)
+    def count(p, region):
+        reg = _inter(p.bbox, region)
+        return 0 if reg is None else int(_sub(p.mask, p.bbox, reg).sum())
+
+    boxes = [shapely.box(p.bbox[2], p.bbox[0], p.bbox[3], p.bbox[1]) for p in pieces]
+    tree = shapely.STRtree(boxes)
+    for i, a in enumerate(pieces):
+        for j in tree.query(boxes[i], predicate="intersects").tolist():
+            b = pieces[j]
+            if j <= i or a.block == b.block:
+                continue
+            shared = _inter(a.window, b.window)  # both windows see all of it
+            reg = _inter(_inter(a.bbox, b.bbox), shared)
+            if reg is None:
+                continue
+            inter = int((_sub(a.mask, a.bbox, reg) & _sub(b.mask, b.bbox, reg)).sum())
+            if inter and inter / (count(a, shared) + count(b, shared) - inter) >= min_iou:
+                parent[find(i)] = find(j)
     groups: dict = {}
-    for i, p in enumerate(pieces):
-        groups.setdefault(find(i), []).append(p)
-    for g in groups.values():
-        # union of each piece's core pixels (cores partition the scene)
-        r0, r1 = min(p.bbox[0].start for p in g), max(p.bbox[0].stop for p in g)
-        c0, c1 = min(p.bbox[1].start for p in g), max(p.bbox[1].stop for p in g)
-        canvas = np.zeros((r1 - r0, c1 - c0), bool)
-        for p in g:
-            reg = _inter(p.bbox, p.core)
-            canvas[reg[0].start - r0 : reg[0].stop - r0, reg[1].start - c0 : reg[1].stop - c0] |= (
-                _sub(p.mask, p.bbox, reg)
-            )
-        rows, cols = np.nonzero(canvas.any(1))[0], np.nonzero(canvas.any(0))[0]
-        bbox = (slice(r0 + rows[0], r0 + rows[-1] + 1), slice(c0 + cols[0], c0 + cols[-1] + 1))
-        m = canvas[rows[0] : rows[-1] + 1, cols[0] : cols[-1] + 1]
-        emit(m, bbox[0].start, bbox[1].start, _crop(fields, bbox))
-    out["_stats"] = {"blocks": len(blocks), "pieces": len(pieces), "merged_objects": len(groups)}
+    for i in range(n):
+        groups.setdefault(find(i), []).append(i)
+    members = list(groups.values())
+    gid = np.empty(n, np.int64)  # piece -> object
+    for g, idx in enumerate(members):
+        gid[idx] = g
+    view = []  # each object's most central whole view (piece index) or -1
+    for idx in members:
+        v = max(idx, key=lambda i: (pieces[i].margin, -pieces[i].block))
+        view.append(v if pieces[v].margin >= 0 else -1)
+    views = sorted((v for v in view if v >= 0), key=lambda v: (pieces[v].margin, -pieces[v].block))
+    vtree = shapely.STRtree([boxes[v] for v in views]) if views else None
+    def pixels(p, region):  # scene (row, col) of p's mask pixels inside ``region``
+        reg = _inter(p.bbox, region)
+        if reg is None:
+            return np.zeros((0, 2), np.int64)
+        return np.argwhere(_sub(p.mask, p.bbox, reg)) + (reg[0], reg[2])
+
+    def hits(p, rc, region=None):  # which of the scene pixels ``rc`` p's mask holds (in region)
+        box = p.bbox if region is None else _inter(p.bbox, region)
+        if box is None:
+            return np.zeros(len(rc), bool)
+        ok = ((rc[:, 0] >= box[0]) & (rc[:, 0] < box[1]) & (rc[:, 1] >= box[2])
+              & (rc[:, 1] < box[3]))
+        ok[ok] = p.mask[rc[ok, 0] - p.bbox[0], rc[ok, 1] - p.bbox[2]]
+        return ok
+
+    out = []
+    for g, idx in enumerate(members):
+        # candidate pixels (sparse: never a dense canvas over a large, thin object's box): its
+        # core pixels and those its whole view claims
+        rc = [pixels(pieces[i], pieces[i].core) for i in idx]
+        if view[g] >= 0:
+            rc.append(pixels(pieces[view[g]], pieces[view[g]].bbox))
+        rc = np.unique(np.concatenate(rc).reshape(-1, 2), axis=0)
+        if not len(rc):
+            continue
+        box = (int(rc[:, 0].min()), int(rc[:, 0].max()) + 1, int(rc[:, 1].min()),
+               int(rc[:, 1].max()) + 1)
+        q = shapely.box(box[2], box[0], box[3], box[1])
+        owner = np.full(len(rc), -1, np.int64)  # object of each core pixel (core block's view)
+        for i in tree.query(q, predicate="intersects").tolist():
+            owner[hits(pieces[i], rc, pieces[i].core)] = gid[i]
+        if vtree is not None:
+            best = np.full(len(rc), -1, np.int64)  # most central claimant
+            own = np.zeros(len(rc), bool)  # the core block's object claims it itself
+            for k in sorted(vtree.query(q, predicate="intersects").tolist()):  # by priority
+                h = hits(pieces[views[k]], rc)
+                best[h] = gid[views[k]]
+                own |= h & (owner == gid[views[k]])
+            owner = np.where((best >= 0) & ~own & (owner >= 0), best, owner)
+        rc = rc[owner == g]
+        if not len(rc):
+            continue
+        tight = (int(rc[:, 0].min()), int(rc[:, 0].max()) + 1, int(rc[:, 1].min()),
+                 int(rc[:, 1].max()) + 1)
+        m = np.zeros((tight[1] - tight[0], tight[3] - tight[2]), bool)
+        m[rc[:, 0] - tight[0], rc[:, 1] - tight[2]] = True
+        out.append((tight, m, [pieces[i] for i in idx]))
     return out
+
+
+# ---------------------------------------------------------------- instance decoders
+
+@dataclass
+class InstanceBlockDecoder:
+    """Instances (boundary + distance heads) -> polygons, block by block.
+
+    ``method="corners"``: :func:`polygons_from_corners` (B3, needs ``corner`` and
+    ``direction``); ``"outline"``: :func:`polygons_from_labels` (B0). Instance thresholds as
+    :func:`manyseg.instances.instances_from_outputs` (``logits=False``: stitched fields are
+    probabilities); polygon parameters as the decoders'. ``names`` maps the field names used
+    here (``extent``, ``boundary``, ``distance``, ``corner``, ``direction``) to the caller's.
+    Records: ``id`` (anchor), ``geometry`` (shapely, scene pixel coordinates), ``pixels``
+    (instance size) and ``scene_edge`` (touches the scene edge, so may be cut).
+    """
+
+    method: str = "corners"
+    extent_threshold: float = 0.6
+    boundary_threshold: float = 0.5
+    seed_threshold: float = 0.15
+    min_size: int = 16
+    logits: bool = False
+    backend: str = "auto"
+    corner_threshold: float = 0.5
+    kernel: int = 3
+    snap_radius: float = 4.0
+    big_dev: float = 4.0
+    agree: float = 0.4
+    merge_deg: float = 8.0
+    simplify: float = 1.0
+    min_area: float = 16
+    min_iou: float = 0.5
+    names: dict = field(default_factory=dict)
+
+    def __post_init__(self):
+        if self.method not in ("corners", "outline"):
+            raise ValueError(f"method must be corners|outline, got {self.method!r}")
+
+    # -- geometry of the decoder's reach (px)
+    @property
+    def margin(self) -> int:
+        """Gap an instance must keep from a window edge (not the scene edge) to be decoded
+        there: the corner peaks and directions it reads lie within this of its pixels."""
+        if self.method == "outline":
+            return 1
+        return math.ceil(self.snap_radius + 1.5) + self.kernel + 2
+
+    @property
+    def crop_margin(self) -> int:
+        """Field context a piece carries around its core pixels."""
+        return self.margin
+
+    @property
+    def min_halo(self) -> int:
+        """Smallest halo for which pieces carry valid context (peaks need ``kernel`` + 3 px
+        of window beyond the crop)."""
+        if self.method == "outline":
+            return self.margin + 1
+        return self.crop_margin + self.kernel + 3
+
+    # -- per window
+    def _field(self, fields, name) -> np.ndarray:
+        a = np.asarray(fields[self.names.get(name, name)], np.float32)
+        return a if a.ndim == 3 else a[None]
+
+    def labels(self, fields, origin: tuple[int, int], scene_width: int) -> np.ndarray:
+        """(h, w) instance labels of one window (1..K, any order); no size filter (a window
+        may see only part of an instance)."""
+        import torch
+
+        from ..instances import instances_from_outputs
+
+        t = [torch.from_numpy(self._field(fields, n))[None]
+             for n in ("extent", "boundary", "distance")]
+        return instances_from_outputs(
+            *t, logits=self.logits, extent_threshold=self.extent_threshold,
+            boundary_threshold=self.boundary_threshold, seed_threshold=self.seed_threshold,
+            min_size=0, backend=self.backend, origin=origin, scene_width=scene_width,
+        )[0].numpy()
+
+    def _context(self, fields, origin) -> dict:
+        """What :meth:`_vectorise` reads, for a window at scene ``origin``."""
+        if self.method == "outline":
+            return {}
+        from .corners import _corner_peaks
+
+        pix, xy = _corner_peaks(self._field(fields, "corner")[0], self.corner_threshold,
+                                self.kernel, origin)
+        o = np.argsort(pix[:, 0], kind="stable")
+        return {"pix": pix[o], "xy": xy[o], "direction": (origin, self._field(fields, "direction"))}
+
+    def _peaks_near(self, ctx, box: Box):
+        pix = ctx["pix"]
+        a, b = np.searchsorted(pix[:, 0], [box[0], box[1]])
+        sel = np.arange(a, b)
+        sel = sel[(pix[sel, 1] >= box[2]) & (pix[sel, 1] < box[3])]
+        return pix[sel], ctx["xy"][sel]
+
+    def _vectorise(self, mask, y0: int, x0: int, ctx):
+        if self.method == "outline":
+            from .polygons import _outline
+
+            q = _outline(mask, y0, x0).simplify(self.simplify)
+            return q if q.geom_type == "Polygon" and q.area >= self.min_area else None
+        from .corners import _instance_polygon
+
+        d = math.ceil(self.snap_radius) + 2
+        box = (y0 - d, y0 + mask.shape[0] + d, x0 - d, x0 + mask.shape[1] + d)
+        (o, dr) = ctx["direction"]
+        return _instance_polygon(
+            mask, y0, x0, self._peaks_near(ctx, box)[1], dr, o, snap_radius=self.snap_radius,
+            big_dev=self.big_dev, agree=self.agree, merge_deg=self.merge_deg,
+            simplify=self.simplify, min_area=self.min_area)
+
+    def _crops(self, fields, ctx, box: Box, window: Box) -> tuple[dict, tuple | None]:
+        """Field crops (and corner peaks) over scene ``box`` (inside ``window``) for a piece."""
+        if self.method == "outline":
+            return {}, None
+        (o, dr) = ctx["direction"]
+        crop = dr[:, box[0] - o[0] : box[1] - o[0], box[2] - o[1] : box[3] - o[1]]
+        return {"direction": ((box[0], box[2]), crop.copy())}, self._peaks_near(ctx, box)
+
+    def _piece_context(self, group: list, box: Box, scene) -> dict:
+        """:meth:`_context` for a merged object over scene ``box`` from its pieces' crops."""
+        if self.method == "outline":
+            return {}
+        lim = (0, scene.height, 0, scene.width)
+        dbox = _grow(box, self.crop_margin, lim)
+        pix = np.concatenate([p.peaks[0] for p in group]).reshape(-1, 2)
+        xy = np.concatenate([p.peaks[1] for p in group]).reshape(-1, 2)
+        if len(pix):
+            _, first = np.unique(pix, axis=0, return_index=True)  # seen by two blocks
+            first.sort()
+            pix, xy = pix[first], xy[first]
+        o = np.argsort(pix[:, 0], kind="stable")
+        dr = _paste(dbox, [p.crops["direction"] for p in group], 0.0)
+        return {"pix": pix[o], "xy": xy[o], "direction": ((dbox[0], dbox[2]), dr)}
+
+    def _record(self, anchor, geom, n, box: Box, scene) -> dict:
+        edge = box[0] == 0 or box[2] == 0 or box[1] == scene.height or box[3] == scene.width
+        return {"id": int(anchor), "geometry": geom, "pixels": int(n), "scene_edge": bool(edge)}
+
+    def _split(self, fields, block, scene):
+        """Window decode -> (complete objects, pieces, incomplete label ids, labels, ctx).
+        A complete object: (anchor, box, mask, inside core); its geometry is not computed."""
+        from scipy import ndimage
+
+        wt, wb, wl, wr = block.window
+        R, e = self.margin, block.scene_edges
+        ct, cb, cl, cr = block.core
+        halo = min([ct - wt] * (not e[0]) + [wb - cb] * (not e[1]) + [cl - wl] * (not e[2])
+                   + [wr - cr] * (not e[3]) + [1 << 30])
+        if halo < self.min_halo:
+            raise ValueError(f"halo {halo} is below this decoder's minimum {self.min_halo}")
+        if wb > scene.height or wr > scene.width:
+            raise ValueError(f"window {block.window} is outside the scene "
+                             f"({scene.height} x {scene.width})")
+        lab = self.labels(fields, (wt, wl), scene.width)
+        ctx = self._context(fields, (wt, wl))
+        complete, pieces, partial, outside = [], [], [], []
+        for k, sl in enumerate(ndimage.find_objects(lab), start=1):
+            if sl is None:
+                continue
+            m = lab[sl] == k
+            box = (wt + sl[0].start, wt + sl[0].stop, wl + sl[1].start, wl + sl[1].stop)
+            ok = ((e[0] or box[0] - wt >= R) and (e[1] or wb - box[1] >= R)
+                  and (e[2] or box[2] - wl >= R) and (e[3] or wr - box[3] >= R))
+            inside = _inter(box, block.core) == box
+            gap = min([box[0] - wt] * (not e[0]) + [wb - box[1]] * (not e[1])
+                      + [box[2] - wl] * (not e[2]) + [wr - box[3]] * (not e[3]) + [1 << 30])
+            if ok:
+                complete.append((_anchor(m, box[0], box[2], scene.width), box, m, inside, k))
+            else:
+                partial.append(k)
+            if ok and inside:
+                continue
+            core = _inter(box, block.core)
+            if core is None or not _sub(m, box, core).any():
+                if ok:  # another block's core holds all of it; a whole view may still help
+                    outside.append((sl, box, m, gap))
+                continue
+            cm = _sub(m, box, core)
+            rr, cc = np.nonzero(cm.any(1))[0], np.nonzero(cm.any(0))[0]
+            tight = (core[0] + rr[0], core[0] + rr[-1] + 1, core[2] + cc[0], core[2] + cc[-1] + 1)
+            crops, peaks = self._crops(fields, ctx, _grow(tight, self.crop_margin, block.window),
+                                       block.window)
+            pieces.append(_Piece(block.index, box, m, block.core, block.window, crops, peaks,
+                                 gap if ok else -1))
+        if pieces and outside:
+            # Whole views of instances held by another core that touch (through touching
+            # instances) one of this block's pieces: if that core's window joins them with a
+            # neighbour it cannot see whole, these views separate them again (_merge_pieces).
+            comp = ndimage.label(lab > 0)[0]
+            hot = np.zeros(comp.max() + 1, bool)
+            for p in pieces:
+                sl = (slice(p.bbox[0] - wt, p.bbox[1] - wt), slice(p.bbox[2] - wl, p.bbox[3] - wl))
+                hot[comp[sl][p.mask]] = True
+            for sl, box, m, gap in outside:
+                if hot[comp[sl][m][0]]:
+                    pieces.append(_Piece(block.index, box, m, block.core, block.window,
+                                         margin=gap))
+        return complete, pieces, partial, lab, ctx
+
+    def __call__(self, fields, block, scene) -> BlockResult:
+        complete, pieces, _, _, ctx = self._split(fields, block, scene)
+        records = []
+        for anchor, box, m, inside, _ in complete:
+            if not inside:
+                continue
+            n = int(m.sum())
+            if n < self.min_size:
+                continue
+            g = self._vectorise(m, box[0], box[2], ctx)
+            if g is not None:
+                records.append(self._record(anchor, g, n, box, scene))
+        return BlockResult(block.index, records, pieces,
+                           stats={"records": len(records), "pieces": len(pieces)})
+
+    def _merged(self, results, scene):
+        """Objects rebuilt from pieces after ``min_size``: (anchor, box, mask, pieces whose
+        field crops reach the object; the crops of all of them together cover its context)."""
+        shapely = _deps()[1]
+        pieces = [p for res in results for p in res.pieces]
+        cropped = [p for p in pieces if p.crops]
+        cboxes = []
+        for p in cropped:
+            (r, c), a = next(iter(p.crops.values()))
+            cboxes.append(shapely.box(c, r, c + a.shape[-1], r + a.shape[-2]))
+        tree = shapely.STRtree(cboxes)
+        lim = (0, scene.height, 0, scene.width)
+        out = []
+        for box, m, _ in _merge_pieces(pieces, self.min_iou):
+            n = int(m.sum())
+            if n < self.min_size:
+                continue
+            gb = _grow(box, self.crop_margin, lim)
+            near = tree.query(shapely.box(gb[2], gb[0], gb[3], gb[1]), predicate="intersects")
+            out.append((_anchor(m, box[0], box[2], scene.width), box, m,
+                        [cropped[i] for i in sorted(near.tolist())]))
+        return out, len(pieces)
+
+    def combine(self, results: list, scene) -> Records:
+        records = [r for res in results for r in res.records]
+        merged, n_pieces = self._merged(results, scene)
+        for anchor, box, m, g in merged:
+            geom = self._vectorise(m, box[0], box[2], self._piece_context(g, box, scene))
+            if geom is not None:
+                records.append(self._record(anchor, geom, int(m.sum()), box, scene))
+        ids = [r["id"] for r in records]
+        if len(set(ids)) != len(ids):  # disjoint masks have distinct first pixels
+            raise RuntimeError("anchor collision: two objects claim the same first pixel")
+        records.sort(key=lambda r: r["id"])
+        return Records(records, {"blocks": len(results), "pieces": n_pieces,
+                                 "merged_objects": len(merged)})
+
+
+@dataclass
+class RoofBlockDecoder(InstanceBlockDecoder):
+    """Roof faces (corners decoder) joined by :func:`planar_faces`, a robust plane per face
+    from the ``height`` field (nDSM, metres) and an optional mesh (:mod:`manyseg.vectors.roofs`).
+    Records sorted by ``(id, part)`` as :func:`roof_faces`: ``id``, ``part``, ``geometry``,
+    ``plane`` (a, b, c) and ``mesh`` ((K, 3) ring) unless ``mesh`` is None."""
+
+    extent_threshold: float = 0.4
+    boundary_threshold: float = 0.3
+    seed_threshold: float = 0.15
+    agree: float = 0.6
+    tolerance: float = 2.5
+    erode: int = 2
+    trim: float = 0.2
+    mesh: str | None = "J2"
+
+    def __post_init__(self):
+        if self.method != "corners":
+            raise ValueError("roofs decode faces with method='corners'")
+
+    @property
+    def stray(self) -> float:
+        """Bound on how far a face leaves its instance's pixels: corners move at most
+        3 x ``snap_radius`` from the outline (``_polygon``), plus simplification and slack."""
+        return 3 * self.snap_radius + self.simplify + 2
+
+    @property
+    def settle(self) -> int:
+        """Gap from a window edge / partly seen instance that makes a face's cluster certain."""
+        return math.ceil(self.tolerance + self.stray) + 2
+
+    @property
+    def crop_margin(self) -> int:
+        # a joined face stays within ~stray + tolerance of its pixels; the plane fit reads
+        # its bounding box + erode + 1
+        return max(self.margin, math.ceil(self.stray + 2 * self.tolerance) + self.erode + 2)
+
+    def _context(self, fields, origin) -> dict:
+        ctx = super()._context(fields, origin)
+        ctx["height"] = (origin, self._field(fields, "height")[0])
+        return ctx
+
+    def _crops(self, fields, ctx, box, window):
+        crops, peaks = super()._crops(fields, ctx, box, window)
+        (o, h) = ctx["height"]
+        crops["height"] = ((box[0], box[2]),
+                           h[box[0] - o[0] : box[1] - o[0], box[2] - o[1] : box[3] - o[1]].copy())
+        return crops, peaks
+
+    def _join(self, anchors, faces, height, origin):
+        from .roofs import roof_records
+
+        return roof_records(anchors, faces, height, origin, tolerance=self.tolerance,
+                            erode=self.erode, trim=self.trim, mesh=self.mesh)
+
+    def _clusters(self, faces: list) -> list[list[int]]:
+        """Indices of ``faces`` grouped as :func:`planar_faces` joins them."""
+        from .polygons import _face_clusters
+
+        return _face_clusters(faces, self.tolerance)
+
+    def __call__(self, fields, block, scene) -> BlockResult:
+        from scipy import ndimage
+
+        shapely = _deps()[1]
+        complete, pieces, partial, lab, ctx = self._split(fields, block, scene)
+        wt, wb, wl, wr = block.window
+        W = scene.width
+        S, e = self.settle, block.scene_edges
+        near = None
+        if partial:  # distance (px) to the nearest pixel of an instance seen only in part
+            near = ndimage.distance_transform_edt(~np.isin(lab, partial))
+        anchors, faces, settled, owned = [], [], [], []
+        for anchor, box, m, inside, _ in complete:
+            if int(m.sum()) < self.min_size:
+                continue
+            g = self._vectorise(m, box[0], box[2], ctx)
+            if g is None:
+                continue
+            x0, y0, x1, y1 = g.bounds
+            ok = ((e[0] or y0 - wt >= S) and (e[1] or wb - y1 >= S)
+                  and (e[2] or x0 - wl >= S) and (e[3] or wr - x1 >= S))
+            if ok and near is not None:
+                rr = (max(int(y0) - wt - 1, 0), min(math.ceil(y1) - wt + 1, wb - wt))
+                cc = (max(int(x0) - wl - 1, 0), min(math.ceil(x1) - wl + 1, wr - wl))
+                yy, xx = np.mgrid[rr[0] : rr[1], cc[0] : cc[1]]
+                px = shapely.box(xx + wl, yy + wt, xx + wl + 1, yy + wt + 1)
+                hit = shapely.intersects(g, px)  # pixels the face touches
+                ok = not hit.any() or float(near[rr[0] : rr[1], cc[0] : cc[1]][hit].min()) > S
+            anchors.append(anchor)
+            faces.append(g)
+            settled.append(ok)
+            owned.append(inside)
+        records, resolved, pending = [], [], []
+        done = set()
+        (ho, h) = ctx["height"]
+        for cl in self._clusters(faces):
+            a = min(anchors[i] for i in cl)
+            ar, ac = divmod(a, W)
+            if all(settled[i] for i in cl) and _inter((ar, ar + 1, ac, ac + 1), block.core):
+                records += self._join([anchors[i] for i in cl], [faces[i] for i in cl], h, ho)
+                resolved += [anchors[i] for i in cl]
+                done.update(cl)
+        pad = math.ceil(2 * self.tolerance) + self.erode + 2
+        for i in range(len(faces)):
+            if owned[i] and i not in done:
+                x0, y0, x1, y1 = faces[i].bounds
+                box = _grow((int(y0), int(math.ceil(y1)), int(x0), int(math.ceil(x1))), pad,
+                            block.window)
+                crop = h[box[0] - ho[0] : box[1] - ho[0], box[2] - ho[1] : box[3] - ho[1]].copy()
+                pending.append(_Pending(anchors[i], faces[i], ((box[0], box[2]), crop)))
+        return BlockResult(block.index, records, pieces, pending, resolved,
+                           stats={"faces": len(faces), "resolved": len(resolved),
+                                  "pending": len(pending), "pieces": len(pieces)})
+
+    def combine(self, results: list, scene) -> Records:
+        records = [rec for res in results for rec in res.records]
+        resolved = [a for res in results for a in res.resolved]
+        if len(set(resolved)) != len(resolved):
+            raise RuntimeError("two blocks resolved the same roof face")
+        done = set(resolved)
+        anchors, faces, crops = [], [], []
+        for res in results:
+            for p in res.pending:
+                if p.anchor not in done:
+                    anchors.append(p.anchor)
+                    faces.append(p.face)
+                    crops.append([p.crop])
+        merged, n_pieces = self._merged(results, scene)
+        for anchor, box, m, g in merged:
+            if anchor in done:
+                continue
+            face = self._vectorise(m, box[0], box[2], self._piece_context(g, box, scene))
+            if face is not None:
+                anchors.append(anchor)
+                faces.append(face)
+                crops.append([p.crops["height"] for p in g])
+        if len(set(anchors)) != len(anchors):
+            raise RuntimeError("anchor collision: two roof faces claim the same first pixel")
+        lim = (0, scene.height, 0, scene.width)
+        nan_planes = 0
+        clusters = self._clusters(faces)
+        for cl in clusters:
+            cc = [c for i in cl for c in crops[i]]
+
+            def height(face, cc=cc):  # crop around one joined face (planes read + erode + 1)
+                x0, y0, x1, y1 = face.bounds
+                box = _grow((int(y0), math.ceil(y1), int(x0), math.ceil(x1)), self.erode + 2,
+                            lim)
+                return _paste(box, cc), (box[0], box[2])
+
+            out = self._join([anchors[i] for i in cl], [faces[i] for i in cl], height, None)
+            nan_planes += sum(not np.isfinite(o["plane"]).all() for o in out)
+            records += out
+        records.sort(key=lambda rec: (rec["id"], rec["part"]))
+        return Records(records, {"blocks": len(results), "pieces": n_pieces,
+                                 "merged_objects": len(merged), "resolved_in_blocks": len(done),
+                                 "joined_in_combine": len(faces), "combine_clusters": len(clusters),
+                                 "nan_planes": nan_planes})
+
+
+# ---------------------------------------------------------------- registry and output
+
+_DEFAULTS = {
+    # E038 B3 (corner 0.5 / big_dev 4 / agree 0.4 / merge 8) on E030's B0 thresholds
+    "footprints": {"method": "corners", "extent_threshold": 0.6, "boundary_threshold": 0.5,
+                   "seed_threshold": 0.15},
+    # E046 B0 on FTW: thresholds 0.6 / 0.3 / 0.3, Douglas-Peucker 0.5 px
+    "fields": {"method": "outline", "extent_threshold": 0.6, "boundary_threshold": 0.3,
+               "seed_threshold": 0.3, "simplify": 0.5},
+}
+
+
+def block_decoder(task: str, **params) -> BlockDecoder:
+    """A block decoder with the tuned defaults for ``task``; ``params`` override them.
+
+    * ``"footprints"``: extent, boundary, distance + corner, direction; ``method="corners"``
+      (B3, E038) or ``"outline"`` (B0, ``simplify`` 1 px unless given).
+    * ``"fields"``: extent, boundary, distance; outline decoding (B0, E046).
+    * ``"roofs"``: as footprints + ``height`` (nDSM, metres); E047 F3 thresholds and corners,
+      :func:`planar_faces` (2.5 px), E043b robust planes, J2 mesh (``mesh=None`` skips it).
+    * ``"roads"``: mask, keypoints, direction; :class:`manyseg.vectors.roads.RoadBlockDecoder`.
+    """
+    if task == "roads":
+        from .roads import RoadBlockDecoder
+
+        return RoadBlockDecoder(**params)
+    if task == "roofs":
+        return RoofBlockDecoder(**params)
+    if task not in _DEFAULTS:
+        raise ValueError(f"unknown task {task!r}: footprints|fields|roofs|roads")
+    kw = dict(_DEFAULTS[task])
+    if task == "footprints" and params.get("method") == "outline":
+        kw["simplify"] = 1.0  # E038 B0
+    kw.update(params)
+    return InstanceBlockDecoder(**kw)
+
+
+def _world(geom, transform):
+    if transform is None:
+        return geom
+    from shapely import affinity
+
+    a, b, c, d, e, f = (transform[k] for k in range(6))
+    return affinity.affine_transform(geom, [a, b, d, e, c, f])
+
+
+def _properties(rec: dict) -> dict:
+    out = {}
+    for k, v in rec.items():
+        if k in ("geometry", "mesh"):
+            continue
+        if k == "plane":
+            out.update(plane_a=v[0], plane_b=v[1], plane_c=v[2])
+        elif isinstance(v, (np.generic,)):
+            out[k] = v.item()
+        else:
+            out[k] = v
+    return out
+
+
+def _geometries(records, transform, mesh: bool) -> list:
+    shapely = _deps()[1]
+    out = []
+    for r in records:
+        g = r["geometry"]
+        if mesh and r.get("mesh") is not None:
+            ring = np.asarray(r["mesh"])
+            g = shapely.Polygon(np.r_[ring, ring[:1]])
+        out.append(_world(g, transform))
+    return out
+
+
+def records_to_geojson(records, transform=None, crs=None, *, mesh: bool = False) -> dict:
+    """GeoJSON ``FeatureCollection`` of block-decoder records (or a :class:`VectorGraph`, via
+    :func:`to_geojson`). ``transform``: affine pixel -> world (rasterio order); ``crs`` is
+    written as a ``name`` member when given. ``mesh=True`` writes roof faces as 3-D polygons
+    from their mesh rings (z in metres). ``plane`` becomes ``plane_a`` / ``_b`` / ``_c`` (in
+    scene pixel coordinates)."""
+    import json
+
+    shapely = _deps()[1]
+    from .graph import VectorGraph
+    from .polygons import to_geojson
+
+    if isinstance(records, VectorGraph):
+        fc = to_geojson(records, transform)
+    else:
+        geoms = _geometries(records, transform, mesh)
+        fc = {"type": "FeatureCollection",
+              "features": [{"type": "Feature", "geometry": json.loads(shapely.to_geojson(g)),
+                            "properties": _properties(r)} for g, r in zip(geoms, records)]}
+    if crs is not None:
+        fc["crs"] = {"type": "name", "properties": {"name": str(crs)}}
+    return fc
+
+
+def write_records(records, path, scene=None, *, layer: str | None = None,
+                  mesh: bool = False) -> Path:
+    """Write records to ``path`` in world coordinates through ``scene.transform`` / ``crs``:
+    ``.geojson`` / ``.json`` with the standard library, anything else (e.g. ``.gpkg``) with
+    geopandas. Returns the path."""
+    import json
+
+    path = Path(path)
+    transform = getattr(scene, "transform", None)
+    crs = getattr(scene, "crs", None)
+    if path.suffix.lower() in (".geojson", ".json"):
+        path.write_text(json.dumps(records_to_geojson(records, transform, crs, mesh=mesh)))
+        return path
+    try:
+        import geopandas as gpd
+    except ImportError as e:  # pragma: no cover - optional
+        raise ImportError(f"writing {path.suffix} needs geopandas; use .geojson") from e
+    from .graph import VectorGraph
+
+    if isinstance(records, VectorGraph):
+        shapely = _deps()[1]
+        geoms = [_world(shapely.LineString(p), transform) for p in records.polylines()]
+        props: list = [{} for _ in geoms]
+    else:
+        geoms = _geometries(records, transform, mesh)
+        props = [_properties(r) for r in records]
+    gdf = gpd.GeoDataFrame(props, geometry=geoms, crs=crs)
+    gdf.to_file(path, layer=layer or path.stem)
+    return path

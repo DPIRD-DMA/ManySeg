@@ -231,9 +231,11 @@ def _peak_pixels(hm: np.ndarray, threshold: float, kernel: int) -> np.ndarray:
     return pts[alive]
 
 
-def _refine(hm: np.ndarray, pix: np.ndarray) -> np.ndarray:
+def _refine(hm: np.ndarray, pix: np.ndarray, origin: tuple[int, int] = (0, 0)) -> np.ndarray:
     """Sub-pixel ``(x, y)``: per-axis parabola through the log heatmap (exact for a Gaussian),
-    clipped to +-1 px; no offset on an axis whose neighbour is outside the image."""
+    clipped to +-1 px; no offset on an axis whose neighbour is outside the image. ``origin``
+    (row, col) shifts the result into scene coordinates (integer shift before the offset, so
+    the floats equal a scene-wide call)."""
     if len(pix) == 0:
         return np.zeros((0, 2))
     H, W = hm.shape
@@ -248,7 +250,7 @@ def _refine(hm: np.ndarray, pix: np.ndarray) -> np.ndarray:
     inx, iny = (c > 0) & (c < W - 1), (r > 0) & (r < H - 1)
     dx = np.where(inx, offset(lg[r, np.maximum(c - 1, 0)], lg[r, c], lg[r, np.minimum(c + 1, W - 1)]), 0)
     dy = np.where(iny, offset(lg[np.maximum(r - 1, 0), c], lg[r, c], lg[np.minimum(r + 1, H - 1), c]), 0)
-    return np.stack([c + 0.5 + dx, r + 0.5 + dy], 1)
+    return np.stack([c + origin[1] + 0.5 + dx, r + origin[0] + 0.5 + dy], 1)
 
 
 def graph_from_tensor(vertex, edge, vector, *, vertex_threshold: float = 0.2,

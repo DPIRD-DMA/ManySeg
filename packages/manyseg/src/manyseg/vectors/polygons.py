@@ -30,7 +30,6 @@ def polygons_from_labels(labels, *, simplify: float = 1.0, min_area: float = 16,
     (E028's mask baseline traced marching-squares contours instead, which cut each corner by
     half a pixel.)
     """
-    shapely = _deps()[1]
     from scipy import ndimage
     from shapely import affinity
 
@@ -41,18 +40,24 @@ def polygons_from_labels(labels, *, simplify: float = 1.0, min_area: float = 16,
     for i, sl in enumerate(ndimage.find_objects(lab.astype(np.int64)), start=1):
         if sl is None:
             continue
-        r, c0, c1 = _runs(lab[sl] == i)
-        y0, x0 = sl[0].start, sl[1].start
-        poly = shapely.union_all(shapely.box(c0 + x0, r + y0, c1 + x0, r + 1 + y0))
-        if poly.geom_type == "MultiPolygon":
-            poly = max(poly.geoms, key=lambda g: g.area)
-        poly = poly.simplify(simplify)
+        poly = _outline(lab[sl] == i, sl[0].start, sl[1].start).simplify(simplify)
         if poly.geom_type == "Polygon" and poly.area >= min_area:
             if scale != 1:
                 poly = affinity.scale(poly, 1 / scale, 1 / scale, origin=(0, 0))
             out.append(poly)
     return out
 
+
+def _outline(mask: np.ndarray, y0: int, x0: int):
+    """Pixel-edge outline of a bool ``mask`` whose top-left pixel is at integer ``(y0, x0)``
+    (largest part if disconnected), not simplified. Integer offsets keep the coordinates exact,
+    so a mask cut from a window gives the same polygon as the same mask in the whole scene."""
+    shapely = _deps()[1]
+    r, c0, c1 = _runs(mask)
+    poly = shapely.union_all(shapely.box(c0 + x0, r + y0, c1 + x0, r + 1 + y0))
+    if poly.geom_type == "MultiPolygon":
+        poly = max(poly.geoms, key=lambda g: g.area)
+    return poly
 
 
 def planar_faces(polygons, tolerance: float = 2.5) -> list:
@@ -68,11 +73,55 @@ def planar_faces(polygons, tolerance: float = 2.5) -> list:
     area is lost. E048b (trained LoD2 faces):
     seam closure 0.38 -> 0.72 (3DBAG's own faces: 0.79), heights better, face F1 unchanged.
     """
+    return [f for _, _, f in _planar_faces(polygons, tolerance)]
+
+
+def _face_clusters(faces: list, tolerance: float) -> list[list[int]]:
+    """Indices of ``faces`` grouped by gaps up to ``tolerance`` (connected components of
+    "within ``tolerance``"), each group and the list in index order."""
     shapely = _deps()[1]
+    parent = list(range(len(faces)))
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    if len(faces) > 1:
+        a, b = shapely.STRtree(faces).query(faces, predicate="dwithin", distance=tolerance)
+        for i, j in zip(a.tolist(), b.tolist()):
+            ri, rj = find(i), find(j)
+            if ri != rj:
+                parent[max(ri, rj)] = min(ri, rj)
+    groups: dict = {}
+    for i in range(len(faces)):
+        groups.setdefault(find(i), []).append(i)
+    return sorted(groups.values())
+
+
+def _planar_faces(polygons, tolerance: float) -> list:
+    """:func:`planar_faces` as ``(face index, part, polygon)`` triples; the face index counts the
+    Polygon parts of the input, part 0 is the kept (largest) part of a face, 1.. the others.
+
+    Faces interact only through gaps up to ``tolerance``, so each cluster of such faces is
+    joined on its own: the result for a face depends only on its cluster (not on the noding of
+    unrelated outlines elsewhere), which lets block-wise decoders reproduce it exactly."""
     faces = [q for p in polygons for q in getattr(p, "geoms", [p])
              if q.geom_type == "Polygon" and not q.is_empty]
-    if len(faces) < 2 or tolerance <= 0:
-        return faces
+    if tolerance <= 0:
+        return [(i, 0, f) for i, f in enumerate(faces)]
+    main: dict = {}
+    extra: dict = {}
+    for cl in _face_clusters(faces, tolerance):
+        for j, part, g in _join_cluster([faces[i] for i in cl], tolerance):
+            (main if part == 0 else extra.setdefault(cl[j], {}))[cl[j] if part == 0 else part] = g
+    out = [(j, 0, main[j]) for j in sorted(main)]
+    return out + [(j, k, g) for j in sorted(extra) for k, g in sorted(extra[j].items())]
+
+
+def _join_cluster(faces: list, tolerance: float) -> list:
+    shapely = _deps()[1]
     tree = shapely.STRtree(faces)
     placed: dict = {}
     for i in sorted(range(len(faces)), key=lambda k: -faces[k].area):
@@ -91,17 +140,16 @@ def planar_faces(polygons, tolerance: float = 2.5) -> list:
         a, j = max((faces[int(k)].intersection(c).area, int(k)) for k in cand)
         if a >= 0.5 * c.area:
             parts.setdefault(j, []).append(c)
-    out, extra = [], []
+    out = []
     for j in range(len(faces)):
         if j not in parts:
             continue
         u = shapely.union_all(parts[j])
         pieces = [g for g in getattr(u, "geoms", [u]) if g.geom_type == "Polygon" and g.area > 1]
         pieces.sort(key=lambda g: -g.area)
-        if pieces:
-            out.append(shapely.Polygon(pieces[0].exterior))
-            extra += [shapely.Polygon(g.exterior) for g in pieces[1:]]
-    return out + extra
+        out += [(j, k, shapely.Polygon(g.exterior)) for k, g in enumerate(pieces)]
+    return out
+
 
 def _apply(transform, xy: np.ndarray) -> list:
     if transform is None:
