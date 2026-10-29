@@ -167,7 +167,7 @@ First release. Python 3.10–3.14, PyTorch ≥ 2.10, timm ≥ 1.0.20.
   `DensityBlockDecoder` (count per block core) follow the same block contract. Results:
   `ScenePoints` (`.yx` in `manyseg.points` convention, `.xy` for GIS, `.scores`, `.pixels`;
   `.to_geojson()` uses the scene's transform and CRS, `transform=None` gives pixel
-  coordinates, `score` is a reserved property) and `SceneCount`. The `find_peaks` blur is now a
+  coordinates without a CRS, `score` is a reserved property) and `SceneCount`. The `find_peaks` blur is now a
   fixed-order tap sum instead of `conv2d` (values within 2e-7), so a crop gives bit-identical
   values away from its edges.
 * **Deterministic instance ties:** `instances_from_outputs(origin=, scene_width=, ids="anchor")`,

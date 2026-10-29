@@ -508,6 +508,8 @@ def test_scene_points_to_geojson_uses_scene_transform():
     assert sp.to_geojson(transform=(1, 0, 0, 0, 1, 0))["features"][0]["geometry"][
         "coordinates"] == [3.5, 2.5]
     # transform=None explicitly: pixel (x, y), although the scene has a transform
-    assert sp.to_geojson(transform=None)["features"][1]["geometry"]["coordinates"] == [6.0, 4.75]
+    pix = ScenePoints(sp.yx, sp.scores, sp.pixels, NORTH_UP, "EPSG:28350").to_geojson(
+        transform=None)
+    assert pix["features"][1]["geometry"]["coordinates"] == [6.0, 4.75] and "crs" not in pix
     with pytest.raises(ValueError, match="reserved"):
         sp.to_geojson(properties={"score": [1, 2]})

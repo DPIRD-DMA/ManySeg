@@ -68,15 +68,15 @@ class ScenePoints:
         coordinates when the scene has none); ``None``, pixel ``(x, y)`` coordinates; else an
         affine in rasterio order. Each feature has a ``score`` property plus any columns in
         ``properties`` (``score`` is reserved: a ``properties["score"]`` raises). The scene's
-        ``crs`` is written as a ``name`` member, as :func:`~manyseg.vectors.records_to_geojson`
-        does. Needs the ``vectors`` extra."""
+        ``crs`` is written as a ``name`` member when the coordinates are in world units, as
+        :func:`~manyseg.vectors.records_to_geojson` does. Needs the ``vectors`` extra."""
         from ..vectors.polygons import to_geojson
 
         if properties and "score" in properties:
             raise ValueError("'score' is a reserved property (the peak score); rename yours")
         t = self.transform if transform is _UNSET else transform
         fc = to_geojson(self.xy, t, {"score": self.scores, **(properties or {})})
-        if self.crs is not None:
+        if self.crs is not None and t is not None:  # pixel coordinates are in no CRS
             fc["crs"] = {"type": "name", "properties": {"name": str(self.crs)}}
         return fc
 

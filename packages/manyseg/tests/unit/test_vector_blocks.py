@@ -556,8 +556,9 @@ def test_scene_records_carry_transform_and_crs(tmp_path):
     assert out.transform == sc.transform and out.crs == sc.crs
     ref = records_to_geojson(out, sc.transform, sc.crs)
     assert out.to_geojson() == ref == records_to_geojson(out)
-    assert records_to_geojson(out, None)["features"][0]["geometry"] != ref["features"][0][
-        "geometry"]  # explicit None: pixel coordinates
+    px = records_to_geojson(out, None)  # explicit None: pixel coordinates, so no CRS named
+    assert px["features"][0]["geometry"] != ref["features"][0]["geometry"] and "crs" not in px
+    assert records_to_geojson(out, None, "EPSG:28992")["crs"] == ref["crs"]  # unless asked
     a = json.loads(out.write(tmp_path / "a.geojson").read_text())
     b = json.loads(write_records(out, tmp_path / "b.geojson").read_text())
     c = json.loads(write_records(out, tmp_path / "c.geojson", sc).read_text())

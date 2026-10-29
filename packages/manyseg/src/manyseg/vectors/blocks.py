@@ -864,7 +864,8 @@ def records_to_geojson(records, transform=_UNSET, crs=_UNSET, *, mesh: bool = Fa
     """GeoJSON ``FeatureCollection`` of block-decoder records (or a :class:`VectorGraph`, via
     :func:`to_geojson`). ``transform``: affine pixel -> world (rasterio order); ``None``: pixel
     coordinates; not given: the records' own (:class:`SceneRecords`), else pixel coordinates.
-    ``crs`` (not given: the records' own) is written as a ``name`` member when known.
+    ``crs`` (not given: the records' own, but none for pixel coordinates) is written as a
+    ``name`` member when known.
     ``mesh=True`` writes roof faces as 3-D polygons from their mesh rings (z in metres).
     ``plane`` becomes ``plane_a`` / ``_b`` / ``_c`` (in scene pixel coordinates)."""
     import json
@@ -875,8 +876,8 @@ def records_to_geojson(records, transform=_UNSET, crs=_UNSET, *, mesh: bool = Fa
 
     if transform is _UNSET:
         transform = getattr(records, "transform", None)
-    if crs is _UNSET:
-        crs = getattr(records, "crs", None)
+    if crs is _UNSET:  # pixel coordinates are not in the scene's CRS: name it only with a transform
+        crs = getattr(records, "crs", None) if transform is not None else None
     if isinstance(records, VectorGraph):
         fc = to_geojson(records, transform)
     else:

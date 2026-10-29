@@ -1072,7 +1072,7 @@ fc = to_geojson(points_to_xy(yx), transform, properties={"score": scores.numpy()
 # A stitched scene, block by block (halo >= dec.min_halo = kernel // 2 + blur radius)
 dec = block_decoder("points", threshold=0.3, kernel=5, smooth_sigma=1.0, offsets="offset")
 pts = decode_scene(fields, dec, scene=scene)  # ScenePoints; ManyPred: postprocess_blocks
-fc = pts.to_geojson()  # through scene.transform, names scene.crs; transform=None: pixels
+fc = pts.to_geojson()  # through scene.transform, names scene.crs (transform=None: pixels)
 # pts.yx (y, x, centres at integers), pts.xy (x, y, corners at integers), pts.scores
 ```
 
