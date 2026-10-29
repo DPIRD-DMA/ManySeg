@@ -85,7 +85,9 @@ def footprint_targets(polygons, shape: tuple[int, int], *, boundary_width: float
     * ``instances`` ``(H, W)`` int32: the instance ids (:func:`rasterize_instances`; holes such
       as courtyards kept);
     * ``corner`` ``(H, W)``, ``direction`` ``(2, H, W)``, ``direction_mask`` ``(H, W)`` bool:
-      :func:`corner_targets` of the polygons that got an instance (``corner_kw`` passed on);
+      :func:`corner_targets` of the polygons that got an instance, as visible in the instance
+      map (a polygon overlapped by a later one loses the covered part, so no wall or corner is
+      drawn inside the later instance; ``corner_kw`` passed on);
     * ``extent``, ``boundary``, ``distance`` ``(H, W)`` float32: the instance heads'
       targets, :func:`manyseg.instances.instance_targets` with ``CornerLineTask``'s settings
       (``boundary_width`` 2, normalised distance). ``instance_heads=False`` leaves them out:
@@ -97,9 +99,26 @@ def footprint_targets(polygons, shape: tuple[int, int], *, boundary_width: float
     polygons = list(polygons)
     labels, source = rasterize_instances(polygons, shape, min_area=min_area)
     out = {"instances": labels,
-           **corner_targets([polygons[i] for i in np.unique(source)], shape, **corner_kw)}
+           **corner_targets(_visible(polygons, np.unique(source)), shape, **corner_kw)}
     if instance_heads:
         out.update(_instance_heads(labels, boundary_width, distance))
+    return out
+
+
+def _visible(polygons, keep, min_overlap: float = 0.5) -> list:
+    """The kept polygons minus the later polygons overlapping them by more than ``min_overlap``
+    px² (the instance map's "later wins"), split into parts. Polygons that only touch (shared
+    roof-face edges) are left exactly as given."""
+    shapely = _deps()[1]
+    tree = shapely.STRtree(polygons)
+    out = []
+    for i in keep:
+        p = polygons[i]
+        later = [polygons[j] for j in tree.query(p, predicate="intersects")
+                 if j > i and p.intersection(polygons[j]).area > min_overlap]
+        if later:
+            p = p.difference(shapely.union_all(later))
+        out += [q for q in getattr(p, "geoms", [p]) if q.geom_type == "Polygon" and q.area > 0]
     return out
 
 

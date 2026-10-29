@@ -862,7 +862,8 @@ transform (`pixel_to_world` / `world_to_pixel` convert arrays and geometries). `
 polygons valid, clips them to `[0, W] x [0, H]` and splits multipart geometry; lines are clipped
 with their vertices kept, so junction vertices still match. A building cut by the tile edge is
 clipped there, as the experiments trained. Where polygons overlap, the later one wins (rasterio
-order); `rasterize_instances` exposes that step (`fill_holes`, `split`, `min_area`). Unit tests
+order; the covered walls and corners of the earlier one are not drawn either);
+`rasterize_instances` exposes that step (`fill_holes`, `split`, `min_area`). Unit tests
 encode synthetic vectors and decode the targets with the shipped decoders
 (`polygons_from_corners`, `polygons_from_labels`, `graph_from_road_heads`): footprints IoU
 > 0.98 with the same vertex count, roof faces > 0.99, fields > 0.97, roads within 3 px with

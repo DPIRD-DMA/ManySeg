@@ -39,12 +39,31 @@ ROTATED = Affine(0.25, -0.12, 391_000.0, -0.09, -0.31, 6_466_000.0)
 
 
 def _match(pred, true):
-    """Best IoU of each true polygon among the predictions."""
-    return [max((p.intersection(t).area / p.union(t).area for p in pred), default=0.0)
-            for t in true]
+    """IoU of each true polygon with its prediction under a one-to-one (Hungarian) assignment;
+    0 for a true polygon left without one."""
+    from scipy.optimize import linear_sum_assignment
+
+    iou = np.array([[p.intersection(t).area / p.union(t).area for p in pred] for t in true])
+    out = [0.0] * len(true)
+    if iou.size:
+        for r, c in zip(*linear_sum_assignment(-iou)):
+            out[r] = float(iou[r, c])
+    return out
 
 
 # --- georeferencing ----------------------------------------------------------------------------
+
+def test_pixel_corner_convention():
+    """Not just a round trip (a shared half-pixel error would cancel): the world footprint of
+    pixel (row 2, col 3), as rasterio defines it, becomes the unit box at x 3..4, y 2..3 and
+    burns exactly that pixel."""
+    x0, y1 = NORTH_UP * (3, 2)
+    cell = shapely.box(x0, y1 - 0.3, x0 + 0.3, y1)
+    (p,) = to_pixels([cell], NORTH_UP, (8, 8))
+    assert np.allclose(p.bounds, (3, 2, 4, 3))
+    lab, _ = rasterize_instances([p], (8, 8))
+    assert lab.sum() == 1 and lab[2, 3] == 1
+
 
 @pytest.mark.parametrize("transform", [NORTH_UP, ROTATED])
 def test_pixel_world_round_trip(transform):
@@ -208,6 +227,24 @@ def test_footprint_from_world_with_courtyard_and_border():
     assert min(ious) > 0.95, ious
     out = polygons_from_labels(t["instances"])
     assert min(_match(out, [court, clipped])) > 0.95 and len(out[0].interiors) == 1
+
+
+def test_overlapping_footprints_draw_only_visible_walls():
+    """Where a later polygon covers an earlier one, the earlier one's hidden wall and corners
+    are not targets (they would lie inside the later instance)."""
+    size = 64
+    a, b = shapely.box(10, 10, 30, 30), shapely.box(20, 10, 40, 30)
+    t = footprint_targets([a, b], (size, size))
+    assert (t["instances"][12:28, 21:39] == 2).all()
+    assert not t["direction_mask"][14:26, 28:32].any()  # a's right wall (x = 30) is hidden
+    assert t["corner"][10, 30] < 0.05 and t["corner"][29, 30] < 0.05
+    assert t["corner"][10, 20] > 0.5  # b's corners and a's visible ones stay
+    assert t["corner"][10, 10] > 0.5 and t["corner"][29, 39] > 0.5
+    # touching faces are unaffected: same targets as corner_targets on the faces as given
+    faces = _hip_roof(32, 32, 40, 24, 10)
+    ct = corner_targets(faces, (size, size))
+    t = roof_face_targets(faces, (size, size))
+    assert all(np.array_equal(t[k], ct[k]) for k in ct)
 
 
 def test_rasterize_instances_rules():
