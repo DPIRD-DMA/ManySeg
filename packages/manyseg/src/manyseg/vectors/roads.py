@@ -260,10 +260,13 @@ class RoadBlockDecoder:
     skeleton pixels, peak suppression in the whole-scene order, arm rejoining (direction read
     from the sparse samples), short-component removal and gap bridging, all with the scene as
     the border. Every per-block step except skeletonize reaches at most ``zone_radius + 10`` px,
-    so the result equals the whole-scene decode exactly when thinning's reach (about half the
-    widest road blob, e.g. a car park) is below the halo; a wider blob crossing a seam can
-    change the skeleton inside the halo's reach of it (tested on City-Scale fields with halo
-    128: identical graphs).
+    so the result equals the whole-scene decode exactly when thinning's reach is below the halo.
+    That reach is data dependent: about the half-width of a solid blob, but up to ~3x the
+    half-width of a blob with holes (a car park); City-Scale road blobs are at most 11 px deep
+    and halo 128 gives identical graphs. Each block also thins core + half the halo and
+    ``combine`` warns if any core skeleton changed (reach above half the halo). The halo must
+    be at least :attr:`min_halo`; the blocks' result size is ~24 bytes per pixel within
+    ``zone_radius + 10`` px of a keypoint (direction samples) plus 16 per skeleton pixel.
     """
 
     def __init__(
@@ -301,8 +304,11 @@ class RoadBlockDecoder:
 
     @property
     def min_halo(self) -> int:
-        """Halo the keypoint and direction steps need (skeletonize needs more on wide blobs)."""
-        return int(math.ceil(self.params["zone_radius"])) + 10
+        """Halo the keypoint, direction and small-blob steps need: ``zone_radius + 10`` and
+        ``min_area - 1`` (a blob reaching from the core to the window edge then has at least
+        ``min_area`` pixels). Skeletonize needs more on wide blobs (see the class note)."""
+        p = self.params
+        return max(int(math.ceil(p["zone_radius"])) + 10, int(p["min_area"]) - 1)
 
     def __call__(self, fields, block, scene) -> dict:
         from scipy import ndimage
@@ -316,7 +322,8 @@ class RoadBlockDecoder:
         for at_edge, margin in zip(edges, (ct - wt, wb - cb, cl - wl, wr - cr)):
             if not at_edge and margin < self.min_halo:
                 raise ValueError(
-                    f"block {block.index}: halo {margin} px < {self.min_halo} px (zone_radius + 10)"
+                    f"block {block.index}: halo {margin} px < {self.min_halo} px "
+                    "(max(zone_radius + 10, min_area - 1))"
                 )
         m = _arr(fields[nm["mask"]])
         m = m[0] if m.ndim == 3 else m
@@ -334,13 +341,23 @@ class RoadBlockDecoder:
             small = (size < p["min_area"]) & ~inner
             small[0] = False
             fg &= ~small[lab]
-        sr, sc = np.nonzero(skeletonize(fg)[cy, cx])
+        sk = skeletonize(fg)[cy, cx]
+        sr, sc = np.nonzero(sk)
         out = {"skeleton": np.stack([sr + ct, sc + cl], 1).astype(np.int64), "peaks": {}}
+        # thinning's reach is data dependent: flag a core skeleton that changes with half the halo
+        half = [g if e else g // 2 for e, g in zip(edges, (ct - wt, wb - cb, cl - wl, wr - cr))]
+        out["unstable"] = False
+        if not all(edges):
+            st, sb, sl = ct - wt - half[0], cb - wt + half[1], cl - wl - half[2]
+            sub = skeletonize(fg[st:sb, sl : cr - wl + half[3]])
+            hy, hx = slice(half[0], half[0] + cb - ct), slice(half[2], half[2] + cr - cl)
+            out["unstable"] = not np.array_equal(sub[hy, hx], sk)
 
-        keys = []
-        R = p["zone_radius"] + 9
+        R = p["zone_radius"] + 9  # direction samples: pixel centres within R of a peak (below)
         rad = int(math.ceil(R)) + 1
         oy, ox = np.mgrid[-rad : rad + 1, -rad : rad + 1]
+        disk = oy**2 + ox**2 <= (R + 1) ** 2  # around the peak's pixel: a superset
+        need = np.zeros(m.shape, bool)
         for i, c in enumerate(CLASSES):
             hm = kp[i]
             keep = (hm == ndimage.maximum_filter(hm, size=_KERNEL, mode="nearest")) & (
@@ -352,24 +369,31 @@ class RoadBlockDecoder:
             iy = np.clip(xy[:, 1].astype(int), 0, H - 1) - wt
             onm = m[iy, ix] > p["threshold"]
             out["peaks"][c] = (pix + (wt, wl), hm[pix[:, 0], pix[:, 1]], xy, onm)
-            for x, y in xy[onm]:  # pixels whose centre is within R of the peak
-                py, px = oy + int(math.floor(y)), ox + int(math.floor(x))
-                ok = (np.hypot(px + 0.5 - x, py + 0.5 - y) <= R) & (py >= 0) & (py < H)
-                ok &= (px >= 0) & (px < W)
-                keys.append(py[ok].astype(np.int64) * W + px[ok])
-        keys = np.unique(np.concatenate(keys)) if keys else np.zeros(0, np.int64)
-        ky, kx = keys // W - wt, keys % W - wl
-        if len(keys) and (
-            ky.min() < 0 or ky.max() >= wb - wt or kx.min() < 0 or kx.max() >= wr - wl
-        ):
-            raise ValueError(f"block {block.index}: direction samples outside the window")
-        out["direction"] = (keys, d[:, ky, kx].T.copy())
+            for x, y in xy[onm]:  # window-sized mask: memory bounded whatever the peak count
+                py, px = int(math.floor(y)) - wt, int(math.floor(x)) - wl
+                y0, y1 = max(py - rad, 0), min(py + rad + 1, need.shape[0])
+                x0, x1 = max(px - rad, 0), min(px + rad + 1, need.shape[1])
+                need[y0:y1, x0:x1] |= disk[
+                    y0 - py + rad : y1 - py + rad, x0 - px + rad : x1 - px + rad
+                ]
+        ky, kx = np.nonzero(need)  # raster order; the halo (>= R + 1) holds every sample
+        out["direction"] = ((ky + wt).astype(np.int64) * W + kx + wl, d[:, ky, kx].T.copy())
         return out
 
     def combine(self, results: list, scene) -> VectorGraph:
+        import warnings
+
         cKDTree = _deps()[2]
         p = self.params
         H, W = int(scene.height), int(scene.width)
+        bad = sum(bool(x.get("unstable")) for x in results)
+        if bad:
+            warnings.warn(
+                f"{bad} block(s): the core skeleton changed when the halo was halved (road blobs "
+                "wider than the halo supports); the graph may differ from a whole-scene decode "
+                "near their seams. Use a larger halo.",
+                stacklevel=2,
+            )
         sk = np.concatenate([x["skeleton"] for x in results] or [np.zeros((0, 2), np.int64)])
         o = np.lexsort((sk[:, 1], sk[:, 0]))  # raster order, as np.nonzero on the scene
         surf = _nx_from_skeleton(

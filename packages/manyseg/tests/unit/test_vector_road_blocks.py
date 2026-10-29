@@ -3,6 +3,7 @@
 import json
 import math
 import pickle
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -49,17 +50,21 @@ def _grid(H, W, block, halo, offset=(0, 0)):
     return out
 
 
-def _decode(fields, dec, block, halo, offset=(0, 0)):
-    """In-memory driver as ManyPred's postprocess_blocks (with a pickle round trip, as workers)."""
+def _decode(fields, dec, block, halo, offset=(0, 0), results=None, strict=True):
+    """In-memory driver as ManyPred's postprocess_blocks (with a pickle round trip, as workers).
+    ``strict``: the halo-reach warning is an error."""
     H, W = next(iter(fields.values())).shape[-2:]
     scene = _Scene(H, W)
     dec = pickle.loads(pickle.dumps(dec))
-    res = []
+    res = [] if results is None else results
     for b in _grid(H, W, block, halo, offset):
         wf = {k: np.asarray(v[:, b.window[0] : b.window[1], b.window[2] : b.window[3]])
               for k, v in fields.items()}
         res.append(pickle.loads(pickle.dumps(dec(wf, b, scene))))
-    return dec.combine(res, scene)
+    with warnings.catch_warnings():
+        if strict:
+            warnings.simplefilter("error")
+        return dec.combine(res, scene)
 
 
 def _same(a, b):
@@ -136,7 +141,7 @@ def _whole(f, **p):
     return graph_from_road_heads(f["mask"][0], f["keypoints"], f["direction"], **p)
 
 
-GRIDS = [(128, 32, (0, 0)), (96, 24, (0, 0)), (160, 40, (37, 91)), (100, 20, (64, 0)),
+GRIDS = [(128, 32, (0, 0)), (96, 29, (0, 0)), (160, 40, (37, 91)), (100, 30, (64, 0)),
          (512, 32, (0, 0))]
 
 
@@ -165,29 +170,86 @@ def test_scene_exercises_bridging_and_crossings():
 def test_parameters_and_names():
     f = _scene(1, quantize=False)
     p = dict(threshold=0.4, keypoint_threshold=0.3, zone_radius=12.0, pair_deg=140.0, spur=15,
-             gap=30, simplify=1.0, min_length=10, min_area=600, scale=0.5)
+             gap=30, simplify=1.0, min_length=10, min_area=60, scale=0.5)
     ref = _whole(f, **p)
     g = {"m": f["mask"], "kp": f["keypoints"], "dir": f["direction"]}
     dec = RoadBlockDecoder(**p, names={"mask": "m", "keypoints": "kp", "direction": "dir"})
-    for block, halo in ((128, 40), (96, 22)):
+    for block, halo in ((128, 59), (96, 64)):
         assert _same(_decode(g, dec, block, halo), ref), (block, halo)
 
 
 def test_empty_scene_and_empty_blocks():
     z = {"mask": np.zeros((1, 200, 300), np.float32), "keypoints": np.zeros((3, 200, 300)),
          "direction": np.zeros((4, 200, 300))}
-    g = _decode(z, RoadBlockDecoder(), 64, 20)
+    g = _decode(z, RoadBlockDecoder(), 64, 29)
     assert g.xy.shape == (0, 2) and g.edges.shape == (0, 2)
     assert len(RoadBlockDecoder().combine([], _Scene(10, 10)).edges) == 0
     z["mask"][0, 90:96, 10:290] = 0.9  # one road; most blocks see nothing
     z["keypoints"] = z["keypoints"].astype(np.float32)
-    assert _same(_decode(z, RoadBlockDecoder(), 64, 20), _whole(z))
+    assert _same(_decode(z, RoadBlockDecoder(), 64, 29), _whole(z))
 
 
 def test_small_halo_raises():
     f = _scene(0)
     with pytest.raises(ValueError, match="halo"):
         _decode(f, RoadBlockDecoder(), 128, 10)
+
+
+def _blank(H, W):
+    return {"mask": np.zeros((1, H, W), np.float32), "keypoints": np.zeros((3, H, W), np.float32),
+            "direction": np.zeros((4, H, W), np.float32)}
+
+
+def test_small_blob_across_a_seam():
+    """Codex 10-29 #1: a 50-px, 1-px-wide blob centred on a seam is seen cut by both windows;
+    with min_area 100 the halo must be >= 99 so neither window keeps it as 'maybe large'."""
+    f = _blank(400, 400)
+    f["mask"][0, 100:300, 60] = 0.9  # a road, kept
+    f["mask"][0, 200, 103:153] = 0.9  # 50 px across the x = 128 seam, removed
+    ref = _whole(f, min_area=100, gap=0)
+    assert len(ref.edges) == 1
+    with pytest.raises(ValueError, match="min_area"):
+        _decode(f, RoadBlockDecoder(min_area=100, gap=0), 128, 40)
+    assert _same(_decode(f, RoadBlockDecoder(min_area=100, gap=0), 128, 99), ref)
+
+
+def _car_park(H=320, W=320):
+    rng = np.random.default_rng(1)
+    f = _blank(H, W)
+    m = f["mask"][0]
+    m[150:156, :] = 0.9
+    m[:, 100:105] = 0.9
+    m[130:170, 135:200] = 0.9  # 40 x 65 px across the seams at 160
+    m[rng.random(m.shape) < 0.01] = 0  # parked cars: holes make thinning reach far
+    return f
+
+
+def test_wide_blob_warns_when_halo_too_small():
+    f = _car_park()
+    p = dict(threshold=0.5, min_area=1)
+    ref = _whole(f, **p)
+    with pytest.warns(UserWarning, match="halo"):
+        _decode(f, RoadBlockDecoder(**p), 160, 24, strict=False)
+    assert _same(_decode(f, RoadBlockDecoder(**p), 160, 100), ref)
+
+
+def test_dense_peaks_memory_is_bounded():
+    """Codex 10-29 #3: an untrained keypoint head (a local maximum every few px) costs at most
+    the window's pixels in direction samples, and still decodes as the whole scene."""
+    rng = np.random.default_rng(0)
+    f = _blank(260, 300)
+    for r in (60, 120, 125, 180):
+        f["mask"][0, r : r + 6, 10:290] = 0.9
+    f["mask"][0, 20:240, 100:106] = f["mask"][0, 20:240, 200:208] = 0.9
+    f["keypoints"][:] = rng.random(f["keypoints"].shape).astype(np.float32)
+    f["direction"][:] = rng.normal(0, 1, f["direction"].shape).astype(np.float32)
+    res = []
+    got = _decode(f, RoadBlockDecoder(gap=0), 128, 29, results=res)
+    for r, b in zip(res, _grid(260, 300, 128, 29)):
+        area = (b.window[1] - b.window[0]) * (b.window[3] - b.window[2])
+        keys = r["direction"][0]
+        assert len(keys) <= area and np.all(np.diff(keys) > 0)
+    assert _same(got, _whole(f, gap=0))
 
 
 def test_suppression_matches_peak_pixels():
