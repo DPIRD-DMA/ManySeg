@@ -76,7 +76,7 @@ def count_mae(out, mask, heat):
 
 class EMA(Callback if Callback is not None else object):
     """Keeps an exponential moving average of the weights (and BatchNorm statistics:
-    ``use_buffers=True``). Evaluate or save ``self.ema.module`` after training. Built on the
+    ``use_buffers=True``). Evaluate or save ``self.averaged.module`` after training. Built on the
     unwrapped model in ``before_fit``, so it works with the dict outputs unchanged."""
 
     order = 65  # after the optimiser step
@@ -87,11 +87,12 @@ class EMA(Callback if Callback is not None else object):
     def before_fit(self):
         from torch.optim.swa_utils import AveragedModel, get_ema_multi_avg_fn
 
-        self.ema = AveragedModel(self.learn.model, multi_avg_fn=get_ema_multi_avg_fn(self.decay),
-                                 use_buffers=True)
+        # not self.ema: fastai already exposes this callback as learn.ema
+        self.averaged = AveragedModel(self.learn.model, use_buffers=True,
+                                      multi_avg_fn=get_ema_multi_avg_fn(self.decay))
 
     def after_step(self):
-        self.ema.update_parameters(self.learn.model)
+        self.averaged.update_parameters(self.learn.model)
 
 
 def main():
@@ -121,7 +122,7 @@ def main():
     print({k: tuple(v.shape) for k, v in out.items()})
 
     # the EMA weights: a copy of the model, still dict-output
-    ema_model = copy.deepcopy(ema.ema.module).eval().cpu()
+    ema_model = copy.deepcopy(ema.averaged.module).eval().cpu()
     x = dls.valid.one_batch()[0].cpu()
     with torch.no_grad():
         print("EMA heads:", list(ema_model(x)))

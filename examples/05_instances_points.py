@@ -4,6 +4,8 @@ Targets come from an instance-ID mask; post-processing runs outside the model (a
 any exported graph). Longer walkthroughs: `instance_fields.py`, `point_counting.py`.
 """
 
+import math
+
 import torch
 import torch.nn.functional as F
 from manyseg import create_model
@@ -12,6 +14,7 @@ from manyseg.points import (
     centers_from_instances,
     count_from_density,
     density_head,
+    density_loss,
     density_map,
     find_peaks,
     heatmap_from_instances,
@@ -31,15 +34,18 @@ def toy_instances(n=2, size=64, seed=0):
 
 
 def main():
+    torch.manual_seed(0)
     img, ids = toy_instances()
     model = create_model(
         backbone="resnet18", pretrained=False,  # True downloads ImageNet weights
         heads={**instance_heads(decoders={"boundary": "unet"}),  # extent, boundary, distance
-               **point_heads(), **density_head()})               # heatmap, density
+               **point_heads(),                                  # heatmap
+               **density_head(activation="softplus")})           # density >= 0
     t = instance_targets(ids, boundary_width=1)  # extent, boundary, distance: (B, 1, H, W)
     pts = [c for c, _ in centers_from_instances(ids)]  # (K, 2) float (y, x) per image
     hm = heatmap_from_instances(ids, sigma=2.0)
     den = density_map(pts, tuple(ids.shape[-2:]), sigma=2.0)  # sums to the count
+    scale = 2 * math.pi * 2.0**2  # density_loss trains density * scale, so peaks are about 1
 
     opt = torch.optim.AdamW(model.parameters(), lr=1e-3)
     for _ in range(3):
@@ -47,7 +53,7 @@ def main():
         loss = (F.binary_cross_entropy_with_logits(out["extent"], t["extent"])
                 + F.binary_cross_entropy_with_logits(out["boundary"], t["boundary"])
                 + F.l1_loss(out["distance"] * t["extent"], t["distance"])
-                + F.mse_loss(out["heatmap"], hm) + F.mse_loss(out["density"], den))
+                + F.mse_loss(out["heatmap"], hm) + density_loss(out["density"], pts, sigma=2.0))
         opt.zero_grad()
         loss.backward()
         opt.step()
@@ -64,7 +70,8 @@ def main():
     print("  true objects:  ", [len(p) for p in pts])
     print("  instances:     ", [int(lab.max()) for lab in labels])
     print("  peaks:         ", [len(p) for p, _ in peaks])
-    print("  density counts:", [round(c, 1) for c in count_from_density(out["density"]).tolist()])
+    counts = count_from_density(out["density"], value_scale=scale)
+    print("  density counts:", [round(c, 1) for c in counts.tolist()])
 
     # Perfect predictions (the targets) recover the objects exactly:
     exact = instances_from_outputs(t["extent"], t["boundary"], t["distance"], logits=False,

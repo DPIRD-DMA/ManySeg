@@ -12,8 +12,6 @@ cannot express composes as for dense models:
    pixel head next to the image heads (the decoder is then built for the pixel head only).
 """
 
-import math
-
 import torch
 import torch.nn.functional as F
 from manyseg import create_model
@@ -70,8 +68,7 @@ def main():
 
     def loss(out):
         mean, logvar = out["harvest"].chunk(2, dim=1)
-        nll = 0.5 * (logvar + (harvest - mean) ** 2 / logvar.exp()).mean() + 0.5 * math.log(
-            2 * math.pi)
+        nll = F.gaussian_nll_loss(mean, harvest, logvar.exp(), full=True)
         return (F.binary_cross_entropy_with_logits(out["labels"], y) + nll
                 + F.cross_entropy(out["water"], water))
 

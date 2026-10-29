@@ -2,8 +2,9 @@
 onnxscript / onnxruntime are not installed).
 
 torch.compile needs no export: `torch.compile(model, dynamic=True)` gives one graph across
-input sizes. For GPU inference, bf16 autocast + compile was 1.6x * 1.46x faster than eager
-fp32 on an RTX 4090 (E014); the first call per shape compiles (8-15 s), so it is not run here:
+input sizes. For GPU inference on an RTX 4090 (E014, medians over 10 models), bf16 autocast was
+1.61x faster than fp32 and compiling a further 1.46x; the first call compiles (8-15 s cold),
+so it is not run here:
 
     fast = torch.compile(model, dynamic=True)
     with torch.autocast("cuda", torch.bfloat16):
