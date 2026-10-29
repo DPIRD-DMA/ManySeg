@@ -201,18 +201,37 @@ def _corner_peaks(corner: np.ndarray, threshold: float = 0.3, kernel: int = 3,
 
 def corner_targets(polygons, shape: tuple[int, int], *, tolerance: float = 1.5,
                    turn_deg: float = 20.0,
-                   sigma: float = 2.0, line_width: float = 1.0):
+                   sigma: float = 2.0, line_width: float = 1.0, tile_edges: str = "keep"):
     """Training targets for :func:`polygons_from_corners` from polygons (pixel coordinates):
     ``corner`` (H, W) Gaussian blobs at vertices turning more than ``turn_deg`` after a
     ``tolerance`` px simplification (raster staircase jogs are not corners), ``direction``
     (2, H, W) ``(cos 2t, sin 2t)`` of the simplified walls within ``line_width`` px, and
-    ``direction_mask`` (H, W) bool."""
+    ``direction_mask`` (H, W) bool.
+
+    ``tile_edges``: what to do with the edges of the tile (the raster border), where polygons
+    clipped to the tile (:func:`to_pixels`) have vertices and walls that are not the object's.
+    ``"keep"`` (the default, as trained in E030-E047) treats them as any other corner and wall.
+    ``"ignore"`` (experimental): no corner at a vertex on the border and no direction on a wall
+    lying along it, and an extra ``corner_ignore`` (H, W) bool marks the pixels within
+    ``3 * sigma`` of those vertices, to leave out of the corner loss (``CornerLineTask``
+    does), so they are neither corners nor background.
+    """
     from rasterio.features import rasterize
     from rasterio.transform import Affine
 
+    if tile_edges not in ("keep", "ignore"):
+        raise ValueError(f"tile_edges must be 'keep' or 'ignore', got {tile_edges!r}")
     shapely = _deps()[1]
     H, W = shape
-    pts = []
+    ignore = tile_edges == "ignore"
+
+    def border(xy, eps=1e-6):
+        """Per point: the border lines it lies on (bit mask: left, right, top, bottom)."""
+        xy = np.asarray(xy, np.float64).reshape(-1, 2)
+        return ((np.abs(xy[:, 0]) <= eps) * 1 | (np.abs(xy[:, 0] - W) <= eps) * 2
+                | (np.abs(xy[:, 1]) <= eps) * 4 | (np.abs(xy[:, 1] - H) <= eps) * 8)
+
+    pts, skipped = [], []
     direction = np.zeros((2, H, W), np.float32)
     mask = np.zeros((H, W), bool)
     for p in polygons:
@@ -223,9 +242,16 @@ def corner_targets(polygons, shape: tuple[int, int], *, tolerance: float = 1.5,
         if len(c) >= 3:
             a, b = np.roll(c, 1, 0) - c, np.roll(c, -1, 0) - c
             cos = -(a * b).sum(1) / (np.linalg.norm(a, axis=1) * np.linalg.norm(b, axis=1) + 1e-9)
-            pts.append(c[cos < math.cos(math.radians(turn_deg))])
+            turn = c[cos < math.cos(math.radians(turn_deg))]
+            if ignore:
+                on = border(turn) > 0
+                skipped.append(turn[on])
+                turn = turn[~on]
+            pts.append(turn)
         cc = np.asarray(s.exterior.coords)
         for u, v in zip(cc[:-1], cc[1:]):
+            if ignore and border(u) & border(v):  # a wall along the tile edge: a clip
+                continue
             th = math.atan2(v[1] - u[1], v[0] - u[0])
             m = rasterize([(shapely.LineString([u, v]).buffer(line_width), 1)], out_shape=(H, W),
                           transform=Affine.identity(), dtype="uint8").astype(bool)
@@ -235,6 +261,17 @@ def corner_targets(polygons, shape: tuple[int, int], *, tolerance: float = 1.5,
     corner = np.zeros((H, W), np.float32)
     pts = np.concatenate(pts) if pts else np.zeros((0, 2))
     rr = int(math.ceil(3 * sigma))
+    out = {}
+    if ignore:
+        out["corner_ignore"] = np.zeros((H, W), bool)
+        for x, y in (np.concatenate(skipped) if skipped else np.zeros((0, 2))):
+            c0, r0 = int(math.floor(x)) - rr, int(math.floor(y)) - rr
+            cs, rs = max(c0, 0), max(r0, 0)
+            ce, re = min(c0 + 2 * rr + 1, W), min(r0 + 2 * rr + 1, H)
+            if cs < ce and rs < re:
+                yy, xx = np.mgrid[rs:re, cs:ce]
+                near = (xx + 0.5 - x) ** 2 + (yy + 0.5 - y) ** 2 <= (rr + 0.5) ** 2
+                out["corner_ignore"][rs:re, cs:ce] |= near
     for x, y in pts:
         c0, r0 = int(math.floor(x)) - rr, int(math.floor(y)) - rr
         cs, rs = max(c0, 0), max(r0, 0)
@@ -245,4 +282,6 @@ def corner_targets(polygons, shape: tuple[int, int], *, tolerance: float = 1.5,
         d2 = (xx + 0.5 - x) ** 2 + (yy + 0.5 - y) ** 2
         g = np.exp(-d2 / (2 * sigma ** 2)).astype(np.float32)
         np.maximum(corner[rs:re, cs:ce], g, out=corner[rs:re, cs:ce])
-    return {"corner": corner, "direction": direction, "direction_mask": mask}
+    if ignore:
+        out["corner_ignore"] &= corner < 0.5  # a real corner's peak stays a positive
+    return {"corner": corner, "direction": direction, "direction_mask": mask, **out}

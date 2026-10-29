@@ -791,7 +791,12 @@ class CornerLineTask(Task):
     maxima above 0.5) + ``direction_weight`` * L1 of the direction on the outline pixels
     (``direction_mask``). Primary metric: PQ of the instance decoding, as for
     :class:`InstanceTask`; ``loss`` is the full loss, ``instance_loss`` its instance part (the
-    experiments' validation loss)."""
+    experiments' validation loss).
+
+    Experimental tile-invariant targets: ``distance="absolute"`` (unnormalised distance, so an
+    instance cut by the tile edge gets the same values as in the whole scene; decode with a
+    ``seed_threshold`` in pixels) and a ``corner_ignore`` label (``corner_targets(...,
+    tile_edges="ignore")``): those pixels are left out of the corner loss."""
 
     name = "corner_lines"
     primary_metric = "pq"
@@ -799,8 +804,9 @@ class CornerLineTask(Task):
 
     def __init__(self, boundary_width: float = 2.0, corner_weight: float = 1.0,
                  direction_weight: float = 1.0, iou_threshold: float = 0.5,
-                 decoders=None) -> None:
-        self.inner = InstanceTask(boundary_width=boundary_width, iou_threshold=iou_threshold)
+                 decoders=None, distance: str = "normalized") -> None:
+        self.inner = InstanceTask(boundary_width=boundary_width, iou_threshold=iou_threshold,
+                                  distance=distance)
         self.corner_weight, self.direction_weight = corner_weight, direction_weight
         self.decoders = decoders
 
@@ -817,7 +823,10 @@ class CornerLineTask(Task):
         _full_resolution(out, t["instances"], self.name)
         inner = t["inner"] if "inner" in t else self.inner.targets(t["instances"])
         tc = t["corner"].float()[:, None]
-        corner = losses.heatmap_focal(out["corner"], tc, pos=losses.heatmap_peaks(tc))
+        logits = out["corner"]
+        if "corner_ignore" in t:  # tile_edges="ignore": neither corner nor background there
+            logits = logits.masked_fill(t["corner_ignore"].bool()[:, None], -20.0)
+        corner = losses.heatmap_focal(logits, tc, pos=losses.heatmap_peaks(tc))
         m = t["direction_mask"].bool()[:, None]
         direction = losses.masked_regression(out["direction"], t["direction"], m)
         return {"instances": self.inner.loss(out, inner), "corner": corner,
