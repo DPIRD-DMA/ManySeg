@@ -106,33 +106,61 @@ First release. Python 3.10–3.14, PyTorch ≥ 2.10, timm ≥ 1.0.20.
   instances, and the code stays in `experiments/E030_whu_polygons/`.
 * `manyseg-bench`: `evaluation.vectors` with APLS, GEO, junction F1, crossing scores and polygon
   metrics (C-IoU, detection F1, PoLiS, N-ratio).
-* Training presets for the trained vector models: `corner_line_heads` (instance heads + `corner`
-  + `direction`) and `road_heads` (`mask`, `line`, `keypoints`, `direction`), focal-loss heatmap
-  heads starting at `p = 0.1`; `road_targets` (road graph → surface, centreline, junction / end /
-  crossing heatmaps, two-mode direction; identical to E044's encoder); `dihedral`,
-  `dihedral_xy`, `dihedral_geometry` (the 8 exact flips / rotations / transposes, with the
-  double-angle direction rule). `manyseg-bench`: `CornerLineTask` (`"corner_lines"`) and
-  `RoadGraphTask` (`"roads"`) with the E030 / E044 losses; `GPULoader` takes label dicts,
-  `dihedral=True` and `directions=`, and the runner uses them for tasks with direction targets.
-* Target encoders from vector data: `to_pixels` (features in a CRS, as shapely, GeoJSON or a
-  GeoDataFrame, cut to a tile's geotransform and shape in pixel coordinates; reprojected when
-  the CRSs differ; `pixel_to_world`, `world_to_pixel`, `from_gdal`), `footprint_targets`,
-  `roof_face_targets` and `field_targets` (every head's target for the corner-line preset or
-  the instance heads), `road_graph` (lines → road graph + grade-separated crossings for
-  `road_targets`) and `rasterize_instances`. The `vectors` extra now includes `rasterio`, which
-  `corner_targets` and `road_targets` already needed.
-* Points in geographic and large-scene workflows: `to_geojson` writes `Point` / `MultiPoint`
-  features (from an `(N, 2)` pixel `(x, y)` array or shapely points; `properties` may be a dict
-  of columns) and refuses torch tensors, which in `manyseg.points` are `(y, x)`;
-  `to_pixels(kind="points")` (also inferred) returns an `(N, 2)` pixel `(x, y)` array of the
-  points inside the tile. `manyseg.points.points_to_xy` / `points_from_xy` convert between the
-  two conventions (`(y, x)` with centres at integers, `(x, y)` with corners at integers), the
-  latter straight into `gaussian_heatmap` / `density_map`. `PointBlockDecoder` (peaks of a
-  stitched heatmap block by block, optional offset and mask fields; equals a whole-scene
-  `find_peaks` exactly, ties included; refuses a halo below `kernel // 2` + the blur radius) and
-  `DensityBlockDecoder` (count per block core) follow the large-scene block contract. The
-  `find_peaks` blur is now a fixed-order tap sum instead of `conv2d` (values within 2e-7), so a
-  crop gives bit-identical values away from its edges.
+* **Experimental:** names and defaults may change before 1.0. Each task below has a head
+  preset, target encoders from vector data in a CRS, a decoder chosen in a pre-registered
+  experiment and block decoding for large scenes. Guide: `docs/api_design.md` (Vector outputs);
+  runnable examples `examples/14_vector_footprints.py` to `18_vector_points.py`; one end-to-end
+  test per task (vector labels → targets → block decoding → GeoJSON / GeoPackage).
+* **Training presets:** `corner_line_heads` (instance heads + `corner` + `direction`; footprints
+  and roof faces) and `road_heads` (`mask`, `line`, `keypoints`, `direction`); the focal-loss
+  heatmap heads start at `p = 0.1`. `dihedral`, `dihedral_xy`, `dihedral_geometry`: the 8 exact
+  flips / rotations / transposes, with the double-angle rule for direction fields.
+  `manyseg-bench`: `CornerLineTask` (`"corner_lines"`) and `RoadGraphTask` (`"roads"`) with the
+  E030 / E044 losses; `GPULoader` takes label dicts, `dihedral=True` and `directions=`, and the
+  runner uses them for tasks with direction targets.
+* **Target encoders from vector data in a CRS:** `to_pixels` (shapely, GeoJSON or a
+  GeoDataFrame, cut to a tile's geotransform and shape in pixel coordinates, reprojected when
+  the CRSs differ; `kind="points"` gives an `(N, 2)` pixel `(x, y)` array), `pixel_to_world`,
+  `world_to_pixel`, `from_gdal`; then `footprint_targets`, `roof_face_targets`, `field_targets`
+  (every head's target as numpy arrays), `road_graph` (lines → road graph + grade-separated
+  crossings) → `road_targets` (identical to E044's encoder), and `rasterize_instances`. The
+  `vectors` extra now includes `rasterio`.
+* **Decoders:** footprints `polygons_from_corners` (B3, straight walls; E038), fields
+  `polygons_from_labels` (B0, pixel outlines; E046), roads `graph_from_road_heads` (R4: junctions
+  and overpasses; E044b). LoD2 roofs (E047b, E048b; they need an nDSM input, RGB alone was not
+  viable in E049): `planar_faces` joins the faces into a planar partition, `face_plane` /
+  `roof_planes` fit a robust plane per face, `roof_mesh` (J1 / J2) lifts the rings, and
+  `roof_records` / `roof_faces` do all three. `planar_faces` joins each cluster of faces (gaps up
+  to the tolerance) on its own, so a face no longer depends on the noding of unrelated outlines.
+* **Large scenes, block by block:** `block_decoder(task)` (tuned defaults for `"footprints"`,
+  `"fields"`, `"roofs"`, `"roads"`), `decode_scene` (in-memory driver over arrays or memmaps),
+  `block_grid`, `Block`, `Scene`, `records_to_geojson` and `write_records` (GeoJSON, or a
+  GeoPackage through geopandas, in the scene's CRS; roof faces optionally as 3-D meshes).
+  Seam-exact: objects crossing block edges are joined by their anchor (first scene pixel), so a
+  block decode equals the whole-scene decode, with nothing duplicated or cut at seams, when the
+  halo covers the decoder's reach: at least its `min_halo` (enforced), and for road skeletons
+  and instances much larger than the halo possibly more (documented; roads warn). Tested on
+  seams, block corners, several grids and real stitched predictions. The same decoders run in ManyPred's
+  `predict_files(merge="cut", block_postprocess=BlockPostprocess(...))` (ManyPred's next
+  release); E050b: tiles of at least 1024 px with 256 px overlap.
+* **Points in a CRS and over large scenes:** `to_geojson` writes `Point` / `MultiPoint` features
+  (from an `(N, 2)` pixel `(x, y)` array or shapely points; `properties` may be a dict of
+  columns) and refuses torch tensors, which in `manyseg.points` are `(y, x)`.
+  `manyseg.points.points_to_xy` / `points_from_xy` convert between the two conventions (`(y, x)`
+  with centres at integers, `(x, y)` with corners at integers), the latter straight into
+  `gaussian_heatmap` / `density_map`. `PointBlockDecoder` (peaks of a stitched heatmap block by
+  block, optional offset and mask fields; equals a whole-scene `find_peaks` exactly, ties
+  included; refuses a halo below `kernel // 2` + the blur radius) and `DensityBlockDecoder`
+  (count per block core) follow the same block contract. The `find_peaks` blur is now a
+  fixed-order tap sum instead of `conv2d` (values within 2e-7), so a crop gives bit-identical
+  values away from its edges.
+* **Deterministic instance ties:** `instances_from_outputs(origin=, scene_width=, ids="anchor")`,
+  `connected_components(origin=, scene_width=)` and `anchor_labels` label by scene pixel index,
+  so a window decodes as the whole scene does; the scikit-image watershed now releases markers
+  of equal distance in raster order (its tie-break followed heap internals and changed with the
+  crop). Whole-scene decodes can differ marginally from development builds (2601 → 2600 roof
+  faces on one test scene).
+
 ### Performance (E026; values unchanged up to rounding)
 
 * bf16 autocast no longer carries float32 activations where CUDA runs an op in float32:

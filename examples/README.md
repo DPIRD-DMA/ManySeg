@@ -22,6 +22,21 @@ run on CPU.
 | [`12_accelerate.py`](12_accelerate.py) | The plain loop under Accelerate (CPU, one GPU or `accelerate launch` on several): `prepare`, `gather_for_metrics`, `unwrap_model` before saving (needs `accelerate`) |
 | [`13_torchgeo.py`](13_torchgeo.py) | TorchGeo's segmentation task with `configure_models` swapped for a ManySeg model: its losses, metrics, scheduler, freezing and `predict_step` (needs `torchgeo`, Python ≥ 3.12) |
 
+Vector outputs (experimental; need `manyseg[vectors]`). Each goes from vector data in a CRS to
+training targets, the model's heads, a scene decoded block by block (`decode_scene`, equal to a
+whole-scene decode) and GeoJSON, plus a GeoPackage when geopandas is installed. The targets of
+the whole scene stand in for a trained model's stitched outputs, so each runs in seconds; see
+[Vector outputs](../docs/api_design.md#vector-outputs-line-graphs-polygons) for training and
+for large scenes with ManyPred.
+
+| Script | Shows |
+| --- | --- |
+| [`14_vector_footprints.py`](14_vector_footprints.py) | Building outlines (EPSG:28350) → `footprint_targets` → `corner_line_heads` → `block_decoder("footprints")` (corners and walls, B3) → `buildings.geojson` / `.gpkg` |
+| [`15_vector_fields.py`](15_vector_fields.py) | Field parcels (Sentinel-2 grid) → `field_targets` → `instance_heads` → `block_decoder("fields")` (instance outlines, B0) → `fields.geojson` / `.gpkg` |
+| [`16_vector_roads.py`](16_vector_roads.py) | OSM-style ways with widths → `road_graph` (junctions, overpasses) → `road_targets` → `road_heads` → `block_decoder("roads")` (R4) → road LineStrings |
+| [`17_vector_roofs.py`](17_vector_roofs.py) | LoD2 roof faces → `roof_face_targets`; RGB + nDSM input → `block_decoder("roofs")`: planar faces, a plane per face from the nDSM, a 3-D mesh → 2-D and 3-D GeoJSON |
+| [`18_vector_points.py`](18_vector_points.py) | Tree points → heatmap and density targets (`points_from_xy`) → `PointBlockDecoder` / `DensityBlockDecoder` over a scene → GeoJSON points with scores, a count |
+
 Longer walkthroughs:
 
 | Script | Shows |
@@ -41,7 +56,8 @@ uv run python examples/01_single_input.py
 ```
 
 With pip, `pip install manyseg` is enough for 01-05, 08 and 10; 09 needs `fastai`, 11
-`lightning`, 12 `accelerate` and 13 `torchgeo`. Optional parts skip with a message when
+`lightning`, 12 `accelerate`, 13 `torchgeo`, and 14-18 and `vector_presets.py`
+`manyseg[vectors]` (plus `geopandas` for the GeoPackages). Optional parts skip with a message when
 their dependency is missing: ONNX in 06 needs `manyseg[onnx]` and `onnxruntime`, 07 needs
 `manyseg[quant]` (torchao), and the PNG in 03 needs the Graphviz `dot` binary.
 

@@ -782,6 +782,144 @@ over-/under-segmentation, point F1, count MAE) live in `manyseg-bench`, except
 
 ### Vector outputs (line graphs, polygons)
 
+**Experimental in 0.1.0.** Names and defaults may still change, and each decoder was chosen on
+one or two datasets. They need the `vectors` extra (`manyseg[vectors]`: shapely, networkx,
+rasterio, scipy, scikit-image); writing GeoPackages also needs geopandas.
+
+A model predicts dense heads; a decoder turns them into polygons, graphs or points outside the
+model, so export and inference stay plain tensors. The workflow per task is the same:
+
+1. **Targets.** Your vector labels in any CRS → `to_pixels` (cut to a tile, reprojected) → the
+   task's target encoder → one numpy array per head.
+2. **Model.** `create_model(heads=...)` with the task's head preset, trained with the losses in
+   `manyseg-bench` (`CornerLineTask`, `RoadGraphTask`, `InstanceTask`).
+3. **Decoding.** The predicted rasters (sigmoid applied to logit heads) → `block_decoder(task)`
+   → records or a graph in scene pixels, block by block for scenes of any size.
+4. **Output.** `write_records` (GeoJSON, or GeoPackage via geopandas) through the scene's
+   geotransform and CRS.
+
+| Task | Heads | Targets | Decoder | Reads |
+| --- | --- | --- | --- | --- |
+| Building footprints | `corner_line_heads()` | `footprint_targets` | `block_decoder("footprints")`: instances → `polygons_from_corners` (straight walls) | `extent`, `boundary`, `distance`, `corner`, `direction` |
+| Field boundaries | `instance_heads()` | `field_targets` | `block_decoder("fields")`: instances → `polygons_from_labels` (pixel outlines) | `extent`, `boundary`, `distance` |
+| Road networks | `road_heads()` | `road_graph` → `road_targets` | `block_decoder("roads")`: `graph_from_road_heads` | `mask`, `keypoints`, `direction` |
+| LoD2 roof faces | `corner_line_heads()`, RGB + nDSM input | `roof_face_targets` | `block_decoder("roofs")`: faces → `planar_faces` → a plane per face → mesh | as footprints + `height` (the nDSM) |
+| Points, counts | `point_heads()`, `density_head()` | `to_pixels(kind="points")` → `points_from_xy` → `gaussian_heatmap` / `density_map` | `PointBlockDecoder`, `DensityBlockDecoder` (also `block_decoder("points")` / `("density")`) | `heatmap` (+ `offset`, `mask`); `density` |
+
+Logit heads, to pass through a sigmoid before decoding: `extent`, `boundary`, `corner`, `mask`,
+`keypoints` (and `heatmap` with `point_heads(heatmap="segmentation")`). `distance`, `direction`,
+`offset` and `density` are values; `height` is the nDSM you fed the model, not a prediction.
+
+Why these decoders (pre-registered experiments in [`experiments/`](../experiments/)):
+
+* **Footprints, E038** (WHU aerial, 2 seeds): corners and walls (B3) beat pixel outlines on
+  boundary F (+0.02) and C-IoU × F1 (0.63 vs 0.46-0.47), at 0.01-0.02 lower detection F1.
+* **Fields, E046** (Fields of The World, Netherlands, 1 seed): pixel outlines (B0) beat corners
+  and walls on boundary F (0.59 vs 0.57), as in the E045 oracle (touching fields snapped to
+  each other's corners, curved edges were straightened).
+* **Roads, E044 / E044b** (City-Scale, 3 seeds): `graph_from_road_heads` (R4) matched a mask
+  skeleton (APLS +0.003 to +0.005, junction F1 +0.02 to +0.03) and kept 22-25 points more of
+  the overpasses (0.54-0.59 vs 0.32-0.34).
+* **Roof faces, E047b + E048b** (3D BAG, Netherlands, 1 seed): trained faces on RGB + nDSM
+  reached face F1 0.57-0.59 against 0.28-0.31 for plane segmentation of the nDSM, with lower
+  height error (1.3-1.4 m vs 1.8-2.1 m RMSE). The shipped corner decoder gives straight outlines
+  (C-IoU 0.64 vs 0.15-0.21 for pixel outlines) at 0.01-0.04 lower face F1. Joining faces into a
+  planar partition raised seam closure from 0.38 to 0.71-0.73 (3D BAG's own faces: 0.79).
+  **E049:** from RGB alone, with predicted heights, face F1 fell by 0.28-0.38 and height RMSE
+  rose by 1.8-2.9 m: not viable.
+* **Stitching, E050 / E050b**: decode stitched predictions made with `merge="cut"` (each pixel
+  from the most central tile) and tiles of at least 1024 px with 256 px overlap. Cutting removed
+  the seam effect on road junctions (agreement with a single-pass prediction +0.017 over
+  blending); for roofs, tile context mattered most (face agreement with the single pass 0.944
+  at 512 / 128 px, 0.987 at 1024 / 256 px, both cut).
+
+**One scene, end to end.** Coordinates are pixel `(x, y)` with pixel corners at integers, so
+an affine geotransform in rasterio order (`dataset.transform`; GDAL's through `from_gdal`) maps
+them to the CRS directly:
+
+```python
+from manyseg.vectors import (Scene, block_decoder, decode_scene, footprint_targets,
+                             to_pixels, write_records)
+
+# Training targets for one tile: vector labels in a CRS -> pixels -> every head's target
+# crs: the labels' CRS (a GeoDataFrame's own .crs is used if omitted); raster_crs: the image's
+polys = to_pixels(buildings, transform, (H, W), crs=buildings_crs, raster_crs=crs)  # reprojected
+targets = footprint_targets(polys, (H, W))  # instances, corner, direction, extent, ...
+
+# A predicted scene -> polygons in the CRS. `pred`: head name -> stitched (C, H, W) or (H, W)
+# numpy arrays (or memmaps), sigmoid applied to the logit heads
+scene = Scene(H, W, transform=transform, crs=crs)
+dec = block_decoder("footprints")  # or "fields", "roads", "roofs"; parameters override defaults
+records = decode_scene(pred, dec, block=4096, halo=256, scene=scene)  # list of dicts, by id
+write_records(records, "buildings.geojson", scene)  # ".gpkg" with geopandas
+```
+
+`decode_scene` cuts the scene into blocks (cores that partition it, plus a `halo` of context)
+and joins the objects that cross block edges; the result equals a whole-scene decode when the
+halo covers the decoder's reach (see the limitations below; tested on seams, block corners,
+several grids and real stitched predictions). Records are dicts with
+`id` (the scene pixel index of the object's first pixel, so it does not depend on the grid),
+`geometry` (shapely, scene pixels), `pixels` and `scene_edge` (touches the scene edge, so it
+may be cut). Roof records hold `id`, `part` (pieces a join split off), `geometry`, `plane`
+(`z = a x + b y + c` in metres, `x` / `y` in scene pixels) and `mesh` (a `(K, 3)` ring;
+`write_records(..., mesh=True)` writes 3-D polygons, z in metres).
+`"roads"` returns a `VectorGraph`; points return `ScenePoints` (`to_geojson()`). Runnable
+versions of each task: [`examples/14_vector_footprints.py`](../examples/14_vector_footprints.py)
+to [`18_vector_points.py`](../examples/18_vector_points.py).
+
+**Large scenes with ManyPred** (*requires the ManyPred release that adds `merge="cut"` and
+`BlockPostprocess`; not released yet*). ManyPred stitches the tiles' outputs and calls the
+decoder on each block of the stitched rasters while it predicts, so one call writes the
+vectors and memory stays bounded:
+
+```python
+from pathlib import Path
+
+from manypred import BlockPostprocess, predict_files
+from manypred.geo import load_raster
+from manyseg.vectors import block_decoder, write_records
+
+dec = block_decoder("footprints")
+post = BlockPostprocess(
+    dec, block=4096, halo=256, combine=dec.combine,
+    save=lambda records, item, scene: write_records(records, Path(item).with_suffix(".gpkg"), scene),
+    fields=["extent", "boundary", "distance", "corner", "direction"],
+)
+predict_files(
+    model, ["scene_1.tif", "scene_2.tif"], load_func=load_raster,
+    patch_size=1024, overlap=256, merge="cut",  # E050b: tiles >= 1024 px, 256 px overlap
+    activation={"extent": "sigmoid", "boundary": "sigmoid", "corner": "sigmoid"},
+    block_postprocess=post,
+)
+```
+
+The decoder sees only model outputs there, so for roofs either have the model return its nDSM
+input as a `height` output, or decode the saved rasters afterwards with
+`manypred.postprocess_blocks({..., "height": "ndsm.tif"}, dec, combine=dec.combine)` (fields
+may be raster paths, read window by window). Without ManyPred, `decode_scene` does the same
+over arrays or memmaps you stitched yourself.
+
+**Limitations.**
+
+* Experimental: decoders and defaults come from one or two datasets each (above); validate
+  on your data, and re-tune thresholds there (`block_decoder(task, extent_threshold=...)`).
+* Roofs need a height input (nDSM in metres, on the image grid): planes are fitted to it, and
+  without it the face partition collapses (E049).
+* The halo must be at least the decoder's `min_halo` (`PointBlockDecoder.reach` for points):
+  17 px for footprints and 30 px for roofs (corner decoding), 2 px for fields, 29 px for roads,
+  `kernel // 2` plus the blur radius for points. `decode_scene` raises below it. 256 px is a safe
+  default.
+* Roads: skeletonisation can reach further than its other steps, about the half-width of the
+  widest road blob and up to ~3 times that for blobs with holes (car parks). If that exceeds
+  the halo, the graph near a seam may differ from a whole-scene decode; `combine` warns when a
+  block's skeleton changed with its halo. Use a larger halo then.
+* Instances equal a whole-scene decode when each window labels an instance as the whole scene
+  would, which holds when the decoder's reach stays below the halo. Where windows disagree
+  beyond that (an instance much larger than the halo), an object may split at a seam, but no
+  pixel is lost or claimed twice.
+
+#### Building blocks
+
 > **Evidence:** E028 (oracle: perfect OSM roads and footprints rasterized into each candidate set
 > of targets, corrupted, decoded, scored). Roads: a road mask → skeleton is the baseline to beat.
 > A Sat2Graph-style graph tensor decodes perfect targets best and is the only one that keeps
