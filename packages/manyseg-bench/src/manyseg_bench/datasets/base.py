@@ -64,6 +64,10 @@ def save_split(cache: Path, split: str, images, masks: np.ndarray, names: list[s
             np.save(cache / f"{split}_images.{k}.npy", v)
     else:
         np.save(cache / f"{split}_images.npy", images)
+    # one label representation per split: files of another (or of dropped entries) would be
+    # loaded instead of / with the new labels
+    for f in [cache / f"{split}_masks.npy", *cache.glob(f"{split}_masks.*.npy")]:
+        f.unlink(missing_ok=True)
     if isinstance(masks, dict):
         for k, v in masks.items():
             np.save(cache / f"{split}_masks.{k}.npy", v)

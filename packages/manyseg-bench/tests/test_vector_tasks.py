@@ -286,6 +286,13 @@ def test_split_with_label_dict_round_trips(tmp_path):
     s = load_split(tmp_path, "train")
     assert set(s.masks) == {"mask", "direction"}
     assert s.masks["direction"].shape == (3, 4, 8, 8)
+    # re-preparing replaces the labels: no stale single mask or dropped entries (Codex review)
+    save_split(tmp_path, "train", imgs, {"mask": labels["mask"]}, ["a", "b", "c"])
+    assert set(load_split(tmp_path, "train").masks) == {"mask"}
+    save_split(tmp_path, "train", imgs, np.zeros((3, 8, 8), np.uint8), ["a", "b", "c"])
+    assert load_split(tmp_path, "train").masks.shape == (3, 8, 8)
+    save_split(tmp_path, "train", imgs, labels, ["a", "b", "c"])
+    assert set(load_split(tmp_path, "train").masks) == {"mask", "direction"}
 
 
 # --- end to end: run_training on synthetic caches ------------------------------------------------

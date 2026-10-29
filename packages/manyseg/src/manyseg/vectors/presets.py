@@ -2,7 +2,8 @@
 
 Both presets use the built-in head types only. The heatmap heads trained with the CenterNet focal
 loss (``corner``, ``keypoints``) start at the prior ``p = 0.1`` (``bias_init = logit(0.1)``), so
-the loss is not swamped by negatives at initialisation (E036: about 200 at ``p = 0.5``). Head
+the loss is not swamped by negatives at initialisation (E036: about 200 at ``p = 0.5``; the
+experiments set the bias to -2.19, ``p = 0.1007``). Head
 names are those the vector decoders read (``polygons_from_corners``, ``graph_from_road_heads``).
 Losses and metrics live in ``manyseg-bench`` (``CornerLineTask``, ``RoadGraphTask``).
 """
