@@ -138,10 +138,15 @@ def polygons_from_corners(labels, corner, direction, *, corner_threshold: float 
                           agree: float = 0.4, merge_deg: float = 15.0, simplify: float = 1.0,
                           min_area: float = 16) -> list:
     """Straight-walled polygons from instance ``labels`` (H, W), a ``corner`` probability map
-    (H, W) and a ``direction`` field (2, H, W) of ``(cos 2t, sin 2t)`` (numpy or torch). Defaults
-    are E035b's level-1/2 tuning. Instances with fewer than 3 snapped corners, or whose straightened
-    polygon degenerates (< 3 walls, invalid, empty), fall back to their outline simplified by
-    ``simplify`` px, so a building the instance mask found is never dropped."""
+    (H, W) and a ``direction`` field (2, H, W) of ``(cos 2t, sin 2t)`` (numpy or torch).
+    Instances with fewer than 3 snapped corners, or whose straightened polygon degenerates
+    (< 3 walls, invalid, empty), fall back to their outline simplified by ``simplify`` px, so a
+    building the instance mask found is never dropped.
+
+    A low-level building block with generic defaults (E035b's oracle level-1/2 tuning). The
+    settings tuned on trained models are in ``block_decoder("footprints")`` (E038 B3:
+    ``corner_threshold=0.5``, ``big_dev=4``, ``merge_deg=8``) and ``block_decoder("roofs")``
+    (E047b); use those with :func:`decode_scene` unless you need this step on its own."""
     def _np(a):
         if hasattr(a, "detach"):
             return a.detach().float().cpu().numpy()

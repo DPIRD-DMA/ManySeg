@@ -44,15 +44,13 @@ def main():
         print(f"skipping: {e.name} is not installed (pip install 'manyseg[vectors]')")
         return
     from manyseg.points import (
-        DensityBlockDecoder,
-        PointBlockDecoder,
         density_head,
         density_map,
         gaussian_heatmap,
         point_heads,
         points_from_xy,
     )
-    from manyseg.vectors import Scene, decode_scene, to_pixels
+    from manyseg.vectors import Scene, block_decoder, decode_scene, to_pixels
 
     # 1. Points in a CRS -> (N, 2) pixel (x, y) inside the tile -> (y, x) targets.
     world = trees()
@@ -70,12 +68,12 @@ def main():
     print("model fields:", {k: tuple(v[0].shape) for k, v in out.items()})
     fields = {"heatmap": heatmap, "density": density}  # stand-in: perfect outputs
 
-    # 3. Block by block: peaks whose pixel lies in a block's core; halo >= dec.reach.
-    #    (block_decoder("points", ...) / ("density", ...) build the same decoders.)
+    # 3. Block by block: peaks whose pixel lies in a block's core; halo >= dec.min_halo.
+    #    (block_decoder builds manyseg.points' PointBlockDecoder / DensityBlockDecoder.)
     scene = Scene(*SHAPE, transform=TRANSFORM, crs=CRS)
-    dec = PointBlockDecoder(threshold=0.5, kernel=3)
+    dec = block_decoder("points", threshold=0.5, kernel=3)
     pts = decode_scene(fields, dec, block=128, halo=16, scene=scene)  # ScenePoints
-    count = decode_scene(fields, DensityBlockDecoder(), block=128, halo=0, scene=scene)
+    count = decode_scene(fields, block_decoder("density"), block=128, halo=0, scene=scene)
     err = np.hypot(*(pts.xy[:, None] - xy[None]).transpose(2, 0, 1)).min(1)
     print(f"{len(pts)} peaks (max {err.max():.2f} px from a tree: peaks are pixels; add an "
           f"offset head for sub-pixel points); density count {count.total:.2f} over "
@@ -83,8 +81,7 @@ def main():
 
     # 4. GeoJSON points in metres, with each peak's score.
     out_dir = Path(tempfile.mkdtemp())
-    fc = pts.to_geojson()  # through scene.transform; it does not name the CRS, so add it
-    fc["crs"] = {"type": "name", "properties": {"name": CRS}}  # as write_records does
+    fc = pts.to_geojson()  # through scene.transform, naming scene.crs; pts.yx, pts.xy, pts.scores
     (out_dir / "trees.geojson").write_text(json.dumps(fc))
     print("first tree:", fc["features"][0]["geometry"]["coordinates"],
           fc["features"][0]["properties"])

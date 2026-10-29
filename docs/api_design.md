@@ -786,6 +786,36 @@ over-/under-segmentation, point F1, count MAE) live in `manyseg-bench`, except
 one or two datasets. They need the `vectors` extra (`manyseg[vectors]`: shapely, networkx,
 rasterio, scipy, scikit-image); writing GeoPackages also needs geopandas.
 
+**Recommended API** (`manyseg.vectors` unless noted):
+
+* Head presets: `corner_line_heads()`, `road_heads()`; `manyseg.instances.instance_heads()`,
+  `manyseg.points.point_heads()` / `density_head()`.
+* Target encoders: `to_pixels` (labels in a CRS → tile pixels), then `footprint_targets`,
+  `field_targets`, `roof_face_targets`, `road_graph` → `road_targets`; for points
+  `manyseg.points.points_from_xy` → `gaussian_heatmap` / `density_map`.
+* Decoding: `decode_scene(fields, block_decoder(task), scene=Scene(H, W, transform, crs))` with
+  `task` one of `"footprints"`, `"fields"`, `"roofs"`, `"roads"`, `"points"`, `"density"`. This
+  is both the whole-scene and the large-scene path: with the default `block=4096` a scene of up
+  to 4096 px a side is one block, a larger one is decoded block by block. `block_decoder` holds
+  the tuned settings.
+* Results and writers: `SceneRecords` (footprints, fields, roofs: a list of dicts carrying the
+  scene's transform and CRS, with `.write(path)` and `.to_geojson()`), `VectorGraph` (roads),
+  `manyseg.points.ScenePoints` (`.yx`, `.xy`, `.scores`, `.to_geojson()`) and `SceneCount`;
+  `write_records`, `records_to_geojson`, `to_geojson`.
+* Georeferencing helpers: `Scene`, `from_gdal`, `pixel_to_world`, `world_to_pixel`;
+  `manyseg.points.points_to_xy` / `points_from_xy`.
+
+**Building blocks** (generic defaults; `block_decoder(task)` has the tuned ones):
+`polygons_from_corners`, `polygons_from_labels`, `graph_from_road_heads`, `graph_from_mask`,
+`graph_from_mask_blocks` (a plain line-probability head over a large scene), `planar_faces`,
+`bridge_ends` (modifies its graph in place), `graph_chains`, `corner_targets`,
+`rasterize_instances`, the dihedral augmentation (`dihedral`, `dihedral_xy`,
+`dihedral_geometry`, `dihedral_shape`), the block machinery (`block_grid`, `Block`,
+`BlockDecoder`, `InstanceBlockDecoder`, `RoofBlockDecoder`, `RoadBlockDecoder`,
+`manyseg.points.PointBlockDecoder` / `DensityBlockDecoder`) and roof assembly in
+`manyseg.vectors.roofs` (`roof_faces`, `roof_records`, `face_plane`, `roof_planes`,
+`roof_mesh`; not re-exported).
+
 A model predicts dense heads; a decoder turns them into polygons, graphs or points outside the
 model, so export and inference stay plain tensors. The workflow per task is the same:
 
@@ -793,10 +823,11 @@ model, so export and inference stay plain tensors. The workflow per task is the 
    task's target encoder → one numpy array per head.
 2. **Model.** `create_model(heads=...)` with the task's head preset, trained with the losses in
    `manyseg-bench` (`CornerLineTask`, `RoadGraphTask`, `InstanceTask`).
-3. **Decoding.** The predicted rasters (sigmoid applied to logit heads) → `block_decoder(task)`
-   → records or a graph in scene pixels, block by block for scenes of any size.
-4. **Output.** `write_records` (GeoJSON, or GeoPackage via geopandas) through the scene's
-   geotransform and CRS.
+3. **Decoding.** The predicted rasters (sigmoid applied to logit heads, or `logits=True`) →
+   `decode_scene(fields, block_decoder(task), scene=scene)` → `SceneRecords`, a `VectorGraph`
+   or `ScenePoints` in scene pixels, block by block for scenes of any size.
+4. **Output.** `records.write(path)` / `write_records` (GeoJSON, or GeoPackage via geopandas)
+   through the scene's geotransform and CRS.
 
 | Task | Heads | Targets | Decoder | Reads |
 | --- | --- | --- | --- | --- |
@@ -809,6 +840,9 @@ model, so export and inference stay plain tensors. The workflow per task is the 
 Logit heads, to pass through a sigmoid before decoding: `extent`, `boundary`, `corner`, `mask`,
 `keypoints` (and `heatmap` with `point_heads(heatmap="segmentation")`). `distance`, `direction`,
 `offset` and `density` are values; `height` is the nDSM you fed the model, not a prediction.
+Or pass raw logits with `block_decoder(task, logits=True)`: footprints, fields and roofs apply
+the sigmoid to `extent`, `boundary` and `corner`, roads to `mask` and `keypoints`, points to
+`heatmap` and the optional `mask` field; values are never transformed.
 
 Why these decoders (pre-registered experiments in [`experiments/`](../experiments/)):
 
@@ -850,20 +884,24 @@ targets = footprint_targets(polys, (H, W))  # instances, corner, direction, exte
 # numpy arrays (or memmaps), sigmoid applied to the logit heads
 scene = Scene(H, W, transform=transform, crs=crs)
 dec = block_decoder("footprints")  # or "fields", "roads", "roofs"; parameters override defaults
-records = decode_scene(pred, dec, block=4096, halo=256, scene=scene)  # list of dicts, by id
-write_records(records, "buildings.geojson", scene)  # ".gpkg" with geopandas
+records = decode_scene(pred, dec, scene=scene)  # SceneRecords: dicts by id + transform, crs
+records.write("buildings.geojson")  # ".gpkg" with geopandas; = write_records(records, path)
 ```
 
-`decode_scene` cuts the scene into blocks (cores that partition it, plus a `halo` of context)
-and joins the objects that cross block edges; the result equals a whole-scene decode when the
-halo covers the decoder's reach (see the limitations below; tested on seams, block corners,
-several grids and real stitched predictions). Records are dicts with
+`decode_scene` cuts the scene into blocks (cores that partition it, plus a `halo` of context;
+defaults `block=4096`, `halo=256`, so a smaller scene is one block) and joins the objects that
+cross block edges; the result equals a whole-scene decode when the halo is at least the
+decoder's `min_halo` and, for roads, also covers the skeleton's data-dependent reach (see the
+limitations below; tested on seams, block corners, several grids and real stitched
+predictions). Footprints, fields and roofs return `SceneRecords`: a list of dicts, carrying the
+scene's `transform` and `crs` for `.write(path)` / `.to_geojson()`, with
 `id` (the scene pixel index of the object's first pixel, so it does not depend on the grid),
 `geometry` (shapely, scene pixels), `pixels` and `scene_edge` (touches the scene edge, so it
 may be cut). Roof records hold `id`, `part` (pieces a join split off), `geometry`, `plane`
 (`z = a x + b y + c` in metres, `x` / `y` in scene pixels) and `mesh` (a `(K, 3)` ring;
 `write_records(..., mesh=True)` writes 3-D polygons, z in metres).
-`"roads"` returns a `VectorGraph`; points return `ScenePoints` (`to_geojson()`). Runnable
+`"roads"` returns a `VectorGraph` (`write_records(graph, path, scene)`); points return
+`ScenePoints` (`to_geojson()`). Runnable
 versions of each task: [`examples/14_vector_footprints.py`](../examples/14_vector_footprints.py)
 to [`18_vector_points.py`](../examples/18_vector_points.py).
 
@@ -905,14 +943,14 @@ over arrays or memmaps you stitched yourself.
   on your data, and re-tune thresholds there (`block_decoder(task, extent_threshold=...)`).
 * Roofs need a height input (nDSM in metres, on the image grid): planes are fitted to it, and
   without it the face partition collapses (E049).
-* The halo must be at least the decoder's `min_halo` (`PointBlockDecoder.reach` for points):
-  17 px for footprints and 30 px for roofs (corner decoding), 2 px for fields, 29 px for roads,
-  `kernel // 2` plus the blur radius for points. `decode_scene` raises below it. 256 px is a safe
-  default.
-* Roads: skeletonisation can reach further than its other steps, about the half-width of the
-  widest road blob and up to ~3 times that for blobs with holes (car parks). If that exceeds
-  the halo, the graph near a seam may differ from a whole-scene decode; `combine` warns when a
-  block's skeleton changed with its halo. Use a larger halo then.
+* The halo must be at least the decoder's `min_halo`: 17 px for footprints and 30 px for roofs
+  (corner decoding), 2 px for fields, 29 px for roads, `kernel // 2` plus the blur radius for
+  points, 0 for density. `decode_scene` raises below it. 256 px is a safe default.
+* Roads: `min_halo` is necessary, not sufficient. Skeletonisation can reach further than the
+  other steps, about the half-width of the widest road blob and up to ~3 times that for blobs
+  with holes (car parks). If that exceeds the halo, the graph near a seam may differ from a
+  whole-scene decode; `combine` warns when a block's skeleton changed with its halo. Use a
+  larger halo then.
 * Instances equal a whole-scene decode when each window labels an instance as the whole scene
   would, which holds when the decoder's reach stays below the halo. Where windows disagree
   beyond that (an instance much larger than the halo), an object may split at a seam, but no
@@ -930,7 +968,10 @@ over arrays or memmaps you stitched yourself.
 > (C-IoU 0.61 vs 0.71, detection F1 0.75 vs 0.85), so it is not shipped: as pre-registered, the
 > code stays in `experiments/E030_whu_polygons/graph_tensor.py`.
 
-Decoding runs outside the exported model. Coordinates are `(x, y)` in GIS raster convention
+These are the steps `block_decoder` composes, for use on their own (one tile, a custom
+pipeline). Their defaults are generic; the tuned settings are in `block_decoder(task)`
+(footprints E038, fields E046, roofs E047b; `graph_from_road_heads` shares the roads ones,
+E044). Decoding runs outside the exported model. Coordinates are `(x, y)` in GIS raster convention
 (pixel corners at integers), unlike `manyseg.points` (`(y, x)`, centres at integers), so a
 geotransform maps them directly (`to_geojson(..., transform=)`). Needs `manyseg[vectors]`.
 
@@ -1001,7 +1042,10 @@ polygons valid, clips them to `[0, W] x [0, H]` and splits multipart geometry; l
 with their vertices kept, so junction vertices still match. A building cut by the tile edge is
 clipped there, as the experiments trained. Where polygons overlap, the later one wins (rasterio
 order; the covered walls and corners of the earlier one are not drawn either);
-`rasterize_instances` exposes that step (`fill_holes`, `split`, `min_area`). Unit tests
+`rasterize_instances` exposes that step (`fill_holes`, `split`, `min_area`). Reprojection
+needs both CRSs: `to_pixels` raises when only one of the features' CRS (`crs=` or a
+GeoDataFrame's `.crs`) and `raster_crs` is known, unless `assume_same_crs=True`; with neither
+known the features are taken to be in the raster's CRS. Unit tests
 encode synthetic vectors and decode the targets with the shipped decoders
 (`polygons_from_corners`, `polygons_from_labels`, `graph_from_road_heads`): footprints IoU
 > 0.98 with the same vertex count, roof faces > 0.99, fields > 0.97, roads within 3 px with
@@ -1014,8 +1058,8 @@ inverse: a swap or a half-pixel shift survives any round trip within one convent
 `to_geojson` refuses torch tensors for that reason.
 
 ```python
-from manyseg.points import PointBlockDecoder, find_peaks, gaussian_heatmap, points_from_xy, points_to_xy
-from manyseg.vectors import to_geojson, to_pixels
+from manyseg.points import find_peaks, gaussian_heatmap, points_from_xy, points_to_xy
+from manyseg.vectors import block_decoder, decode_scene, to_geojson, to_pixels
 
 # Training targets from labelled points in a CRS
 xy = to_pixels(trees_gdf, transform, shape, raster_crs=crs, kind="points")  # (N, 2), in the tile
@@ -1025,22 +1069,23 @@ hm = gaussian_heatmap([points_from_xy(xy)], shape, sigma=2.0)               # (1
 ((yx, scores),) = find_peaks(torch.sigmoid(out["heatmap"]), threshold=0.3)
 fc = to_geojson(points_to_xy(yx), transform, properties={"score": scores.numpy()})
 
-# A stitched scene, block by block (halo >= dec.reach = kernel // 2 + blur radius)
-dec = PointBlockDecoder(threshold=0.3, kernel=5, smooth_sigma=1.0, offsets="offset")
-# ManyPred: postprocess_blocks(fields, dec, combine=dec.combine, halo=256)
-pts = dec.combine([dec(crop(fields, b.window), b, scene) for b in blocks], scene)  # ScenePoints
-fc = pts.to_geojson()  # through scene.transform; pts.points (y, x), pts.xy (x, y), pts.scores
+# A stitched scene, block by block (halo >= dec.min_halo = kernel // 2 + blur radius)
+dec = block_decoder("points", threshold=0.3, kernel=5, smooth_sigma=1.0, offsets="offset")
+pts = decode_scene(fields, dec, scene=scene)  # ScenePoints; ManyPred: postprocess_blocks
+fc = pts.to_geojson()  # through scene.transform, names scene.crs; transform=None: pixels
+# pts.yx (y, x, centres at integers), pts.xy (x, y, corners at integers), pts.scores
 ```
 
 `PointBlockDecoder` runs `find_peaks` on each window and keeps the peaks whose pixel lies in the
-block's core; with a halo of at least `reach` it equals a whole-scene `find_peaks` exactly (same
+block's core; with a halo of at least `min_halo` it equals a whole-scene `find_peaks` exactly (same
 peaks, scores and plateaus; tested on seams, corners, scene edges and several grids) and raises
 when a block's halo is smaller on a side that is not the scene edge. Offsets (`dy, dx`) are added
 at the peak, so a refined point may sit just outside its core. Results are sorted by score, ties
 in raster order; `max_points` applies to the whole scene. `DensityBlockDecoder` sums a density
 field over each core (`SceneCount`: total and per-block counts; no halo needed).
 `manyseg.vectors.block_decoder("points", **params)` and `block_decoder("density", **params)` build
-the same two decoders.
+these two decoders. `ScenePoints.to_geojson()` reserves the `score` property (a user
+`properties["score"]` raises).
 `to_pixels(kind="points")` keeps `0 <= x < W`, `0 <= y < H`, so a point on a shared tile edge
 goes to one tile (within float rounding of the edge it can go either way).
 

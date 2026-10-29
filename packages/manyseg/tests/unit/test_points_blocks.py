@@ -105,13 +105,13 @@ def test_block_decode_equals_whole_scene_find_peaks(kw, quantise):
     dec = PointBlockDecoder(**kw)
     for block, offset in [(24, (0, 0)), (24, (7, 13)), (17, (0, 5)), (40, (3, 0)), (200, (0, 0)),
                           (1, (0, 0))]:
-        for halo in (dec.reach, dec.reach + 3):
-            if block == 1 and halo != dec.reach:
+        for halo in (dec.min_halo, dec.min_halo + 3):
+            if block == 1 and halo != dec.min_halo:
                 continue
             out = decode({"heatmap": hm}, dec, block, halo, offset)
             assert np.array_equal(out.pixels, ref_p), (block, offset, halo)
             assert np.array_equal(out.scores, ref_s)
-            assert np.array_equal(out.points, ref_p.astype(np.float64))
+            assert np.array_equal(out.yx, ref_p.astype(np.float64))
     if quantise and not kw.get("smooth_sigma"):  # the flat square across the seams: its
         # interior (every neighbour inside the square) is all peaks, each kept once
         sq = (out.pixels >= 23) & (out.pixels < 27)
@@ -121,13 +121,13 @@ def test_block_decode_equals_whole_scene_find_peaks(kw, quantise):
 def test_too_small_halo_raises_and_would_be_wrong():
     hm = scene_heatmap()
     dec = PointBlockDecoder(threshold=0.2, kernel=5, smooth_sigma=1.0)
-    assert dec.reach == 2 + 3
+    assert dec.min_halo == 2 + 3
     with pytest.raises(ValueError, match="halo too small"):
-        decode({"heatmap": hm}, dec, 24, dec.reach - 1)
+        decode({"heatmap": hm}, dec, 24, dec.min_halo - 1)
 
     class Unchecked(PointBlockDecoder):  # what the check prevents: seam duplicates / losses
         @property
-        def reach(self):
+        def min_halo(self):
             return 0
 
     ref_p, _ = reference(hm, threshold=0.2, kernel=5, smooth_sigma=1.0)
@@ -156,17 +156,35 @@ def test_offsets_mask_logits_and_max_points():
     off = rng.uniform(-0.5, 0.5, (2, h, w)).astype(np.float32)
     fg = (rng.uniform(0, 1, (1, h, w)) > 0.3).astype(np.float32)
     logit = np.log(hm / (1 - hm)).astype(np.float32)
-    fields = {"hm_logit": logit, "offset": off, "fg": fg}
+    # logits=True applies to the mask field too: logit 0.3 -> p 0.57 (> 0.5), -3 -> p 0.05
+    fields = {"hm_logit": logit, "offset": off, "fg": np.where(fg > 0.5, 0.3, -3.0)}
     dec = PointBlockDecoder("hm_logit", threshold=0.3, kernel=3, offsets="offset", mask="fg",
                             logits=True, max_points=25)
-    out = decode(fields, dec, 20, dec.reach, (5, 9))
+    out = decode(fields, dec, 20, dec.min_halo, (5, 9))
     prob = torch.sigmoid(torch.from_numpy(logit))
     ((p, s),) = find_peaks(prob[None], 0.3, mask=torch.from_numpy(fg > 0.5))
     p, s = p.numpy(), s.numpy()
     o = np.lexsort((p[:, 1], p[:, 0], -s.astype(np.float64)))[:25]
     assert len(out) == 25 and np.array_equal(out.pixels, p[o]) and np.array_equal(out.scores, s[o])
-    assert np.allclose(out.points, p[o] + off[:, p[o][:, 0], p[o][:, 1]].T)
-    assert np.allclose(out.xy, out.points[:, ::-1] + 0.5)
+    assert np.allclose(out.yx, p[o] + off[:, p[o][:, 0], p[o][:, 1]].T)
+    assert np.allclose(out.xy, out.yx[:, ::-1] + 0.5)
+    raw = PointBlockDecoder("hm_logit", threshold=0.3, offsets="offset", mask="fg", logits=False)
+    fields["hm_logit"] = prob.numpy()  # without logits=True the mask is compared raw: 0.3 < 0.5
+    assert len(decode(fields, raw, 20, raw.min_halo, (5, 9))) == 0
+
+
+def test_decode_scene_checks_point_halo_early_and_empty_fields():
+    from manyseg.vectors import decode_scene
+
+    hm = scene_heatmap()
+    dec = PointBlockDecoder(threshold=0.3, kernel=5)
+    with pytest.raises(ValueError, match="min_halo"):  # decode_scene's own check, not a block's
+        decode_scene({"heatmap": hm}, dec, 24, dec.min_halo - 1)
+    with pytest.raises(ValueError, match="must not be empty"):
+        decode_scene({}, dec)
+    one = decode_scene({"heatmap": hm}, dec)  # default block 4096: the whole scene, one block
+    assert np.array_equal(one.pixels, reference(hm, threshold=0.3, kernel=5)[0])
+    assert DensityBlockDecoder().min_halo == 0
 
 
 def test_float16_fields_and_scene_transform():
@@ -187,19 +205,19 @@ def test_empty_and_pickling():
     hm = np.zeros((1, 40, 50), np.float32)
     dec = PointBlockDecoder()
     out = decode({"heatmap": hm}, dec, 16, 1)
-    assert out.points.shape == (0, 2) and out.scores.shape == (0,) and out.pixels.shape == (0, 2)
+    assert out.yx.shape == (0, 2) and out.scores.shape == (0,) and out.pixels.shape == (0, 2)
     assert len(dec.combine([], Scene(40, 50))) == 0
     dec = PointBlockDecoder(threshold=0.3, kernel=5, smooth_sigma=1.2, offsets="offset")
     dec2 = pickle.loads(pickle.dumps(dec))
-    assert dec2 == dec and dec2.reach == dec.reach
+    assert dec2 == dec and dec2.min_halo == dec.min_halo
     hm = scene_heatmap()
     fields = {"heatmap": hm, "offset": np.zeros((2, *hm.shape[1:]), np.float32)}
-    bl = grid(*hm.shape[1:], 30, dec.reach)
+    bl = grid(*hm.shape[1:], 30, dec.min_halo)
     t, b, le, r = bl[4].window
     part = dec({k: v[:, t:b, le:r] for k, v in fields.items()}, bl[4], Scene(*hm.shape[1:]))
     part2 = pickle.loads(pickle.dumps(part))
-    assert isinstance(part2, ScenePoints) and np.array_equal(part2.points, part.points)
-    out = pickle.loads(pickle.dumps(decode(fields, dec2, 30, dec.reach)))
+    assert isinstance(part2, ScenePoints) and np.array_equal(part2.yx, part.yx)
+    out = pickle.loads(pickle.dumps(decode(fields, dec2, 30, dec.min_halo)))
     assert np.array_equal(out.pixels, reference(hm, threshold=0.3, kernel=5, smooth_sigma=1.2)[0])
     dd = pickle.loads(pickle.dumps(DensityBlockDecoder(value_scale=2.0)))
     assert dd == DensityBlockDecoder(value_scale=2.0)
@@ -269,7 +287,7 @@ def test_blocks_from_vectors_block_grid():
     dec = PointBlockDecoder(threshold=0.3, kernel=5)
     s = Scene(*hm.shape[1:])
     res = [dec({"heatmap": hm[:, b.window[0]:b.window[1], b.window[2]:b.window[3]]}, b, s)
-           for b in block_grid(*hm.shape[1:], 24, dec.reach, offset=(5, 7))]
+           for b in block_grid(*hm.shape[1:], 24, dec.min_halo, offset=(5, 7))]
     assert np.array_equal(dec.combine(res, s).pixels, reference(hm, threshold=0.3, kernel=5)[0])
 
 

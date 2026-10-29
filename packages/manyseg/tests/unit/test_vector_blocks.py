@@ -19,10 +19,10 @@ from manyseg.instances import (  # noqa: E402
 )
 from manyseg.vectors import planar_faces, polygons_from_corners, polygons_from_labels  # noqa: E402
 from manyseg.vectors.blocks import (  # noqa: E402
-    BlockResult,
     InstanceBlockDecoder,
-    Records,
     Scene,
+    SceneRecords,
+    _BlockResult,
     block_decoder,
     block_grid,
     decode_scene,
@@ -331,6 +331,20 @@ def test_footprints_blocks_equal_whole_scene(method):
     assert _canon(r["geometry"] for r in one) == _canon(ref)
 
 
+def test_footprints_logits_apply_to_extent_boundary_and_corner():
+    import torch
+
+    f = _terraces()
+    lg = {k: (torch.logit(torch.from_numpy(np.clip(v, 1e-3, 1 - 1e-3).astype(np.float32))).numpy()
+              if k in ("extent", "boundary", "corner") else v) for k, v in f.items()}
+    back = {k: (torch.sigmoid(torch.from_numpy(v)).numpy() if k in ("extent", "boundary", "corner")
+                else v) for k, v in lg.items()}
+    ref = decode_scene(back, block_decoder("footprints"), 200, 40)
+    got = decode_scene(lg, block_decoder("footprints", logits=True), 200, 40)
+    assert len(ref) > 10 and _canon(r["geometry"] for r in got) == _canon(
+        r["geometry"] for r in ref)
+
+
 def test_fields_blocks_equal_whole_scene():
     f = _terraces(5)
     thr = dict(extent_threshold=0.6, boundary_threshold=0.3, seed_threshold=0.3)
@@ -420,7 +434,7 @@ def test_results_are_picklable_and_small():
         t, bt, lf, rt = b.window
         res = dec({k: v[..., t:bt, lf:rt] if v.ndim == 3 else v[None, t:bt, lf:rt]
                    for k, v in f.items()}, b, Scene(400, 500))
-        assert isinstance(res, BlockResult)
+        assert isinstance(res, _BlockResult)
         back = pickle.loads(pickle.dumps(res))
         assert len(back.records) == len(res.records)
         rec = pickle.dumps(res.records)
@@ -428,7 +442,7 @@ def test_results_are_picklable_and_small():
         pickle.loads(pickle.dumps(dec))
     out = decode_scene(f, block_decoder("footprints"), 150, 40)
     back = pickle.loads(pickle.dumps(out))
-    assert isinstance(back, Records) and back.stats == out.stats
+    assert isinstance(back, SceneRecords) and back.stats == out.stats
 
 
 def test_registry_and_halo_check():
@@ -458,6 +472,42 @@ def test_decode_scene_checks_offset_grids_and_scene_size():
         decode_scene(f, block_decoder("footprints"), 4096, 4, offset=(200, 0))
     with pytest.raises(ValueError, match="scene"):
         decode_scene(f, block_decoder("footprints"), 200, 40, scene=Scene(400, 1000))
+
+
+def test_decode_scene_empty_fields_and_default_one_block():
+    with pytest.raises(ValueError, match="must not be empty"):
+        decode_scene({}, block_decoder("footprints"))
+    f = _terraces()
+    one = decode_scene(f, block_decoder("fields"))  # default block 4096 > scene: one block
+    assert one.stats["blocks"] == 1
+    ref = decode_scene(f, block_decoder("fields"), 200, 40)
+    assert _canon(r["geometry"] for r in one) == _canon(r["geometry"] for r in ref)
+
+
+def test_public_surface():
+    import manyseg.vectors as V
+
+    for name in ("graph_from_mask_blocks", "dihedral_shape", "SceneRecords"):
+        assert name in V.__all__ and hasattr(V, name)
+    for name in ("roof_faces", "roof_records", "face_plane", "roof_planes", "roof_mesh",
+                 "Records", "BlockResult"):
+        assert name not in V.__all__ and not hasattr(V, name), name
+    from manyseg.vectors import roofs
+
+    assert all(hasattr(roofs, n) for n in ("roof_faces", "roof_records", "face_plane",
+                                           "roof_planes", "roof_mesh"))
+
+
+def test_bridge_ends_mutates_and_returns_the_graph():
+    import networkx as nx
+    from manyseg.vectors import bridge_ends
+
+    g = nx.Graph()
+    for n, xy in enumerate([(10, 50), (40, 50), (50, 50), (80, 50)]):
+        g.add_node(n, xy=np.array(xy, float))
+    g.add_edges_from([(0, 1), (2, 3)])
+    assert bridge_ends(g, 20, (100, 100)) is g and g.has_edge(1, 2)
+    assert bridge_ends(g, 0, (100, 100)) is g
 
 
 def test_roads_registry_entry():
@@ -496,6 +546,26 @@ def test_write_records(tmp_path):
 
     g = gpd.read_file(write_records(out, tmp_path / "roofs.gpkg", sc))
     assert len(g) == len(out) and g.crs.to_epsg() == 28992
+
+
+def test_scene_records_carry_transform_and_crs(tmp_path):
+    f = _terraces(7)
+    sc = Scene(400, 500, (0.25, 0, 1000, 0, -0.25, 2000), "EPSG:28992")
+    out = decode_scene(f, block_decoder("footprints"), 200, 40, scene=sc)
+    assert isinstance(out, SceneRecords) and isinstance(out, list)
+    assert out.transform == sc.transform and out.crs == sc.crs
+    ref = records_to_geojson(out, sc.transform, sc.crs)
+    assert out.to_geojson() == ref == records_to_geojson(out)
+    assert records_to_geojson(out, None)["features"][0]["geometry"] != ref["features"][0][
+        "geometry"]  # explicit None: pixel coordinates
+    a = json.loads(out.write(tmp_path / "a.geojson").read_text())
+    b = json.loads(write_records(out, tmp_path / "b.geojson").read_text())
+    c = json.loads(write_records(out, tmp_path / "c.geojson", sc).read_text())
+    assert a == b == c == ref
+    back = pickle.loads(pickle.dumps(out))
+    assert back.transform == sc.transform and back.crs == sc.crs and list(back) == list(out)
+    plain = decode_scene(f, block_decoder("footprints"), 200, 40)  # no georeferencing
+    assert plain.transform is None and "crs" not in plain.to_geojson()
 
 
 # ---------------------------------------------------------------- roads: graph_from_mask_blocks

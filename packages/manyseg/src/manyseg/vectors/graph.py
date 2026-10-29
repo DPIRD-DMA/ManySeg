@@ -273,15 +273,19 @@ def _prune_spurs(nodes, chains, spur, shape, passes=2):
     return nodes, chains
 
 
-def bridge_ends(g, gap: float, shape) -> None:
-    """In place: join mutually-nearest dangling ends (degree 1, not within 3 px of the image
-    border) closer than ``gap`` px, unless a path shorter than ``3 * gap`` already joins them."""
+def bridge_ends(g, gap: float, shape):
+    """Join mutually-nearest dangling ends (degree 1, not within 3 px of the image border) of
+    the ``networkx`` graph ``g`` (nodes carry ``xy``) closer than ``gap`` px, unless a path
+    shorter than ``3 * gap`` already joins them.
+
+    **Modifies** ``g`` **in place** (adds edges) and returns it, for chaining; copy it first
+    (``g.copy()``) to keep the original."""
     nx, _, cKDTree, _, _ = _deps()
     if gap <= 0:
-        return
+        return g
     ends = [n for n in g if g.degree(n) == 1 and not _near_border(g.nodes[n]["xy"], shape)]
     if len(ends) < 2:
-        return
+        return g
     xy = np.array([g.nodes[n]["xy"] for n in ends])
     d, k = cKDTree(xy).query(xy, k=2, distance_upper_bound=gap)
 
@@ -298,6 +302,7 @@ def bridge_ends(g, gap: float, shape) -> None:
             close = False
         if not close:
             g.add_edge(ends[i], ends[j])
+    return g
 
 
 def graph_from_mask(prob, threshold: float = 0.5, *, spur: float = 10, gap: float = 0,
@@ -371,9 +376,11 @@ def graph_from_mask_blocks(prob, threshold: float = 0.5, *, block: int = 2048, h
                            min_length: float = 20, min_area: int = 30,
                            scale: float = 1.0) -> VectorGraph:
     """:func:`graph_from_mask` for scenes too large to skeletonize at once (``prob`` may be a
-    memmap). Each window (core + ``halo``) is thresholded and skeletonized; its core's skeleton
-    pixels are kept, and one graph is built from the union. Equals the global result when
-    thinning's reach (about half the widest blob) is below ``halo``. The halo used is at least
+    memmap): the large-scene path for a plain line-probability head (the unified road heads
+    use ``block_decoder("roads")`` instead). Each window (core + ``halo``) is thresholded and
+    skeletonized; its core's skeleton pixels are kept, and one graph is built from the union.
+    Equals the global result when thinning's reach (about half the widest blob) is below
+    ``halo``. The halo used is at least
     ``min_area - 1`` (as ``RoadBlockDecoder.min_halo``): a blob that reaches from a core to its
     window's edge then has at least ``min_area`` pixels, so a small blob across a seam is seen
     whole (and removed) rather than kept by both windows as possibly large.

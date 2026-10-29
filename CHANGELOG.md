@@ -120,7 +120,8 @@ First release. Python 3.10–3.14, PyTorch ≥ 2.10, timm ≥ 1.0.20.
   runner uses them for tasks with direction targets.
 * **Target encoders from vector data in a CRS:** `to_pixels` (shapely, GeoJSON or a
   GeoDataFrame, cut to a tile's geotransform and shape in pixel coordinates, reprojected when
-  the CRSs differ; `kind="points"` gives an `(N, 2)` pixel `(x, y)` array), `pixel_to_world`,
+  the CRSs differ, raising when only one of the two CRSs is known unless
+  `assume_same_crs=True`; `kind="points"` gives an `(N, 2)` pixel `(x, y)` array), `pixel_to_world`,
   `world_to_pixel`, `from_gdal`; then `footprint_targets`, `roof_face_targets`, `field_targets`
   (every head's target as numpy arrays), `road_graph` (lines → road graph + grade-separated
   crossings) → `road_targets` (identical to E044's encoder), and `rasterize_instances`. The
@@ -128,18 +129,30 @@ First release. Python 3.10–3.14, PyTorch ≥ 2.10, timm ≥ 1.0.20.
 * **Decoders:** footprints `polygons_from_corners` (B3, straight walls; E038), fields
   `polygons_from_labels` (B0, pixel outlines; E046), roads `graph_from_road_heads` (R4: junctions
   and overpasses; E044b). LoD2 roofs (E047b, E048b; they need an nDSM input, RGB alone was not
-  viable in E049): `planar_faces` joins the faces into a planar partition, `face_plane` /
-  `roof_planes` fit a robust plane per face, `roof_mesh` (J1 / J2) lifts the rings, and
-  `roof_records` / `roof_faces` do all three. `planar_faces` joins each cluster of faces (gaps up
-  to the tolerance) on its own, so a face no longer depends on the noding of unrelated outlines.
-* **Large scenes, block by block:** `block_decoder(task)` (tuned defaults for `"footprints"`,
-  `"fields"`, `"roofs"`, `"roads"`), `decode_scene` (in-memory driver over arrays or memmaps),
-  `block_grid`, `Block`, `Scene`, `records_to_geojson` and `write_records` (GeoJSON, or a
-  GeoPackage through geopandas, in the scene's CRS; roof faces optionally as 3-D meshes).
+  viable in E049): `planar_faces` joins the faces into a planar partition; in
+  `manyseg.vectors.roofs` (not re-exported at the top level), `face_plane` / `roof_planes` fit a
+  robust plane per face, `roof_mesh` (J1 / J2) lifts the rings, and `roof_records` /
+  `roof_faces` do all three. `planar_faces` joins each cluster of faces (gaps up to the
+  tolerance) on its own, so a face no longer depends on the noding of unrelated outlines. These
+  functions are building blocks with generic defaults; `block_decoder(task)` holds the tuned
+  settings (`graph_from_road_heads` shares the roads ones). `graph_from_road_heads` and
+  `RoadBlockDecoder` take `logits=True` (sigmoid on `mask` and `keypoints`), as the instance
+  decoders (`extent`, `boundary` and `corner`) and `PointBlockDecoder` (heatmap and mask field)
+  do. `bridge_ends` modifies its graph in place and returns it.
+* **One decode path for any scene size:** `decode_scene(fields, block_decoder(task))` (tuned
+  defaults for `"footprints"`, `"fields"`, `"roofs"`, `"roads"`, `"points"`, `"density"`;
+  default `block=4096`, so a smaller scene is one block), over arrays or memmaps; `block_grid`,
+  `Block`, `Scene`, `graph_from_mask_blocks` (a plain line head over a large scene).
+  Instance and roof decoders return `SceneRecords` (a list of dicts carrying the scene's
+  `transform` and `crs`, with `.write(path)` and `.to_geojson()`); `records_to_geojson` and
+  `write_records` (GeoJSON, or a GeoPackage through geopandas, in the scene's CRS; roof faces
+  optionally as 3-D meshes) read them without a separate scene. `decode_scene` checks every
+  decoder's `min_halo` before decoding and rejects empty `fields`.
   Seam-exact: objects crossing block edges are joined by their anchor (first scene pixel), so a
   block decode equals the whole-scene decode, with nothing duplicated or cut at seams, when the
-  halo covers the decoder's reach: at least its `min_halo` (enforced), and for road skeletons
-  and instances much larger than the halo possibly more (documented; roads warn). Tested on
+  halo is at least the decoder's `min_halo` (enforced); road skeletons additionally need the
+  halo to cover thinning's data-dependent reach (roads warn), and instances much larger than
+  the halo may split at a seam (documented). Tested on
   seams, block corners, several grids and real stitched predictions. The same decoders run in ManyPred's
   `predict_files(merge="cut", block_postprocess=BlockPostprocess(...))` (ManyPred's next
   release); E050b: tiles of at least 1024 px with 256 px overlap.
@@ -150,8 +163,11 @@ First release. Python 3.10–3.14, PyTorch ≥ 2.10, timm ≥ 1.0.20.
   with centres at integers, `(x, y)` with corners at integers), the latter straight into
   `gaussian_heatmap` / `density_map`. `PointBlockDecoder` (peaks of a stitched heatmap block by
   block, optional offset and mask fields; equals a whole-scene `find_peaks` exactly, ties
-  included; refuses a halo below `kernel // 2` + the blur radius) and `DensityBlockDecoder`
-  (count per block core) follow the same block contract. The `find_peaks` blur is now a
+  included; refuses a halo below its `min_halo`, `kernel // 2` + the blur radius) and
+  `DensityBlockDecoder` (count per block core) follow the same block contract. Results:
+  `ScenePoints` (`.yx` in `manyseg.points` convention, `.xy` for GIS, `.scores`, `.pixels`;
+  `.to_geojson()` uses the scene's transform and CRS, `transform=None` gives pixel
+  coordinates, `score` is a reserved property) and `SceneCount`. The `find_peaks` blur is now a
   fixed-order tap sum instead of `conv2d` (values within 2e-7), so a crop gives bit-identical
   values away from its edges.
 * **Deterministic instance ties:** `instances_from_outputs(origin=, scene_width=, ids="anchor")`,

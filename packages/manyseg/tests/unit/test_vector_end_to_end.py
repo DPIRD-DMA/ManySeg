@@ -317,11 +317,11 @@ def test_points_blocks_equal_whole_and_input():
     hm = gaussian_heatmap([points_from_xy(xy)], (H, W), sigma=2.0)[0].numpy()
     fields = {"heatmap": noisy(hm, 0)}
     dec = PointBlockDecoder(threshold=0.5)  # block_decoder("points") builds the same
-    assert dec.reach <= HALO
+    assert dec.min_halo <= HALO
     got = decode_scene(fields, dec, BLOCK, HALO, scene=SCENE)
     ((yx, scores),) = find_peaks(torch.from_numpy(fields["heatmap"])[None], 0.5)
     o = np.lexsort((yx[:, 1], yx[:, 0], -scores.double()))  # ties (clipped at 1) in raster order
-    assert np.array_equal(got.points, yx.numpy()[o]) and np.array_equal(got.scores, scores[o])
+    assert np.array_equal(got.yx, yx.numpy()[o]) and np.array_equal(got.scores, scores[o])
     assert len(got) == len(pts)
     d = np.hypot(*(got.xy[:, None] - np.asarray(pts)[None]).transpose(2, 0, 1)).min(1)
     assert d.max() <= math.sqrt(0.5) + 1e-6  # each peak is the pixel holding its tree

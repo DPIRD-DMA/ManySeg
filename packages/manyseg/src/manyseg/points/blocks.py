@@ -13,7 +13,7 @@ Fields are the stitched head outputs on the scene grid (full-resolution heads; a
 resolution head's raster has its own grid and transform).
 
 :class:`PointBlockDecoder` equals a whole-scene :func:`find_peaks` exactly (same peaks, same
-scores, ties and plateaus included) when the halo is at least :attr:`PointBlockDecoder.reach`:
+scores, ties and plateaus included) when the halo is at least :attr:`PointBlockDecoder.min_halo`:
 a peak at pixel ``p`` depends only on the (blurred) heatmap within ``kernel // 2`` of ``p``, and
 a blurred value only on the heatmap within the blur radius. Each block keeps the peaks whose
 pixel lies in its core, so no peak is kept twice or lost at a seam.
@@ -30,44 +30,51 @@ import torch
 from .geo import points_to_xy
 from .postprocess import blur_radius, find_peaks
 
+_UNSET: Any = object()  # "argument not given" (``None`` means pixel coordinates)
+
 
 @dataclass(eq=False)
 class ScenePoints:
     """Points of a scene (or of one block's core).
 
-    * ``points``: ``(N, 2)`` float64 ``(y, x)`` in scene pixels, :mod:`manyseg.points`
+    * ``yx``: ``(N, 2)`` float64 ``(y, x)`` in scene pixels, :mod:`manyseg.points`
       convention (pixel centres at integers): the peak pixel, plus the predicted ``(dy, dx)``
       offset there if the decoder reads an offset head.
     * ``scores``: ``(N,)`` float32 heatmap values at the peaks (blurred if ``smooth_sigma``).
     * ``pixels``: ``(N, 2)`` int64 ``(row, col)`` of the peak pixel (which core kept it).
     * ``transform``, ``crs``: the scene's, when known.
+    * :attr:`xy`: ``(N, 2)`` pixel ``(x, y)`` with corners at integers, for GIS.
 
     Sorted by score, descending; ties in raster order of ``pixels`` (row, then column).
     """
 
-    points: np.ndarray
+    yx: np.ndarray
     scores: np.ndarray
     pixels: np.ndarray
     transform: Any = None
     crs: Any = None
 
     def __len__(self) -> int:
-        return len(self.points)
+        return len(self.yx)
 
     @property
     def xy(self) -> np.ndarray:
         """``(N, 2)`` float64 pixel ``(x, y)`` with pixel corners at integers
-        (:mod:`manyseg.vectors` convention: ``points[:, ::-1] + 0.5``)."""
-        return points_to_xy(self.points)
+        (:mod:`manyseg.vectors` convention: ``yx[:, ::-1] + 0.5``)."""
+        return points_to_xy(self.yx)
 
-    def to_geojson(self, transform=None, properties: dict | None = None) -> dict:
-        """GeoJSON ``Point`` features through ``transform`` (default: the scene's; pixel
-        coordinates when neither is known), with a ``score`` property plus any columns in
-        ``properties``; the scene's ``crs`` is written as a ``name`` member, as
-        :func:`~manyseg.vectors.records_to_geojson` does. Needs the ``vectors`` extra."""
+    def to_geojson(self, transform=_UNSET, properties: dict | None = None) -> dict:
+        """GeoJSON ``Point`` features through ``transform``: not given, the scene's (pixel
+        coordinates when the scene has none); ``None``, pixel ``(x, y)`` coordinates; else an
+        affine in rasterio order. Each feature has a ``score`` property plus any columns in
+        ``properties`` (``score`` is reserved: a ``properties["score"]`` raises). The scene's
+        ``crs`` is written as a ``name`` member, as :func:`~manyseg.vectors.records_to_geojson`
+        does. Needs the ``vectors`` extra."""
         from ..vectors.polygons import to_geojson
 
-        t = self.transform if transform is None else transform
+        if properties and "score" in properties:
+            raise ValueError("'score' is a reserved property (the peak score); rename yours")
+        t = self.transform if transform is _UNSET else transform
         fc = to_geojson(self.xy, t, {"score": self.scores, **(properties or {})})
         if self.crs is not None:
             fc["crs"] = {"type": "name", "properties": {"name": str(self.crs)}}
@@ -87,7 +94,7 @@ def _bounds(b) -> tuple[int, int, int, int]:
 
 def _layout(block, scene, reach: int):
     """(core, window, core in window coordinates), after checking that the halo covers
-    ``reach`` on every side that is not the scene edge."""
+    ``reach`` (the decoder's ``min_halo``) on every side that is not the scene edge."""
     core, win = _bounds(block.core), _bounds(block.window)
     if not (win[0] <= core[0] and core[1] <= win[1] and win[2] <= core[2] and core[3] <= win[3]):
         raise ValueError(f"block core {core} is not inside its window {win}")
@@ -134,9 +141,10 @@ class PointBlockDecoder:
             ``None``: points are the peak pixels.
         mask: a field (1 channel) whose value must exceed ``mask_threshold`` at a peak (e.g. a
             foreground probability), as :func:`find_peaks` ``mask=``.
-        logits: apply a sigmoid to the heatmap first.
+        logits: the heatmap and the ``mask`` field are logits: a sigmoid is applied to both
+            first (``mask_threshold`` stays a probability; ``offsets`` are values).
 
-    The block grid's halo must be at least :attr:`reach`; a block with less halo on a side that
+    The block grid's halo must be at least :attr:`min_halo`; a block with less halo on a side that
     is not the scene edge raises. Equals ``find_peaks(heatmap, ...)`` on the whole scene, float32
     (fields are converted to float32 first, so a float16 raster's threshold comparison is done
     in float32). Result: :class:`ScenePoints`.
@@ -161,20 +169,22 @@ class PointBlockDecoder:
             raise ValueError(f"max_points must be >= 0, got {self.max_points}")
 
     @property
-    def reach(self) -> int:
+    def min_halo(self) -> int:
         """The smallest halo (px) that gives whole-scene results: ``kernel // 2`` plus the blur
         radius ``max(1, ceil(3 * smooth_sigma))`` when ``smooth_sigma`` > 0."""
         return self.kernel // 2 + blur_radius(self.smooth_sigma)
 
     def __call__(self, fields, block, scene) -> ScenePoints:
-        core, win, (it, ib, il, ir) = _layout(block, scene, self.reach)
+        core, win, (it, ib, il, ir) = _layout(block, scene, self.min_halo)
         hm = torch.from_numpy(np.array(_field(fields, self.field, 1, win), np.float32))
         if self.logits:
             hm = torch.sigmoid(hm)
         m = None
         if self.mask is not None:
-            m = np.asarray(_field(fields, self.mask, 1, win)) > self.mask_threshold
-            m = torch.from_numpy(m)
+            m = np.asarray(_field(fields, self.mask, 1, win))
+            if self.logits:
+                m = torch.sigmoid(torch.from_numpy(np.array(m, np.float32))).numpy()
+            m = torch.from_numpy(m > self.mask_threshold)
         ((pts, scores),) = find_peaks(hm[None], self.threshold, kernel=self.kernel,
                                       smooth_sigma=self.smooth_sigma, mask=m)
         pts, scores = pts.numpy(), scores.numpy()
@@ -192,7 +202,7 @@ class PointBlockDecoder:
         """All blocks' points in one :class:`ScenePoints`: score descending, ties in raster
         order, cut to ``max_points``, with the scene's ``transform`` / ``crs``."""
         res = list(results)
-        points = np.concatenate([r.points for r in res] or [np.zeros((0, 2))]).reshape(-1, 2)
+        yx = np.concatenate([r.yx for r in res] or [np.zeros((0, 2))]).reshape(-1, 2)
         scores = np.concatenate([r.scores for r in res] or [np.zeros(0, np.float32)])
         pixels = np.concatenate([r.pixels for r in res] or [np.zeros((0, 2), np.int64)])
         pixels = pixels.reshape(-1, 2).astype(np.int64)
@@ -201,7 +211,7 @@ class PointBlockDecoder:
         order = np.lexsort((pixels[:, 1], pixels[:, 0], -scores.astype(np.float64)))
         if self.max_points is not None:
             order = order[:self.max_points]
-        return ScenePoints(points[order], scores[order].astype(np.float32), pixels[order],
+        return ScenePoints(yx[order], scores[order].astype(np.float32), pixels[order],
                            getattr(scene, "transform", None), getattr(scene, "crs", None))
 
 
@@ -229,7 +239,7 @@ class DensityBlockDecoder:
     mask: str | None = None
     mask_threshold: float = 0.5
 
-    reach = 0
+    min_halo = 0
 
     def __call__(self, fields, block, scene) -> tuple[tuple[int, int, int, int], float]:
         core, win, (it, ib, il, ir) = _layout(block, scene, 0)

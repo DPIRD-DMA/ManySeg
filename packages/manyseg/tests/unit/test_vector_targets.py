@@ -482,8 +482,18 @@ def test_to_pixels_points_reprojected():
                             return_index=True)
         assert idx.tolist() == [0, 1, 2]
         assert np.allclose(xy, px[:3], atol=1e-4)  # 1e-4 px = 0.03 mm
-    # raster CRS unknown: taken to be in the features' CRS (degrees here: all outside the tile)
-    assert len(to_pixels(gdf.to_crs(4326), NORTH_UP, (100, 100))) == 0
+    # raster CRS unknown, features' known: reprojection needs both, so it raises ...
+    with pytest.raises(ValueError, match="raster_crs"):
+        to_pixels(gdf.to_crs(4326), NORTH_UP, (100, 100))
+    with pytest.raises(ValueError, match="assume_same_crs"):
+        to_pixels(list(gdf.geometry), NORTH_UP, (100, 100), raster_crs="EPSG:28350")
+    # ... unless asked to take them as being in the raster's CRS (degrees: all outside the tile)
+    assert len(to_pixels(gdf.to_crs(4326), NORTH_UP, (100, 100), assume_same_crs=True)) == 0
+    xy = to_pixels(list(gdf.geometry), NORTH_UP, (100, 100), raster_crs="EPSG:28350",
+                   assume_same_crs=True)
+    assert np.allclose(xy, px[:3], atol=1e-6)
+    # neither known: the raster's CRS, as before
+    assert np.allclose(to_pixels(list(gdf.geometry), NORTH_UP, (100, 100)), px[:3], atol=1e-6)
 
 
 def test_scene_points_to_geojson_uses_scene_transform():
@@ -497,3 +507,7 @@ def test_scene_points_to_geojson_uses_scene_transform():
     assert fc["features"][1]["properties"] == {"score": pytest.approx(0.8), "id": 8}
     assert sp.to_geojson(transform=(1, 0, 0, 0, 1, 0))["features"][0]["geometry"][
         "coordinates"] == [3.5, 2.5]
+    # transform=None explicitly: pixel (x, y), although the scene has a transform
+    assert sp.to_geojson(transform=None)["features"][1]["geometry"]["coordinates"] == [6.0, 4.75]
+    with pytest.raises(ValueError, match="reserved"):
+        sp.to_geojson(properties={"score": [1, 2]})

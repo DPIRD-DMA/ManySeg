@@ -55,7 +55,6 @@ def main():
         Scene,
         block_decoder,
         decode_scene,
-        graph_from_road_heads,
         road_graph,
         road_heads,
         road_targets,
@@ -82,13 +81,14 @@ def main():
     print("model fields:", {k: v.shape for k, v in fields.items()})
     fields = {k: t[k] for k in ("mask", "keypoints", "direction")}  # stand-in: perfect outputs
 
-    # 3. Block by block. The halo must cover dec.min_halo and the skeleton's reach: about the
-    #    half-width of the widest road blob (more for blobs with holes, such as car parks);
-    #    combine warns when a block's skeleton depended on its halo.
+    # 3. Block by block. Equal to the whole-scene decode when the halo covers dec.min_halo
+    #    (enforced) and the skeleton's reach: about the half-width of the widest road blob (more
+    #    for blobs with holes, such as car parks); combine warns when a block's skeleton
+    #    depended on its halo. (logits=True would apply the sigmoid to mask and keypoints.)
     scene = Scene(*SHAPE, transform=TRANSFORM, crs=CRS)
     dec = block_decoder("roads")  # R4 with E044's City-Scale tuning (1 m pixels)
     g = decode_scene(fields, dec, block=256, halo=64, scene=scene)
-    whole = graph_from_road_heads(fields["mask"], fields["keypoints"], fields["direction"])
+    whole = decode_scene(fields, dec, scene=scene)  # default block 4096 px: one block
     same = np.array_equal(g.xy, whole.xy) and np.array_equal(g.edges, whole.edges)
     junctions = g.junctions()
     bridges = sum(np.hypot(*(junctions - c).T).min() > 15 for c in crossings)

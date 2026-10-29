@@ -6,9 +6,9 @@ are duck-typed (``index``, ``core``, ``window``, ``scene_edges``; ``height``, ``
 ``transform``, ``crs``), and :func:`decode_scene` is an in-memory driver with the same calls::
 
     dec = block_decoder("footprints")
-    records = decode_scene(fields, dec, block=4096, halo=256)       # or, with ManyPred:
+    records = decode_scene(fields, dec, scene=scene)                # or, with ManyPred:
     records = postprocess_blocks(fields, dec, combine=dec.combine, block=4096, halo=256)
-    write_records(records, "buildings.gpkg", scene)
+    records.write("buildings.gpkg")  # SceneRecords: in the scene's transform and CRS
 
 Dense fields (already stitched) are decoded in windows = core + halo; the cores partition the
 scene. Every object is keyed by its *anchor*, the scene pixel index of its first pixel in raster
@@ -31,8 +31,8 @@ a block resolves a cluster (join, planes, mesh) when every face in it is settled
 away from the window edge and from any instance the window sees only in part, by more than the
 join tolerance plus the largest distance a face strays from its mask) and the cluster's anchor
 (its smallest face anchor) lies in its core. The other faces travel with a height crop and are
-joined in ``combine`` cluster by cluster, so the result equals :func:`roof_faces` on the whole
-scene.
+joined in ``combine`` cluster by cluster, so the result equals
+:func:`manyseg.vectors.roofs.roof_faces` on the whole scene.
 """
 
 from __future__ import annotations
@@ -107,20 +107,57 @@ class BlockDecoder(Protocol):
     def combine(self, results: list, scene) -> Any: ...
 
 
-class Records(list):
-    """``list[dict]`` of decoded objects sorted by ``id`` (the anchor), with ``stats``."""
+_UNSET: Any = object()  # "argument not given" (``None`` means pixel coordinates)
 
-    def __init__(self, items=(), stats: dict | None = None):
+
+class SceneRecords(list):
+    """The decoded objects of a scene: a ``list[dict]`` sorted by ``id`` (the anchor), with
+    ``stats`` and the scene's ``transform`` and ``crs`` (set by ``combine`` from the scene).
+
+    :meth:`to_geojson` and :meth:`write` put them in world coordinates through that transform
+    and name that CRS, as :func:`records_to_geojson` / :func:`write_records` do."""
+
+    def __init__(self, items=(), stats: dict | None = None, *, transform=None, crs=None):
         super().__init__(items)
         self.stats = stats or {}
+        self.transform = transform
+        self.crs = crs
+
+    def to_geojson(self, *, mesh: bool = False) -> dict:
+        """GeoJSON ``FeatureCollection`` through the scene's transform, naming its CRS
+        (:func:`records_to_geojson`)."""
+        return records_to_geojson(self, mesh=mesh)
+
+    def write(self, path, *, layer: str | None = None, mesh: bool = False) -> Path:
+        """Write to ``path`` (``.geojson``, or e.g. ``.gpkg`` with geopandas) in the scene's
+        transform and CRS (:func:`write_records`). Returns the path."""
+        return write_records(self, path, layer=layer, mesh=mesh)
+
+
+def _scene_records(records, scene, stats: dict) -> SceneRecords:
+    return SceneRecords(records, stats, transform=getattr(scene, "transform", None),
+                        crs=getattr(scene, "crs", None))
 
 
 def decode_scene(fields, decoder, block: int = 4096, halo: int = 256, *, scene=None,
                  offset: tuple[int, int] = (0, 0)):
-    """Decode a scene held in memory (or as memmaps) block by block: ``decoder(window_fields,
-    block, scene)`` per block in grid order, then ``decoder.combine(results, scene)``, as
-    ManyPred's ``postprocess_blocks`` does (no ManyPred needed). ``fields``: name -> (H, W) or
-    (C, H, W) array-likes sharing (H, W). ``block`` >= the scene size decodes it in one piece."""
+    """Decode a scene, whole or block by block: the recommended way to run any decoder from
+    :func:`block_decoder` (``decode_scene(fields, block_decoder(task))``).
+
+    ``decoder(window_fields, block, scene)`` runs per block in grid order, then
+    ``decoder.combine(results, scene)``, as ManyPred's ``postprocess_blocks`` does (no ManyPred
+    needed). ``fields``: name -> (H, W) or (C, H, W) arrays (or memmaps) sharing (H, W).
+    ``scene``: its size and georeferencing (:class:`Scene`; default ``Scene(H, W)``, pixel
+    coordinates). With the defaults (``block=4096``, ``halo=256``) a scene of up to 4096 px a
+    side is one block, i.e. a whole-scene decode; a larger one is cut into 4096 px cores with
+    256 px of halo. The halo must be at least ``decoder.min_halo`` when there is more than one
+    block (checked here, before any block runs); for roads exactness also needs the halo to
+    cover the skeleton's data-dependent reach (:class:`~manyseg.vectors.RoadBlockDecoder`
+    warns). Returns what ``combine`` returns: :class:`SceneRecords` (instances, roofs), a
+    :class:`~manyseg.vectors.VectorGraph` (roads), :class:`~manyseg.points.ScenePoints` or
+    :class:`~manyseg.points.SceneCount`."""
+    if not len(fields):
+        raise ValueError("fields must not be empty")
     shapes = {k: tuple(np.shape(v))[-2:] for k, v in fields.items()}
     if len(set(shapes.values())) != 1:
         raise ValueError(f"fields must share (H, W), got {shapes}")
@@ -129,9 +166,9 @@ def decode_scene(fields, decoder, block: int = 4096, halo: int = 256, *, scene=N
     if (scene.height, scene.width) != (H, W):
         raise ValueError(f"scene is {scene.height} x {scene.width}, fields are {H} x {W}")
     grid = block_grid(H, W, block, halo, offset)
-    need = getattr(decoder, "min_halo", 0)
+    need = getattr(decoder, "min_halo", 0)  # every block decoder here defines it
     if halo < need and len(grid) > 1:
-        raise ValueError(f"halo {halo} is below this decoder's minimum {need}")
+        raise ValueError(f"halo {halo} is below this decoder's minimum {need} (min_halo)")
     results = []
     for b in grid:
         t, bt, lt, rt = b.window
@@ -167,7 +204,7 @@ class _Pending:
 
 
 @dataclass
-class BlockResult:
+class _BlockResult:
     """What a block decoder returns for one block (picklable)."""
 
     index: int
@@ -325,11 +362,15 @@ class InstanceBlockDecoder:
 
     ``method="corners"``: :func:`polygons_from_corners` (B3, needs ``corner`` and
     ``direction``); ``"outline"``: :func:`polygons_from_labels` (B0). Instance thresholds as
-    :func:`manyseg.instances.instances_from_outputs` (``logits=False``: stitched fields are
-    probabilities); polygon parameters as the decoders'. ``names`` maps the field names used
-    here (``extent``, ``boundary``, ``distance``, ``corner``, ``direction``) to the caller's.
-    Records: ``id`` (anchor), ``geometry`` (shapely, scene pixel coordinates), ``pixels``
-    (instance size) and ``scene_edge`` (touches the scene edge, so may be cut).
+    :func:`manyseg.instances.instances_from_outputs`; polygon parameters as the decoders'.
+    ``logits``: ``False`` (default), stitched ``extent``, ``boundary`` and ``corner`` are
+    probabilities; ``True``, they are logits and a sigmoid is applied to them (``distance``,
+    ``direction`` and roofs' ``height`` are values, never transformed). ``names`` maps the
+    field names used here (``extent``, ``boundary``, ``distance``, ``corner``, ``direction``)
+    to the caller's.
+    Result (:meth:`combine`): :class:`SceneRecords`, dicts with ``id`` (anchor), ``geometry``
+    (shapely, scene pixel coordinates), ``pixels`` (instance size) and ``scene_edge`` (touches
+    the scene edge, so may be cut).
     """
 
     method: str = "corners"
@@ -402,8 +443,12 @@ class InstanceBlockDecoder:
             return {}
         from .corners import _corner_peaks
 
-        pix, xy = _corner_peaks(self._field(fields, "corner")[0], self.corner_threshold,
-                                self.kernel, origin)
+        corner = self._field(fields, "corner")[0]
+        if self.logits:  # as extent and boundary in instances_from_outputs(logits=True)
+            import torch
+
+            corner = torch.sigmoid(torch.from_numpy(corner)).numpy()
+        pix, xy = _corner_peaks(corner, self.corner_threshold, self.kernel, origin)
         o = np.argsort(pix[:, 0], kind="stable")
         return {"pix": pix[o], "xy": xy[o], "direction": (origin, self._field(fields, "direction"))}
 
@@ -519,7 +564,7 @@ class InstanceBlockDecoder:
                                          margin=gap))
         return complete, pieces, partial, lab, ctx
 
-    def __call__(self, fields, block, scene) -> BlockResult:
+    def __call__(self, fields, block, scene) -> _BlockResult:
         complete, pieces, _, _, ctx = self._split(fields, block, scene)
         records = []
         for anchor, box, m, inside, _ in complete:
@@ -531,7 +576,7 @@ class InstanceBlockDecoder:
             g = self._vectorise(m, box[0], box[2], ctx)
             if g is not None:
                 records.append(self._record(anchor, g, n, box, scene))
-        return BlockResult(block.index, records, pieces,
+        return _BlockResult(block.index, records, pieces,
                            stats={"records": len(records), "pieces": len(pieces)})
 
     def _merged(self, results, scene):
@@ -557,7 +602,7 @@ class InstanceBlockDecoder:
                         [cropped[i] for i in sorted(near.tolist())]))
         return out, len(pieces)
 
-    def combine(self, results: list, scene) -> Records:
+    def combine(self, results: list, scene) -> SceneRecords:
         records = [r for res in results for r in res.records]
         merged, n_pieces = self._merged(results, scene)
         for anchor, box, m, g in merged:
@@ -568,16 +613,17 @@ class InstanceBlockDecoder:
         if len(set(ids)) != len(ids):  # disjoint masks have distinct first pixels
             raise RuntimeError("anchor collision: two objects claim the same first pixel")
         records.sort(key=lambda r: r["id"])
-        return Records(records, {"blocks": len(results), "pieces": n_pieces,
-                                 "merged_objects": len(merged)})
+        return _scene_records(records, scene, {"blocks": len(results), "pieces": n_pieces,
+                                               "merged_objects": len(merged)})
 
 
 @dataclass
 class RoofBlockDecoder(InstanceBlockDecoder):
     """Roof faces (corners decoder) joined by :func:`planar_faces`, a robust plane per face
     from the ``height`` field (nDSM, metres) and an optional mesh (:mod:`manyseg.vectors.roofs`).
-    Records sorted by ``(id, part)`` as :func:`roof_faces`: ``id``, ``part``, ``geometry``,
-    ``plane`` (a, b, c) and ``mesh`` ((K, 3) ring) unless ``mesh`` is None."""
+    Result: :class:`SceneRecords` sorted by ``(id, part)`` as
+    :func:`manyseg.vectors.roofs.roof_faces`: ``id``, ``part``, ``geometry``, ``plane``
+    (a, b, c) and ``mesh`` ((K, 3) ring) unless ``mesh`` is None."""
 
     extent_threshold: float = 0.4
     boundary_threshold: float = 0.3
@@ -633,7 +679,7 @@ class RoofBlockDecoder(InstanceBlockDecoder):
 
         return _face_clusters(faces, self.tolerance)
 
-    def __call__(self, fields, block, scene) -> BlockResult:
+    def __call__(self, fields, block, scene) -> _BlockResult:
         from scipy import ndimage
 
         shapely = _deps()[1]
@@ -683,11 +729,11 @@ class RoofBlockDecoder(InstanceBlockDecoder):
                             block.window)
                 crop = h[box[0] - ho[0] : box[1] - ho[0], box[2] - ho[1] : box[3] - ho[1]].copy()
                 pending.append(_Pending(anchors[i], faces[i], ((box[0], box[2]), crop)))
-        return BlockResult(block.index, records, pieces, pending, resolved,
+        return _BlockResult(block.index, records, pieces, pending, resolved,
                            stats={"faces": len(faces), "resolved": len(resolved),
                                   "pending": len(pending), "pieces": len(pieces)})
 
-    def combine(self, results: list, scene) -> Records:
+    def combine(self, results: list, scene) -> SceneRecords:
         records = [rec for res in results for rec in res.records]
         resolved = [a for res in results for a in res.resolved]
         if len(set(resolved)) != len(resolved):
@@ -727,10 +773,10 @@ class RoofBlockDecoder(InstanceBlockDecoder):
             nan_planes += sum(not np.isfinite(o["plane"]).all() for o in out)
             records += out
         records.sort(key=lambda rec: (rec["id"], rec["part"]))
-        return Records(records, {"blocks": len(results), "pieces": n_pieces,
-                                 "merged_objects": len(merged), "resolved_in_blocks": len(done),
-                                 "joined_in_combine": len(faces), "combine_clusters": len(clusters),
-                                 "nan_planes": nan_planes})
+        return _scene_records(records, scene, {
+            "blocks": len(results), "pieces": n_pieces, "merged_objects": len(merged),
+            "resolved_in_blocks": len(done), "joined_in_combine": len(faces),
+            "combine_clusters": len(clusters), "nan_planes": nan_planes})
 
 
 # ---------------------------------------------------------------- registry and output
@@ -746,7 +792,10 @@ _DEFAULTS = {
 
 
 def block_decoder(task: str, **params) -> BlockDecoder:
-    """A block decoder with the tuned defaults for ``task``; ``params`` override them.
+    """A block decoder with the tuned defaults for ``task``; ``params`` override them. Run it
+    with :func:`decode_scene` (whole scene or block by block) or ManyPred's block
+    post-processing. The low-level functions (:func:`polygons_from_corners`,
+    :func:`polygons_from_labels`, ...) keep generic defaults; the tuned settings live here.
 
     * ``"footprints"``: extent, boundary, distance + corner, direction; ``method="corners"``
       (B3, E038) or ``"outline"`` (B0, ``simplify`` 1 px unless given).
@@ -811,18 +860,23 @@ def _geometries(records, transform, mesh: bool) -> list:
     return out
 
 
-def records_to_geojson(records, transform=None, crs=None, *, mesh: bool = False) -> dict:
+def records_to_geojson(records, transform=_UNSET, crs=_UNSET, *, mesh: bool = False) -> dict:
     """GeoJSON ``FeatureCollection`` of block-decoder records (or a :class:`VectorGraph`, via
-    :func:`to_geojson`). ``transform``: affine pixel -> world (rasterio order); ``crs`` is
-    written as a ``name`` member when given. ``mesh=True`` writes roof faces as 3-D polygons
-    from their mesh rings (z in metres). ``plane`` becomes ``plane_a`` / ``_b`` / ``_c`` (in
-    scene pixel coordinates)."""
+    :func:`to_geojson`). ``transform``: affine pixel -> world (rasterio order); ``None``: pixel
+    coordinates; not given: the records' own (:class:`SceneRecords`), else pixel coordinates.
+    ``crs`` (not given: the records' own) is written as a ``name`` member when known.
+    ``mesh=True`` writes roof faces as 3-D polygons from their mesh rings (z in metres).
+    ``plane`` becomes ``plane_a`` / ``_b`` / ``_c`` (in scene pixel coordinates)."""
     import json
 
     shapely = _deps()[1]
     from .graph import VectorGraph
     from .polygons import to_geojson
 
+    if transform is _UNSET:
+        transform = getattr(records, "transform", None)
+    if crs is _UNSET:
+        crs = getattr(records, "crs", None)
     if isinstance(records, VectorGraph):
         fc = to_geojson(records, transform)
     else:
@@ -837,14 +891,16 @@ def records_to_geojson(records, transform=None, crs=None, *, mesh: bool = False)
 
 def write_records(records, path, scene=None, *, layer: str | None = None,
                   mesh: bool = False) -> Path:
-    """Write records to ``path`` in world coordinates through ``scene.transform`` / ``crs``:
-    ``.geojson`` / ``.json`` with the standard library, anything else (e.g. ``.gpkg``) with
-    geopandas. Returns the path."""
+    """Write records to ``path`` in world coordinates through ``scene.transform`` / ``crs``
+    (``scene`` not given: the records' own, as :class:`SceneRecords` carry them; a
+    :class:`VectorGraph` needs ``scene`` for world coordinates): ``.geojson`` / ``.json`` with
+    the standard library, anything else (e.g. ``.gpkg``) with geopandas. Returns the path."""
     import json
 
     path = Path(path)
-    transform = getattr(scene, "transform", None)
-    crs = getattr(scene, "crs", None)
+    src = records if scene is None else scene
+    transform = getattr(src, "transform", None)
+    crs = getattr(src, "crs", None)
     if path.suffix.lower() in (".geojson", ".json"):
         path.write_text(json.dumps(records_to_geojson(records, transform, crs, mesh=mesh)))
         return path

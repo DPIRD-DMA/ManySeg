@@ -57,7 +57,6 @@ def main():
         decode_scene,
         footprint_targets,
         to_pixels,
-        write_records,
     )
 
     # 1. Vector labels -> pixel geometry of the tile ((x, y), pixel corners at integers) ->
@@ -88,7 +87,7 @@ def main():
     scene = Scene(*SHAPE, transform=TRANSFORM, crs=CRS)
     dec = block_decoder("footprints")  # B3 defaults; halo must be >= dec.min_halo
     records = decode_scene(fields, dec, block=256, halo=64, scene=scene)
-    whole = decode_scene(fields, dec, block=max(SHAPE), scene=scene)  # one block
+    whole = decode_scene(fields, dec, scene=scene)  # default block 4096 px: one block
     same = all(shapely.equals_exact(a["geometry"], b["geometry"], 0)
                for a, b in zip(records, whole)) and len(records) == len(whole)
     print(f"{len(records)} polygons from {len(polys)} buildings; {records.stats}; "
@@ -96,16 +95,16 @@ def main():
     walls = sorted(len(r["geometry"].exterior.coords) - 1 for r in records)
     print("corners per polygon:", walls)  # straight walls: 4 for rectangles, 6 for the L
 
-    # 4. Records -> world coordinates through scene.transform, CRS kept.
+    # 4. SceneRecords carry the scene's transform and CRS: written in world coordinates.
     out_dir = Path(tempfile.mkdtemp())
-    path = write_records(records, out_dir / "buildings.geojson", scene)
+    path = records.write(out_dir / "buildings.geojson")  # or write_records(records, path)
     print("wrote", path.name, "in metres; properties:", [k for k in records[0] if k != "geometry"])
     try:
         import geopandas as gpd
     except ImportError:
         print("GeoPackage: needs geopandas")
         return
-    gdf = gpd.read_file(write_records(records, out_dir / "buildings.gpkg", scene))
+    gdf = gpd.read_file(records.write(out_dir / "buildings.gpkg"))
     iou = [max(p.intersection(b).area / p.union(b).area for b in world) for p in gdf.geometry]
     print(f"wrote buildings.gpkg ({gdf.crs}); IoU with the input layer: min {min(iou):.3f}")
 

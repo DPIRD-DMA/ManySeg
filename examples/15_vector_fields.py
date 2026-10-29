@@ -57,7 +57,6 @@ def main():
         decode_scene,
         field_targets,
         to_pixels,
-        write_records,
     )
 
     # 1. Parcels -> the tile's pixel geometry -> targets (each 4-connected piece is a field,
@@ -80,7 +79,7 @@ def main():
     scene = Scene(*SHAPE, transform=TRANSFORM, crs=CRS)
     dec = block_decoder("fields")  # outline decoding, E046 thresholds, 0.5 px simplification
     records = decode_scene(fields, dec, block=160, halo=32, scene=scene)
-    whole = decode_scene(fields, dec, block=max(SHAPE), scene=scene)
+    whole = decode_scene(fields, dec, scene=scene)  # default block 4096 px: one block
     same = len(records) == len(whole) and all(
         shapely.equals_exact(a["geometry"], b["geometry"], 0) for a, b in zip(records, whole))
     print(f"{len(records)} fields from {len(world)} parcels; {records.stats}; "
@@ -90,13 +89,13 @@ def main():
     # or filter by area if that matters for your data.
 
     out_dir = Path(tempfile.mkdtemp())
-    write_records(records, out_dir / "fields.geojson", scene)
+    records.write(out_dir / "fields.geojson")  # the scene's transform and CRS
     try:
         import geopandas as gpd
     except ImportError:
         print("wrote fields.geojson (a GeoPackage needs geopandas)")
         return
-    gdf = gpd.read_file(write_records(records, out_dir / "fields.gpkg", scene))
+    gdf = gpd.read_file(records.write(out_dir / "fields.gpkg"))
     iou = [max(p.intersection(b).area / p.union(b).area for b in world) for p in gdf.geometry]
     print(f"wrote fields.geojson, fields.gpkg ({gdf.crs}, {gdf.area.sum() / 1e4:.0f} ha); "
           f"IoU with the input parcels: median {np.median(iou):.3f}, min {min(iou):.3f}")

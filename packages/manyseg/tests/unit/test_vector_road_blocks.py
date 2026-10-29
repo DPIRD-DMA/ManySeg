@@ -177,6 +177,27 @@ def test_parameters_and_names():
         assert _same(_decode(g, dec, block, halo), ref), (block, halo)
 
 
+def test_logits():
+    """logits=True: sigmoid on mask and keypoints (not direction), whole scene and per block."""
+    import torch
+
+    f = _scene(0, quantize=False)
+    ref = _whole(f, threshold=0.5, gap=50)
+    lg = {k: (v if k == "direction" else
+              torch.logit(torch.from_numpy(np.clip(v, 1e-4, 1 - 1e-4).astype(np.float32))).numpy())
+          for k, v in f.items()}
+    back = {k: (v if k == "direction" else torch.sigmoid(torch.from_numpy(v)).numpy())
+            for k, v in lg.items()}  # what logits=True decodes
+    exp = _whole(back, threshold=0.5, gap=50)
+    assert len(exp.edges) > 0.9 * len(ref.edges)
+    assert _same(_whole(lg, threshold=0.5, gap=50, logits=True), exp)
+    dec = RoadBlockDecoder(threshold=0.5, gap=50, logits=True)
+    assert dec.params["logits"] is True and "logits" in repr(dec)
+    assert _same(_decode(lg, dec, 128, 32), exp)
+    # raw logits read as probabilities: everything above logit 0.5 is road, a different graph
+    assert not _same(_whole(lg, threshold=0.5, gap=50), exp)
+
+
 def test_empty_scene_and_empty_blocks():
     z = {"mask": np.zeros((1, 200, 300), np.float32), "keypoints": np.zeros((3, 200, 300)),
          "direction": np.zeros((4, 200, 300))}

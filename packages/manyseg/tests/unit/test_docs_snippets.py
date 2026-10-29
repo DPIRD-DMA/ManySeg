@@ -89,3 +89,33 @@ def test_vector_manypred_snippet():
     for fn in (BlockPostprocess, predict_files):
         params = inspect.signature(fn).parameters
         assert calls[fn.__name__] <= set(params), (fn.__name__, calls[fn.__name__] - set(params))
+
+
+def test_vector_points_snippet():
+    import numpy as np
+    import pytest
+
+    gpd = pytest.importorskip("geopandas")
+    pytest.importorskip("rasterio")
+    from manyseg.points import gaussian_heatmap, points_from_xy
+    from manyseg.vectors import Scene, pixel_to_world
+
+    code = _docs_block("pts = decode_scene(fields, dec")
+    H, W = 64, 80
+    transform = (0.5, 0.0, 391_000.0, 0.0, -0.5, 6_466_000.0)
+    px = np.array([[10.5, 20.5], [40.5, 30.5], [70.5, 50.5]])  # pixel centres, (x, y)
+    trees = gpd.GeoDataFrame(geometry=gpd.points_from_xy(*pixel_to_world(px, transform).T),
+                             crs="EPSG:28350")
+    hm = gaussian_heatmap([points_from_xy(px)], (H, W), sigma=2.0)  # (1, 1, H, W), peak 1
+    logit = torch.logit(hm.clamp(1e-4, 1 - 1e-4))
+    ns = {"torch": torch, "trees_gdf": trees, "transform": transform, "shape": (H, W),
+          "crs": "EPSG:28350", "out": {"heatmap": logit},
+          "fields": {"heatmap": hm[0].numpy(), "offset": np.zeros((2, H, W), np.float32)},
+          "scene": Scene(H, W, transform=transform, crs="EPSG:28350")}
+    exec(compile(code, "api_design.md", "exec"), ns)
+    assert np.allclose(ns["xy"], px)
+    assert len(ns["pts"]) == 3 and np.allclose(sorted(map(tuple, ns["pts"].xy)), px)
+    fc = ns["fc"]
+    assert fc["crs"]["properties"]["name"] == "EPSG:28350"
+    got = sorted(tuple(f["geometry"]["coordinates"]) for f in fc["features"])
+    assert np.allclose(got, sorted(map(tuple, pixel_to_world(px, transform))))

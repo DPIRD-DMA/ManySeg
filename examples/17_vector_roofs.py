@@ -89,7 +89,6 @@ def main():
         decode_scene,
         roof_face_targets,
         to_pixels,
-        write_records,
     )
 
     # 1. Faces -> pixel geometry -> targets (faces sharing an edge stay separate instances).
@@ -114,7 +113,7 @@ def main():
     scene = Scene(*SHAPE, transform=TRANSFORM, crs=CRS)
     dec = block_decoder("roofs")  # halo >= dec.min_halo
     records = decode_scene(fields, dec, block=192, halo=64, scene=scene)
-    whole = decode_scene(fields, dec, block=max(SHAPE), scene=scene)
+    whole = decode_scene(fields, dec, scene=scene)  # default block 4096 px: one block
     same = len(records) == len(whole) and all(
         shapely.equals_exact(a["geometry"], b["geometry"], 0) and a["plane"] == b["plane"]
         for a, b in zip(records, whole))
@@ -125,8 +124,8 @@ def main():
 
     # 4. Faces as 2-D polygons (plane_a / _b / _c attributes) and as a 3-D mesh (z in metres).
     out_dir = Path(tempfile.mkdtemp())
-    write_records(records, out_dir / "roof_faces.geojson", scene)
-    path = write_records(records, out_dir / "roof_mesh.geojson", scene, mesh=True)
+    records.write(out_dir / "roof_faces.geojson")  # the scene's transform and CRS
+    path = records.write(out_dir / "roof_mesh.geojson", mesh=True)
     ring = json.loads(path.read_text())["features"][0]["geometry"]["coordinates"][0]
     first = [tuple(round(v, 2) for v in p) for p in ring[:2]]
     print("3-D ring of the first face (X, Y, z):", first, "...")
@@ -135,7 +134,7 @@ def main():
     except ImportError:
         print("wrote roof_faces.geojson, roof_mesh.geojson (a GeoPackage needs geopandas)")
         return
-    gdf = gpd.read_file(write_records(records, out_dir / "roofs.gpkg", scene, mesh=True))
+    gdf = gpd.read_file(records.write(out_dir / "roofs.gpkg", mesh=True))
     print(f"wrote roofs.gpkg ({gdf.crs}, has z: {bool(gdf.has_z.all())}), {len(gdf)} faces")
 
 

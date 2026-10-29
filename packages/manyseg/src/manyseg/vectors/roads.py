@@ -60,6 +60,13 @@ def _arr(x):
     return x.detach().float().cpu().numpy() if hasattr(x, "detach") else np.asarray(x, np.float32)
 
 
+def _sigmoid(a: np.ndarray) -> np.ndarray:
+    """float32 sigmoid, as ``torch.sigmoid`` on a float32 tensor."""
+    import torch
+
+    return torch.sigmoid(torch.from_numpy(np.ascontiguousarray(a, np.float32))).numpy()
+
+
 def _segments_graph(segs):
     """Polylines -> graph; coincident points merged; crossing lines are not noded."""
     nx = _deps()[0]
@@ -96,12 +103,14 @@ def graph_from_road_heads(
     min_length: float = 20,
     min_area: int = 30,
     scale: float = 1.0,
+    logits: bool = False,
 ) -> VectorGraph:
-    """Road graph from the unified road heads (numpy or torch; probabilities, not logits).
+    """Road graph from the unified road heads (numpy or torch).
 
     Args:
-        mask: ``(H, W)`` road-surface probability.
-        keypoints: ``(3, H, W)`` junction, end and crossing heatmaps.
+        mask: ``(H, W)`` road-surface probability (logit with ``logits=True``).
+        keypoints: ``(3, H, W)`` junction, end and crossing heatmaps (probabilities; logits
+            with ``logits=True``).
         direction: ``(4, H, W)`` two ``(cos 2t, sin 2t)`` modes (the second only at crossings).
         threshold, spur, gap, simplify, min_length, min_area: as :func:`graph_from_mask` on the
             surface (gap bridging runs once, on the final graph).
@@ -109,11 +118,18 @@ def graph_from_road_heads(
         zone_radius: Radius (px) of the disk around each keypoint where arms are rejoined.
         pair_deg: Arms through a crossing are paired if their headings are at least this far apart.
         scale: The heads' ``scale``; coordinates are returned in input pixels.
+        logits: ``mask`` and ``keypoints`` are logits: apply a sigmoid to both first
+            (``direction`` is a value and is never transformed).
 
-    Defaults are E044's City-Scale tuning (1 m pixels).
+    A low-level building block for one tile or scene in memory; the recommended entry point is
+    ``decode_scene(fields, block_decoder("roads"))``, which gives the same graph whole-scene and
+    block by block. The defaults here are the same as ``block_decoder("roads")``: E044's
+    City-Scale tuning (1 m pixels).
     """
     remove_small_objects, skeletonize = _deps()[3:]
     m, kp, d = _arr(mask), _arr(keypoints), _arr(direction)
+    if logits:
+        m, kp = _sigmoid(m), _sigmoid(kp)
     H, W = m.shape
     fg = remove_small_objects(m > threshold, max_size=max(min_area - 1, 0))
     surf = _nx_from_skeleton(
@@ -260,13 +276,17 @@ class RoadBlockDecoder:
     skeleton pixels, peak suppression in the whole-scene order, arm rejoining (direction read
     from the sparse samples), short-component removal and gap bridging, all with the scene as
     the border. Every per-block step except skeletonize reaches at most ``zone_radius + 10`` px,
-    so the result equals the whole-scene decode exactly when thinning's reach is below the halo.
+    so the result equals the whole-scene decode exactly when the halo is at least
+    :attr:`min_halo` **and** covers thinning's reach.
     That reach is data dependent: about the half-width of a solid blob, but up to ~3x the
     half-width of a blob with holes (a car park); City-Scale road blobs are at most 11 px deep
     and halo 128 gives identical graphs. Each block also thins core + half the halo and
     ``combine`` warns if any core skeleton changed (reach above half the halo). The halo must
-    be at least :attr:`min_halo`; the blocks' result size is ~24 bytes per pixel within
-    ``zone_radius + 10`` px of a keypoint (direction samples) plus 16 per skeleton pixel.
+    be at least :attr:`min_halo` (enforced); the blocks' result size is ~24 bytes per pixel
+    within ``zone_radius + 10`` px of a keypoint (direction samples) plus 16 per skeleton pixel.
+
+    ``logits=True``: the ``mask`` and ``keypoints`` fields are logits (a sigmoid is applied in
+    each block, as :func:`graph_from_road_heads` ``logits=True``); ``direction`` is a value.
     """
 
     def __init__(
@@ -282,6 +302,7 @@ class RoadBlockDecoder:
         min_length: float = 20,
         min_area: int = 30,
         scale: float = 1.0,
+        logits: bool = False,
         names: dict | None = None,
     ):
         self.params = dict(
@@ -295,6 +316,7 @@ class RoadBlockDecoder:
             min_length=min_length,
             min_area=min_area,
             scale=scale,
+            logits=bool(logits),
         )
         self.names = {"mask": "mask", "keypoints": "keypoints", "direction": "direction"}
         self.names.update(names or {})
@@ -306,7 +328,9 @@ class RoadBlockDecoder:
     def min_halo(self) -> int:
         """Halo the keypoint, direction and small-blob steps need: ``zone_radius + 10`` and
         ``min_area - 1`` (a blob reaching from the core to the window edge then has at least
-        ``min_area`` pixels). Skeletonize needs more on wide blobs (see the class note)."""
+        ``min_area`` pixels). Necessary, not sufficient: exactness also needs the halo to cover
+        the skeleton's data-dependent reach (about the half-width of the widest road blob, up to
+        ~3x for blobs with holes); ``combine`` warns when it did not (see the class note)."""
         p = self.params
         return max(int(math.ceil(p["zone_radius"])) + 10, int(p["min_area"]) - 1)
 
@@ -328,6 +352,8 @@ class RoadBlockDecoder:
         m = _arr(fields[nm["mask"]])
         m = m[0] if m.ndim == 3 else m
         kp, d = _arr(fields[nm["keypoints"]]), _arr(fields[nm["direction"]])
+        if p["logits"]:
+            m, kp = _sigmoid(m), _sigmoid(kp)
         cy, cx = slice(ct - wt, cb - wt), slice(cl - wl, cr - wl)  # core in window pixels
 
         fg = m > p["threshold"]

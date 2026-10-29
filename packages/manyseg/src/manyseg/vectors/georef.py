@@ -182,8 +182,8 @@ def _kind(g) -> str | None:
 
 
 def to_pixels(features, transform, shape: tuple[int, int], *, crs=None, raster_crs=None,
-              kind: str | None = None, min_area: float = 0.0, min_length: float = 0.0,
-              return_index: bool = False):
+              assume_same_crs: bool = False, kind: str | None = None, min_area: float = 0.0,
+              min_length: float = 0.0, return_index: bool = False):
     """Vector features in world coordinates -> pixel-coordinate geometries clipped to one tile,
     as the target encoders take them (:func:`footprint_targets`, :func:`field_targets`,
     :func:`roof_face_targets`, :func:`road_graph`).
@@ -199,8 +199,12 @@ def to_pixels(features, transform, shape: tuple[int, int], *, crs=None, raster_c
         crs, raster_crs: the features' and the raster's CRS (anything rasterio's
             ``CRS.from_user_input`` takes, or a pyproj CRS). When both are known and differ,
             vertices are reprojected (rasterio / PROJ; edges stay straight, so densify long
-            edges first if the projections differ strongly). When either is unknown the
-            features are taken to be in the raster's CRS.
+            edges first if the projections differ strongly). When neither is known, the
+            features are taken to be in the raster's CRS. When only one is known this raises,
+            since reprojecting needs both (a GeoDataFrame that lost its CRS would otherwise land
+            silently in the wrong place).
+        assume_same_crs: with only one CRS known, skip that check and take the features to be
+            in the raster's CRS.
         kind: ``"polygons"``, ``"lines"`` or ``"points"``; inferred when ``None`` (mixed inputs
             raise).
         min_area, min_length: drop clipped parts at or below this size (px² / px; the default
@@ -231,6 +235,13 @@ def to_pixels(features, transform, shape: tuple[int, int], *, crs=None, raster_c
     H, W = shape
     geoms, fcrs = _geometries(features)
     src = crs if crs is not None else fcrs
+    if (src is None) != (raster_crs is None) and not assume_same_crs:
+        known, missing = (("the features' CRS (crs= or their .crs)", "raster_crs")
+                          if raster_crs is None
+                          else ("raster_crs", "the features' CRS (crs= or a GeoDataFrame's .crs)"))
+        raise ValueError(f"to_pixels: {known} is known but {missing} is not; reprojection needs "
+                         "both. Pass the missing one, or assume_same_crs=True if the features "
+                         "are already in the raster's CRS.")
     reproject = src is not None and raster_crs is not None and not _same_crs(src, raster_crs)
     idx = _tile_filter(geoms, transform, shape, src if reproject else None, raster_crs)
     if kind is None:
