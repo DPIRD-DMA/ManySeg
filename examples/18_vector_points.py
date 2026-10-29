@@ -40,8 +40,8 @@ def main():
     try:
         import rasterio  # noqa: F401
         import shapely  # noqa: F401
-    except ImportError:
-        print("skipping: needs pip install 'manyseg[vectors]'")
+    except ImportError as e:  # CI (MANYSEG_REQUIRE_TRAINERS=1) fails on "is not installed"
+        print(f"skipping: {e.name} is not installed (pip install 'manyseg[vectors]')")
         return
     from manyseg.points import (
         DensityBlockDecoder,
@@ -83,7 +83,8 @@ def main():
 
     # 4. GeoJSON points in metres, with each peak's score.
     out_dir = Path(tempfile.mkdtemp())
-    fc = pts.to_geojson()  # through scene.transform
+    fc = pts.to_geojson()  # through scene.transform; it does not name the CRS, so add it
+    fc["crs"] = {"type": "name", "properties": {"name": CRS}}  # as write_records does
     (out_dir / "trees.geojson").write_text(json.dumps(fc))
     print("first tree:", fc["features"][0]["geometry"]["coordinates"],
           fc["features"][0]["properties"])

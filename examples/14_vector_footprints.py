@@ -47,8 +47,8 @@ def main():
         import rasterio  # noqa: F401
         import shapely
         import skimage  # noqa: F401
-    except ImportError:
-        print("skipping: needs pip install 'manyseg[vectors]'")
+    except ImportError as e:  # CI (MANYSEG_REQUIRE_TRAINERS=1) fails on "is not installed"
+        print(f"skipping: {e.name} is not installed (pip install 'manyseg[vectors]')")
         return
     from manyseg.vectors import (
         Scene,
@@ -60,10 +60,16 @@ def main():
         write_records,
     )
 
-    # 1. Vector labels -> pixel geometry of the tile ((x, y), pixel corners at integers),
-    #    reprojected when crs and raster_crs differ -> every head's target as numpy arrays.
-    world = buildings()
-    polys = to_pixels(world, TRANSFORM, SHAPE, crs=CRS, raster_crs=CRS)
+    # 1. Vector labels -> pixel geometry of the tile ((x, y), pixel corners at integers) ->
+    #    every head's target as numpy arrays. The labels here are in lon / lat (EPSG:4326):
+    #    to_pixels reprojects them to the raster's CRS (crs= the labels', raster_crs= the
+    #    image's; a GeoDataFrame's own .crs is used when crs= is not given).
+    from rasterio.warp import transform as reproject
+
+    world = buildings()  # metres, EPSG:28350 (kept to compare with at the end)
+    lonlat = [shapely.transform(b, lambda xy: np.c_[reproject(CRS, "EPSG:4326", *xy.T)])
+              for b in world]
+    polys = to_pixels(lonlat, TRANSFORM, SHAPE, crs="EPSG:4326", raster_crs=CRS)
     t = footprint_targets(polys, SHAPE)
     print("targets:", {k: v.shape for k, v in t.items()})
 

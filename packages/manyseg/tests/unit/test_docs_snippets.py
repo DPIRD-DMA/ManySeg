@@ -47,19 +47,26 @@ def test_vector_scene_snippet(tmp_path, monkeypatch):
     H, W, x0, y0 = 300, 280, 391_000.0, 6_466_000.0
     transform = (0.5, 0.0, x0, 0.0, -0.5, y0)
     boxes = [(20, 30, 60, 70), (120, 100, 170, 150), (200, 220, 260, 290)]  # pixel boxes
-    buildings = [shapely.box(x0 + a / 2, y0 - d / 2, x0 + c / 2, y0 - b / 2)
-                 for a, b, c, d in boxes]  # metres
+    metres = [shapely.box(x0 + a / 2, y0 - d / 2, x0 + c / 2, y0 - b / 2) for a, b, c, d in boxes]
+    from rasterio.warp import transform as warp
+
+    def to_lonlat(xy):
+        return np.c_[warp("EPSG:28350", "EPSG:4326", xy[:, 0], xy[:, 1])]
+
+    buildings = [shapely.transform(m, to_lonlat) for m in metres]  # labels in lon / lat
     t = footprint_targets([shapely.box(*b) for b in boxes], (H, W))
     pred = {k: t[k] for k in ("extent", "boundary", "distance", "corner", "direction")}
     monkeypatch.chdir(tmp_path)
-    ns = {"buildings": buildings, "transform": transform, "H": H, "W": W, "crs": "EPSG:28350",
-          "pred": pred}
+    ns = {"buildings": buildings, "buildings_crs": "EPSG:4326", "transform": transform, "H": H,
+          "W": W, "crs": "EPSG:28350", "pred": pred}
     exec(compile(code, "api_design.md", "exec"), ns)
     assert len(ns["polys"]) == 3 and ns["targets"]["corner"].shape == (H, W)
+    # reprojected from lon / lat onto the raster's grid: the pixel boxes again
+    assert np.allclose(sorted(p.bounds for p in ns["polys"]), sorted(boxes), atol=0.05)
     assert len(ns["records"]) == 3
     fc = json.loads((tmp_path / "buildings.geojson").read_text())
     got = sorted(shapely.geometry.shape(f["geometry"]).bounds for f in fc["features"])
-    assert np.allclose(got, sorted(b.bounds for b in buildings), atol=0.5)  # metres
+    assert np.allclose(got, sorted(m.bounds for m in metres), atol=0.5)  # in EPSG:28350
 
 
 def test_vector_manypred_snippet():

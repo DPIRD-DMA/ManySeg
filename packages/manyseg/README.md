@@ -31,7 +31,8 @@ pip install "manyseg @ git+https://github.com/DPIRD-DMA/ManySeg#subdirectory=pac
 ```
 
 Optional extras: `[quant]` (int8 quantisation), `[onnx]` (ONNX export), `[instances]`
-(instance post-processing). After the first release this becomes `pip install manyseg`.
+(instance post-processing), `[vectors]` (polygons, road graphs and points as GIS layers).
+After the first release this becomes `pip install manyseg`.
 
 ## Quick start
 
@@ -216,6 +217,28 @@ plants per drone tile, peak counting was far better (count MAE 1.0 against 9–1
 small background bias summed over every pixel adds up; count peaks for a few large objects.
 If you use a density head, `density_head(activation="softplus")` is recommended: on that
 drone data it cut density count error from 10.1 to 2.9. Validate on your data.
+
+**Vector outputs (experimental).** `manyseg.vectors` (the `[vectors]` extra) turns
+predictions into GIS layers: building footprints with straight walls, field boundaries,
+road graphs with junctions and overpasses, LoD2 roof faces with a plane and 3-D mesh each
+(heights from an nDSM input), and points. Each task has a head preset, target encoders that
+take your vector labels in any CRS, and a decoder chosen in pre-registered experiments. Large
+scenes are decoded block by block, with the same result as a whole-scene decode when the
+blocks' halo covers the decoder's reach; with ManyPred this happens while it predicts (needs
+ManyPred's next release).
+
+```python
+from manyseg.vectors import Scene, block_decoder, decode_scene, write_records
+
+# probs: head name -> the stitched predictions (numpy; sigmoid on the logit heads)
+scene = Scene(H, W, transform=src.transform, crs=src.crs)  # the image's grid (rasterio)
+records = decode_scene(probs, block_decoder("footprints"), block=4096, halo=256, scene=scene)
+write_records(records, "buildings.gpkg", scene)  # polygons in the raster's CRS
+```
+
+Examples [14–18](https://github.com/DPIRD-DMA/ManySeg/blob/main/examples/README.md) cover each task from vector labels to GeoJSON; the
+[guide](https://github.com/DPIRD-DMA/ManySeg/blob/main/docs/api_design.md#vector-outputs-line-graphs-polygons) lists the heads, decoders,
+evidence and limits.
 
 **Save and load.** `manyseg.save` stores the weights with the configuration and, as metadata
 for inference code, the input normalisation, output activations and class names; `manyseg.load`

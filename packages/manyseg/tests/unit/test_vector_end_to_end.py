@@ -82,11 +82,15 @@ def assert_same_records(got, ref):
 
 
 def match(decoded, truth, min_iou):
-    """One-to-one: every true polygon has a decoded one with IoU >= min_iou, and no extras."""
+    """One-to-one (optimal assignment by IoU): as many decoded as true polygons, and every
+    pair at IoU >= min_iou."""
+    from scipy.optimize import linear_sum_assignment
+
     assert len(decoded) == len(truth), (len(decoded), len(truth))
-    for t in truth:
-        best = max(iou(t, d) for d in decoded)
-        assert best >= min_iou, (t.wkt, best)
+    m = np.array([[iou(t, d) for d in decoded] for t in truth])
+    rows, cols = linear_sum_assignment(-m)
+    bad = [(truth[r].wkt, m[r, c]) for r, c in zip(rows, cols) if m[r, c] < min_iou]
+    assert not bad, bad
 
 
 def check_written(records, tmp_path, name, mesh=False):
@@ -100,7 +104,10 @@ def check_written(records, tmp_path, name, mesh=False):
         g = shapely.geometry.shape(f["geometry"])
         assert f["properties"]["id"] == r["id"]
         assert mesh or shapely.equals_exact(g, world(r["geometry"]), 1e-6)
-    gpd = pytest.importorskip("geopandas")
+    try:  # optional (not in the vectors extra): GeoPackage only where geopandas is installed
+        import geopandas as gpd
+    except ImportError:
+        return fc
     gdf = gpd.read_file(write_records(records, tmp_path / f"{name}.gpkg", SCENE, mesh=mesh))
     assert gdf.crs.to_epsg() == 28350 and len(gdf) == len(records)
     for g, r in zip(gdf.geometry, records):
@@ -222,7 +229,10 @@ def test_roads_blocks_equal_whole_and_input(tmp_path):
     for f, q in zip(fc["features"], graph.polylines()):
         metres = np.c_[X0 + PX * q[:, 0], Y0 - PX * q[:, 1]]
         assert np.allclose(f["geometry"]["coordinates"], metres)
-    gpd = pytest.importorskip("geopandas")
+    try:
+        import geopandas as gpd
+    except ImportError:
+        return
     gdf = gpd.read_file(write_records(graph, tmp_path / "roads.gpkg", SCENE))
     assert gdf.crs.to_epsg() == 28350 and len(gdf) == len(graph.polylines())
 

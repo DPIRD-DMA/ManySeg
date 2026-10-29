@@ -138,8 +138,9 @@ First release. Python 3.10–3.14, PyTorch ≥ 2.10, timm ≥ 1.0.20.
   GeoPackage through geopandas, in the scene's CRS; roof faces optionally as 3-D meshes).
   Seam-exact: objects crossing block edges are joined by their anchor (first scene pixel), so a
   block decode equals the whole-scene decode, with nothing duplicated or cut at seams, when the
-  halo is at least the decoder's `min_halo` (tested on seams, block corners, several grids and
-  real stitched predictions). The same decoders run in ManyPred's
+  halo covers the decoder's reach: at least its `min_halo` (enforced), and for road skeletons
+  and instances much larger than the halo possibly more (documented; roads warn). Tested on
+  seams, block corners, several grids and real stitched predictions. The same decoders run in ManyPred's
   `predict_files(merge="cut", block_postprocess=BlockPostprocess(...))` (ManyPred's next
   release); E050b: tiles of at least 1024 px with 256 px overlap.
 * **Points in a CRS and over large scenes:** `to_geojson` writes `Point` / `MultiPoint` features

@@ -222,8 +222,9 @@ predictions into GIS layers: building footprints with straight walls, field boun
 road graphs with junctions and overpasses, LoD2 roof faces with a plane and 3-D mesh each
 (heights from an nDSM input), and points. Each task has a head preset, target encoders that
 take your vector labels in any CRS, and a decoder chosen in pre-registered experiments. Large
-scenes are decoded block by block, with the same result as a whole-scene decode; with ManyPred
-this happens while it predicts (needs ManyPred's next release).
+scenes are decoded block by block, with the same result as a whole-scene decode when the
+blocks' halo covers the decoder's reach; with ManyPred this happens while it predicts (needs
+ManyPred's next release).
 
 ```python
 from manyseg.vectors import Scene, block_decoder, decode_scene, write_records

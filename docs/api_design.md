@@ -842,7 +842,8 @@ from manyseg.vectors import (Scene, block_decoder, decode_scene, footprint_targe
                              to_pixels, write_records)
 
 # Training targets for one tile: vector labels in a CRS -> pixels -> every head's target
-polys = to_pixels(buildings, transform, (H, W), crs=crs, raster_crs=crs)  # reprojects if they differ
+# crs: the labels' CRS (a GeoDataFrame's own .crs is used if omitted); raster_crs: the image's
+polys = to_pixels(buildings, transform, (H, W), crs=buildings_crs, raster_crs=crs)  # reprojected
 targets = footprint_targets(polys, (H, W))  # instances, corner, direction, extent, ...
 
 # A predicted scene -> polygons in the CRS. `pred`: head name -> stitched (C, H, W) or (H, W)
@@ -854,8 +855,9 @@ write_records(records, "buildings.geojson", scene)  # ".gpkg" with geopandas
 ```
 
 `decode_scene` cuts the scene into blocks (cores that partition it, plus a `halo` of context)
-and joins the objects that cross block edges; the result equals a whole-scene decode (tested
-on seams, block corners, several grids and real stitched predictions). Records are dicts with
+and joins the objects that cross block edges; the result equals a whole-scene decode when the
+halo covers the decoder's reach (see the limitations below; tested on seams, block corners,
+several grids and real stitched predictions). Records are dicts with
 `id` (the scene pixel index of the object's first pixel, so it does not depend on the grid),
 `geometry` (shapely, scene pixels), `pixels` and `scene_edge` (touches the scene edge, so it
 may be cut). Roof records hold `id`, `part` (pieces a join split off), `geometry`, `plane`

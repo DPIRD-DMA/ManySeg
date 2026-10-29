@@ -47,8 +47,8 @@ def main():
         import rasterio  # noqa: F401
         import shapely
         import skimage  # noqa: F401
-    except ImportError:
-        print("skipping: needs pip install 'manyseg[vectors]'")
+    except ImportError as e:  # CI (MANYSEG_REQUIRE_TRAINERS=1) fails on "is not installed"
+        print(f"skipping: {e.name} is not installed (pip install 'manyseg[vectors]')")
         return
     from manyseg.instances import instance_heads
     from manyseg.vectors import (
