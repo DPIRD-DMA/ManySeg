@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import math
+import sys
 import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -24,8 +25,11 @@ from scipy.sparse.csgraph import connected_components
 from scipy.spatial import cKDTree
 from shapely.geometry import Polygon, box
 
-from manyseg.vectors import encode_graph_tensor, polygons_from_labels, polygons_from_tensor, vertex_graph
+from manyseg.vectors import polygons_from_labels
 from manyseg_bench.evaluation.vectors import polygon_metrics
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "E030_whu_polygons"))
+from graph_tensor import encode_graph_tensor, polygons_from_tensor, vertex_graph  # noqa: E402
 
 TILE, GSD = 512, 0.25
 IDENT = Affine(1, 0, 0, 0, 1, 0)

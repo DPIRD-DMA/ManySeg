@@ -7,16 +7,6 @@ scikit-image). See ``experiments/E028_vector_oracle`` for how these baselines we
 
 from .corners import corner_targets, polygons_from_corners
 from .graph import VectorGraph, bridge_ends, graph_chains, graph_from_mask
-from .graph_tensor import (
-    encode_graph_tensor,
-    graph_from_tensor,
-    graph_tensor_heads,
-    offset_field,
-    offset_field_from_mask,
-    polygons_from_tensor,
-    snap_points,
-    vertex_graph,
-)
 from .polygons import planar_faces, polygons_from_labels, to_geojson
 from .roads import graph_from_road_heads
 
@@ -24,21 +14,13 @@ __all__ = [
     "VectorGraph",
     "bridge_ends",
     "corner_targets",
-    "encode_graph_tensor",
     "graph_chains",
     "graph_from_mask",
     "graph_from_road_heads",
-    "graph_from_tensor",
-    "graph_tensor_heads",
-    "offset_field",
-    "offset_field_from_mask",
     "planar_faces",
     "polygons_from_corners",
     "polygons_from_labels",
-    "polygons_from_tensor",
-    "snap_points",
     "to_geojson",
-    "vertex_graph",
 ]
 
 # --- training presets (heads, road targets, dihedral augmentation) ---

@@ -72,7 +72,7 @@ def decode(arm: str, a: dict, p: dict, cache: dict) -> list:
                 extent_threshold=key[0], boundary_threshold=key[1], seed_threshold=key[2],
                 min_size=16)[0]
         return polygons_from_labels(cache[key], simplify=p["simplify"], min_area=16)
-    from manyseg.vectors import polygons_from_tensor
+    from graph_tensor import polygons_from_tensor
 
     snap = a["snap"].astype(np.float32) if "snap" in a else None  # E033 snap head
     return polygons_from_tensor(a["vertex"].astype(np.float32), a["edge"].astype(np.float32),

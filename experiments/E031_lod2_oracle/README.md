@@ -39,7 +39,7 @@ Both get the same (corrupted) **building mask** and **height model**.
 | id | roof faces from | then |
 |---|---|---|
 | A0 | the height model: smooth, per-pixel gradient, join 4-neighbours inside the mask whose gradients and heights agree, drop small regions, merge regions with near-identical planes, polygonize (`polygons_from_labels`) | robust (trimmed) least-squares plane per face |
-| A1 | a graph tensor of the plan-view roof graph (`manyseg.vectors.graph_tensor`, planar, 20 px spacing): `polygons_from_tensor` with faces kept inside the mask | same plane fit per face |
+| A1 | a graph tensor of the plan-view roof graph (`manyseg.vectors.graph_tensor` at the time, now `experiments/E030_whu_polygons/graph_tensor.py`; planar, 20 px spacing): `polygons_from_tensor` with faces kept inside the mask | same plane fit per face |
 | LoD1 | the building mask (one face per connected component) | one flat height (median) | reference only |
 
 ## Corruptions

@@ -101,9 +101,9 @@ First release. Python 3.10–3.14, PyTorch ≥ 2.10, timm ≥ 1.0.20.
 
 * `graph_from_mask` (line probability → `VectorGraph`: skeleton, junction merging, spur pruning,
   end bridging, simplification), `polygons_from_labels` (instance labels → exact pixel-edge
-  polygons with holes), `to_geojson` (with an affine geotransform). Experimental graph-tensor
-  polygon heads (`graph_tensor_heads`, `encode_graph_tensor`, `polygons_from_tensor`), pending
-  E030.
+  polygons with holes), `to_geojson` (with an affine geotransform). Graph-tensor polygon heads
+  were evaluated (E028 oracle, E030 trained on WHU) and are not shipped: they fell below mask
+  instances, and the code stays in `experiments/E030_whu_polygons/`.
 * `manyseg-bench`: `evaluation.vectors` with APLS, GEO, junction F1, crossing scores and polygon
   metrics (C-IoU, detection F1, PoLiS, N-ratio).
 * Training presets for the trained vector models: `corner_line_heads` (instance heads + `corner`

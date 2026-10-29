@@ -17,7 +17,7 @@ from scipy.spatial import cKDTree  # noqa: E402
 
 # --- frozen copies of the helpers before the refactor (do not edit) ----------------------------
 
-def _old_peak_pixels(hm, threshold, kernel):  # vectors.graph_tensor._peak_pixels
+def _old_peak_pixels(hm, threshold, kernel):  # graph tensor _peak_pixels (experiments/E030)
     keep = (hm == ndimage.maximum_filter(hm, size=kernel, mode="nearest")) & (hm > threshold)
     pts = np.argwhere(keep)
     if len(pts) < 2:
@@ -39,7 +39,7 @@ def _old_offset(lo, mid, hi):
     return np.clip(np.where(ok, 0.5 * (lo - hi) / np.where(ok, den, -1), 0), -1, 1)
 
 
-def _old_refine(hm, pix):  # vectors.graph_tensor._refine
+def _old_refine(hm, pix):  # graph tensor _refine (experiments/E030)
     if len(pix) == 0:
         return np.zeros((0, 2))
     H, W = hm.shape
@@ -296,26 +296,6 @@ def test_polygons_from_corners_equals_old(monkeypatch):
     monkeypatch.setattr(C, "refine", old_refine)
     old = [[p.wkb for p in polygons_from_corners(lab, c, t["direction"], **k)] for c, k in runs]
     assert new == old and len(new[0]) == 3
-
-
-def test_graph_from_tensor_equals_old(monkeypatch):
-    from manyseg.vectors import encode_graph_tensor, graph_from_tensor, vertex_graph
-    from manyseg.vectors import graph_tensor as G
-    from shapely.geometry import box
-
-    vg = vertex_graph([box(30, 30, 90, 70), box(120, 40, 180, 130), box(0, 150, 50, 200)],
-                      border=(200, 200))
-    t = encode_graph_tensor(vg, (200, 200))
-    rng = np.random.default_rng(3)
-    v = np.round(np.clip(t["vertex"] + rng.normal(0, 0.05, t["vertex"].shape), 0, 1), 2)
-    runs = [(t["vertex"], {}), (v.astype(np.float32), dict(kernel=5, vertex_threshold=0.3))]
-    new = [graph_from_tensor(x, t["edge"], t["vector"], **k) for x, k in runs]
-    monkeypatch.setattr(G, "peak_pixels", _old_peak_pixels)
-    monkeypatch.setattr(G, "refine", _old_refine)
-    old = [graph_from_tensor(x, t["edge"], t["vector"], **k) for x, k in runs]
-    for a, b in zip(new, old):
-        assert np.array_equal(a.xy, b.xy) and np.array_equal(a.edges, b.edges)
-    assert len(new[0].xy) > 10
 
 
 @pytest.mark.parametrize("seed", [0, 1])

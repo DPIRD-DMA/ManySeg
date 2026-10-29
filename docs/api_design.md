@@ -788,7 +788,9 @@ over-/under-segmentation, point F1, count MAE) live in `manyseg-bench`, except
 > overpasses, but missed vertices and occlusion break it faster than a mask, so it is not offered
 > for roads; a junction heatmap adds nothing. Footprints: the same graph tensor → faces gave the
 > best oracle polygons through moderate corruption (C-IoU 0.72–0.75 vs 0.53 for mask contours) and
-> fails all-or-nothing; it is **experimental** until the trained comparison (E030) decides.
+> fails all-or-nothing. Trained on WHU aerial (E030, one seed) it fell well below mask instances
+> (C-IoU 0.61 vs 0.71, detection F1 0.75 vs 0.85), so it is not shipped: as pre-registered, the
+> code stays in `experiments/E030_whu_polygons/graph_tensor.py`.
 
 Decoding runs outside the exported model. Coordinates are `(x, y)` in GIS raster convention
 (pixel corners at integers), unlike `manyseg.points` (`(y, x)`, centres at integers), so a
@@ -805,8 +807,6 @@ fc = to_geojson(g, transform=geotransform)        # LineStrings, world coordinat
 labels = instances_from_outputs(out["extent"], out["boundary"], out["distance"], logits=True)[0]
 polys = polygons_from_labels(labels, simplify=1.0)   # shapely Polygons, holes kept
 
-# Experimental: graph-tensor polygon heads (E028; E030 pending)
-from manyseg.vectors import graph_tensor_heads, polygons_from_tensor
 ```
 
 Metrics (APLS, GEO precision / recall, junction F1, grade-separated crossings, C-IoU, PoLiS,

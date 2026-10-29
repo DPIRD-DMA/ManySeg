@@ -16,7 +16,8 @@ import torch
 import torch.nn.functional as F
 from shapely import affinity
 
-from manyseg.vectors import corner_targets, encode_graph_tensor, graph_tensor_heads, offset_field, vertex_graph
+from graph_tensor import encode_graph_tensor, graph_tensor_heads, offset_field, vertex_graph
+from manyseg.vectors import corner_targets
 
 TILE = 512
 SPACING = 20.0  # graph-tensor vertex spacing (px); the vector head predicts vector / SPACING

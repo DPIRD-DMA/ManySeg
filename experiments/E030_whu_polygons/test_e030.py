@@ -39,7 +39,7 @@ def test_endpoint_loss_rewards_correct_vectors():
     from shapely.geometry import box
 
     from common import SPACING, TILE, GraphTensorTask
-    from manyseg.vectors import encode_graph_tensor, vertex_graph
+    from graph_tensor import encode_graph_tensor, vertex_graph
 
     polys = [box(100.3, 120.2, 180.1, 170.4), box(300.2, 50.1, 340.3, 130.2)]
     g = encode_graph_tensor(vertex_graph(polys, SPACING, border=(TILE, TILE)), (TILE, TILE))
@@ -64,7 +64,7 @@ def test_wall_tolerant_vertex_loss_ignores_on_wall_predictions():
     from shapely.geometry import box
 
     from common import SPACING, TILE, GraphTensorTask
-    from manyseg.vectors import encode_graph_tensor, vertex_graph
+    from graph_tensor import encode_graph_tensor, vertex_graph
 
     vg = vertex_graph([box(100.3, 120.2, 300.1, 170.4)], SPACING, border=(TILE, TILE))
     g = encode_graph_tensor(vg, (TILE, TILE))

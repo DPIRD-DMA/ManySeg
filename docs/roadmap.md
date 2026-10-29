@@ -127,7 +127,7 @@ style edge classifiers) would be a separate optional module, never a head.
 | --- | --- | --- |
 | E028 | Oracle: perfect OSM vectors → candidate dense targets → controlled corruption → decode → score. Roads: the Sat2Graph-style graph tensor has the best ceiling (only one to keep overpasses: 150/160 vs 0/160; APLS 0.98 vs 0.89 on Murdoch) but missed vertices and occlusion break it faster than a mask, so it is dropped; a junction heatmap adds nothing. Footprints: the same graph tensor → faces is viable and gives the best polygons to level 2 (C-IoU 0.72–0.75 vs 0.53 for mask contours), failing all-or-nothing; a corner heatmap improves shape but loses detections, so it is dropped. One learned representation for both tasks is not supported | ✅ |
 | 1 | Trained roads on City-Scale: mask baseline only (E028 dropped R1 and R2); lower priority. A mask + graph-tensor hybrid would need its own pre-registration | ⏳ |
-| 2 | Trained footprints on WHU aerial: mask instances (B0) vs graph tensor → faces (B2). Decides whether ManySeg ships graph-tensor polygon heads | ⏳ next |
+| 2 | Trained footprints on WHU aerial: mask instances (B0) vs graph tensor → faces (B2). B2 fell well below B0 (one seed, C-IoU 0.61 vs 0.71); graph-tensor polygon heads are not shipped, the code stays in `experiments/E030_whu_polygons/` | ✅ |
 | 3 | Shared utilities and schema; one model with task-specific heads vs separate models | ⏳ |
 | 4 | LoD1: footprint + ground / eave / roof height; roof-to-footprint offset for off-nadir imagery | ⏳ |
 | 5 | LoD2 roofs: roof-face segmentation + ridge / edge evidence, planes fitted jointly from DSM / LiDAR, watertight solid, CityJSON. RGB-only heights are a learned prior, reported separately from topology | ⏳ |

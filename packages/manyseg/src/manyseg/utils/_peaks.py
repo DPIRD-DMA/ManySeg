@@ -22,7 +22,8 @@ were tuned against it):
   score (``torch.argsort(descending=True)``, ties in an unspecified order) and ``max_points``
   stay in ``find_peaks``.
 * :mod:`manyseg.vectors` (corner peaks in ``polygons_from_corners``, keypoint peaks in
-  ``graph_from_road_heads`` with kernel 5, vertex peaks in ``graph_from_tensor``):
+  ``graph_from_road_heads`` with kernel 5; the graph tensor's vertex peaks in
+  ``experiments/E030_whu_polygons/graph_tensor.py`` use the same pair):
   :func:`peak_pixels` (numpy mask + suppression; ``(row, col)`` strongest first) then
   :func:`refine` to ``(x, y)`` pixel-centre coordinates.
 * ``RoadBlockDecoder``: :func:`maxima_mask` and :func:`refine` per window (``origin`` and

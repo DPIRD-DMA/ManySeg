@@ -1,4 +1,8 @@
-"""Sat2Graph-style graph tensor for polygons (experimental; E028 oracle viable, E030 pending).
+"""Sat2Graph-style graph tensor for polygons (experiment code, not part of the library).
+
+Moved out of ``manyseg.vectors`` before 0.1.0: E030 evaluated it and, as pre-registered, the code
+stays in ``experiments/``. E030, E031, E033 and their tests import it from here (put this
+directory on ``sys.path``).
 
 Dense targets that encode a planar graph: around each vertex (within ``radius`` px) a vertex
 score, and for each of ``sectors`` angular sectors an edge probability plus the vector from the
@@ -9,7 +13,7 @@ the ``extent`` mask.
 
 E028 (oracle, OSM footprints at 0.5 m) found it decodes footprints with near-exact corners and
 degrades all-or-nothing, and that it is fragile for road networks (one missed vertex breaks two
-edges), so it is offered for polygons only. Coordinates follow :mod:`manyseg.vectors.graph`.
+edges), so it was tried for polygons only. Coordinates follow :mod:`manyseg.vectors.graph`.
 """
 
 from __future__ import annotations
@@ -17,9 +21,8 @@ from __future__ import annotations
 import math
 
 import numpy as np
-
-from ..utils._peaks import peak_pixels, refine
-from .graph import VectorGraph, _deps
+from manyseg.utils._peaks import peak_pixels, refine
+from manyseg.vectors.graph import VectorGraph, _deps
 
 SECTORS = 6
 
@@ -229,7 +232,7 @@ def graph_from_tensor(vertex, edge, vector, *, vertex_threshold: float = 0.2,
     offset, instead of the sub-pixel parabola fit.
     """
     nx, _, cKDTree, _, _ = _deps()
-    from .graph import bridge_ends
+    from manyseg.vectors.graph import bridge_ends
 
     vertex, edge, vector = (a.detach().float().cpu().numpy() if hasattr(a, "detach") else np.asarray(a)
                             for a in (vertex, edge, vector))

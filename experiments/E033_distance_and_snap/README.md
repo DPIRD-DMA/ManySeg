@@ -11,7 +11,7 @@ quadratic EDT) were fixed before this pre-registration. Two general tools came o
   away) plus `1.0 · p · D / 32` (more the further away, capped at 32 px); pixel means; distances
   from the exact geometry, precomputed in the loader (SciPy, linear time). It suppresses wrong
   predictions in proportion to their distance; it does not move them.
-* `manyseg.vectors.offset_field` / `offset_field_from_mask` / `snap_points`: the vector from each
+* `manyseg.vectors.offset_field` / `offset_field_from_mask` / `snap_points` (now in `experiments/E030_whu_polygons/graph_tensor.py`): the vector from each
   pixel within a radius to the nearest true element (points, or line / boundary pixels), trained
   as a 2-channel regression head; at decode time a detected point moves by its predicted vector.
   This is the part that moves predictions to the right place.
