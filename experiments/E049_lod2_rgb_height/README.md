@@ -63,3 +63,32 @@ Test once per checkpoint (ledger keyed by SHA-256).
   split opens; the R checkpoint's SHA-256 must equal E047b's; full runs require both test areas;
   `--limit` smoke runs (val only) are marked non-decision-grade. One smoke run was made with
   2-epoch smoke checkpoints; no smoke run uses the real checkpoints.
+
+## Results, seed 0 (10:02; worktree e049-433109f with evaluate49 from ebdac49; `runs/eval_H0_s0_H1_s0.json`)
+Training 150 epochs: H0 16.9 min, val PQ 0.092 (under-segmentation 0.72); H1 val PQ 0.100
+(E047b with the nDSM: 0.252). Val: H0 face F1 0.21, RMSE 3.78 m, normal error 22.7 deg.
+Test (48 tiles; Leidsche Rijn / Staphorst):
+
+| arm | face F1 | height RMSE m | normal err deg | corner F1 | C-IoU |
+|---|---|---|---|---|---|
+| R (RGB + nDSM, F3 + planar) | 0.564 / 0.591 | 1.37 / 1.27 | 5.6 / 2.9 | 0.36 / 0.29 | 0.63 / 0.61 |
+| D (H0 faces, nDSM planes) | 0.168 / 0.303 | 1.92 / 1.84 | 10.5 / 4.5 | 0.10 / 0.11 | 0.38 / 0.34 |
+| H0 (RGB, predicted height) | 0.168 / 0.303 | 4.26 / 2.96 | 22.5 / 20.1 | 0.10 / 0.11 | 0.38 / 0.34 |
+| H1 (RGB, predicted slopes) | 0.181 / 0.312 | 3.93 / 2.96 | 19.2 / 22.5 | 0.10 / 0.11 | 0.39 / 0.36 |
+| H1r (H1, planes from its height) | 0.181 / 0.312 | 4.25 / 3.09 | 23.8 / 20.9 | 0.10 / 0.11 | 0.39 / 0.36 |
+
+Height raster MAE on GT roof pixels: H0 3.20 / 2.26 m, H1 3.16 / 2.32 m, AHN nDSM 0.48 / 0.44 m;
+off roofs: H0 0.36 / 0.24 m, H1 0.43 / 0.28 m, AHN 0.52 / 0.62 m (trees).
+
+**Decision (seed 0):** best arm on val H1r. Rule 1 **fails** (face F1 -0.38 / -0.28 vs R, allowed
+-0.10; RMSE +2.88 / +1.82 m, allowed +0.75); rule 2 fails; rule 3 (slope head) **fails** (normal
+error -3.3 deg at Leidsche Rijn, +2.3 deg at Staphorst). The second-seed trigger fired on rule 3's
+RMSE margin (Staphorst +0.005 m vs the 0.05 bar), so seeds 1 (H0_s1, H1_s1) run under the same
+protocol (unit e049-s1); rule 1 cannot flip on a second seed (gap 0.28-0.38 vs 0.10).
+
+Reading: without height input the face partition collapses (adjacent faces and terraced houses
+merge); D shows those faces alone cost +0.55 m RMSE over R. Predicted heights then add
++1.0 to +2.3 m: the model finds buildings and keeps trees / ground at 0 (cleaner than AHN off
+roofs) but guesses storey counts (Leidsche Rijn flats 4-5 m too tall) and blurs ridges, so plane
+tilts are 20 deg off. Visual: `fig_e049_heights.png` (session scratchpad), status page section
+"RGB-only roofs".

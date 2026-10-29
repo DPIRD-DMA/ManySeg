@@ -1,0 +1,14 @@
+{
+ "fd82db466c70d35a1d55b1e994a0b2b237229c4baa6ad90a3cc0dc1b4c616cd6": {
+  "opened": "2026-10-29 10:02",
+  "arm": "H0",
+  "out": "$WORKSPACE/ManySeg-runs/e049-433109f/experiments/E049_lod2_rgb_height/runs/eval_H0_s0_H1_s0.json",
+  "completed": "2026-10-29 10:02"
+ },
+ "bc024fd40afec6808b18d112b3f8508bc27b1a7ae4a96b92b239683d03d1a337": {
+  "opened": "2026-10-29 10:02",
+  "arm": "H1",
+  "out": "$WORKSPACE/ManySeg-runs/e049-433109f/experiments/E049_lod2_rgb_height/runs/eval_H0_s0_H1_s0.json",
+  "completed": "2026-10-29 10:02"
+ }
+}
