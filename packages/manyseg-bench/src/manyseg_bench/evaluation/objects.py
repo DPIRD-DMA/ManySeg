@@ -151,15 +151,18 @@ class PointMetrics:
 
 class CountMetrics:
     def __init__(self) -> None:
-        self.abs = self.sq = 0.0
+        self.abs = self.sq = self.signed = 0.0
         self.n = 0
 
     def update(self, pred: Tensor, gt: Tensor) -> None:
         e = pred.double().cpu() - gt.double().cpu()
         self.abs += float(e.abs().sum())
+        self.signed += float(e.sum())
         self.sq += float((e ** 2).sum())
         self.n += e.numel()
 
     def compute(self) -> dict:
         n = max(1, self.n)
-        return {"mae": self.abs / n, "rmse": math.sqrt(self.sq / n), "n": self.n}
+        # bias: mean signed error (predicted - true count), e.g. a softplus background floor
+        return {"mae": self.abs / n, "rmse": math.sqrt(self.sq / n), "bias": self.signed / n,
+                "n": self.n}

@@ -279,8 +279,11 @@ class PointTask(Task):
                  calibrate: bool = True,
                  thresholds: tuple[float, ...] = (0.05, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5, 0.6,
                                                   0.7),
-                 density_scale: float = 100.0, head_scale: float = 1, decoders=None) -> None:
+                 density_scale: float = 100.0, head_scale: float = 1, decoders=None,
+                 density_activation: str | None = None) -> None:
         self.offsets, self.density, self.sigma, self.kind = offsets, density, sigma, heatmap
+        # density_activation: passed to manyseg.points.density_head (None or "softplus"; E011c)
+        self.density_activation = density_activation
         self.head_scale, self.decoders = head_scale, decoders
         _with_scale({}, head_scale)  # validate early
         self.radius, self.peak_threshold, self.density_scale = radius, peak_threshold, density_scale
@@ -297,7 +300,7 @@ class PointTask(Task):
         if self.density:
             d = self.decoders
             d = d.get("density") if isinstance(d, dict) else ("unet" if d == "separate" else d)
-            heads = density_head(d)
+            heads = density_head(d, activation=self.density_activation)
         else:
             heads = point_heads(self.kind, offsets=self.offsets, decoders=self.decoders)
         return _with_scale(heads, self.head_scale)
