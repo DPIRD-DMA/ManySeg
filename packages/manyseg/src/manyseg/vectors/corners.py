@@ -17,8 +17,8 @@ import math
 
 import numpy as np
 
+from ..utils._peaks import peak_pixels, refine
 from .graph import _deps
-from .graph_tensor import _peak_pixels, _refine
 from .polygons import polygons_from_labels
 
 
@@ -142,7 +142,7 @@ def polygons_from_corners(labels, corner, direction, *, corner_threshold: float 
     shapely = _deps()[1]
     cp = corner.detach().float().cpu().numpy() if hasattr(corner, "detach") else np.asarray(corner, np.float32)
     dr = direction.detach().float().cpu().numpy() if hasattr(direction, "detach") else np.asarray(direction, np.float32)
-    peaks = _refine(cp, _peak_pixels(cp, corner_threshold, kernel))
+    peaks = refine(cp, peak_pixels(cp, corner_threshold, kernel))
     out = []
     for poly in polygons_from_labels(labels, simplify=0.0, min_area=min_area):
         ring = np.asarray(shapely.segmentize(poly.exterior, 1.0).coords)

@@ -13,7 +13,6 @@ import pytest
 pytest.importorskip("skimage")
 from manyseg.vectors.roads import (  # noqa: E402
     RoadBlockDecoder,
-    _suppress,
     graph_from_road_heads,
 )
 
@@ -250,20 +249,6 @@ def test_dense_peaks_memory_is_bounded():
         keys = r["direction"][0]
         assert len(keys) <= area and np.all(np.diff(keys) > 0)
     assert _same(got, _whole(f, gap=0))
-
-
-def test_suppression_matches_peak_pixels():
-    from manyseg.vectors.graph import _deps
-    from manyseg.vectors.graph_tensor import _peak_pixels
-    from scipy import ndimage
-
-    rng = np.random.default_rng(0)
-    for _ in range(5):
-        hm = np.round(ndimage.gaussian_filter(rng.random((80, 90)), 1.5), 2).astype(np.float32)
-        keep = (hm == ndimage.maximum_filter(hm, size=5, mode="nearest")) & (hm > 0.45)
-        pts = np.argwhere(keep)
-        got = pts[_suppress(pts, hm[keep], 5, _deps()[2])]
-        assert np.array_equal(got, _peak_pixels(hm, 0.45, 5))
 
 
 def _fixture(name):

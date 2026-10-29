@@ -16,8 +16,8 @@ import math
 
 import numpy as np
 
+from ..utils._peaks import maxima_mask, peak_pixels, refine, suppress
 from .graph import VectorGraph, _deps, _nx_from_skeleton, bridge_ends
-from .graph_tensor import _peak_pixels, _refine
 
 CLASSES = ("junction", "end", "crossing")
 _KERNEL = 5  # keypoint peak max-filter size
@@ -129,7 +129,7 @@ def graph_from_road_heads(
         ]
 
     peaks = {
-        c: on_mask(_refine(kp[i], _peak_pixels(kp[i], keypoint_threshold, _KERNEL)))
+        c: on_mask(refine(kp[i], peak_pixels(kp[i], keypoint_threshold, _KERNEL)))
         for i, c in enumerate(CLASSES)
     }
     return _assemble(surf, peaks, d, (H, W), zone_radius, pair_deg, gap, scale)
@@ -360,11 +360,9 @@ class RoadBlockDecoder:
         need = np.zeros(m.shape, bool)
         for i, c in enumerate(CLASSES):
             hm = kp[i]
-            keep = (hm == ndimage.maximum_filter(hm, size=_KERNEL, mode="nearest")) & (
-                hm > p["keypoint_threshold"]
-            )
+            keep = maxima_mask(hm, p["keypoint_threshold"], _KERNEL)
             pix = np.argwhere(keep[cy, cx]) + (ct - wt, cl - wl)  # window pixels, raster order
-            xy = _refine_window(hm, pix, (wt, wl), (H, W))
+            xy = refine(hm, pix, origin=(wt, wl), shape=(H, W))  # as on the scene
             ix = np.clip(xy[:, 0].astype(int), 0, W - 1) - wl
             iy = np.clip(xy[:, 1].astype(int), 0, H - 1) - wt
             onm = m[iy, ix] > p["threshold"]
@@ -383,7 +381,6 @@ class RoadBlockDecoder:
     def combine(self, results: list, scene) -> VectorGraph:
         import warnings
 
-        cKDTree = _deps()[2]
         p = self.params
         H, W = int(scene.height), int(scene.width)
         bad = sum(bool(x.get("unstable")) for x in results)
@@ -412,7 +409,7 @@ class RoadBlockDecoder:
             xy = np.concatenate([q[2] for q in parts] or [np.zeros((0, 2))])
             onm = np.concatenate([q[3] for q in parts] or [np.zeros(0, bool)])
             o = np.lexsort((pix[:, 1], pix[:, 0]))
-            sel = o[_suppress(pix[o], val[o], _KERNEL, cKDTree)]  # as _peak_pixels
+            sel = o[suppress(pix[o], val[o], _KERNEL)]  # as peak_pixels on the scene
             peaks[c] = xy[sel[onm[sel]]].reshape(-1, 2)
         keys = np.concatenate([x["direction"][0] for x in results] or [np.zeros(0, np.int64)])
         vals = np.concatenate(
@@ -423,49 +420,6 @@ class RoadBlockDecoder:
         return _assemble(
             surf, peaks, d, (H, W), p["zone_radius"], p["pair_deg"], p["gap"], p["scale"]
         )
-
-
-def _refine_window(hm, pix, origin, scene_hw):
-    """:func:`~manyseg.vectors.graph_tensor._refine` of window pixels ``pix`` with the scene as
-    the image (``origin`` = window's top-left in the scene), so it equals a whole-scene call."""
-    if len(pix) == 0:
-        return np.zeros((0, 2))
-    H, W = scene_hw
-    h, w = hm.shape
-    lg = np.log(np.clip(hm, 1e-4, None))
-    r, c = pix[:, 0], pix[:, 1]
-    R, C = r + origin[0], c + origin[1]
-
-    def offset(lo, mid, hi):
-        den = lo - 2 * mid + hi
-        ok = den < -1e-9
-        return np.clip(np.where(ok, 0.5 * (lo - hi) / np.where(ok, den, -1), 0), -1, 1)
-
-    inx, iny = (C > 0) & (C < W - 1), (R > 0) & (R < H - 1)
-    dx = np.where(
-        inx, offset(lg[r, np.maximum(c - 1, 0)], lg[r, c], lg[r, np.minimum(c + 1, w - 1)]), 0
-    )
-    dy = np.where(
-        iny, offset(lg[np.maximum(r - 1, 0), c], lg[r, c], lg[np.minimum(r + 1, h - 1), c]), 0
-    )
-    return np.stack([C + 0.5 + dx, R + 0.5 + dy], 1)
-
-
-def _suppress(pts, vals, kernel, cKDTree):
-    """Indices of the peaks :func:`~manyseg.vectors.graph_tensor._peak_pixels` keeps, given its
-    local maxima ``pts`` in raster order and their values: strongest first, greedy."""
-    if len(pts) < 2:
-        return np.arange(len(pts))
-    order = np.argsort(-vals, kind="stable")
-    q = pts[order]
-    tree = cKDTree(q)
-    alive = np.ones(len(q), bool)
-    for i in range(len(q)):
-        if alive[i]:
-            for j in tree.query_ball_point(q[i], (kernel // 2) * 1.5):
-                if j > i:
-                    alive[j] = False
-    return order[alive]
 
 
 class _SparseField:

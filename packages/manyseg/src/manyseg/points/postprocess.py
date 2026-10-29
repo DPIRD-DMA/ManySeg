@@ -19,6 +19,7 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor
 
+from ..utils._peaks import maxima_mask
 from ..utils.resolution import scale_factor, to_input_coords
 
 
@@ -82,8 +83,7 @@ def find_peaks(heatmap: Tensor, threshold: float = 0.5, *, kernel: int = 3,
             raise ValueError(f"mask {tuple(m.shape)} does not match the heatmap "
                              f"{tuple(hm.shape)}")
         hm = hm.masked_fill(~(m.bool() if m.dtype == torch.bool else m > 0), float("-inf"))
-    pooled = F.max_pool2d(hm[:, None], kernel, stride=1, padding=kernel // 2)[:, 0]
-    keep = (hm == pooled) & (hm > threshold)
+    keep = maxima_mask(hm, threshold, kernel)
     out = []
     for i in range(hm.shape[0]):
         pts = torch.nonzero(keep[i])
