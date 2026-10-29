@@ -254,3 +254,16 @@ def test_coordinate_conversions():
     hm = gaussian_heatmap([points_from_xy([[3.5, 2.5]])], (5, 6))
     assert hm.shape == (1, 1, 5, 6) and hm[0, 0, 2, 3] == 1.0
     assert points_to_xy(np.zeros((0, 2))).shape == (0, 2)
+
+
+def test_slice_pair_blocks_from_vectors_block_grid():
+    """The older manyseg.vectors.blocks.Block stores core / window as (row slice, col slice)."""
+    pytest.importorskip("scipy")
+    from manyseg.vectors.blocks import block_grid
+
+    hm = scene_heatmap()
+    dec = PointBlockDecoder(threshold=0.3, kernel=5)
+    s = Scene(*hm.shape[1:])
+    res = [dec({"heatmap": hm[(slice(None), *b.window)]}, b, s)
+           for b in block_grid(hm.shape[1:], 24, dec.reach, offset=(5, 7))]
+    assert np.array_equal(dec.combine(res, s).pixels, reference(hm, threshold=0.3, kernel=5)[0])

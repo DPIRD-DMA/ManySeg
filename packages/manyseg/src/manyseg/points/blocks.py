@@ -71,6 +71,10 @@ class ScenePoints:
 
 
 def _bounds(b) -> tuple[int, int, int, int]:
+    """``(top, bottom, left, right)`` from the contract's 4-tuple or a ``(row slice, col slice)``
+    pair (the older ``manyseg.vectors.blocks.Block``)."""
+    if len(b) == 2 and all(isinstance(v, slice) for v in b):
+        b = (b[0].start, b[0].stop, b[1].start, b[1].stop)
     t, bo, le, r = (int(v) for v in b)
     if not (t <= bo and le <= r):
         raise ValueError(f"expected (top, bottom, left, right), got {tuple(b)}")
