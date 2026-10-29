@@ -114,6 +114,13 @@ First release. Python 3.10–3.14, PyTorch ≥ 2.10, timm ≥ 1.0.20.
   double-angle direction rule). `manyseg-bench`: `CornerLineTask` (`"corner_lines"`) and
   `RoadGraphTask` (`"roads"`) with the E030 / E044 losses; `GPULoader` takes label dicts,
   `dihedral=True` and `directions=`, and the runner uses them for tasks with direction targets.
+* Target encoders from vector data: `to_pixels` (features in a CRS, as shapely, GeoJSON or a
+  GeoDataFrame, cut to a tile's geotransform and shape in pixel coordinates; reprojected when
+  the CRSs differ; `pixel_to_world`, `world_to_pixel`, `from_gdal`), `footprint_targets`,
+  `roof_face_targets` and `field_targets` (every head's target for the corner-line preset or
+  the instance heads), `road_graph` (lines → road graph + grade-separated crossings for
+  `road_targets`) and `rasterize_instances`. The `vectors` extra now includes `rasterio`, which
+  `corner_targets` and `road_targets` already needed.
 ### Performance (E026; values unchanged up to rounding)
 
 * bf16 autocast no longer carries float32 activations where CUDA runs an op in float32:

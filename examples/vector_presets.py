@@ -1,7 +1,8 @@
 """Training the vector-output presets (runs on CPU with random weights).
 
 Corner-line instances (footprints, fields, roof faces) and unified roads: head preset -> targets
-encoded from geometry (polygons, a road graph) -> a random dihedral transform per step, with the
+encoded from vector data in world coordinates (building polygons and road lines in a projected
+CRS, cut to one tile with ``to_pixels``) -> a random dihedral transform per step, with the
 direction fields transformed too -> a few training steps -> vector decoding.
 
 The losses here are short versions of manyseg-bench's ``CornerLineTask`` and ``RoadGraphTask``
@@ -43,24 +44,36 @@ def augment(d, image, targets, directions=("direction",)):
                                 for k, v in targets.items()}
 
 
+# The tile: 0.5 m pixels, top-left corner at (391000, 6466000) in MGA zone 50 (EPSG:28350), as
+# rasterio's dataset.transform gives it (a GDAL geotransform converts with from_gdal).
+TRANSFORM = (0.5, 0.0, 391_000.0, 0.0, -0.5, 6_466_000.0)
+
+
 def corner_lines(size=64, steps=15):
     import shapely
     from manyseg.instances import instance_targets, instances_from_outputs
-    from manyseg.vectors import corner_line_heads, corner_targets, polygons_from_corners
-    from rasterio.features import rasterize
-    from rasterio.transform import Affine
+    from manyseg.vectors import (
+        corner_line_heads,
+        footprint_targets,
+        polygons_from_corners,
+        to_pixels,
+    )
 
-    polys = [shapely.affinity.rotate(shapely.box(8, 10, 26, 22), 20, origin="centroid"),
-             shapely.Polygon([(36, 8), (56, 8), (56, 30), (46, 30), (46, 18), (36, 18)]),
-             shapely.box(12, 38, 30, 56), shapely.box(40, 40, 56, 54)]
-    ids = rasterize([(p, k + 1) for k, p in enumerate(polys)], out_shape=(size, size),
-                    transform=Affine.identity(), dtype="int32")
-    ids = torch.from_numpy(ids).long()
+    x0, y0 = 391_000.0, 6_466_000.0  # building outlines in metres (e.g. a cadastre layer)
+    buildings = [shapely.affinity.rotate(shapely.box(x0 + 4, y0 - 11, x0 + 13, y0 - 5), 20),
+                 shapely.Polygon([(x0 + 18, y0 - 4), (x0 + 28, y0 - 4), (x0 + 28, y0 - 15),
+                                  (x0 + 23, y0 - 15), (x0 + 23, y0 - 9), (x0 + 18, y0 - 9)]),
+                 shapely.box(x0 + 6, y0 - 28, x0 + 15, y0 - 19),
+                 shapely.box(x0 + 20, y0 - 27, x0 + 34, y0 - 20)]  # cut by the tile's edge
+    # GeoJSON features, a GeoDataFrame (crs= / raster_crs= reproject) or shapely geometries
+    polys = to_pixels(buildings, TRANSFORM, (size, size))
+    t = footprint_targets(polys, (size, size))  # instances, corner, direction(_mask), extent...
+    ids = torch.from_numpy(t["instances"]).long()
     image = torch.rand(3, size, size) * 0.2 + (ids > 0).float() * (0.5 + 0.1 * (ids % 3))
-    ct = corner_targets(polys, (size, size))  # corner heatmap, wall directions, outline mask
-    targets = {"instances": ids, **{k: torch.from_numpy(v) for k, v in ct.items()}}
+    targets = {k: torch.from_numpy(t[k]) for k in ("corner", "direction", "direction_mask")}
+    targets["instances"] = ids  # what CornerLineTask reads (it derives extent etc. itself)
     # Perfect outputs round-trip: the instances and the target maps decode to straight walls
-    exact = polygons_from_corners(ids.numpy(), ct["corner"], ct["direction"])
+    exact = polygons_from_corners(t["instances"], t["corner"], t["direction"])
     print("corner lines: vertices per polygon from the targets:",
           [len(q.exterior.coords) - 1 for q in exact])
 
@@ -95,17 +108,25 @@ def corner_lines(size=64, steps=15):
 
 
 def roads(size=64, steps=15):
-    import networkx as nx
     import numpy as np
-    from manyseg.vectors import graph_from_road_heads, road_heads, road_targets
+    import shapely
+    from manyseg.vectors import (
+        graph_from_road_heads,
+        road_graph,
+        road_heads,
+        road_targets,
+        to_pixels,
+    )
 
-    g = nx.Graph()
-    for n, xy in {"w": (0, 30), "j": (30, 31), "e": (64, 26), "s": (31, 64), "end": (40, 8),
-                  "a": (50, 0), "b": (58, 64)}.items():
-        g.add_node(n, xy=np.array(xy, float))
-    g.add_edges_from([("w", "j"), ("j", "e"), ("j", "s"), ("j", "end")], width=6.0)
-    g.add_edge("a", "b", width=8.0)  # an overpass: crosses the other roads without a node
-    crossing = [(53.4, 27.6)]
+    def world(*xy):  # pixel positions of this toy network -> metres (EPSG:28350)
+        return shapely.LineString([(391_000 + 0.5 * x, 6_466_000 - 0.5 * y) for x, y in xy])
+
+    # OSM-style ways: the junction is a shared vertex; the overpass shares none
+    ways = [world((0, 30), (30, 31)), world((30, 31), (64, 26)), world((30, 31), (31, 64)),
+            world((30, 31), (40, 8)), world((50, 0), (58, 64))]
+    lines, src = to_pixels(ways, TRANSFORM, (size, size), return_index=True)
+    widths = np.array([3.0, 3.0, 3.0, 3.0, 4.0])[src] / 0.5  # metres -> pixels
+    g, crossing = road_graph(lines, widths=widths)  # junctions + grade-separated crossings
     rt = road_targets(g, (size, size), crossings=crossing)  # mask, line, keypoints, direction
     targets = {k: torch.from_numpy(v) for k, v in rt.items()}
     image = torch.rand(3, size, size) * 0.2 + targets["mask"] * 0.6
@@ -148,7 +169,7 @@ def main():
         import rasterio  # noqa: F401
         import shapely  # noqa: F401
     except ImportError:
-        print("skipping: needs pip install 'manyseg[vectors]' rasterio")
+        print("skipping: needs pip install 'manyseg[vectors]'")
         return
     torch.manual_seed(0)
     corner_lines()

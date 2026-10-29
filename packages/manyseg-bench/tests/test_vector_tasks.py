@@ -166,6 +166,47 @@ def test_tasks_registered_and_full_resolution_only():
         RoadGraphTask().loss(half, t)
 
 
+def test_library_encoders_feed_the_tasks():
+    """footprint_targets / road_graph + road_targets give exactly the labels the tasks read: the
+    instance targets CornerLineTask derives equal the encoder's, and outputs equal to the
+    targets score a lower loss than random ones."""
+    from manyseg.vectors import footprint_targets, road_graph
+
+    size = 64
+    polys, _ = _corner_sample(size)
+    ft = footprint_targets(polys, (size, size))
+    task = CornerLineTask()
+    y = {k: torch.from_numpy(ft[k])[None] for k in ("instances", "corner", "direction",
+                                                     "direction_mask")}
+    y["instances"] = y["instances"].long()
+    inner = task.targets(y)["inner"]
+    for k in ("extent", "boundary", "distance"):
+        torch.testing.assert_close(inner[k][0, 0], torch.from_numpy(ft[k]), rtol=0, atol=0)
+
+    def logit(a):
+        return torch.logit(torch.as_tensor(a).float().clamp(0.02, 0.98))
+
+    good = {"extent": logit(ft["extent"])[None, None],
+            "boundary": logit(ft["boundary"])[None, None],
+            "distance": torch.from_numpy(ft["distance"])[None, None],
+            "corner": logit(ft["corner"])[None, None],
+            "direction": torch.from_numpy(ft["direction"])[None]}
+    bad = {k: torch.randn_like(v) for k, v in good.items()}
+    assert float(task.loss(good, y)) < float(task.loss(bad, y))
+
+    lines = [shapely.LineString([(0, 30.5), (64, 34.2)]),
+             shapely.LineString([(30.1, 0), (33.3, 64)])]
+    g, cr = road_graph(lines)
+    assert len(cr) == 1  # no shared vertex: an overpass
+    rt = road_targets(g, (size, size), crossings=cr)
+    yr = {k: torch.from_numpy(v)[None] for k, v in rt.items()}
+    rtask = RoadGraphTask()
+    good = {"mask": logit(rt["mask"])[None, None], "line": logit(rt["line"])[None, None],
+            "keypoints": logit(rt["keypoints"])[None], "direction": yr["direction"]}
+    bad = {k: torch.randn_like(v) for k, v in good.items()}
+    assert float(rtask.loss(good, yr)) < float(rtask.loss(bad, yr))
+
+
 # --- loader: dihedral augmentation of direction targets ------------------------------------------
 
 def _corner_sample(size=48):
