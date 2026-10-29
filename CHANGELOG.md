@@ -138,7 +138,10 @@ First release. Python 3.10–3.14, PyTorch ≥ 2.10, timm ≥ 1.0.20.
   settings (`graph_from_road_heads` shares the roads ones). `graph_from_road_heads` and
   `RoadBlockDecoder` take `logits=True` (sigmoid on `mask` and `keypoints`), as the instance
   decoders (`extent`, `boundary` and `corner`) and `PointBlockDecoder` (heatmap and mask field)
-  do. `bridge_ends` modifies its graph in place and returns it.
+  do. `bridge_ends` modifies its graph in place and returns it. Road graph ends within
+  `BORDER_MARGIN` = 5 px of the image border (was 3 px) count as at the border: roads leaving the
+  scene run to its edge, and two cut ends are no longer bridged by a fake road along it (found by
+  the end-to-end test; on the City-Scale fixtures only graph parts within 30 px of the border change).
 * **One decode path for any scene size:** `decode_scene(fields, block_decoder(task))` (tuned
   defaults for `"footprints"`, `"fields"`, `"roofs"`, `"roads"`, `"points"`, `"density"`;
   default `block=4096`, so a smaller scene is one block), over arrays or memmaps; `block_grid`,

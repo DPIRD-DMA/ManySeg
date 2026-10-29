@@ -1173,10 +1173,6 @@ NORMALISED_ROOFS = ("per-tile normalised distance: roof faces in the overlap res
 ACUTE_TIPS = ("decoder limit, also in the single pass: the 45-degree tip of a hip-end face "
               "between two walls' boundary bands gets its own seed and becomes an extra "
               "17-25 px face (instances_from_outputs)")
-BORDER_BRIDGE = ("library issue, also in the single pass: two roads leaving the top scene edge "
-                 "48 px apart skeletonise to ends 3.25 px from the border, just past "
-                 "bridge_ends' 3 px border margin, and are joined by a 49 px road along the "
-                 "edge (precision 0.985), which also joins the overpass to the network")
 # (task, merge, distance, str(grid)) of the slow tier that fail for these reasons
 _ORACLE = {
     ("roofs", "cut", "normalized", "700x1000-p256-o32-s0,0"): ACUTE_TIPS,
@@ -1184,8 +1180,6 @@ _ORACLE = {
     ("roofs", "cut", "absolute", "700x1000-p256-o128-s17.3,-9.6"): ACUTE_TIPS,
     ("roofs", "blend", "absolute", "700x1000-p256-o128-s17.3,-9.6"): ACUTE_TIPS,
     ("roofs", "cut", "normalized", "700x1000-p512-o256-s-31.5,23.25"): ACUTE_TIPS,
-    ("roads", "cut", "normalized", "700x1000-p512-o256-s-31.5,23.25"): BORDER_BRIDGE,
-    ("roads", "blend", "normalized", "700x1000-p512-o256-s-31.5,23.25"): BORDER_BRIDGE,
 }
 
 
@@ -1218,8 +1212,7 @@ class ExpectedFailure(AssertionError):
 _ALLOWED = {NORMALISED_SEAMS: {"agreement", "extra", "split", "merged", "missing", "mean_iou",
                                "min_iou", "polis", "holes", "blocks"},
             NORMALISED_ROOFS: {"agreement", "extra", "split", "merged", "missing", "mean_iou"},
-            ACUTE_TIPS: {"extra"},
-            BORDER_BRIDGE: {"precision", "components", "length"}}
+            ACUTE_TIPS: {"extra"}}
 
 
 def _params(grids):

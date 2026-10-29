@@ -255,7 +255,13 @@ def _join_degree2(nodes, chains):
         nodes.pop(n2, None)
 
 
-def _near_border(p, shape, margin=3.0) -> bool:
+# A road cut by the image border ends its skeleton about half a road width inside (3.25 px for
+# 6 px roads); within this margin an end counts as "at the border": spur pruning keeps it and
+# bridge_ends does not join it to another cut end (E2E test, 2026-10-29; was 3 px).
+BORDER_MARGIN = 5.0
+
+
+def _near_border(p, shape, margin=BORDER_MARGIN) -> bool:
     return min(p[0], p[1], shape[1] - p[0], shape[0] - p[1]) <= margin
 
 
@@ -274,7 +280,7 @@ def _prune_spurs(nodes, chains, spur, shape, passes=2):
 
 
 def bridge_ends(g, gap: float, shape):
-    """Join mutually-nearest dangling ends (degree 1, not within 3 px of the image border) of
+    """Join mutually-nearest dangling ends (degree 1, not within ``BORDER_MARGIN`` = 5 px of the image border) of
     the ``networkx`` graph ``g`` (nodes carry ``xy``) closer than ``gap`` px, unless a path
     shorter than ``3 * gap`` already joins them.
 
