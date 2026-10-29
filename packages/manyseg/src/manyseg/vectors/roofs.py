@@ -150,14 +150,15 @@ def roof_records(anchors, faces, height, origin: tuple[int, int] = (0, 0), *,
 
 
 def roof_faces(labels, corner, direction, height, *, tolerance: float = 2.5, erode: int = 2,
-               trim: float = 0.2, mesh: str | None = "J2", corner_threshold: float = 0.3,
-               kernel: int = 3, snap_radius: float = 4.0, big_dev: float = 8.0,
-               agree: float = 0.4, merge_deg: float = 15.0, simplify: float = 1.0,
+               trim: float = 0.2, mesh: str | None = "J2", corner_threshold: float = 0.5,
+               kernel: int = 3, snap_radius: float = 4.0, big_dev: float = 4.0,
+               agree: float = 0.6, merge_deg: float = 8.0, simplify: float = 1.0,
                min_area: float = 16) -> list[dict]:
     """Whole-scene roof decode from instance ``labels`` (H, W), ``corner`` (H, W), ``direction``
     (2, H, W) and ``height`` (H, W, nDSM in metres): faces of :func:`polygons_from_corners`
-    (same parameters) -> :func:`roof_records`. ``block_decoder("roofs")`` gives the same records
-    block by block on scenes too large for memory."""
+    (same parameters) -> :func:`roof_records`. Defaults are E047b's tuned F3 settings, as in
+    ``block_decoder("roofs")``, which gives the same records block by block on scenes too large
+    for memory (with the same parameters and instance labels from the same thresholds)."""
     from scipy import ndimage
 
     from .corners import _corner_peaks, _instance_polygon

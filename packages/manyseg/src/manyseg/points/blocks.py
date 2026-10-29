@@ -63,11 +63,15 @@ class ScenePoints:
     def to_geojson(self, transform=None, properties: dict | None = None) -> dict:
         """GeoJSON ``Point`` features through ``transform`` (default: the scene's; pixel
         coordinates when neither is known), with a ``score`` property plus any columns in
-        ``properties``. Needs the ``vectors`` extra."""
+        ``properties``; the scene's ``crs`` is written as a ``name`` member, as
+        :func:`~manyseg.vectors.records_to_geojson` does. Needs the ``vectors`` extra."""
         from ..vectors.polygons import to_geojson
 
         t = self.transform if transform is None else transform
-        return to_geojson(self.xy, t, {"score": self.scores, **(properties or {})})
+        fc = to_geojson(self.xy, t, {"score": self.scores, **(properties or {})})
+        if self.crs is not None:
+            fc["crs"] = {"type": "name", "properties": {"name": str(self.crs)}}
+        return fc
 
 
 def _bounds(b) -> tuple[int, int, int, int]:

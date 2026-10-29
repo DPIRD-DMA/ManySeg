@@ -177,6 +177,10 @@ def test_float16_fields_and_scene_transform():
     ref_p, ref_s = reference(hm.astype(np.float32), threshold=0.4)
     assert np.array_equal(out.pixels, ref_p) and np.array_equal(out.scores, ref_s)
     assert out.transform == t and out.crs == "EPSG:28350"
+    pytest.importorskip("shapely")
+    fc = out.to_geojson()  # the scene's CRS travels with the points, as in records_to_geojson
+    assert fc["crs"] == {"type": "name", "properties": {"name": "EPSG:28350"}}
+    assert len(fc["features"]) == len(out.pixels)
 
 
 def test_empty_and_pickling():
