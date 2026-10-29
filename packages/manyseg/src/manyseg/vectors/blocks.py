@@ -754,15 +754,21 @@ def block_decoder(task: str, **params) -> BlockDecoder:
     * ``"roofs"``: as footprints + ``height`` (nDSM, metres); E047 F3 thresholds and corners,
       :func:`planar_faces` (2.5 px), E043b robust planes, J2 mesh (``mesh=None`` skips it).
     * ``"roads"``: mask, keypoints, direction; :class:`manyseg.vectors.roads.RoadBlockDecoder`.
+    * ``"points"``: a point heatmap; :class:`manyseg.points.blocks.PointBlockDecoder`.
+    * ``"density"``: a density head's count; :class:`manyseg.points.blocks.DensityBlockDecoder`.
     """
     if task == "roads":
         from .roads import RoadBlockDecoder
 
         return RoadBlockDecoder(**params)
+    if task in ("points", "density"):
+        from ..points.blocks import DensityBlockDecoder, PointBlockDecoder
+
+        return (PointBlockDecoder if task == "points" else DensityBlockDecoder)(**params)
     if task == "roofs":
         return RoofBlockDecoder(**params)
     if task not in _DEFAULTS:
-        raise ValueError(f"unknown task {task!r}: footprints|fields|roofs|roads")
+        raise ValueError(f"unknown task {task!r}: footprints|fields|roofs|roads|points|density")
     kw = dict(_DEFAULTS[task])
     if task == "footprints" and params.get("method") == "outline":
         kw["simplify"] = 1.0  # E038 B0

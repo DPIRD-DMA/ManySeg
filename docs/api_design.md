@@ -901,6 +901,8 @@ when a block's halo is smaller on a side that is not the scene edge. Offsets (`d
 at the peak, so a refined point may sit just outside its core. Results are sorted by score, ties
 in raster order; `max_points` applies to the whole scene. `DensityBlockDecoder` sums a density
 field over each core (`SceneCount`: total and per-block counts; no halo needed).
+`manyseg.vectors.block_decoder("points", **params)` and `block_decoder("density", **params)` build
+the same two decoders.
 `to_pixels(kind="points")` keeps `0 <= x < W`, `0 <= y < H`, so a point on a shared tile edge
 goes to one tile (within float rounding of the edge it can go either way).
 

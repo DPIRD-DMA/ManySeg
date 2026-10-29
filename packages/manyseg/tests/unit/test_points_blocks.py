@@ -267,3 +267,25 @@ def test_blocks_from_vectors_block_grid():
     res = [dec({"heatmap": hm[:, b.window[0]:b.window[1], b.window[2]:b.window[3]]}, b, s)
            for b in block_grid(*hm.shape[1:], 24, dec.reach, offset=(5, 7))]
     assert np.array_equal(dec.combine(res, s).pixels, reference(hm, threshold=0.3, kernel=5)[0])
+
+
+def test_block_decoder_registry_points_and_density():
+    """manyseg.vectors.block_decoder("points" | "density", **params) builds the point decoders,
+    and decode_scene runs them like the whole scene."""
+    pytest.importorskip("scipy")
+    from manyseg.vectors import block_decoder, decode_scene
+
+    dec = block_decoder("points", threshold=0.3, kernel=5, max_points=50)
+    assert type(dec) is PointBlockDecoder and dec.kernel == 5 and dec.max_points == 50
+    assert type(block_decoder("density")) is DensityBlockDecoder
+    assert block_decoder("density", value_scale=4.0, mask="fg").value_scale == 4.0
+    with pytest.raises(TypeError):
+        block_decoder("points", min_area=3)  # not a PointBlockDecoder parameter
+
+    hm = scene_heatmap()
+    out = decode_scene({"heatmap": hm[0]}, block_decoder("points", threshold=0.3, kernel=5),
+                       24, 2, offset=(5, 7))  # 2-D field, as ManyPred-free callers pass it
+    assert np.array_equal(out.pixels, reference(hm, threshold=0.3, kernel=5)[0])
+    d = np.abs(hm).astype(np.float32)
+    cnt = decode_scene({"density": d}, block_decoder("density", value_scale=2.0), 24, 0)
+    assert cnt.total == pytest.approx(float(d.sum(dtype=np.float64)) / 2.0, rel=1e-6)
