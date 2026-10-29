@@ -75,3 +75,11 @@ For roofs, no stitching closes the gap (0.91 in overlaps vs 0.98 elsewhere): eve
 a 512 px patch with 128 overlap lies within 128 px of some patch edge, so the predictions there
 lack context whichever patch is used. That points to patch size / overlap (context), not the merge
 rule; not tested here. Figures: status page, section "Stitching".
+
+## E050b (pre-registered 12:20, user request): does more context fix the roof gap?
+Roofs only, the 4 test scenes, merges blend and midline (no tuned parameters, so no val stage).
+Tile settings (patch, overlap): (512, 128) as E050, (512, 256), (1024, 256), (1024, 512).
+Metric: face agreement F1 with the single-pass decode over **all faces** (zones differ between
+settings), plus the overlap-zone value. Rule: more context helps if a setting raises all-face F1
+by >= 0.01 over (512, 128) with the same merge; the smallest setting that does is recommended as
+the roof default. Cost reported as the number of model patches per scene.
