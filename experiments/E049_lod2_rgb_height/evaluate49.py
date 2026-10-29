@@ -59,7 +59,7 @@ def work(item):
                 else:  # "ndsm": the real AHN nDSM (R, D)
                     P = e043.planes(faces, {"height": nd.astype(np.float32)}, "robust")
                 rows.append(V._row(t, faces, P))
-    h = prob["height"].astype(np.float32) if "height" in prob else nd.astype(np.float32)
+    h = prob["height_raw"].astype(np.float32) if "height_raw" in prob else nd.astype(np.float32)
     hs = dict(roof_abs=float(np.abs(h - t.height)[t.mask].sum()), roof_n=int(t.mask.sum()),
               off_abs=float(np.abs(h)[~t.mask].sum()), off_n=int((~t.mask).sum()))
     return rows, hs
@@ -79,6 +79,8 @@ def predict(model, kind, split, n):
         with torch.autocast("cuda", dtype=torch.bfloat16):
             out = model(x)
         p = b3_probabilities(out, 0) if kind == "R" else T9.probabilities(out, 0)
+        if kind != "R":  # unclamped prediction for the height MAE (Codex E049 #2)
+            p["height_raw"] = out["height"][0, 0].float().cpu().numpy() * T9.H_SCALE
         yield i, {k: v.astype(np.float16) for k, v in p.items()}
 
 
@@ -117,8 +119,10 @@ def tune(model, procs, limit):
     return {"thr": thr, "params": GRID3[k], "val": v2[k]}
 
 
-def decide(test, best):
-    areas = [a for a in AREAS if a in test["R"]["areas"]] or list(test["R"]["areas"])
+def decide(test, best, smoke=False):
+    areas = sorted(test["R"]["areas"])
+    if not smoke and set(areas) != set(AREAS):  # both test areas required (Codex E049 #5)
+        raise SystemExit(f"test areas {areas} != {AREAS}")
     b, r = test[best]["areas"], test["R"]["areas"]
     df = {a: b[a]["face_f1"] - r[a]["face_f1"] for a in areas}
     dh = {a: b[a]["h_rmse"] - r[a]["h_rmse"] for a in areas}
@@ -130,7 +134,7 @@ def decide(test, best):
     slope = all(dn[a] <= -1.0 and dr[a] <= 0.05 for a in areas)
     margins = [abs(df[a] + 0.10) for a in areas] + [abs(df[a] + 0.03) for a in areas]
     hm = [abs(dh[a] - 0.75) for a in areas] + [abs(dh[a] - 0.25) for a in areas] + [abs(dr[a] - 0.05) for a in areas]
-    return {"best_arm": best, "face_f1_vs_R": df, "h_rmse_vs_R": dh, "rgb_only_viable": viable,
+    return {"decision_grade": not smoke, "best_arm": best, "face_f1_vs_R": df, "h_rmse_vs_R": dh, "rgb_only_viable": viable,
             "close_to_dsm": close, "h1_minus_h0_normal_deg": dn, "h1_minus_h0_rmse": dr, "slope_head_worth_it": slope,
             "second_seed_needed": min(margins) < 0.02 or min(hm) < 0.05 or min(abs(dn[a] + 1.0) for a in areas) < 0.25}
 
@@ -151,17 +155,22 @@ def main():
     ap.add_argument("--procs", type=int, default=6)
     ap.add_argument("--limit", type=int, default=None)
     args = ap.parse_args()
-    sha = hashlib.sha256(args.h0.read_bytes() + args.h1.read_bytes()).hexdigest()
+    # test once per checkpoint, each keyed separately and reserved before test opens (Codex E049 #3)
+    shas = {k: hashlib.sha256(p.read_bytes()).hexdigest() for k, p in (("H0", args.h0), ("H1", args.h1))}
     ledger = HERE / "runs" / "test_ledger.json"
     led = json.loads(ledger.read_text()) if ledger.exists() else {}
     out = HERE / "runs" / f"eval_{args.h0.stem}_{args.h1.stem}{'_limit' if args.limit else ''}.json"
-    if not args.limit and (out.exists() or sha in led):
-        raise SystemExit(f"test already evaluated for these checkpoints ({out}, {led.get(sha)})")
+    if not args.limit and (out.exists() or any(s in led for s in shas.values())):
+        raise SystemExit(f"test already opened for a checkpoint ({out}, {[led.get(s) for s in shas.values()]})")
+    sha = shas
     h0, s0 = load(args.h0, "H0")
     h1, s1 = load(args.h1, "H1")
     ev47 = json.loads((E47 / "runs" / "eval_B3_s0_e150.json").read_text())
+    rpath = E47 / "runs" / "B3_s0_e150.pt"
+    if hashlib.sha256(rpath.read_bytes()).hexdigest() != ev47["sha256"]:  # Codex E049 #4
+        raise SystemExit(f"{rpath} is not the E047b checkpoint {ev47['sha256']}")
     r = T.build()
-    r.load_state_dict(torch.load(E47 / "runs" / "B3_s0_e150.pt", map_location="cpu"))
+    r.load_state_dict(torch.load(rpath, map_location="cpu"))
     r = r.cuda().eval()
     res = {"seeds": [s0, s1], "sha256": sha, "r_sha256": ev47["sha256"]}
     t0 = time.time()
@@ -177,6 +186,10 @@ def main():
     res["selected"], res["val_scores"] = sel, vs
     test, hm = {}, {}
     test_split = "val" if args.limit else "test"  # smoke runs never touch test
+    if not args.limit:
+        for k, s in shas.items():
+            led[s] = {"opened": time.strftime("%Y-%m-%d %H:%M"), "arm": k, "out": str(out)}
+        ledger.write_text(json.dumps(led, indent=1))
     for name, model, kind, s, modes, keys in (("H0", h0, "H", sel["H0"], ["pred", "ndsm"], ["H0", "D"]),
                                               ("H1", h1, "H", sel["H1"], ["slope", "pred"], ["H1", "H1r"]),
                                               ("R", r, "R", sel["R"], ["ndsm"], ["R"])):
@@ -186,11 +199,12 @@ def main():
             print(key, "test", {a: {x: round(y, 3) for x, y in v[j].items() if isinstance(y, float)} for a, v in areas.items()}, flush=True)
         hm[name] = hmae
     res["test"], res["height_mae"] = test, hm
-    res["decision"] = decide(test, best)
+    res["decision"] = decide(test, best, smoke=bool(args.limit))
     res["wall_s"] = time.time() - t0
     out.write_text(json.dumps(res, indent=1))
     if not args.limit:
-        led[sha] = str(out)
+        for s in shas.values():
+            led[s]["completed"] = time.strftime("%Y-%m-%d %H:%M")
         ledger.write_text(json.dumps(led, indent=1))
     print(json.dumps(res["decision"], indent=1), json.dumps(hm, indent=1))
 

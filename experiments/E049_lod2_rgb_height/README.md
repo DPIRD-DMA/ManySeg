@@ -50,3 +50,16 @@ and for the real nDSM.
    RMSE <= H0 + 0.05 m (face F1 reported; H0 and H1 are different models).
 Seed 0 only; a second seed if any rule margin is within 0.02 (F1) / 0.05 m / 0.25 deg.
 Test once per checkpoint (ledger keyed by SHA-256).
+
+## Amendment 1 (09:35, during training, before any evaluation; Codex review notes/codex_e049.md)
+* Height target: `train49.py targets` clips the E031 height to [0, 100] m. This touches 0.003% of
+  train roof pixels (1051 below 0, min -5.6 m; 4096 above 100 m), 0.005% of val and 0.002% of
+  test; kept (no retrain), the metric still scores the unclipped E031 height.
+* Predicted heights are clamped at 0 before plane fitting (heights above ground cannot be
+  negative); the height MAE is reported on the raw, unclamped prediction.
+* "J2 mesh" in the arms: the metrics are E031's face / plane rasters as in E047 (J2 does not change
+  them); J2 meshes are built only for the visual 3D comparison.
+* Protocol: the test ledger keys each checkpoint (H0, H1) separately and is written before the test
+  split opens; the R checkpoint's SHA-256 must equal E047b's; full runs require both test areas;
+  `--limit` smoke runs (val only) are marked non-decision-grade. One smoke run was made with
+  2-epoch smoke checkpoints; no smoke run uses the real checkpoints.
