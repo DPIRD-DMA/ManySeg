@@ -812,6 +812,63 @@ from manyseg.vectors import graph_tensor_heads, polygons_from_tensor
 Metrics (APLS, GEO precision / recall, junction F1, grade-separated crossings, C-IoU, PoLiS,
 N-ratio) are in `manyseg_bench.evaluation.vectors`.
 
+**Training presets.** Two trained models have head presets, target encoders and bench tasks with
+the experiments' losses. Both use built-in head types; the focal-loss heatmap heads start at
+`p = 0.1` (`bias_init = logit(0.1)`).
+
+| Preset | Heads | Targets | Bench task (`manyseg_bench.tasks`) | Decoding |
+| --- | --- | --- | --- | --- |
+| `corner_line_heads()`: footprints, fields, roof faces (B3; E036, E038, E047) | `extent`, `boundary`, `distance` (as `instance_heads`), `corner` (1), `direction` (2: `cos 2t`, `sin 2t`) | `instance_targets(ids, boundary_width=2)` + `corner_targets(polygons, shape)` | `CornerLineTask` (`"corner_lines"`): instance loss + CenterNet focal (corner) + masked L1 (direction on outlines); PQ | `instances_from_outputs` → `polygons_from_corners` |
+| `road_heads()`: roads (R4; E039, E044) | `mask` (1), `line` (1), `keypoints` (3: junction, end, crossing), `direction` (4: two modes) | `road_targets(graph, shape, crossings=, width=6)` | `RoadGraphTask` (`"roads"`): Dice + BCE (mask, line) + focal over the keypoints (positives floored at 16) + L1 (mode 1 on roads, mode 2 at crossings); mask IoU | `graph_from_road_heads` |
+
+Targets carry pixel widths, sigmas and angles, so augment them only with the 8 exact dihedral
+transforms (`manyseg.vectors.dihedral(a, d, direction=True)` for the direction fields: a quarter
+turn negates `(cos 2t, sin 2t)`, a flip negates `sin 2t`, a transpose `cos 2t`;
+`dihedral_geometry` / `dihedral_xy` move the polygons or graph to match). The bench does this
+itself for these tasks (`GPULoader(dihedral=True, directions=...)`), from a dataset cache whose
+labels are a dict of target arrays (`{split}_masks.{name}.npy`). Example:
+[`examples/vector_presets.py`](../examples/vector_presets.py).
+
+**From your vector data to training targets.** Vector labels in a CRS (OSM roads, cadastre
+footprints, field parcels, LoD2 roof faces) become one tile's targets in two calls:
+`to_pixels` cuts them to the tile in pixel coordinates, an encoder returns every head's target
+as numpy arrays under the preset's head names.
+
+```python
+from manyseg.vectors import footprint_targets, road_graph, road_targets, to_pixels
+
+with rasterio.open("tile.tif") as src:              # or a GDAL geotransform via from_gdal(gt)
+    transform, shape, crs = src.transform, src.shape, src.crs
+
+# Footprints (fields, roof faces alike): GeoDataFrame, GeoJSON features or shapely geometries
+polys = to_pixels(buildings_gdf, transform, shape, raster_crs=crs)   # reprojected if needed
+t = footprint_targets(polys, shape)  # instances, corner, direction, direction_mask, extent, ...
+
+# Roads: ways that share a vertex meet at a junction; a crossing without one is an overpass
+lines, src_idx = to_pixels(roads_gdf, transform, shape, raster_crs=crs, return_index=True)
+g, crossings = road_graph(lines, widths=roads_gdf["width_m"].to_numpy()[src_idx] / 0.5)
+t = road_targets(g, shape, crossings=crossings)     # mask, line, keypoints, direction
+```
+
+| Task | Encoder | Returns | Trained with |
+| --- | --- | --- | --- |
+| Footprints (B3; E036, E038) | `footprint_targets(polygons, shape)` | `instances`, `corner`, `direction`, `direction_mask` (what `CornerLineTask` reads) + `extent`, `boundary`, `distance` (`instance_targets`, `boundary_width=2`; `instance_heads=False` drops them, the task derives them itself) | `CornerLineTask` |
+| Roof faces (E047) | `roof_face_targets(faces, shape)` | as footprints; faces sharing an edge stay separate instances. Heights are not a target: the nDSM is an input channel and planes are fitted after decoding | `CornerLineTask` |
+| Fields (B0; E046) | `field_targets(polygons, shape)` | `instances`, `extent`, `boundary`, `distance`: 4-connected pieces as instances, pieces < 16 px dropped, background holes filled | `InstanceTask(boundary_width=2)` |
+| Roads (R4; E044) | `road_graph(lines)` → `road_targets(graph, shape, crossings=)` | `mask`, `line`, `keypoints`, `direction` | `RoadGraphTask` |
+
+Pixel coordinates are `(x, y)` with pixel corners at integers, the inverse of `to_geojson`'s
+transform (`pixel_to_world` / `world_to_pixel` convert arrays and geometries). `to_pixels` makes
+polygons valid, clips them to `[0, W] x [0, H]` and splits multipart geometry; lines are clipped
+with their vertices kept, so junction vertices still match. A building cut by the tile edge is
+clipped there, as the experiments trained. Where polygons overlap, the later one wins (rasterio
+order; the covered walls and corners of the earlier one are not drawn either);
+`rasterize_instances` exposes that step (`fill_holes`, `split`, `min_area`). Unit tests
+encode synthetic vectors and decode the targets with the shipped decoders
+(`polygons_from_corners`, `polygons_from_labels`, `graph_from_road_heads`): footprints IoU
+> 0.98 with the same vertex count, roof faces > 0.99, fields > 0.97, roads within 3 px with
+both junctions kept and the overpass left uncrossed.
+
 > **Evidence (E009, Sen1Floods11, leave-events-out):** FiLM beat metadata-as-channels (+1.3
 > water IoU, 2.9 SE, all folds); FiLM vs no metadata was +0.9 but under the 2 SE bar. Lat/lon added
 > nothing on held-out events. **E013 (CloudSEN12+, unseen locations):** FiLM with lat/lon, day of

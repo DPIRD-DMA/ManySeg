@@ -29,6 +29,7 @@ Longer walkthroughs:
 | [`instance_fields.py`](instance_fields.py) | Field delineation: 30 training steps on synthetic touching fields, then instances |
 | [`point_counting.py`](point_counting.py) | Heatmap + offset + softplus density heads with `density_loss`: peaks, counts, instances by offset grouping |
 | [`metadata_conditioning.py`](metadata_conditioning.py) | Metadata fields, missing values, the three injection modes, export with a vector input |
+| [`vector_presets.py`](vector_presets.py) | The vector-output presets: corner-line instances (`corner_line_heads`, `footprint_targets` from building outlines in metres, polygons with straight walls) and unified roads (`road_heads`, `road_graph` + `road_targets` from world-coordinate ways, a graph with an overpass); dihedral augmentation that transforms direction fields (needs `manyseg[vectors]`) |
 
 ## Running
 

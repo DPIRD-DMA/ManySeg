@@ -83,6 +83,9 @@ class Task:
     primary_metric = ""
     higher_is_better = True
     image_level = False  # one label per image (classification / regression)
+    # Label entries holding (cos 2t, sin 2t) direction channel pairs. The loader then augments
+    # with exact dihedral transforms (``GPULoader(dihedral=True)``) and transforms their values.
+    direction_targets: tuple[str, ...] = ()
 
     def heads(self) -> dict | None:
         """Head configs for providers that support named heads (None = single logits output)."""
@@ -765,6 +768,153 @@ class _SemanticChangeEval:
                 "loss": self.loss / max(1, self.n)}
 
 
+# --- vector-output tasks ----------------------------------------------------------------------
+#
+# Labels are dicts of per-pixel targets encoded from geometry (polygons, road graphs) by the
+# dataset: ``manyseg.vectors.corner_targets`` / ``road_targets``. Their line widths and heatmap
+# sigmas are in pixels and their directions are angles, so they are augmented only by exact
+# dihedral transforms (``direction_targets``), and the heads stay at full resolution.
+
+def _full_resolution(out, y, task: str) -> None:
+    if head_factor(out, y) != 1:
+        raise ValueError(f"{task}: targets are encoded at full resolution; use head scale 1")
+
+
+class CornerLineTask(Task):
+    """Corner-line instances (B3: footprints, fields, roof faces; E036, E038, E047). Heads:
+    :func:`manyseg.vectors.corner_line_heads`. Labels: ``{"instances": ids (B, H, W),
+    "corner": (B, H, W), "direction": (B, 2, H, W), "direction_mask": (B, H, W)}`` (the last
+    three from :func:`manyseg.vectors.corner_targets`).
+
+    Loss (E030 ``CornerLineTask``): the :class:`InstanceTask` loss (``boundary_width`` 2) +
+    ``corner_weight`` * CenterNet focal loss on the corner heatmap (positives: its 3 x 3 local
+    maxima above 0.5) + ``direction_weight`` * L1 of the direction on the outline pixels
+    (``direction_mask``). Primary metric: PQ of the instance decoding, as for
+    :class:`InstanceTask`; ``loss`` is the full loss, ``instance_loss`` its instance part (the
+    experiments' validation loss)."""
+
+    name = "corner_lines"
+    primary_metric = "pq"
+    direction_targets = ("direction",)
+
+    def __init__(self, boundary_width: float = 2.0, corner_weight: float = 1.0,
+                 direction_weight: float = 1.0, iou_threshold: float = 0.5,
+                 decoders=None) -> None:
+        self.inner = InstanceTask(boundary_width=boundary_width, iou_threshold=iou_threshold)
+        self.corner_weight, self.direction_weight = corner_weight, direction_weight
+        self.decoders = decoders
+
+    def heads(self):
+        from manyseg.vectors import corner_line_heads
+
+        return corner_line_heads(self.decoders)
+
+    def targets(self, y):
+        return {**y, "inner": self.inner.targets(y["instances"])}
+
+    def losses(self, out, t) -> dict:
+        """The loss terms (unweighted): ``instances``, ``corner``, ``direction``."""
+        _full_resolution(out, t["instances"], self.name)
+        inner = t["inner"] if "inner" in t else self.inner.targets(t["instances"])
+        tc = t["corner"].float()[:, None]
+        corner = losses.heatmap_focal(out["corner"], tc, pos=losses.heatmap_peaks(tc))
+        m = t["direction_mask"].bool()[:, None]
+        direction = losses.masked_regression(out["direction"], t["direction"], m)
+        return {"instances": self.inner.loss(out, inner), "corner": corner,
+                "direction": direction}
+
+    def loss(self, out, t):
+        parts = self.losses(out, t)
+        return (parts["instances"] + self.corner_weight * parts["corner"]
+                + self.direction_weight * parts["direction"])
+
+    def evaluator(self):
+        return _CornerLineEval(self)
+
+
+class _CornerLineEval:
+    def __init__(self, task: CornerLineTask) -> None:
+        self.t, self.inner, self.loss, self.n = task, task.inner.evaluator(), 0.0, 0
+
+    def update(self, out, y) -> None:
+        t = self.t.targets(y)
+        self.loss += float(self.t.loss(out, t)) * y["instances"].shape[0]
+        self.n += y["instances"].shape[0]
+        self.inner.update(out, y["instances"])
+
+    def compute(self) -> dict:
+        out = self.inner.compute()
+        out["instance_loss"] = out.pop("loss")
+        return {**out, "loss": self.loss / max(1, self.n)}
+
+
+class RoadGraphTask(Task):
+    """Unified road heads (R4; E039, E044). Heads: :func:`manyseg.vectors.road_heads`.
+    Labels: ``{"mask": (B, H, W), "line": (B, H, W), "keypoints": (B, 3, H, W),
+    "direction": (B, 4, H, W)}`` from :func:`manyseg.vectors.road_targets`.
+
+    Loss (E044 ``RoadTask``; ``weights`` for mask, line, keypoints, direction): Dice + BCE on
+    the mask and on the line; one CenterNet focal loss over the three keypoint heatmaps
+    (positives: 3 x 3 local maxima above 0.5), normalised by their total positives with a floor
+    of ``min_keypoints`` (with a floor of 1, a batch without crossings let the summed negatives
+    swamp the decoder and the mask collapsed, E044); L1 of direction mode 1 on the road surface
+    (mask > 0.5) + L1 of mode 2 where its target is set. Primary metric: road-mask IoU (logits
+    > 0 vs mask > 0.5), E044's training-time metric; graph metrics (APLS, junction F1) need the
+    decoder (``manyseg_bench.evaluation.vectors``)."""
+
+    name = "roads"
+    primary_metric = "mask_iou"
+    direction_targets = ("direction",)
+
+    def __init__(self, weights: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
+                 min_keypoints: int = 16, decoders=None) -> None:
+        self.weights, self.min_keypoints, self.decoders = tuple(weights), min_keypoints, decoders
+
+    def heads(self):
+        from manyseg.vectors import road_heads
+
+        return road_heads(self.decoders)
+
+    def losses(self, out, t) -> dict:
+        """The loss terms (unweighted): ``mask``, ``line``, ``keypoints``, ``direction``."""
+        _full_resolution(out, t["mask"], self.name)
+        kp = t["keypoints"].float()
+        d, pd = t["direction"].float(), out["direction"]
+        on_road = (t["mask"] > 0.5)[:, None]
+        crossing = d[:, 2:].abs().sum(1, keepdim=True) > 0
+        return {"mask": losses.dice_bce(out["mask"], t["mask"].float()[:, None]),
+                "line": losses.dice_bce(out["line"], t["line"].float()[:, None]),
+                "keypoints": losses.heatmap_focal(out["keypoints"], kp,
+                                                  pos=losses.heatmap_peaks(kp),
+                                                  min_pos=self.min_keypoints),
+                "direction": (losses.masked_regression(pd[:, :2], d[:, :2], on_road)
+                              + losses.masked_regression(pd[:, 2:], d[:, 2:], crossing))}
+
+    def loss(self, out, t):
+        parts = self.losses(out, t)
+        return sum(w * parts[k] for w, k in zip(self.weights, ("mask", "line", "keypoints",
+                                                               "direction")))
+
+    def evaluator(self):
+        return _RoadEval(self)
+
+
+class _RoadEval:
+    def __init__(self, task: RoadGraphTask) -> None:
+        self.t, self.loss, self.n, self.inter, self.union = task, 0.0, 0, 0, 0
+
+    def update(self, out, y) -> None:
+        b = y["mask"].shape[0]
+        self.loss += float(self.t.loss(out, y)) * b
+        self.n += b
+        p, g = out["mask"][:, 0] > 0, y["mask"] > 0.5
+        self.inter += int((p & g).sum())
+        self.union += int((p | g).sum())
+
+    def compute(self) -> dict:
+        return {"mask_iou": self.inter / max(1, self.union), "loss": self.loss / max(1, self.n)}
+
+
 def build_task(name: str, num_classes: int, ignore_index: int | None = None, **kwargs) -> Task:
     if name == "semantic":
         return SemanticTask(num_classes, ignore_index, **kwargs)
@@ -786,6 +936,10 @@ def build_task(name: str, num_classes: int, ignore_index: int | None = None, **k
         return MultiLabelSegTask(num_classes, ignore_index, **kwargs)
     if name == "semantic_change":
         return SemanticChangeTask(num_classes, ignore_index, **kwargs)
+    if name == "corner_lines":
+        return CornerLineTask(**kwargs)
+    if name == "roads":
+        return RoadGraphTask(**kwargs)
     raise ValueError(f"unknown task {name!r}; choose from semantic, instances, points, "
                      "classification, multilabel, regression, seg_multilabel, change, "
-                     "semantic_change, multilabel_seg")
+                     "semantic_change, multilabel_seg, corner_lines, roads")

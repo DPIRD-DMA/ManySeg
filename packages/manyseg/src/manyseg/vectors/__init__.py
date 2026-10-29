@@ -40,3 +40,27 @@ __all__ = [
     "to_geojson",
     "vertex_graph",
 ]
+
+# --- training presets (heads, road targets, dihedral augmentation) ---
+from .augment import dihedral, dihedral_geometry, dihedral_xy  # noqa: E402
+from .presets import corner_line_heads, road_heads  # noqa: E402
+from .road_targets import road_targets  # noqa: E402
+
+__all__ += ["corner_line_heads", "dihedral", "dihedral_geometry", "dihedral_xy", "road_heads",
+            "road_targets"]
+# --- end training presets ---
+
+# --- training-target encoders (vector data in a CRS -> tile pixels -> every head's target) ---
+from .georef import from_gdal, pixel_to_world, to_pixels, world_to_pixel  # noqa: E402
+from .targets import (  # noqa: E402
+    field_targets,
+    footprint_targets,
+    rasterize_instances,
+    road_graph,
+    roof_face_targets,
+)
+
+__all__ += ["field_targets", "footprint_targets", "from_gdal", "pixel_to_world",
+            "rasterize_instances", "road_graph", "roof_face_targets", "to_pixels",
+            "world_to_pixel"]
+# --- end training-target encoders ---
