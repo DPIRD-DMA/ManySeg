@@ -40,3 +40,9 @@ __all__ = [
     "to_geojson",
     "vertex_graph",
 ]
+
+# --- block-wise road graphs (vec/road-blocks) ---
+from .roads import RoadBlockDecoder  # noqa: E402
+
+__all__ += ["RoadBlockDecoder"]
+# --- end block-wise road graphs ---

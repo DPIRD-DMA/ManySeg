@@ -20,6 +20,7 @@ from .graph import VectorGraph, _deps, _nx_from_skeleton, bridge_ends
 from .graph_tensor import _peak_pixels, _refine
 
 CLASSES = ("junction", "end", "crossing")
+_KERNEL = 5  # keypoint peak max-filter size
 
 
 def _heading(c: np.ndarray, at_end: bool, back: float = 6.0) -> np.ndarray:
@@ -53,6 +54,10 @@ def _refine_heading(h: np.ndarray, tip: np.ndarray, d: np.ndarray, back: float =
         if dot > best_dot:
             best, best_dot = axis * np.sign(axis @ h), dot
     return best if best is not None and best_dot > math.cos(math.radians(30)) else h
+
+
+def _arr(x):
+    return x.detach().float().cpu().numpy() if hasattr(x, "detach") else np.asarray(x, np.float32)
 
 
 def _segments_graph(segs):
@@ -107,15 +112,8 @@ def graph_from_road_heads(
 
     Defaults are E044's City-Scale tuning (1 m pixels).
     """
-    nx, shapely, _, remove_small_objects, skeletonize = _deps()
-    from scipy.sparse.csgraph import minimum_spanning_tree
-
-    def arr(x):
-        return (
-            x.detach().float().cpu().numpy() if hasattr(x, "detach") else np.asarray(x, np.float32)
-        )
-
-    m, kp, d = arr(mask), arr(keypoints), arr(direction)
+    remove_small_objects, skeletonize = _deps()[3:]
+    m, kp, d = _arr(mask), _arr(keypoints), _arr(direction)
     H, W = m.shape
     fg = remove_small_objects(m > threshold, max_size=max(min_area - 1, 0))
     surf = _nx_from_skeleton(
@@ -131,9 +129,17 @@ def graph_from_road_heads(
         ]
 
     peaks = {
-        c: on_mask(_refine(kp[i], _peak_pixels(kp[i], keypoint_threshold, 5)))
+        c: on_mask(_refine(kp[i], _peak_pixels(kp[i], keypoint_threshold, _KERNEL)))
         for i, c in enumerate(CLASSES)
     }
+    return _assemble(surf, peaks, d, (H, W), zone_radius, pair_deg, gap, scale)
+
+
+def _assemble(surf, peaks, d, shape, zone_radius, pair_deg, gap, scale) -> VectorGraph:
+    """Surface graph + keypoint peaks -> road graph (the steps after the dense ones)."""
+    nx, shapely = _deps()[:2]
+    from scipy.sparse.csgraph import minimum_spanning_tree
+
     allk = [q for c in CLASSES for q in peaks[c]]
     if not allk:
         g = surf
@@ -146,7 +152,7 @@ def graph_from_road_heads(
                 < 20
             ):
                 g.remove_nodes_from(comp)
-    bridge_ends(g, gap, (H, W))
+    bridge_ends(g, gap, shape)
     vg = VectorGraph.from_networkx(g)
     if scale != 1:
         vg.xy = vg.xy / scale
@@ -227,3 +233,228 @@ def _rejoin(surf, peaks, allk, d, zr, pair_deg, nx, shapely, minimum_spanning_tr
             Q = np.array(inzone["end"][i][0])
             segs += [np.array([tip, Q]) for tip, _ in A]
     return _segments_graph(segs)
+
+
+# --------------------------------------------------------------------------------------
+# Block-wise decoding of large scenes (contract: notes/large_scene_vectors_contract.md §2-3)
+# --------------------------------------------------------------------------------------
+
+
+class RoadBlockDecoder:
+    """:func:`graph_from_road_heads` block by block (core + halo windows) over stitched fields.
+
+    Usage, in memory or through ManyPred's ``postprocess_blocks``::
+
+        dec = RoadBlockDecoder(threshold=0.5, gap=50)
+        graph = dec.combine([dec(window_fields, b, scene) for b in blocks], scene)
+
+    ``window_fields``: ``names`` -> ``(C, h, w)`` arrays cropped to ``block.window``; ``block``
+    has ``core`` / ``window`` ``(top, bottom, left, right)`` and ``scene_edges``; ``scene`` has
+    ``height`` / ``width``. The graph is in scene pixel coordinates.
+
+    Per block (dense, local): threshold and small-blob removal (blobs touching an inner window
+    edge are kept, as the window sees only part of them), skeletonize, keypoint local maxima
+    with their sub-pixel position and on-surface test, and the direction field on the pixels
+    within ``zone_radius + 9`` px of each on-surface maximum. Only the core's skeleton pixels and
+    maxima are returned. ``combine`` (sparse, global): the surface graph from the union of
+    skeleton pixels, peak suppression in the whole-scene order, arm rejoining (direction read
+    from the sparse samples), short-component removal and gap bridging, all with the scene as
+    the border. Every per-block step except skeletonize reaches at most ``zone_radius + 10`` px,
+    so the result equals the whole-scene decode exactly when thinning's reach (about half the
+    widest road blob, e.g. a car park) is below the halo; a wider blob crossing a seam can
+    change the skeleton inside the halo's reach of it (tested on City-Scale fields with halo
+    128: identical graphs).
+    """
+
+    def __init__(
+        self,
+        *,
+        threshold: float = 0.3,
+        keypoint_threshold: float = 0.2,
+        zone_radius: float = 8.0,
+        pair_deg: float = 150.0,
+        spur: float = 30,
+        gap: float = 50,
+        simplify: float = 2.0,
+        min_length: float = 20,
+        min_area: int = 30,
+        scale: float = 1.0,
+        names: dict | None = None,
+    ):
+        self.params = dict(
+            threshold=threshold,
+            keypoint_threshold=keypoint_threshold,
+            zone_radius=zone_radius,
+            pair_deg=pair_deg,
+            spur=spur,
+            gap=gap,
+            simplify=simplify,
+            min_length=min_length,
+            min_area=min_area,
+            scale=scale,
+        )
+        self.names = {"mask": "mask", "keypoints": "keypoints", "direction": "direction"}
+        self.names.update(names or {})
+
+    def __repr__(self) -> str:
+        return f"RoadBlockDecoder({self.params}, names={self.names})"
+
+    @property
+    def min_halo(self) -> int:
+        """Halo the keypoint and direction steps need (skeletonize needs more on wide blobs)."""
+        return int(math.ceil(self.params["zone_radius"])) + 10
+
+    def __call__(self, fields, block, scene) -> dict:
+        from scipy import ndimage
+
+        skeletonize = _deps()[4]
+        p, nm = self.params, self.names
+        H, W = int(scene.height), int(scene.width)
+        wt, wb, wl, wr = (int(v) for v in block.window)
+        ct, cb, cl, cr = (int(v) for v in block.core)
+        edges = tuple(bool(e) for e in block.scene_edges)
+        for at_edge, margin in zip(edges, (ct - wt, wb - cb, cl - wl, wr - cr)):
+            if not at_edge and margin < self.min_halo:
+                raise ValueError(
+                    f"block {block.index}: halo {margin} px < {self.min_halo} px (zone_radius + 10)"
+                )
+        m = _arr(fields[nm["mask"]])
+        m = m[0] if m.ndim == 3 else m
+        kp, d = _arr(fields[nm["keypoints"]]), _arr(fields[nm["direction"]])
+        cy, cx = slice(ct - wt, cb - wt), slice(cl - wl, cr - wl)  # core in window pixels
+
+        fg = m > p["threshold"]
+        lab, n = ndimage.label(fg)  # as remove_small_objects, but only blobs seen whole
+        if n and p["min_area"] > 1:
+            size = np.bincount(lab.reshape(-1), minlength=n + 1)
+            inner = np.zeros(n + 1, bool)
+            for side, at_edge in zip((lab[0], lab[-1], lab[:, 0], lab[:, -1]), edges):
+                if not at_edge:
+                    inner[side] = True
+            small = (size < p["min_area"]) & ~inner
+            small[0] = False
+            fg &= ~small[lab]
+        sr, sc = np.nonzero(skeletonize(fg)[cy, cx])
+        out = {"skeleton": np.stack([sr + ct, sc + cl], 1).astype(np.int64), "peaks": {}}
+
+        keys = []
+        R = p["zone_radius"] + 9
+        rad = int(math.ceil(R)) + 1
+        oy, ox = np.mgrid[-rad : rad + 1, -rad : rad + 1]
+        for i, c in enumerate(CLASSES):
+            hm = kp[i]
+            keep = (hm == ndimage.maximum_filter(hm, size=_KERNEL, mode="nearest")) & (
+                hm > p["keypoint_threshold"]
+            )
+            pix = np.argwhere(keep[cy, cx]) + (ct - wt, cl - wl)  # window pixels, raster order
+            xy = _refine_window(hm, pix, (wt, wl), (H, W))
+            ix = np.clip(xy[:, 0].astype(int), 0, W - 1) - wl
+            iy = np.clip(xy[:, 1].astype(int), 0, H - 1) - wt
+            onm = m[iy, ix] > p["threshold"]
+            out["peaks"][c] = (pix + (wt, wl), hm[pix[:, 0], pix[:, 1]], xy, onm)
+            for x, y in xy[onm]:  # pixels whose centre is within R of the peak
+                py, px = oy + int(math.floor(y)), ox + int(math.floor(x))
+                ok = (np.hypot(px + 0.5 - x, py + 0.5 - y) <= R) & (py >= 0) & (py < H)
+                ok &= (px >= 0) & (px < W)
+                keys.append(py[ok].astype(np.int64) * W + px[ok])
+        keys = np.unique(np.concatenate(keys)) if keys else np.zeros(0, np.int64)
+        ky, kx = keys // W - wt, keys % W - wl
+        if len(keys) and (
+            ky.min() < 0 or ky.max() >= wb - wt or kx.min() < 0 or kx.max() >= wr - wl
+        ):
+            raise ValueError(f"block {block.index}: direction samples outside the window")
+        out["direction"] = (keys, d[:, ky, kx].T.copy())
+        return out
+
+    def combine(self, results: list, scene) -> VectorGraph:
+        cKDTree = _deps()[2]
+        p = self.params
+        H, W = int(scene.height), int(scene.width)
+        sk = np.concatenate([x["skeleton"] for x in results] or [np.zeros((0, 2), np.int64)])
+        o = np.lexsort((sk[:, 1], sk[:, 0]))  # raster order, as np.nonzero on the scene
+        surf = _nx_from_skeleton(
+            sk[o, 0],
+            sk[o, 1],
+            (H, W),
+            spur=p["spur"],
+            simplify=p["simplify"],
+            min_length=p["min_length"],
+        )
+        peaks = {}
+        for c in CLASSES:
+            parts = [x["peaks"][c] for x in results]
+            pix = np.concatenate([q[0] for q in parts] or [np.zeros((0, 2), np.int64)])
+            val = np.concatenate([q[1] for q in parts] or [np.zeros(0, np.float32)])
+            xy = np.concatenate([q[2] for q in parts] or [np.zeros((0, 2))])
+            onm = np.concatenate([q[3] for q in parts] or [np.zeros(0, bool)])
+            o = np.lexsort((pix[:, 1], pix[:, 0]))
+            sel = o[_suppress(pix[o], val[o], _KERNEL, cKDTree)]  # as _peak_pixels
+            peaks[c] = xy[sel[onm[sel]]].reshape(-1, 2)
+        keys = np.concatenate([x["direction"][0] for x in results] or [np.zeros(0, np.int64)])
+        vals = np.concatenate(
+            [x["direction"][1] for x in results] or [np.zeros((0, 4), np.float32)]
+        )
+        keys, first = np.unique(keys, return_index=True)  # halos overlap: same pixels twice
+        d = _SparseField(keys, vals[first], (vals.shape[1] if vals.ndim == 2 else 4, H, W))
+        return _assemble(
+            surf, peaks, d, (H, W), p["zone_radius"], p["pair_deg"], p["gap"], p["scale"]
+        )
+
+
+def _refine_window(hm, pix, origin, scene_hw):
+    """:func:`~manyseg.vectors.graph_tensor._refine` of window pixels ``pix`` with the scene as
+    the image (``origin`` = window's top-left in the scene), so it equals a whole-scene call."""
+    if len(pix) == 0:
+        return np.zeros((0, 2))
+    H, W = scene_hw
+    h, w = hm.shape
+    lg = np.log(np.clip(hm, 1e-4, None))
+    r, c = pix[:, 0], pix[:, 1]
+    R, C = r + origin[0], c + origin[1]
+
+    def offset(lo, mid, hi):
+        den = lo - 2 * mid + hi
+        ok = den < -1e-9
+        return np.clip(np.where(ok, 0.5 * (lo - hi) / np.where(ok, den, -1), 0), -1, 1)
+
+    inx, iny = (C > 0) & (C < W - 1), (R > 0) & (R < H - 1)
+    dx = np.where(
+        inx, offset(lg[r, np.maximum(c - 1, 0)], lg[r, c], lg[r, np.minimum(c + 1, w - 1)]), 0
+    )
+    dy = np.where(
+        iny, offset(lg[np.maximum(r - 1, 0), c], lg[r, c], lg[np.minimum(r + 1, h - 1), c]), 0
+    )
+    return np.stack([C + 0.5 + dx, R + 0.5 + dy], 1)
+
+
+def _suppress(pts, vals, kernel, cKDTree):
+    """Indices of the peaks :func:`~manyseg.vectors.graph_tensor._peak_pixels` keeps, given its
+    local maxima ``pts`` in raster order and their values: strongest first, greedy."""
+    if len(pts) < 2:
+        return np.arange(len(pts))
+    order = np.argsort(-vals, kind="stable")
+    q = pts[order]
+    tree = cKDTree(q)
+    alive = np.ones(len(q), bool)
+    for i in range(len(q)):
+        if alive[i]:
+            for j in tree.query_ball_point(q[i], (kernel // 2) * 1.5):
+                if j > i:
+                    alive[j] = False
+    return order[alive]
+
+
+class _SparseField:
+    """Read-only ``(C, H, W)`` field known on a set of pixels; ``f[k0:k1, y, x]`` as numpy.
+    A pixel outside the set raises (the halo or sample radius was too small)."""
+
+    def __init__(self, keys, vals, shape):
+        self.keys, self.vals, self.shape = keys, vals, shape
+
+    def __getitem__(self, idx):
+        ch, y, x = idx
+        k = int(y) * self.shape[2] + int(x)
+        j = int(np.searchsorted(self.keys, k))
+        if j >= len(self.keys) or self.keys[j] != k:
+            raise KeyError(f"direction not sampled at pixel (row {y}, col {x})")
+        return self.vals[j][ch]
