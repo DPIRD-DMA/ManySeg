@@ -121,6 +121,18 @@ First release. Python 3.10–3.14, PyTorch ≥ 2.10, timm ≥ 1.0.20.
   the instance heads), `road_graph` (lines → road graph + grade-separated crossings for
   `road_targets`) and `rasterize_instances`. The `vectors` extra now includes `rasterio`, which
   `corner_targets` and `road_targets` already needed.
+* Points in geographic and large-scene workflows: `to_geojson` writes `Point` / `MultiPoint`
+  features (from an `(N, 2)` pixel `(x, y)` array or shapely points; `properties` may be a dict
+  of columns) and refuses torch tensors, which in `manyseg.points` are `(y, x)`;
+  `to_pixels(kind="points")` (also inferred) returns an `(N, 2)` pixel `(x, y)` array of the
+  points inside the tile. `manyseg.points.points_to_xy` / `points_from_xy` convert between the
+  two conventions (`(y, x)` with centres at integers, `(x, y)` with corners at integers), the
+  latter straight into `gaussian_heatmap` / `density_map`. `PointBlockDecoder` (peaks of a
+  stitched heatmap block by block, optional offset and mask fields; equals a whole-scene
+  `find_peaks` exactly, ties included; refuses a halo below `kernel // 2` + the blur radius) and
+  `DensityBlockDecoder` (count per block core) follow the large-scene block contract. The
+  `find_peaks` blur is now a fixed-order tap sum instead of `conv2d` (values within 2e-7), so a
+  crop gives bit-identical values away from its edges.
 ### Performance (E026; values unchanged up to rounding)
 
 * bf16 autocast no longer carries float32 activations where CUDA runs an op in float32:

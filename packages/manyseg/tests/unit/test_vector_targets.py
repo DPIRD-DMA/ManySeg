@@ -395,3 +395,105 @@ def _as_vg(g):
     from manyseg.vectors import VectorGraph
 
     return VectorGraph.from_networkx(g)
+
+
+# --- points: manyseg.points <-> GeoJSON / CRS -------------------------------------------------
+
+@pytest.mark.parametrize("transform", [NORTH_UP, ROTATED])
+def test_points_to_geojson_round_trip(transform):
+    """find_peaks (y, x) -> points_to_xy -> to_geojson -> world; checked against rasterio's own
+    pixel-centre mapping (not just a round trip, where a shared half-pixel error cancels)."""
+    import json
+
+    from manyseg.points import find_peaks, gaussian_heatmap, points_from_xy, points_to_xy
+    from rasterio.transform import xy as rio_xy
+
+    yx = torch.tensor([[2.0, 3.0], [40.0, 7.0], [0.0, 63.0]])
+    ((peaks, scores),) = find_peaks(gaussian_heatmap([yx], (50, 64)), 0.5)
+    xy = points_to_xy(peaks)
+    fc = to_geojson(xy, transform, properties={"score": scores.numpy()})
+    json.dumps(fc)  # numpy values became Python numbers
+    world = np.array([f["geometry"]["coordinates"] for f in fc["features"]])
+    assert all(f["geometry"]["type"] == "Point" for f in fc["features"])
+    rows, cols = peaks[:, 0].numpy(), peaks[:, 1].numpy()
+    rx, ry = rio_xy(transform, rows, cols, offset="center")
+    assert np.allclose(world, np.stack([rx, ry], 1))
+    assert np.allclose(world, pixel_to_world(xy, transform))
+    assert [f["properties"]["score"] for f in fc["features"]] == pytest.approx([1.0] * 3)
+    # and back: the same features in, the same pixels out
+    back = to_pixels(fc, transform, (50, 64))
+    assert np.allclose(back, xy, atol=1e-6)
+    assert torch.allclose(points_from_xy(back), peaks.float(), atol=1e-6)
+
+
+def test_to_geojson_point_inputs():
+    pts = [(1.5, 2.5), (3.0, 4.0)]
+    t = (2, 0, 100, 0, -2, 50)
+    fc = to_geojson(pts, t, properties=[{"id": 1}, {"id": 2}])
+    assert [f["geometry"]["coordinates"] for f in fc["features"]] == [[103, 45], [106, 42]]
+    assert fc == to_geojson(np.array(pts), t, properties=[{"id": 1}, {"id": 2}])
+    assert fc == to_geojson((p for p in pts), t, properties=[{"id": 1}, {"id": 2}])
+    g = to_geojson([shapely.Point(1.5, 2.5), shapely.MultiPoint(pts),
+                    shapely.box(0, 0, 1, 1)], t)
+    assert [f["geometry"]["type"] for f in g["features"]] == ["Point", "MultiPoint", "Polygon"]
+    assert g["features"][1]["geometry"]["coordinates"] == [[103, 45], [106, 42]]
+    assert to_geojson(shapely.Point(0, 0))["features"][0]["geometry"]["coordinates"] == [0, 0]
+    assert to_geojson(np.zeros((0, 2)))["features"] == []
+    with pytest.raises(TypeError, match="points_to_xy"):  # (y, x) tensors would be swapped
+        to_geojson(torch.zeros(3, 2))
+    with pytest.raises(ValueError, match="2 values for 1"):
+        to_geojson([(0, 0)], properties={"score": [1, 2]})
+    with pytest.raises(ValueError, match="shape"):
+        to_geojson(np.zeros((3, 3)))
+
+
+def test_to_pixels_points():
+    H, W = 40, 60
+    px = np.array([[0.5, 0.5], [59.9, 39.9], [0.0, 0.0], [12.25, 30.75],
+                   [60.001, 10.0], [10.0, 40.001], [-0.01, 5.0], [200.0, 200.0]])
+    inside = px[:4]
+    world = pixel_to_world(px, ROTATED)
+    feats = [shapely.Point(*w) for w in world[:3]] + [shapely.MultiPoint(world[3:6])] + \
+        [shapely.Point(*w) for w in world[6:]]
+    xy, idx = to_pixels(feats, ROTATED, (H, W), return_index=True)
+    assert xy.shape == (4, 2) and xy.dtype == np.float64
+    assert np.allclose(xy, inside, atol=1e-6)
+    assert idx.tolist() == [0, 1, 2, 3]  # the MultiPoint's one inside part keeps index 3
+    assert np.allclose(to_pixels(feats, ROTATED, (H, W), kind="points"), inside, atol=1e-6)
+    empty = to_pixels([], ROTATED, (H, W), kind="points")
+    assert empty.shape == (0, 2)
+    xy, idx = to_pixels([shapely.Point(*world[7])], ROTATED, (H, W), return_index=True)
+    assert xy.shape == (0, 2) and idx.shape == (0,)
+    with pytest.raises(ValueError, match="mix"):
+        to_pixels([feats[0], shapely.box(*world[0], *world[1])], ROTATED, (H, W))
+    # with kind=, other geometry types are ignored, as for lines / polygons
+    assert len(to_pixels([feats[0], pixel_to_world(shapely.box(1, 1, 5, 5), ROTATED)],
+                         ROTATED, (H, W), kind="points")) == 1
+
+
+def test_to_pixels_points_reprojected():
+    gpd = pytest.importorskip("geopandas")
+    pytest.importorskip("pyproj")
+    px = np.array([[10.5, 20.5], [99.5, 0.5], [50.0, 99.99], [100.5, 50.0], [-3.0, 3.0]])
+    gdf = gpd.GeoDataFrame({"h": range(5)}, geometry=gpd.points_from_xy(
+        *pixel_to_world(px, NORTH_UP).T), crs="EPSG:28350")
+    for src in (gdf.to_crs(4326), gdf.to_crs(3857).geometry):
+        xy, idx = to_pixels(src, NORTH_UP, (100, 100), raster_crs="EPSG:28350",
+                            return_index=True)
+        assert idx.tolist() == [0, 1, 2]
+        assert np.allclose(xy, px[:3], atol=1e-4)  # 1e-4 px = 0.03 mm
+    # raster CRS unknown: taken to be in the features' CRS (degrees here: all outside the tile)
+    assert len(to_pixels(gdf.to_crs(4326), NORTH_UP, (100, 100))) == 0
+
+
+def test_scene_points_to_geojson_uses_scene_transform():
+    from manyseg.points import ScenePoints
+
+    sp = ScenePoints(np.array([[2.0, 3.0], [4.25, 5.5]]), np.array([0.9, 0.8], np.float32),
+                     np.array([[2, 3], [4, 5]]), transform=NORTH_UP)
+    fc = sp.to_geojson(properties={"id": [7, 8]})
+    world = np.array([f["geometry"]["coordinates"] for f in fc["features"]])
+    assert np.allclose(world, [NORTH_UP @ (3.5, 2.5), NORTH_UP @ (6.0, 4.75)])
+    assert fc["features"][1]["properties"] == {"score": pytest.approx(0.8), "id": 8}
+    assert sp.to_geojson(transform=(1, 0, 0, 0, 1, 0))["features"][0]["geometry"][
+        "coordinates"] == [3.5, 2.5]
