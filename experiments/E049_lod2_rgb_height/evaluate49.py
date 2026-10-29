@@ -78,7 +78,7 @@ def predict(model, kind, split, n):
         x = norm(ds[i][0][None].to(dev).float())
         with torch.autocast("cuda", dtype=torch.bfloat16):
             out = model(x)
-        p = b3_probabilities(out, 0) if kind == "R" else T9.probabilities(out, 0)
+        p = b3_probabilities(out, 0) if kind == "R" else T9.probabilities(out, 0, T9.SLOPE_SCALE.get(kind, 1.0))
         if kind != "R":  # unclamped prediction for the height MAE (Codex E049 #2)
             p["height_raw"] = out["height"][0, 0].float().cpu().numpy() * T9.H_SCALE
         yield i, {k: v.astype(np.float16) for k, v in p.items()}
@@ -111,10 +111,10 @@ def run(model, kind, split, thr_list, settings, modes, planar, procs, limit):
     return [V.summarise(x) for x in all_], {a: [V.summarise(x) for x in accs] for a, accs in per_area.items()}, hmae
 
 
-def tune(model, procs, limit):
-    v1, _, _ = run(model, "H", "val", THR, GRID3[:1], ["pred"], False, procs, limit)
+def tune(model, procs, limit, kind="H"):
+    v1, _, _ = run(model, kind, "val", THR, GRID3[:1], ["pred"], False, procs, limit)
     thr = THR[max(range(len(THR)), key=lambda j: v1[j]["score"])]
-    v2, _, _ = run(model, "H", "val", [thr], GRID3, ["pred"], False, procs, limit)
+    v2, _, _ = run(model, kind, "val", [thr], GRID3, ["pred"], False, procs, limit)
     k = max(range(len(v2)), key=lambda j: v2[j]["score"])
     return {"thr": thr, "params": GRID3[k], "val": v2[k]}
 

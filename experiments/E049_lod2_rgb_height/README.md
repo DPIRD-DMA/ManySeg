@@ -92,3 +92,16 @@ merge); D shows those faces alone cost +0.55 m RMSE over R. Predicted heights th
 roofs) but guesses storey counts (Leidsche Rijn flats 4-5 m too tall) and blurs ridges, so plane
 tilts are 20 deg off. Visual: `fig_e049_heights.png` (session scratchpad), status page section
 "RGB-only roofs".
+
+## E049b (pre-registered 10:30, after seed 0; H1's slope head collapsed)
+Finding: H1's slope head predicts ~0.008 m/px where roofs have ~0.1 (val/test correlation 0.0-0.16), so
+every H1 plane is flat (median 1 deg); E049's rule 3 therefore tested a failed head, not slopes.
+Cause (most likely): the slope target (~0.1-0.3 m/px) gives an L1 term an order smaller than the
+other losses. **H1b** = H1 with the slope target multiplied by 10 (predictions divided by 10),
+everything else unchanged (seed 0, 150 epochs; `train49.py --arm H1b`, `evaluate49b.py`).
+* Gate (val, before test): Pearson correlation of predicted vs target slope on interior roof pixels
+  >= 0.5 for both channels; otherwise the head failed again and test is not opened.
+* Rule (as rule 3): slope head worth it if H1b's slope planes have normal error <= H0 (seed 0
+  test) - 1 deg on both areas and RMSE <= H0 + 0.05 m. H1b's planes from its own height (H1br)
+  reported. Rule 1 is not re-judged (face F1 gap 0.28-0.38).
+Seed 1 of H0 / H1 was stopped at the user's request (10:13, during H0_s1 training, nothing evaluated): the registered second-seed check on rule 3 is not run; it would have re-tested the collapsed head.

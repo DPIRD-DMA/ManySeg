@@ -31,6 +31,7 @@ from manyseg_bench.training.trainer import train  # noqa: E402
 from train47 import CACHE, MEAN, STD  # noqa: E402
 
 H_SCALE = 10.0  # m; the height head predicts metres / 10
+SLOPE_SCALE = {"H0": 1.0, "H1": 1.0, "H1b": 10.0}  # E049b: H1's unscaled slope head collapsed to ~0
 
 
 def make_targets():
@@ -105,9 +106,9 @@ def slope_target(h: torch.Tensor, inst: torch.Tensor):
 class HeightTask(CornerLineTask):
     """B3 roof heads + height (L1, all pixels, m / 10) [+ slope (L1, interior roof pixels)]."""
 
-    def __init__(self, slope: bool):
+    def __init__(self, slope: bool, slope_scale: float = 1.0):
         super().__init__()
-        self.slope = slope
+        self.slope, self.slope_scale = slope, slope_scale
 
     def heads(self):
         h = {**super().heads(), "height": {"type": "regression", "out_channels": 1}}
@@ -121,6 +122,7 @@ class HeightTask(CornerLineTask):
         loss = loss + F.l1_loss(out["height"][:, 0].float(), h / H_SCALE)
         if self.slope:
             st, m = slope_target(h, t["inst"])
+            st = st * self.slope_scale
             ps = out["slope"].float()[:, :, 1:-1, 1:-1]
             mm = m[:, None].expand_as(ps)
             loss = loss + (F.l1_loss(ps[mm], st[mm]) if mm.any() else ps.sum() * 0)
@@ -128,26 +130,26 @@ class HeightTask(CornerLineTask):
 
 
 def build(arm: str):
-    task = HeightTask(slope=arm == "H1")
+    task = HeightTask(slope=arm in ("H1", "H1b"), slope_scale=SLOPE_SCALE[arm])
     model = create_model(backbone="resnet34.tv_in1k", in_channels=3, pretrained=True, heads=task.heads())
     torch.nn.init.constant_(model.heads.corner.conv.bias, -2.19)  # CenterNet prior (E036)
     return model, task
 
 
-def probabilities(out: dict, i: int) -> dict[str, np.ndarray]:
+def probabilities(out: dict, i: int, slope_scale: float = 1.0) -> dict[str, np.ndarray]:
     from common import b3_probabilities
 
     p = b3_probabilities(out, i)
     p["height"] = np.clip(out["height"][i, 0].float().cpu().numpy() * H_SCALE, 0, None)
     if "slope" in out:
-        p["slope"] = out["slope"][i].float().cpu().numpy()
+        p["slope"] = out["slope"][i].float().cpu().numpy() / slope_scale
     return p
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd", choices=["targets", "train"])
-    ap.add_argument("--arm", choices=["H0", "H1"], default="H0")
+    ap.add_argument("--arm", choices=["H0", "H1", "H1b"], default="H0")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--epochs", type=int, default=150)
     ap.add_argument("--batch-size", type=int, default=8)
