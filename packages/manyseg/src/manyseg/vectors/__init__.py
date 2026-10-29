@@ -40,3 +40,26 @@ __all__ = [
     "to_geojson",
     "vertex_graph",
 ]
+
+# --- block decoders for large scenes (vec/block-api) ---
+from .blocks import (  # noqa: E402
+    Block,
+    BlockDecoder,
+    InstanceBlockDecoder,
+    Records,
+    RoofBlockDecoder,
+    Scene,
+    block_decoder,
+    block_grid,
+    decode_scene,
+    records_to_geojson,
+    write_records,
+)
+from .roofs import face_plane, roof_faces, roof_mesh, roof_planes, roof_records  # noqa: E402
+
+__all__ += [
+    "Block", "BlockDecoder", "InstanceBlockDecoder", "Records", "RoofBlockDecoder", "Scene",
+    "block_decoder", "block_grid", "decode_scene", "face_plane", "records_to_geojson",
+    "roof_faces", "roof_mesh", "roof_planes", "roof_records", "write_records",
+]
+# --- end block decoders ---
