@@ -9,7 +9,7 @@ and shape), then:
 * roads: :func:`road_graph`, then :func:`manyseg.vectors.road_targets` (E044).
 
 Every function returns float32 / int32 / bool numpy arrays per tile, keyed by the names the
-presets and bench tasks use (``manyseg.vectors.presets``, ``manyseg_bench.tasks``). Rasterising
+presets and bench tasks use (``manyseg.vectors.presets`` and the tasks in ``manyseg-bench``). Rasterising
 follows rasterio (pixel centres inside; where polygons overlap, the later one wins), as the
 experiments' encoders did.
 """
@@ -93,7 +93,7 @@ def footprint_targets(polygons, shape: tuple[int, int], *, boundary_width: float
       (``boundary_width`` 2, normalised distance). ``instance_heads=False`` leaves them out:
       ``CornerLineTask`` recomputes them from ``instances`` on the device.
 
-    The first four are the labels ``CornerLineTask`` (``manyseg_bench.tasks``) reads; save them
+    The first four are the labels ``CornerLineTask`` (in ``manyseg-bench``) reads; save them
     as a label dict and augment with :func:`dihedral` (``direction=True`` for ``direction``).
     """
     polygons = list(polygons)
@@ -141,7 +141,7 @@ def field_targets(polygons, shape: tuple[int, int], *, boundary_width: float = 2
     """Targets for field boundaries with the instance heads only (B0: outline decoding with
     :func:`polygons_from_labels`; E046 on Fields of The World), from pixel-coordinate polygons:
     ``instances`` ``(H, W)`` int32 and ``extent``, ``boundary``, ``distance`` ``(H, W)``
-    float32 (``InstanceTask(boundary_width=2)`` in ``manyseg_bench.tasks``).
+    float32 (``InstanceTask(boundary_width=2)`` in ``manyseg-bench``).
 
     E046's single accepted set of fields: every 4-connected piece of a field is its own
     instance, pieces under ``min_area`` pixels are dropped, and holes holding only background
