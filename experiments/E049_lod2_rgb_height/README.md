@@ -105,3 +105,14 @@ everything else unchanged (seed 0, 150 epochs; `train49.py --arm H1b`, `evaluate
   test) - 1 deg on both areas and RMSE <= H0 + 0.05 m. H1b's planes from its own height (H1br)
   reported. Rule 1 is not re-judged (face F1 gap 0.28-0.38).
 Seed 1 of H0 / H1 was stopped at the user's request (10:13, during H0_s1 training, nothing evaluated): the registered second-seed check on rule 3 is not run; it would have re-tested the collapsed head.
+
+### E049b result (10:34; worktree e049b-2d4354d; `runs/eval_H1b_s0.json`)
+H1b trained 150 epochs (val PQ similar to H1). Val slope correlation (dz/dx, dz/dy) 0.42 / 0.37,
+up from ~0.1 for H1 but below the 0.5 gate: **gate failed, test not opened**. The scaled head learns
+roof slope partly; on this evidence a separate slope head does not give usable roof tilt from RGB.
+
+## Close-out (10:35, user decision)
+The user closed the RGB-only line: the approach is shown to work with RGB + height data (E047b,
+E048b), and RGB-only roofs are not viable with this model (E049). Not pursued: a pretrained
+height / depth backbone (E050 sketch: fine-tuned Depth Anything V2 Small or a canopy-height
+backbone as the height source, optionally fed to the face model as a 4th channel).

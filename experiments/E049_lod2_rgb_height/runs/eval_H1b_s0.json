@@ -1,0 +1,9 @@
+{
+ "seed": 0,
+ "sha256": "03f69ba794b19fff698690950b2ba48dfac6973a9dfd06b9fc04bf28063df467",
+ "slope_corr_val": [
+  0.4184698672356942,
+  0.3742009463968833
+ ],
+ "gate_passed": false
+}
