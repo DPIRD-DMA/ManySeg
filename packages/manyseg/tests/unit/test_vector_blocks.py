@@ -582,3 +582,20 @@ def test_real_fields_blocks_equal_whole_scene(task, scene):
             _assert_same_roofs(out, ref, (block, halo))
         else:
             assert _canon(r["geometry"] for r in out) == _canon(ref), (block, halo, out.stats)
+
+
+def test_graph_blocks_small_blob_across_a_seam():
+    """As the road block decoder (Codex 10-29 #1): a 96-px, 1-px-wide blob across the x = 128
+    seam is cut by both windows at halo 40 (windows end at x = 168 and start at x = 88); with
+    min_area 100 neither window may keep it as 'maybe large', so the halo is raised to
+    min_area - 1."""
+    from manyseg.vectors.graph import graph_from_mask, graph_from_mask_blocks
+
+    p = np.zeros((400, 400), np.float32)
+    p[100:300, 60] = 0.9  # a road, kept
+    p[200, 80:176] = 0.9  # 96 px across the x = 128 seam, past both windows' edges: removed
+    g = graph_from_mask(p, 0.5, gap=0, min_area=100)
+    assert len(g.edges) == 1
+    for halo in (40, 99, 120):
+        b = graph_from_mask_blocks(p, 0.5, block=128, halo=halo, gap=0, min_area=100)
+        assert _edges(b) == _edges(g), halo

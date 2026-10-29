@@ -368,7 +368,10 @@ def graph_from_mask_blocks(prob, threshold: float = 0.5, *, block: int = 2048, h
     """:func:`graph_from_mask` for scenes too large to skeletonize at once (``prob`` may be a
     memmap). Each window (core + ``halo``) is thresholded and skeletonized; its core's skeleton
     pixels are kept, and one graph is built from the union. Equals the global result when
-    thinning's reach (about half the widest blob) and ``min_area`` are below ``halo``.
+    thinning's reach (about half the widest blob) is below ``halo``. The halo used is at least
+    ``min_area - 1`` (as ``RoadBlockDecoder.min_halo``): a blob that reaches from a core to its
+    window's edge then has at least ``min_area`` pixels, so a small blob across a seam is seen
+    whole (and removed) rather than kept by both windows as possibly large.
     """
     from .blocks import block_grid
 
@@ -381,6 +384,7 @@ def graph_from_mask_blocks(prob, threshold: float = 0.5, *, block: int = 2048, h
     if H == 0 or W == 0:
         return VectorGraph(np.zeros((0, 2)), np.zeros((0, 2), np.int64))
     rows, cols = [], []
+    halo = max(int(halo), int(min_area) - 1)
     for b in block_grid(H, W, block, halo):
         r0, r1, c0, c1 = b.window
         w = np.asarray(prob[r0:r1, c0:c1], np.float32) > threshold
