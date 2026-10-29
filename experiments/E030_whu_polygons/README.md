@@ -98,6 +98,11 @@ and PoLiS reported alongside, because the registered GT inflates vertex counts.
 ## Results
 (pending)
 
+Outcome for the library (2026-10-29, user decision before 0.1.0): with B2 well below B0
+on seed 0 (see E030b's table) and the remaining seeds cancelled, the graph tensor was removed
+from `manyseg.vectors` as the decision rule says; the code is now `graph_tensor.py` in this
+directory, its tests `test_graph_tensor.py`.
+
 # E030b: per-building fallback on the trained models (pre-registered 2026-10-27 11:00)
 
 After E030 finishes: for each seed, B2F as in E028b, with that seed's B2 model for the graph and

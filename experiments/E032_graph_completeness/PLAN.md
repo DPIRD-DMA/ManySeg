@@ -3,7 +3,8 @@
 Context: the graph tensor (Sat2Graph-style: vertex map 1 ch, edge 6 ch per 60° sector, vector
 12 ch to the neighbour, extent 1 ch; decoder = peaks → follow vectors → gap bridging →
 polygonize with tile border → keep faces inside the extent → simplify; code in
-`packages/manyseg/src/manyseg/vectors/graph_tensor.py`, training task in
+`packages/manyseg/src/manyseg/vectors/graph_tensor.py` at the time, now
+`experiments/E030_whu_polygons/graph_tensor.py`; training task in
 `experiments/E030_whu_polygons/common.py:GraphTensorTask`). Evidence so far: E028 (oracle)
 graph best for footprints but all-or-nothing, fails for roads; E031 (oracle LoD2) best roof
 structure, loses buildings when the graph does not close; E031b (oracle) a per-building fallback
