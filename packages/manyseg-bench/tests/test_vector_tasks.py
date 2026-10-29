@@ -317,6 +317,17 @@ def test_loader_dict_labels_affine_and_errors():
         GPULoader(img[:, :, :12], {k: v[..., :12] for k, v in labels.items()}, 4, train=True,
                   dihedral=True, **common)
     GPULoader(img, labels, 4, train=False, directions=("soft",), **common)  # eval: no augment
+    # direction fields must be float: an int8-quantised cache (x 127) would reach the loss x127
+    q = dict(labels, soft=np.round(labels["soft"] * 127).astype(np.int8))
+    for train in (True, False):
+        with pytest.raises(ValueError, match="int8"):
+            GPULoader(img, q, 4, train=train, dihedral=True, directions=("soft",), **common)
+    with pytest.raises(ValueError, match="int8"):  # host-resident (memmap-like) arrays too
+        GPULoader(img, q, 4, train=True, dihedral=True, directions=("soft",),
+                  device_resident=False, **common)
+    GPULoader(img, q, 4, train=True, dihedral=True, **common)  # int8 non-direction entry: fine
+    half = dict(labels, soft=labels["soft"].astype(np.float16))
+    GPULoader(img, half, 4, train=True, dihedral=True, directions=("soft",), **common)
 
 
 def test_split_with_label_dict_round_trips(tmp_path):

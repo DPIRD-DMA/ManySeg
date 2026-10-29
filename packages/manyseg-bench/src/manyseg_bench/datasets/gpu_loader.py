@@ -27,7 +27,9 @@ would encode. ``directions`` names label entries holding ``(cos 2t, sin 2t)`` ch
 (an orientation ``t`` mod 180 degrees); their values are transformed too (a quarter turn
 negates both, a horizontal or vertical flip negates ``sin 2t``, a transpose ``cos 2t``; see
 ``manyseg.vectors.augment``). Directions need ``dihedral``: a resized crop with a changed
-aspect ratio would bend them and rescale the encoded widths.
+aspect ratio would bend them and rescale the encoded widths. They must be stored as floats
+(float16 or float32): an integer entry (a quantised cache) raises, as the loss would see it
+unscaled.
 
 ``vectors`` (``{name: (N, columns)}`` float arrays, NaN = missing) are per-sample metadata. In
 dict mode they are yielded as extra ``(B, columns)`` entries of the input dict, unaugmented
@@ -144,6 +146,15 @@ class GPULoader:
         unknown = set(self.directions) - (set(self.masks) if self.dict_labels else set())
         if unknown:
             raise ValueError(f"direction targets {sorted(unknown)} are not label entries")
+        for k in self.directions:  # (cos 2t, sin 2t) in [-1, 1]: integer storage is a scaled
+            dt = masks[k].dtype    # cache (e.g. int8 x 127) the loss would see unscaled
+            is_float = (dt.is_floating_point if isinstance(dt, torch.dtype)
+                        else np.issubdtype(dt, np.floating))
+            if not is_float:
+                raise ValueError(
+                    f"direction target {k!r} has dtype {dt}; direction fields must be float "
+                    "(cos 2t, sin 2t) in [-1, 1]. Dequantise an integer cache (e.g. int8 / 127) "
+                    "before passing it")
         if self.directions and train and not dihedral:
             raise ValueError("direction targets need dihedral=True augmentation (a resized "
                              "crop would bend the directions and rescale the encoded widths)")
