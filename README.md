@@ -237,6 +237,20 @@ The loaded model still takes the raw-scale input you trained on and returns logi
 the stored normalisation and activations is up to the inference code. The default head of a
 `num_classes=` model is named `"logits"`.
 
+**Share on the Hugging Face Hub.** `manyseg.push_to_hub` takes the same arguments as `save`,
+uploads the file to a model repository (private by default) and writes a model card listing
+the inputs, heads and the licences of the pretrained weights. `load` and `read_metadata` take
+Hub names as timm does:
+
+```python
+manyseg.push_to_hub(model, "your-org/water", activations={"logits": "softmax"},
+                    normalize=[{"type": "scale", "value": 10000}], license="mit",
+                    revision="v1")                  # optional: a branch, created if needed
+model = manyseg.load("hf-hub:your-org/water@v1")   # token=... for a private repository
+```
+
+Both use `HF_TOKEN` or a stored `hf auth login` when no `token=` is given.
+
 Don't save the whole model with `torch.save(model)`: that pickle refers to ManySeg's internal
 module paths, so it breaks when a later version moves or renames a class, and loading it
 needs `torch.load(weights_only=False)`, which can run arbitrary code. A `manyseg.save` file holds

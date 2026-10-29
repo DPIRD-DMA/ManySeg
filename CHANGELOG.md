@@ -126,6 +126,14 @@ First release. Python 3.10–3.14, PyTorch ≥ 2.10, timm ≥ 1.0.20.
   fails with both versions named and an upgrade hint, instead of a bare `create_model`
   error. The README warns against `torch.save(model)` pickles, which depend on internal
   module paths.
+* Hugging Face Hub (`manyseg.hub`): `manyseg.push_to_hub(model, "org/name", ...)` uploads a
+  `manyseg.save` file (repository private by default; `revision=` pushes to a branch, created
+  if needed) with a generated model card (inputs, normalisation, heads with type and scope,
+  pretrained-weight licences, `pipeline_tag`; an existing card is kept); `manyseg.load` and
+  `read_metadata` take `"hf-hub:org/name[@revision]"` and `token=`. `huggingface_hub`
+  (already a timm dependency) is now a direct one.
+* `manyseg.save` rejects `classes` / `bands` given as one list for a model with several heads
+  / inputs, and mapping keys that name no head / input, instead of storing them unchecked.
 * `torch.compile(dynamic=True)`, `manyseg.export.export_model` (dynamic size; dynamic batch
   with `dynamic_batch=True`; dynamic date count except for `concat` / `diff` aggregation) and
   ONNX; int8 quantisation (`manyseg.quantize`, extra `quant`); FSDP2

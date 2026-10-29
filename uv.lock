@@ -2419,6 +2419,7 @@ name = "manyseg"
 version = "0.1.0.dev0"
 source = { editable = "packages/manyseg" }
 dependencies = [
+    { name = "huggingface-hub" },
     { name = "safetensors" },
     { name = "timm" },
     { name = "torch" },
@@ -2456,6 +2457,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
+    { name = "huggingface-hub", specifier = ">=0.23" },
     { name = "onnx", marker = "extra == 'onnx'", specifier = ">=1.16" },
     { name = "onnx", marker = "extra == 'test'", specifier = ">=1.16" },
     { name = "onnxruntime", marker = "extra == 'test'", specifier = ">=1.18" },
