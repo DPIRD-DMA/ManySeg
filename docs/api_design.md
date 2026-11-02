@@ -831,7 +831,7 @@ model, so export and inference stay plain tensors. The workflow per task is the 
 
 | Task | Heads | Targets | Decoder | Reads |
 | --- | --- | --- | --- | --- |
-| Building footprints | `corner_line_heads()` | `footprint_targets` | `block_decoder("footprints")`: instances → `polygons_from_corners` (straight walls) | `extent`, `boundary`, `distance`, `corner`, `direction` |
+| Building footprints | `corner_line_heads()` | `footprint_targets` | `block_decoder("footprints")`: instances → `polygons_from_corners` (straight exterior walls; courtyards kept as traced outlines, E054) | `extent`, `boundary`, `distance`, `corner`, `direction` |
 | Field boundaries | `instance_heads()` | `field_targets` | `block_decoder("fields")`: instances → `polygons_from_labels` (pixel outlines) | `extent`, `boundary`, `distance` |
 | Road networks | `road_heads()` | `road_graph` → `road_targets` | `block_decoder("roads")`: `graph_from_road_heads` | `mask`, `keypoints`, `direction` |
 | LoD2 roof faces | `corner_line_heads()`, RGB + nDSM input | `roof_face_targets` | `block_decoder("roofs")`: faces → `planar_faces` → a plane per face → mesh | as footprints + `height` (the nDSM) |
@@ -995,6 +995,8 @@ E044). Decoding runs outside the exported model. Coordinates are `(x, y)` in GIS
 geotransform maps them directly (`to_geojson(..., transform=)`). Needs `manyseg[vectors]`.
 
 ```python
+import torch
+from manyseg.instances import instances_from_outputs
 from manyseg.vectors import graph_from_mask, polygons_from_labels, to_geojson
 
 # Roads, tracks, fences: one line-probability head
@@ -1016,7 +1018,7 @@ the experiments' losses. Both use built-in head types; the focal-loss heatmap he
 
 | Preset | Heads | Targets | Bench task (`manyseg_bench.tasks`) | Decoding |
 | --- | --- | --- | --- | --- |
-| `corner_line_heads()`: footprints, fields, roof faces (B3; E036, E038, E047) | `extent`, `boundary`, `distance` (as `instance_heads`), `corner` (1), `direction` (2: `cos 2t`, `sin 2t`) | `instance_targets(ids, boundary_width=2)` + `corner_targets(polygons, shape)` | `CornerLineTask` (`"corner_lines"`): instance loss + CenterNet focal (corner) + masked L1 (direction on outlines); PQ | `instances_from_outputs` → `polygons_from_corners` |
+| `corner_line_heads()`: footprints, roof faces (B3; E036, E038, E047) | `extent`, `boundary`, `distance` (as `instance_heads`), `corner` (1), `direction` (2: `cos 2t`, `sin 2t`) | `instance_targets(ids, boundary_width=2)` + `corner_targets(polygons, shape)` | `CornerLineTask` (`"corner_lines"`): instance loss + CenterNet focal (corner) + masked L1 (direction on outlines); PQ | `instances_from_outputs` → `polygons_from_corners` |
 | `road_heads()`: roads (R4; E039, E044) | `mask` (1), `line` (1), `keypoints` (3: junction, end, crossing), `direction` (4: two modes) | `road_targets(graph, shape, crossings=, width=6)` | `RoadGraphTask` (`"roads"`): Dice + BCE (mask, line) + focal over the keypoints (positives floored at 16) + L1 (mode 1 on roads, mode 2 at crossings); mask IoU | `graph_from_road_heads` |
 
 Targets carry pixel widths, sigmas and angles, so augment them only with the 8 exact dihedral

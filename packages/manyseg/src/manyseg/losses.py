@@ -51,7 +51,10 @@ def dice_bce(logits: Tensor, target: Tensor, pos_weight: float | None = None,
 
 def masked_regression(pred: Tensor, target: Tensor, mask: Tensor | None = None,
                       kind: str = "l1") -> Tensor:
-    """L1 / MSE averaged over ``mask`` pixels (all pixels if None; 0 if the mask is empty)."""
+    """L1 / MSE (``kind`` ``"l1"`` or ``"mse"``) averaged over ``mask`` pixels (all pixels if
+    None; 0 if the mask is empty)."""
+    if kind not in ("l1", "mse"):
+        raise ValueError(f"kind must be 'l1' or 'mse', got {kind!r}")
     err = (pred.float() - target.float()).abs() if kind == "l1" else (pred.float() - target) ** 2
     if mask is None:
         return err.mean()
@@ -88,6 +91,8 @@ def distance_map(geometry, max_distance: float = 32.0):
     from scipy import ndimage
 
     g = np.asarray(geometry, bool)
+    if g.ndim != 2:  # the transform would run across the batch axis too
+        raise ValueError(f"expected one (H, W) geometry, got shape {g.shape}; call this per image")
     if not g.any():
         return np.full(g.shape, max_distance, np.float32)
     return np.minimum(ndimage.distance_transform_edt(~g), max_distance).astype(np.float32)

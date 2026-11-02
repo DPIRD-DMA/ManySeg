@@ -397,6 +397,7 @@ class InstanceBlockDecoder:
     min_area: float = 16
     min_iou: float = 0.5
     names: dict = field(default_factory=dict)
+    holes: bool = True  # method="corners": keep courtyards, as polygons_from_corners (E054)
 
     def __post_init__(self):
         if self.method not in ("corners", "outline"):
@@ -481,7 +482,7 @@ class InstanceBlockDecoder:
         return _instance_polygon(
             mask, y0, x0, self._peaks_near(ctx, box)[1], dr, o, snap_radius=self.snap_radius,
             big_dev=self.big_dev, agree=self.agree, merge_deg=self.merge_deg,
-            simplify=self.simplify, min_area=self.min_area)
+            simplify=self.simplify, min_area=self.min_area, holes=self.holes)
 
     def _crops(self, fields, ctx, box: Box, window: Box) -> tuple[dict, tuple | None]:
         """Field crops (and corner peaks) over scene ``box`` (inside ``window``) for a piece."""
@@ -643,6 +644,7 @@ class RoofBlockDecoder(InstanceBlockDecoder):
     erode: int = 2
     trim: float = 0.2
     mesh: str | None = "J2"
+    holes: bool = False  # faces join and mesh on their outer walls
 
     def __post_init__(self):
         if self.method != "corners":
@@ -811,7 +813,8 @@ def block_decoder(task: str, **params) -> BlockDecoder:
     :func:`polygons_from_labels`, ...) keep generic defaults; the tuned settings live here.
 
     * ``"footprints"``: extent, boundary, distance + corner, direction; ``method="corners"``
-      (B3, E038) or ``"outline"`` (B0, ``simplify`` 1 px unless given).
+      (B3, E038; courtyards kept as traced outlines, E054, ``holes=False`` fills them) or
+      ``"outline"`` (B0, ``simplify`` 1 px unless given).
     * ``"fields"``: extent, boundary, distance; outline decoding (B0, E046), absolute distance
       (``seed_threshold`` in px, E052; for a model trained on normalised distance pass
       ``seed_threshold=0.3, extent_threshold=0.6``, E046's).

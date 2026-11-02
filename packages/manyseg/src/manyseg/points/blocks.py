@@ -21,6 +21,7 @@ pixel lies in its core, so no peak is kept twice or lost at a seam.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -244,6 +245,10 @@ class DensityBlockDecoder:
     mask_threshold: float = 0.5
 
     min_halo = 0
+
+    def __post_init__(self):
+        if not (math.isfinite(self.value_scale) and self.value_scale > 0):
+            raise ValueError(f"value_scale must be finite and > 0, got {self.value_scale}")
 
     def __call__(self, fields, block, scene) -> tuple[tuple[int, int, int, int], float]:
         """The block's core and the sum of the density field over it."""

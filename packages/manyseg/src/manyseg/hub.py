@@ -162,11 +162,13 @@ def card(meta: Mapping[str, Any], repo_id: str, *, license: str | None = None,
              f"A [ManySeg](https://github.com/DPIRD-DMA/ManySeg) model, saved by ManySeg "
              f"{meta.get('manyseg_version', 'unknown')} (save format {meta.get('format')}).", "",
              "```python", "import manyseg", "",
-             f'model = manyseg.load("{name}")  # returns raw outputs (logits)',
+             f'model = manyseg.load("{name}")  # outputs before the activations below',
              f'meta = manyseg.read_metadata("{name}")  # normalisation, activations',
              "```", "",
-             "The model returns raw outputs: normalise its input as below, and apply each "
-             "head's activation to get predictions.", ""]
+             "Normalise the input as below, then apply each head's activation to its output "
+             "to get predictions. `none` means the output is already the prediction (a head "
+             "with a built-in activation, such as a softplus density head, or plain values).",
+             ""]
 
     inputs = config.get("inputs")
     bands, norm = meta.get("bands"), meta.get("normalize")

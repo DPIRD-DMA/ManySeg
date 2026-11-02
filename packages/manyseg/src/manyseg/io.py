@@ -152,6 +152,7 @@ def save(model: DenseModel, path: str | Path, *, normalize: Any = None,
         elif isinstance(value, str) or len(names) != 1:
             raise ValueError(f"{arg} as a list is for a model with one {what}; this one has "
                              f"{names}: pass {arg}={{{what}: [...]}}.")
+    _check_names(model, config, classes, bands)
     missing = [n for n in heads if n not in acts]
     if missing:
         raise ValueError(
@@ -225,6 +226,29 @@ def _structure(model: torch.nn.Module) -> dict[str, tuple]:
     for name, module in model.named_modules():
         out[f"module:{name}"] = (type(module).__qualname__, module.extra_repr())
     return out
+
+
+def _check_names(model, config: dict, classes, bands) -> None:
+    """One class name per head channel (a one-channel head may name both of its classes) and
+    one band name per input channel."""
+    if classes is not None:
+        by_head = classes if isinstance(classes, Mapping) else {next(iter(model.heads)): classes}
+        for head, names in by_head.items():
+            n = (config.get("heads") or {}).get(head, {}).get("out_channels",
+                                                              config.get("num_classes"))
+            if n is not None and len(names) != n and (n, len(names)) != (1, 2):
+                raise ValueError(f"classes: head {head!r} has {n} channels, got {len(names)} "
+                                 f"names {list(names)}.")
+    if bands is not None:
+        inputs = config.get("inputs") or {None: config}
+        for name, values in (bands.items() if isinstance(bands, Mapping)
+                             else [(next(n for n, c in inputs.items()
+                                         if c.get("kind", "image") != "vector"), bands)]):
+            n = inputs[name].get("in_channels") or 3
+            if len(values) != n:
+                label = "the input" if name is None else f"input {name!r}"
+                raise ValueError(f"bands: {label} has {n} channels, got {len(values)} names "
+                                 f"{list(values)}.")
 
 
 def _check_rebuildable(model: DenseModel, config: Mapping[str, Any]) -> None:

@@ -39,6 +39,7 @@ from __future__ import annotations
 import inspect
 import json
 import math
+import os
 from dataclasses import dataclass, field, replace
 
 import numpy as np
@@ -49,8 +50,11 @@ pytest.importorskip("shapely")
 pytest.importorskip("networkx")
 pytest.importorskip("rasterio")
 pytest.importorskip("skimage")
-manypred = pytest.importorskip(
-    "manypred", reason="ManyPred is an optional test dependency (put its src on PYTHONPATH)")
+if os.environ.get("MANYSEG_REQUIRE_MANYPRED"):  # CI: this module must run, not skip
+    import manypred
+else:
+    manypred = pytest.importorskip(
+        "manypred", reason="ManyPred is an optional test dependency (put its src on PYTHONPATH)")
 if "merge" not in inspect.signature(manypred.predict_array).parameters or not hasattr(
         manypred, "postprocess_blocks"):
     pytest.skip("the installed manypred has no merge= / postprocess_blocks "
@@ -541,7 +545,7 @@ class Report:
 def compare_polygons(task: str, source, decoded, seam, *, holes: bool,
                      pixel: float = PIXEL) -> Report:
     """One-to-one (Hungarian on IoU) matching of decoded to source polygons (map units).
-    ``holes=False`` (the corners decoder returns outer rings): compare with source exteriors."""
+    ``holes=False`` (roof faces, decoded as outer rings): compare with source exteriors."""
     src = [s if holes else shapely.Polygon(s.exterior) for s in source]
     rep = Report(task, len(src), len(decoded))
     tree = shapely.STRtree(decoded) if decoded else None
@@ -926,7 +930,7 @@ def check_polygons(run: Run, tmp, *, agree_iou: float = 0.99):
                 "written geometry is not the records' through the scene transform")
     source = [pixel_to_world(g, run.grid.transform) for g in run.source_px]
     seams = seam_zone(run)
-    holes = run.task == "fields"  # the corners decoder returns outer rings (documented)
+    holes = run.task != "roofs"  # roof faces join and mesh on their outer rings
     rep = compare_polygons(run.task, source, decoded, seams, holes=holes, pixel=run.grid.pixel)
     s = rep.summary()
     fails.check(not rep.missing, f"missing source objects {rep.missing}", "missing")
@@ -1292,7 +1296,7 @@ def seam_study(shape=(700, 1000), configs=((256, 32), (256, 64), (256, 128), (51
             run = pipeline(task, grid, merge, tmp, opts[name], write=False)
             a = agreement(run)
             src = compare_polygons(task, run.source_px, [r["geometry"] for r in run.records],
-                                   seam_zone(run, world=False), holes=task == "fields",
+                                   seam_zone(run, world=False), holes=task != "roofs",
                                    pixel=grid.pixel)
             row = {"task": task, "patch": patch, "overlap": overlap, "merge": merge,
                    "option": name, "objects": len(run.single), "in_seam_zone": len(a.seam),

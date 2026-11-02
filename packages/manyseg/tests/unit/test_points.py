@@ -220,3 +220,13 @@ def test_focal_heatmap_preset_starts_at_centernet_prior():
     torch.testing.assert_close(model.heads["heatmap"].conv.bias,
                                torch.full((1,), math.log(0.1 / 0.9)))
     assert point_heads()["heatmap"].get("bias_init") is None  # MSE regression keeps zero bias
+
+
+@pytest.mark.parametrize("kw, match", [
+    (dict(kernel=-1), "kernel must be odd and positive"),
+    (dict(kernel=2), "kernel must be odd and positive"),
+    (dict(max_points=-1), "max_points must be >= 0"),
+])
+def test_find_peaks_rejects_bad_arguments(kw, match):
+    with pytest.raises(ValueError, match=match):
+        find_peaks(torch.zeros(1, 1, 8, 8), **kw)

@@ -24,7 +24,7 @@ LOCAL_PATH = re.compile(r"/home/|/media/|/Users/|C:\\\\Users")
 
 
 def _cells(path):
-    return json.loads(path.read_text())["cells"]
+    return json.loads(path.read_text(encoding="utf-8"))["cells"]
 
 
 def _code(path):
@@ -80,7 +80,7 @@ def test_notebook_runs(path, tmp_path, monkeypatch):
         nbformat = pytest.importorskip("nbformat")
         pytest.importorskip("ipykernel")
         pytest.importorskip("matplotlib")
-    if "urlopen" in path.read_text():
+    if "urlopen" in path.read_text(encoding="utf-8"):
         try:
             urllib.request.urlopen(BUCKET, timeout=20).close()
         except urllib.error.URLError as e:

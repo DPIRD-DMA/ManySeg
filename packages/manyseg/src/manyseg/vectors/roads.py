@@ -17,10 +17,13 @@ import math
 import numpy as np
 
 from ..utils._peaks import maxima_mask, peak_pixels, refine, suppress
-from .graph import VectorGraph, _deps, _nx_from_skeleton, bridge_ends
+from .graph import VectorGraph, _deps, _nx_from_skeleton, _remove_small, bridge_ends
 
 CLASSES = ("junction", "end", "crossing")
 _KERNEL = 5  # keypoint peak max-filter size
+# Strongest junctions used per zone. Far above a real one; on noise, zones chain into one holding
+# thousands and the spanning tree's dense distance matrix would grow with their square.
+_MAX_ZONE_JUNCTIONS = 256
 
 
 def _heading(c: np.ndarray, at_end: bool, back: float = 6.0) -> np.ndarray:
@@ -135,12 +138,12 @@ def graph_from_road_heads(
     block by block. The defaults here are the same as ``block_decoder("roads")``: E044's
     City-Scale tuning (1 m pixels).
     """
-    remove_small_objects, skeletonize = _deps()[3:]
+    skeletonize = _deps()[3]
     m, kp, d = _arr(mask), _arr(keypoints), _arr(direction)
     if logits:
         m, kp = _sigmoid(m), _sigmoid(kp)
     H, W = m.shape
-    fg = remove_small_objects(m > threshold, max_size=max(min_area - 1, 0))
+    fg = _remove_small(m > threshold, min_area)
     surf = _nx_from_skeleton(
         *np.nonzero(skeletonize(fg)), (H, W), spur=spur, simplify=simplify, min_length=min_length
     )
@@ -187,16 +190,19 @@ def _assemble(surf, peaks, d, shape, zone_radius, pair_deg, gap, scale) -> Vecto
 def _rejoin(surf, peaks, allk, d, zr, pair_deg, nx, shapely, minimum_spanning_tree):
     from collections import defaultdict
 
-    zone = shapely.union_all([shapely.Point(q).buffer(zr) for q in allk])
+    disks = shapely.buffer(shapely.points(allk), zr, quad_segs=16)  # as Point.buffer
+    zone = shapely.union_all(disks)
     zones = list(getattr(zone, "geoms", [zone]))
     ztree = shapely.STRtree(zones)
+    dtree = shapely.STRtree(disks)
 
-    def clip(ln):
-        hit = ztree.query(ln, predicate="intersects")
+    def clip(ln):  # against the disks it meets: dense peaks merge into one huge zone polygon
+        hit = dtree.query(ln, predicate="intersects")
         if len(hit) == 0:
             return ln
-        z = shapely.union_all([zones[i] for i in hit]) if len(hit) > 1 else zones[int(hit[0])]
-        return ln.difference(z)
+        if shapely.covers(disks[hit], ln).any():
+            return shapely.LineString()
+        return ln.difference(shapely.union_all(disks[hit]))
 
     outside = []
     for u, v in surf.edges():
@@ -232,7 +238,7 @@ def _rejoin(surf, peaks, allk, d, zr, pair_deg, nx, shapely, minimum_spanning_tr
         if not A:
             continue
         if inzone["junction"][i]:
-            J = np.array(inzone["junction"][i])
+            J = np.array(inzone["junction"][i][:_MAX_ZONE_JUNCTIONS])
             segs += [np.array([tip, J[np.argmin(np.hypot(*(J - tip).T))]]) for tip, _ in A]
             if len(J) > 1:
                 D = np.hypot(*(J[:, None] - J[None]).transpose(2, 0, 1))
@@ -348,7 +354,7 @@ class RoadBlockDecoder:
         the direction samples around them (see the class note)."""
         from scipy import ndimage
 
-        skeletonize = _deps()[4]
+        skeletonize = _deps()[3]
         p, nm = self.params, self.names
         H, W = int(scene.height), int(scene.width)
         wt, wb, wl, wr = (int(v) for v in block.window)

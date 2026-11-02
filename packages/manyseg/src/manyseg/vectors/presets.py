@@ -33,10 +33,11 @@ def _attach(heads: dict, decoders) -> dict:
 
 def corner_line_heads(decoders: None | str | Mapping[str, Any] = None) -> dict[str, dict]:
     """Head configs for ``create_model(heads=...)`` of the corner-line instance model (B3:
-    footprints, fields, roof faces; E036, E038, E047): the instance heads of
-    :func:`manyseg.instances.instance_heads` (``extent``, ``boundary``, ``distance``) plus
-    ``corner`` (1 channel, logits of a Gaussian corner heatmap, bias ``logit(0.1)``) and
-    ``direction`` (2 channels, regression of the wall direction as ``(cos 2t, sin 2t)``).
+    footprints and roof faces; E036, E038, E047. Fields use ``instance_heads``, E046, E052): the
+    instance heads of :func:`manyseg.instances.instance_heads` (``extent``, ``boundary``,
+    ``distance``) plus ``corner`` (1 channel, logits of a Gaussian corner heatmap, bias
+    ``logit(0.1)``) and ``direction`` (2 channels, regression of the wall direction as ``(cos 2t,
+    sin 2t)``).
 
     Targets: :func:`manyseg.instances.instance_targets` and
     :func:`manyseg.vectors.corner_targets`; decoding: instances, then

@@ -82,8 +82,10 @@ def find_peaks(heatmap: Tensor, threshold: float = 0.5, *, kernel: int = 3,
       outside it, e.g. ``sigmoid(out["fg"]) > 0.5`` from a foreground head, which removes
       background false positives. Applied after smoothing.
     """
-    if kernel % 2 != 1:
-        raise ValueError(f"kernel must be odd, got {kernel}")
+    if kernel < 1 or kernel % 2 != 1:
+        raise ValueError(f"kernel must be odd and positive, got {kernel}")
+    if max_points is not None and max_points < 0:
+        raise ValueError(f"max_points must be >= 0 or None, got {max_points}")
     if smooth_sigma < 0:
         raise ValueError(f"smooth_sigma must be >= 0, got {smooth_sigma}")
     scale_factor(scale)  # validate before any work

@@ -104,7 +104,8 @@ def main() -> int:
     notebooks = []
     for nb in sorted((ROOT / "notebooks").glob("*.ipynb")):
         shutil.copy(nb, SRC / "notebooks" / nb.name)
-        title = next(c for c in json.loads(nb.read_text())["cells"] if c["cell_type"] == "markdown")
+        cells = json.loads(nb.read_text(encoding="utf-8"))["cells"]
+        title = next(c for c in cells if c["cell_type"] == "markdown")
         notebooks.append((title["source"][0].lstrip("# ").strip(), f"notebooks/{nb.name}"))
     (SRC / "reference").mkdir()
     for mod in PAGES:

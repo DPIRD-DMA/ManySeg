@@ -109,10 +109,16 @@ First release. Python 3.10–3.14, PyTorch ≥ 2.10, timm ≥ 1.0.20.
 * `manyseg-bench`: `evaluation.vectors` with APLS, GEO, junction F1, crossing scores and polygon
   metrics (C-IoU, detection F1, PoLiS, N-ratio).
 * **Experimental:** names and defaults may change before 1.0. Each task below has a head
-  preset, target encoders from vector data in a CRS, a decoder chosen in a pre-registered
-  experiment and block decoding for large scenes. Guide: `docs/api_design.md` (Vector outputs);
+  preset, target encoders from vector data in a CRS, a decoder tested in experiments and block
+  decoding for large scenes. Guide: `docs/api_design.md` (Vector outputs);
   runnable examples `examples/14_vector_footprints.py` to `18_vector_points.py`; one end-to-end
   test per task (vector labels → targets → block decoding → GeoJSON / GeoPackage).
+* **Courtyards:** `polygons_from_corners` and `block_decoder("footprints")` keep an instance's
+  holes of at least `min_area` as traced outlines (`holes=False` fills them; E054). Only exterior
+  walls are straightened, and roof faces stay outer rings.
+* **Garbage input:** road and corner decoding cost grows about linearly with scene area on an
+  untrained model's noise (about 30 s per megapixel for roads), with unchanged results on normal
+  input; a zone uses at most its 256 strongest junctions.
 * **Training presets:** `corner_line_heads` (instance heads + `corner` + `direction`; footprints
   and roof faces) and `road_heads` (`mask`, `line`, `keypoints`, `direction`); the focal-loss
   heatmap heads start at `p = 0.1`. `dihedral`, `dihedral_xy`, `dihedral_geometry`: the 8 exact
