@@ -338,6 +338,7 @@ def test_split_with_label_dict_round_trips(tmp_path):
     s = load_split(tmp_path, "train")
     assert set(s.masks) == {"mask", "direction"}
     assert s.masks["direction"].shape == (3, 4, 8, 8)
+    del s  # Windows can't overwrite a file that is still memory-mapped
     # re-preparing replaces the labels: no stale single mask or dropped entries (Codex review)
     save_split(tmp_path, "train", imgs, {"mask": labels["mask"]}, ["a", "b", "c"])
     assert set(load_split(tmp_path, "train").masks) == {"mask"}
