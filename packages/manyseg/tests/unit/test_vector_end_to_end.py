@@ -176,7 +176,9 @@ def test_fields_blocks_equal_whole_and_input(tmp_path):
     polys = to_pixels(parcels, TRANSFORM, (H, W))
     assert len(polys) == 6 and abs(sum(p.area for p in polys) - H * W) < 1  # a partition
     t = field_targets(polys, (H, W))
-    fields = {k: noisy(t[k], i) for i, k in enumerate(("extent", "boundary", "distance"))}
+    # distance is absolute (px, E052): noise in pixels, not clipped to [0, 1]
+    fields = {k: noisy(t[k], i, *((0.3, False) if k == "distance" else ()))
+              for i, k in enumerate(("extent", "boundary", "distance"))}
     dec = block_decoder("fields")  # B0: outlines of the instance masks
     recs = decode_scene(fields, dec, BLOCK, HALO, scene=SCENE)
     whole = decode_scene(fields, dec, block=max(H, W), scene=SCENE)

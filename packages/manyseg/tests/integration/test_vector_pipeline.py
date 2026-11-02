@@ -23,8 +23,9 @@ gets corners and walls; and ``corner_targets`` simplifies the clipped ring, so a
 polygon's walls can differ. Every run first checks (``check_invariance``) that the stitched
 targets equal one whole-scene encoding except exactly there; the decode checks then measure
 what that does to the vectors, against the source and against a single-pass decode (seam
-objects reported apart). Each task runs with the default ``distance="normalized"`` and with
-``distance="absolute"``; ``seam_study`` (run by hand) adds ``tile_edges="ignore"``.
+objects reported apart). Each instance task runs with ``distance="normalized"`` and
+``distance="absolute"`` (the default of ``field_targets`` since E052; footprints and roofs
+default to normalised); ``seam_study`` (run by hand) measures the seam errors of both.
 
 Thresholds are the oracle numbers of the experiments (perfect targets through the shipped
 decoders): see ``THRESHOLDS``.
@@ -435,11 +436,10 @@ class Options:
     """Encoder options measured against the defaults (see the module docstring)."""
 
     distance: str = "normalized"
-    tile_edges: str = "keep"
 
     @property
     def label(self) -> str:
-        return f"distance={self.distance},tile_edges={self.tile_edges}"
+        return f"distance={self.distance}"
 
 
 def _instance_fields(t: dict, corners: bool) -> dict:
@@ -453,10 +453,6 @@ def _instance_fields(t: dict, corners: bool) -> dict:
     return out
 
 
-def _corner_kw(opt: Options) -> dict:
-    return {} if opt.tile_edges == "keep" else {"tile_edges": opt.tile_edges}
-
-
 DEFAULT = Options()
 
 
@@ -465,13 +461,13 @@ def encoder(task: str, world, opt: Options = DEFAULT):
     if task == "footprints":
         def encode(tf, shape):
             polys = to_pixels(world, tf, shape, crs=CRS, raster_crs=CRS, kind="polygons")
-            return _instance_fields(footprint_targets(polys, shape, distance=opt.distance,
-                                                      **_corner_kw(opt)), True)
+            return _instance_fields(footprint_targets(polys, shape, distance=opt.distance),
+                                   True)
     elif task == "roofs":
         def encode(tf, shape):
             polys = to_pixels(world, tf, shape, crs=CRS, raster_crs=CRS, kind="polygons")
-            return _instance_fields(roof_face_targets(polys, shape, distance=opt.distance,
-                                                      **_corner_kw(opt)), True)
+            return _instance_fields(roof_face_targets(polys, shape, distance=opt.distance),
+                                   True)
     elif task == "fields":
         def encode(tf, shape):
             polys = to_pixels(world, tf, shape, crs=CRS, raster_crs=CRS, kind="polygons")
@@ -756,7 +752,10 @@ def pipeline(task: str, grid: Grid, merge: str, tmp, opt: Options = DEFAULT, see
     if task == "roofs":
         h = ndsm(geoms, extras["planes"], (H, W))[None]
         fields["height"] = whole["height"] = h
-    dec = block_decoder(task)
+    # the fields decoder's seed threshold is in pixels (absolute distance, E052); the
+    # normalised arm keeps E046's 0.3 of the instance maximum
+    norm = task == "fields" and opt.distance == "normalized"
+    dec = block_decoder(task, **({"extent_threshold": 0.6, "seed_threshold": 0.3} if norm else {}))
     scene = Scene(H, W, grid.transform, CRS)
     records = decode_scene(fields, dec, grid.block, grid.halo, scene=scene, offset=grid.offset)
     via = manypred.postprocess_blocks(
@@ -1154,10 +1153,11 @@ TASKS = ["footprints", "fields", "roofs", "roads"]
 # with cut, at most 1 (0.999) with blend, mean IoU with the source 0.986-0.988 (default
 # 0.951-0.991). Roof faces (0.25 m): cut exact for both; blend changes 2-39 faces with the
 # default, 0-9 with absolute (worst 0.925; touching faces' shared edges follow distance ties).
-# Footprints: no change with cut; with blend at most one building (0.997). tile_edges="ignore"
-# changed nothing measurable (the corners decoder merges a clip vertex on a straight wall,
-# and cut never stitches in a clip edge once overlap / 2 > 7 px), and costs a little IoU on
-# buildings cut by the scene edge (no corners there): not parametrised here.
+# Footprints: no change with cut; with blend at most one building (0.997). A tried option,
+# corner_targets(tile_edges="ignore") (no corners or walls on clip edges, left out of the
+# corner loss), changed nothing measurable and was dropped (the corners decoder merges a clip
+# vertex on a straight wall, and cut never stitches in a clip edge once overlap / 2 > 7 px), and
+# cost a little IoU on buildings cut by the scene edge (no corners there).
 NORMALISED_SEAMS = ("normalised distance on fields: seam errors (the stitched distance jumps "
                     "where tiles normalise an instance differently: fields split, merged or "
                     "reshaped at seams) and, in the single pass too, seeds lost in narrow parts "
@@ -1173,13 +1173,25 @@ NORMALISED_ROOFS = ("per-tile normalised distance: roof faces in the overlap res
 ACUTE_TIPS = ("decoder limit, also in the single pass: the 45-degree tip of a hip-end face "
               "between two walls' boundary bands gets its own seed and becomes an extra "
               "17-25 px face (instances_from_outputs)")
-# (task, merge, distance, str(grid)) of the slow tier that fail for these reasons
+FIELD_CORNER_SEEDS = ("decoder limit, also in the single pass: with absolute distance and a 3 px "
+                      "seed threshold (E052), a 1 px seed on the threshold's edge at a field's "
+                      "corner, cut off diagonally from the field's seed, becomes an extra 16 px "
+                      "field (instances_from_outputs)")
+NARROW_STRIP = ("decoder limit, also in the single pass: with a 3 px seed threshold the narrow "
+                "strip of the holed field (under ~8 px wide) gets broken seeds, so the field "
+                "splits along it and loses its hole")
+
+# (task, merge, distance, str(grid)) that fail for these reasons
 _ORACLE = {
     ("roofs", "cut", "normalized", "700x1000-p256-o32-s0,0"): ACUTE_TIPS,
     ("roofs", "cut", "normalized", "700x1000-p256-o128-s17.3,-9.6"): ACUTE_TIPS,
     ("roofs", "cut", "absolute", "700x1000-p256-o128-s17.3,-9.6"): ACUTE_TIPS,
     ("roofs", "blend", "absolute", "700x1000-p256-o128-s17.3,-9.6"): ACUTE_TIPS,
     ("roofs", "cut", "normalized", "700x1000-p512-o256-s-31.5,23.25"): ACUTE_TIPS,
+    **{("fields", m, "absolute", g): FIELD_CORNER_SEEDS for m in ("cut", "blend")
+       for g in ("290x410-p128-o32-s0,0", "700x1000-p256-o128-s17.3,-9.6")},
+    **{("fields", m, "absolute", "700x1000-p512-o256-s-31.5,23.25"): NARROW_STRIP
+       for m in ("cut", "blend")},
 }
 
 
@@ -1212,7 +1224,8 @@ class ExpectedFailure(AssertionError):
 _ALLOWED = {NORMALISED_SEAMS: {"agreement", "extra", "split", "merged", "missing", "mean_iou",
                                "min_iou", "polis", "holes", "blocks"},
             NORMALISED_ROOFS: {"agreement", "extra", "split", "merged", "missing", "mean_iou"},
-            ACUTE_TIPS: {"extra"}}
+            ACUTE_TIPS: {"extra"}, FIELD_CORNER_SEEDS: {"extra"},
+            NARROW_STRIP: {"extra", "split", "holes", "min_iou", "mean_iou", "polis"}}
 
 
 def _params(grids):
@@ -1255,18 +1268,6 @@ def test_pipeline(task, merge, distance, grid, tmp_path):
     _run_checks(task, merge, distance, grid, tmp_path)
 
 
-@pytest.mark.parametrize("merge", ["cut", "blend"])
-@pytest.mark.parametrize("task", ["footprints", "roofs"])
-def test_pipeline_tile_edges_ignore(task, merge, tmp_path):
-    """The experimental tile-invariant corner targets (``tile_edges="ignore"``, with absolute
-    distance) through the same pipeline: same checks, so the option cannot break stitching
-    or decoding unnoticed (``seam_study`` measures it changes nothing at seams)."""
-    grid = grid_for(task, FAST)
-    run = pipeline(task, grid, merge, tmp_path, Options("absolute", "ignore"))
-    check_invariance(run)
-    check_polygons(run, tmp_path)
-
-
 SLOW = [Grid((700, 1000), 256, 32, block=333, halo=64, offset=(101, 157)),
         Grid((700, 1000), 256, 128, block=333, halo=64, offset=(101, 157), shift=(17.3, -9.6)),
         Grid((700, 1000), 512, 256, block=400, halo=64, offset=(0, 211), shift=(-31.5, 23.25))]
@@ -1290,16 +1291,12 @@ def seam_study(shape=(700, 1000), configs=((256, 32), (256, 64), (256, 128), (51
     import tempfile
     from pathlib import Path
 
-    opts = {"default": Options(), "absolute": Options(distance="absolute"),
-            "ignore": Options(tile_edges="ignore"),
-            "both": Options(distance="absolute", tile_edges="ignore")}
+    opts = {"normalized": Options(), "absolute": Options(distance="absolute")}
     tmp = Path(tmp or tempfile.mkdtemp())
     rows = []
     for task in tasks:
         for (patch, overlap), merge, name in [(c, m, o) for c in configs
                                               for m in ("cut", "blend") for o in opts]:
-            if task == "fields" and opts[name].tile_edges != "keep":
-                continue
             grid = grid_for(task, Grid(shape, patch, overlap, block=333, halo=64,
                                        offset=(101, 157)))
             run = pipeline(task, grid, merge, tmp, opts[name], write=False)

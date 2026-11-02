@@ -89,7 +89,9 @@ def test_instance_tasks_under_manypred(task):
     from test_vector_blocks import _terraces
 
     f = _terraces(3)  # mixed 2-D / 3-D fields; ManyPred hands them all as (C, h, w) float32
-    out, scene = _check(task, f, 150, 48, lambda a, b: _canon(a) == _canon(b))
+    # _terraces' distance is normalised: fields get E046's thresholds, not E052's pixels
+    norm = {"seed_threshold": 0.3, "extent_threshold": 0.6} if task == "fields" else {}
+    out, scene = _check(task, f, 150, 48, lambda a, b: _canon(a) == _canon(b), **norm)
     assert len(out) > 10
     fc = records_to_geojson(out, scene.transform, scene.crs)
     x0 = fc["features"][0]["geometry"]["coordinates"][0][0][0]
