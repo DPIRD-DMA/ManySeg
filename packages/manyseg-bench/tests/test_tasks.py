@@ -138,3 +138,17 @@ def test_point_task_calibrates_by_default():
     ev = task.evaluator()
     ev.update({"density": task.targets(y)["density"]}, y)
     assert "best_threshold" not in ev.compute()
+
+
+def test_point_task_density_activation():
+    """E011c: density_activation reaches the head preset; counts report a signed bias."""
+    assert "activation" not in PointTask(density=True, density_activation=None).heads()["density"]
+    h = PointTask(density=True).heads()["density"]
+    assert h["activation"] == "softplus" and h["bias_init"] == -4.0
+    y = torch.zeros(1, 32, 32, dtype=torch.long)
+    y[0, 4:10, 4:10] = 1
+    task = PointTask(density=True)
+    ev = task.evaluator()
+    ev.update({"density": task.targets(y)["density"] * task.density_scale * 3}, y)
+    r = ev.compute()
+    assert r["bias"] == pytest.approx(2.0, abs=1e-4) and r["mae"] == pytest.approx(2.0, abs=1e-4)

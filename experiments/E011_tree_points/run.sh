@@ -15,6 +15,6 @@ run() { echo "=== $*"; mb train --provider manyseg --dataset oam_tcd \
 for seed in 0 1 2; do
   run --seeds $seed --tag hm_mse --task-kwargs '{"heatmap": "regression"}'
   run --seeds $seed --tag hm_focal --task-kwargs '{"heatmap": "segmentation"}'
-  run --seeds $seed --tag density --task-kwargs '{"density": true}'
+  run --seeds $seed --tag density --task-kwargs '{"density": true, "density_activation": null}'
 done
 echo "ALL DONE"

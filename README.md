@@ -215,8 +215,11 @@ or sum a density map (`density_head`, `density_loss`). Which is better depends o
 With many small trees per tile, the density head halved count error (E011). With a few large
 plants per drone tile, peak counting was far better (count MAE 1.0 against 9–11), because a
 small background bias summed over every pixel adds up; count peaks for a few large objects.
-If you use a density head, `density_head(activation="softplus")` is recommended: on that
-drone data it cut density count error from 10.1 to 2.9. Validate on your data.
+`density_head()` uses a softplus output by default: on that drone data it cut density count
+error from 10.1 to 2.9, and on OAM-TCD it was no worse than the raw head (E011c). Softplus
+never reaches 0, so a mostly empty tile still sums to a small positive count (about 2 objects on
+an empty 792 x 792 drone tile); `density_head(activation=None)` gives the raw head. Validate on
+your data.
 
 **Vector outputs (experimental).** `manyseg.vectors` (the `[vectors]` extra) turns
 predictions into GIS layers: building footprints with straight walls, field boundaries,

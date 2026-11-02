@@ -69,8 +69,10 @@ First release. Python 3.10–3.14, PyTorch ≥ 2.10, timm ≥ 1.0.20.
     Validated on one downstream drone dataset (792 × 792 tiles, 1–20 plants of ~115 px,
     σ = 12, 45 val images, one seed): density count MAE 10.1 → 2.9 against the raw head
     (clamped at 0; 7.5 summed raw). It leaves a floor of about +1.75 objects per image, as
-    softplus never reaches 0; peak counting on a heatmap still scored 1.0 there. The default
-    stays no activation until E011's density arm is rerun with softplus.
+    softplus never reaches 0; peak counting on a heatmap still scored 1.0 there.
+  * `density_head()` defaults to `activation="softplus"` (E011c: no worse than the raw head on
+    OAM-TCD, count MAE val 20.4 vs 20.4, test 19.8 vs 19.3, 3 seeds); `activation=None` keeps
+    the raw head. The bench `PointTask` follows (`density_activation`).
   * A `"relu"` activation was tried and removed: on the same data the head died (the map
     went to 0, count MAE 3.5, correlation 0.37).
   * `density_loss`: a pixel loss against the mass-preserving target scaled by `2πσ²`, over

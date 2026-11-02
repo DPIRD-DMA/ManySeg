@@ -39,12 +39,12 @@ def point_heads(heatmap: str = "regression", offsets: bool = False,
     return _attach(heads, decoders)
 
 
-def density_head(decoder: Any = None, *, activation: str | None = None) -> dict[str, dict]:
+def density_head(decoder: Any = None, *, activation: str | None = "softplus") -> dict[str, dict]:
     """A 1-channel density map whose integral is the count (:func:`count_from_density`).
     Train with :func:`density_loss`.
 
-    ``activation``: ``None`` (default, raw values, as in E011) or ``"softplus"``, the
-    recommended choice. The model applies it, so training and inference use the same one.
+    ``activation``: ``"softplus"`` (default since E011c) or ``None`` (raw values, as in E011).
+    The model applies it, so training and inference use the same one.
     Results on a downstream drone dataset (792 x 792 tiles, 1-20 plants of about 115 px,
     sigma 12, 45 val images, ConvNeXtV2-T U-Net, density head on the shared decoder,
     :func:`density_loss` MSE with the default ``value_scale``, 25 epochs, one seed):
@@ -61,8 +61,10 @@ def density_head(decoder: Any = None, *, activation: str | None = None) -> dict[
 
     Peak counting on a heatmap head scored count MAE 1.0 on the same data: for a few large
     objects per image, count peaks. On OAM-TCD (many small trees per tile, sigma 2 px) the
-    plain density head halved count MAE against peak counting at a fixed threshold (E011);
-    whether softplus helps there is not yet measured. Validate on your data.
+    plain density head halved count MAE against peak counting at a fixed threshold (E011).
+    E011c reran that density arm with softplus (3 seeds): count MAE val 20.4 vs 20.4, test
+    19.8 vs 19.3 (no worse), with the mean signed count error closer to 0 (val -1.2 vs -4.9).
+    Validate on your data.
 
     ``decoder`` as one entry of :func:`point_heads` ``decoders``.
     """
