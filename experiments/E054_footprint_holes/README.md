@@ -24,3 +24,20 @@ the limitation is documented.
 ## Compute
 One GPU pass per model and split, about 20 min in all (GPU shared, timings not reported); CPU
 decoding under MemoryMax 10 GB.
+
+## Results (12:04; `runs/e054.json`; GPU shared, timings not reported)
+Test, `holes` False -> True at the shipped settings. False reproduces E053's `min_seed=8` run.
+
+| checkpoint | boundary F | boundary P | boundary R | det F1 | holes (GT 692) |
+|---|---|---|---|---|---|
+| B3_s0 | 0.6580 -> 0.6577 | 0.6625 -> 0.6614 | 0.6536 -> 0.6539 | 0.8544 -> 0.8544 | 4 -> 264 |
+| B3_s1 | 0.6623 -> 0.6619 | 0.6657 -> 0.6644 | 0.6590 -> 0.6593 | 0.8517 -> 0.8517 | 4 -> 317 |
+
+Mean True - False: boundary F -0.0004, detection F1 -0.00002; val agrees (-0.0001, -0.0004).
+**Decision (rule above): `holes=True` is the footprint default.** Holes are about 0.0002 of the
+outline here (692 GT holes among about 50,000 buildings), so the score barely moves either way:
+this keeps the geometry the targets promise, it does not improve the score. Rendered tiles with
+GT courtyards show large courtyards kept and some thin slivers between wings missed; the
+models find about 40% as many holes as the GT has, and how many of those match a GT hole was not
+measured. (The 4 holes with `holes=False` come from `buffer(0)` repairing an invalid straightened
+polygon, as before.)

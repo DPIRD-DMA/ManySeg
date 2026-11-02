@@ -27,7 +27,8 @@ def _docs_block(marker: str) -> str:
     doc = Path(__file__).resolve().parents[4] / "docs" / "api_design.md"
     if not doc.is_file():
         pytest.skip("not a repository checkout (no docs/)")
-    blocks = [b for b in re.findall(r"```python\n(.*?)```", doc.read_text(), re.S) if marker in b]
+    text = doc.read_text(encoding="utf-8")
+    blocks = [b for b in re.findall(r"```python\n(.*?)```", text, re.S) if marker in b]
     assert len(blocks) == 1, f"{len(blocks)} blocks contain {marker!r}"
     return blocks[0]
 
@@ -64,7 +65,7 @@ def test_vector_scene_snippet(tmp_path, monkeypatch):
     # reprojected from lon / lat onto the raster's grid: the pixel boxes again
     assert np.allclose(sorted(p.bounds for p in ns["polys"]), sorted(boxes), atol=0.05)
     assert len(ns["records"]) == 3
-    fc = json.loads((tmp_path / "buildings.geojson").read_text())
+    fc = json.loads((tmp_path / "buildings.geojson").read_text(encoding="utf-8"))
     got = sorted(shapely.geometry.shape(f["geometry"]).bounds for f in fc["features"])
     assert np.allclose(got, sorted(m.bounds for m in metres), atol=0.5)  # in EPSG:28350
 

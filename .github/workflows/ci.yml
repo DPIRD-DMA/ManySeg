@@ -68,6 +68,19 @@ jobs:
           uv venv --python 3.12
           uv pip install --torch-backend cpu -e "packages/manyseg[test]" \
             fastai lightning accelerate torchgeo
+      # The end-to-end vector test needs ManyPred; once its repository is public it has to run
+      - name: ManyPred, for the vector pipeline test
+        env:
+          GIT_TERMINAL_PROMPT: "0"
+        run: |
+          if git ls-remote https://github.com/DPIRD-DMA/ManyPred.git HEAD > /dev/null 2>&1; then
+            uv pip install geopandas matplotlib "manypred[geo] @ git+https://github.com/DPIRD-DMA/ManyPred.git"
+            echo "MANYSEG_REQUIRE_MANYPRED=1" >> "$GITHUB_ENV"
+          else
+            echo "::warning::ManyPred is not public yet: the vector pipeline test skips"
+          fi
+      - name: Vector pipeline test, fast cases
+        run: uv run --no-sync pytest packages/manyseg/tests/integration/test_vector_pipeline.py -n 2 -q -m "not slow"
       # heavy tests (Swin compile and export probes, minutes each) run nightly and on demand
       - run: >-
           uv run --no-sync pytest packages/manyseg -n 2 -q --durations=15

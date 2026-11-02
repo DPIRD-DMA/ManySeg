@@ -1,6 +1,7 @@
 """manyseg.losses: the functions moved from manyseg-bench (tested there through the re-export)
 plus multiclass_dice and multi_head_loss."""
 
+import numpy as np
 import pytest
 import torch
 import torch.nn.functional as F
@@ -74,3 +75,15 @@ def test_density_loss_is_reexported():
     from manyseg.points import density_loss
 
     assert losses.density_loss is density_loss
+
+
+def test_masked_regression_rejects_an_unknown_kind():
+    t = torch.zeros(1, 1, 2, 2)
+    with pytest.raises(ValueError, match="'l1' or 'mse'"):
+        losses.masked_regression(t, t, kind="mae")
+
+
+def test_distance_map_rejects_a_batch():
+    pytest.importorskip("scipy")
+    with pytest.raises(ValueError, match=r"one \(H, W\) geometry"):
+        losses.distance_map(np.zeros((2, 8, 8), bool))

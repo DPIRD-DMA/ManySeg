@@ -813,7 +813,8 @@ def block_decoder(task: str, **params) -> BlockDecoder:
     :func:`polygons_from_labels`, ...) keep generic defaults; the tuned settings live here.
 
     * ``"footprints"``: extent, boundary, distance + corner, direction; ``method="corners"``
-      (B3, E038) or ``"outline"`` (B0, ``simplify`` 1 px unless given).
+      (B3, E038; courtyards kept as traced outlines, E054, ``holes=False`` fills them) or
+      ``"outline"`` (B0, ``simplify`` 1 px unless given).
     * ``"fields"``: extent, boundary, distance; outline decoding (B0, E046), absolute distance
       (``seed_threshold`` in px, E052; for a model trained on normalised distance pass
       ``seed_threshold=0.3, extent_threshold=0.6``, E046's).

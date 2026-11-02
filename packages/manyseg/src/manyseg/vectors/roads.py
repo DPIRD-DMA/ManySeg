@@ -190,7 +190,7 @@ def _assemble(surf, peaks, d, shape, zone_radius, pair_deg, gap, scale) -> Vecto
 def _rejoin(surf, peaks, allk, d, zr, pair_deg, nx, shapely, minimum_spanning_tree):
     from collections import defaultdict
 
-    disks = shapely.buffer(shapely.points(allk), zr)
+    disks = shapely.buffer(shapely.points(allk), zr, quad_segs=16)  # as Point.buffer
     zone = shapely.union_all(disks)
     zones = list(getattr(zone, "geoms", [zone]))
     ztree = shapely.STRtree(zones)

@@ -227,11 +227,12 @@ your data.
 predictions into GIS layers: building footprints with straight walls, field boundaries,
 road graphs with junctions and overpasses, LoD2 roof faces with a plane and 3-D mesh each
 (heights from an nDSM input), and points. Each task has a head preset, target encoders that
-take your vector labels in any CRS, and a decoder chosen in pre-registered experiments. One
-call decodes a scene of any size: large scenes block by block, with the same result as a
-whole-scene decode when the blocks' halo is at least the decoder's `min_halo` (for roads it
-must also cover the skeleton's data-dependent reach; the decoder warns); with ManyPred this
-happens while it predicts (needs ManyPred's next release).
+take your vector labels in any CRS, and a decoder tested in experiments (`docs/api_design.md`
+gives each one's evidence). One call decodes a scene of any size: large scenes block by block,
+with the same result as a whole-scene decode when the blocks' halo is at least the decoder's
+`min_halo`, except that an instance reaching much further than the halo can split at a block
+seam, and for roads the halo must also cover the skeleton's data-dependent reach (the decoder
+warns). With ManyPred this happens while it predicts (needs ManyPred's next release).
 
 ```python
 from manyseg.vectors import Scene, block_decoder, decode_scene

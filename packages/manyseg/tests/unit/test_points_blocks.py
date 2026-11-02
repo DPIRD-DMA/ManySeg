@@ -311,3 +311,9 @@ def test_block_decoder_registry_points_and_density():
     d = np.abs(hm).astype(np.float32)
     cnt = decode_scene({"density": d}, block_decoder("density", value_scale=2.0), 24, 0)
     assert cnt.total == pytest.approx(float(d.sum(dtype=np.float64)) / 2.0, rel=1e-6)
+
+
+@pytest.mark.parametrize("scale", [0, -1.0, float("inf"), float("nan")])
+def test_density_decoder_rejects_a_bad_value_scale(scale):
+    with pytest.raises(ValueError, match="value_scale"):
+        DensityBlockDecoder(value_scale=scale)

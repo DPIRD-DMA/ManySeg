@@ -127,7 +127,7 @@ def test_push_then_load_roundtrip(fake_hub):
 
 def test_model_card_contents(fake_hub):
     push(license="cc-by-4.0")
-    text = (fake_hub.repo("org/water") / "README.md").read_text()
+    text = (fake_hub.repo("org/water") / "README.md").read_text(encoding="utf-8")
     assert text.startswith("---\nlibrary_name: manyseg\nlicense: cc-by-4.0\n"
                            "pipeline_tag: image-segmentation\n")
     assert 'manyseg.load("hf-hub:org/water")' in text
@@ -140,7 +140,8 @@ def test_model_card_contents(fake_hub):
 def test_existing_card_is_kept(fake_hub):
     push(model_card="# hand-written\n")
     push()  # a generated card would replace it
-    assert (fake_hub.repo("org/water") / "README.md").read_text() == "# hand-written\n"
+    card = fake_hub.repo("org/water") / "README.md"
+    assert card.read_text(encoding="utf-8") == "# hand-written\n"
     assert fake_hub.commits[1][3] == ["model.safetensors"]
     push(model_card=False)
     assert fake_hub.commits[2][3] == ["model.safetensors"]
@@ -152,7 +153,7 @@ def test_revision_creates_the_branch(fake_hub):
     assert manyseg.read_metadata("hf-hub:org/water@v1", token="hf_secret")["heads"] == [
         "water", "depth"]
     assert 'manyseg.load("hf-hub:org/water@v1")' in (
-        fake_hub.repo("org/water", "v1") / "README.md").read_text()
+        fake_hub.repo("org/water", "v1") / "README.md").read_text(encoding="utf-8")
     with pytest.raises(FileNotFoundError):
         manyseg.load("hf-hub:org/water", token="hf_secret")  # nothing on main
     push(revision="v1")  # an existing branch is reused
@@ -261,3 +262,36 @@ def test_list_classes_or_bands_need_one_head_or_input(tmp_path):
     with pytest.raises(ValueError, match="bands as a list is for a model with one input"):
         manyseg.save(two, tmp_path / "m.safetensors", bands=["VV", "VH"],
                      activations={"logits": "softmax"}, normalize=None)
+
+
+@pytest.mark.filterwarnings("ignore:No normalisation")
+def test_class_and_band_names_must_match_the_channels(tmp_path):
+    model, path = small_model(), tmp_path / "m.safetensors"
+    acts = {"activations": {"water": "softmax"}, "normalize": None}
+    with pytest.raises(ValueError, match="head 'water' has 2 channels, got 3 names"):
+        manyseg.save(model, path, classes={"water": ["a", "b", "c"]}, **acts)
+    with pytest.raises(ValueError, match="the input has 4 channels, got 2 names"):
+        manyseg.save(model, path, bands=["R", "G"], **acts)
+    two = create_model(pretrained=False, num_classes=2, inputs={
+        "s2": {"in_channels": 4, "backbone": "resnet18"},
+        "s1": {"in_channels": 2, "backbone": "resnet18"}})
+    with pytest.raises(ValueError, match="input 's1' has 2 channels, got 1 names"):
+        manyseg.save(two, path, bands={"s1": ["VV"]}, activations={"logits": "softmax"},
+                     normalize=None)
+    manyseg.save(two, path, bands={"s1": ["VV", "VH"]}, classes=["a", "b"],
+                 activations={"logits": "softmax"}, normalize=None)
+    one = create_model(backbone="resnet18", pretrained=False, num_classes=1)
+    manyseg.save(one, path, classes=["dry", "water"], activations={"logits": "sigmoid"},
+                 normalize=None)  # a one-channel head may name both classes
+    with pytest.raises(ValueError, match="has 1 channels, got 3"):
+        manyseg.save(one, path, classes=["a", "b", "c"], activations={"logits": "sigmoid"},
+                     normalize=None)
+
+
+def test_card_does_not_call_activated_outputs_logits():
+    meta = {"create_model": {"in_channels": 3, "heads": {
+                "density": {"type": "regression", "out_channels": 1, "activation": "softplus"}}},
+            "heads": ["density"], "activations": {"density": "none"}, "format": 2}
+    text = hub.card(meta, "org/d")
+    assert "logits" not in text
+    assert "`none` means the output is already the prediction" in text
