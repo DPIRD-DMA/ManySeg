@@ -1,6 +1,6 @@
 # Roadmap
 
-Status as of 2026-11-02, 08:55 AWST. ✅ done · 🔄 in progress · ⏳ planned.
+Status as of 2026-11-02, 09:10 AWST. ✅ done · 🔄 in progress · ⏳ planned.
 
 ## Phase 1: research and architecture ✅
 
@@ -105,7 +105,7 @@ Status as of 2026-11-02, 08:55 AWST. ✅ done · 🔄 in progress · ⏳ planned
 ## Phase 5: research and optimisation 🔄
 
 Done (see Phase 3 for results and `experiments/` for write-ups): E024 (remote-sensing weights with their own normalisation, ResNet-50: SSL4EO DINO and MoCo beat ImageNet on Sen1Floods11, BigEarthNet and PASTIS, DINO by +2.1 / +4.1 / +2.1; recommended. Satlas only on Sen1Floods11, not recommended). E001b, E002–E006, E009–E012,
-E011b, E014, E007 (mixed: frozen encoder BN +2.6 val on Sen1Floods11 at batch 2, GroupNorm decoder +0.5 on Pet; neither passes on both). E013 (negative), E008 (all variants safe; found and fixed an int8 bug on CPUs without VNNI). E007b (frozen encoder BN is a real small-batch fix on both datasets; accumulation alone is not). E015 (native resolution adds nothing but halves grouped-model FLOPs; splitting bands into groups helps +0.9 to +1.3; found the shared-encoder BN bug, fixed). E016 (PASTIS: day of year adds nothing even for crop phenology; band grouping does not replicate). E017 (CloudSEN12+: band groups +0.37 val, under the 0.76 bar; grouping stays a single-dataset result). E023 (semantic change on SECOND: per-input land-cover heads beat fused (+1.5 Score); shared = separate, so share; Siamese +7.0 over early fusion). E021 (time series: several dates help a lot; stacking dates as channels beat the time-series input on PASTIS, the reverse on AI4Boundaries; attention ≈ mean). E022 (binary change: Siamese with diff / concat_diff beats early fusion on OSCD and LEVIR-CD, Siamese concat on LEVIR-CD only; no single op wins on both). E020 (BigEarthNet v2: parity with timm for classification and regression; band groups, S1 and metadata do not help; a segmentation head on the reference maps helps the classifier, +2.1 val / +2.3 test macro mAP; post hoc it looks like regularisation). E019/E019b (ManySeg image heads at val parity with timm classifiers in 6/6 cells; test −0.43, mostly ConvNeXt). E018 (Pareto front: four PVTv2-b0 configs are on the front of both datasets and ship as opt-in `manyseg.presets`; three of them (all but the SegFormer-head `fast`, which is 0.34 lower on Pet) dominate the ResNet-34 U-Net default). E025 (training speed against SMP, from a downstream report: the nearest-upsampling gather's scatter-add backward made U-Net steps 2–5% slower eager and up to 98% slower compiled; replaced where the values are the same, now at parity compiled and 18–25% faster eager; FPN / fastai U-Net 6–14% faster compiled). E026 (performance audit, values unchanged: float32 activations under bf16 autocast removed from fastai_unet, `input_cross`, GroupNorm, UPerNet and DeepLab decoders (−19 to −27% memory); SegFormer fuse per level (−26 to −38% memory); contiguous cross-attention tokens (−50% time, −77% memory); opt-in encoder gradient checkpointing; sync-free bench training loop (−24% step time for the PVTv2 presets); CloudSEN12+ training is disk-bound). E027 (round 2: static compiled evaluation with a padded last batch +12–27%; host arrays of device-resident datasets freed, −2.8 GB RAM; bilinear U-Net and concat-fusion resize dtype −4% time; evaluator syncs, object-metric copies and the ViT neck: no gain). E011c (softplus density head no worse than the raw head on OAM-TCD; now the default). E028–E052: vector outputs, below. Remaining candidates; a budget is set before each one starts:
+E011b, E014, E007 (mixed: frozen encoder BN +2.6 val on Sen1Floods11 at batch 2, GroupNorm decoder +0.5 on Pet; neither passes on both). E013 (negative), E008 (all variants safe; found and fixed an int8 bug on CPUs without VNNI). E007b (frozen encoder BN is a real small-batch fix on both datasets; accumulation alone is not). E015 (native resolution adds nothing but halves grouped-model FLOPs; splitting bands into groups helps +0.9 to +1.3; found the shared-encoder BN bug, fixed). E016 (PASTIS: day of year adds nothing even for crop phenology; band grouping does not replicate). E017 (CloudSEN12+: band groups +0.37 val, under the 0.76 bar; grouping stays a single-dataset result). E023 (semantic change on SECOND: per-input land-cover heads beat fused (+1.5 Score); shared = separate, so share; Siamese +7.0 over early fusion). E021 (time series: several dates help a lot; stacking dates as channels beat the time-series input on PASTIS, the reverse on AI4Boundaries; attention ≈ mean). E022 (binary change: Siamese with diff / concat_diff beats early fusion on OSCD and LEVIR-CD, Siamese concat on LEVIR-CD only; no single op wins on both). E020 (BigEarthNet v2: parity with timm for classification and regression; band groups, S1 and metadata do not help; a segmentation head on the reference maps helps the classifier, +2.1 val / +2.3 test macro mAP; post hoc it looks like regularisation). E019/E019b (ManySeg image heads at val parity with timm classifiers in 6/6 cells; test −0.43, mostly ConvNeXt). E018 (Pareto front: four PVTv2-b0 configs are on the front of both datasets and ship as opt-in `manyseg.presets`; three of them (all but the SegFormer-head `fast`, which is 0.34 lower on Pet) dominate the ResNet-34 U-Net default). E025 (training speed against SMP, from a downstream report: the nearest-upsampling gather's scatter-add backward made U-Net steps 2–5% slower eager and up to 98% slower compiled; replaced where the values are the same, now at parity compiled and 18–25% faster eager; FPN / fastai U-Net 6–14% faster compiled). E026 (performance audit, values unchanged: float32 activations under bf16 autocast removed from fastai_unet, `input_cross`, GroupNorm, UPerNet and DeepLab decoders (−19 to −27% memory); SegFormer fuse per level (−26 to −38% memory); contiguous cross-attention tokens (−50% time, −77% memory); opt-in encoder gradient checkpointing; sync-free bench training loop (−24% step time for the PVTv2 presets); CloudSEN12+ training is disk-bound). E027 (round 2: static compiled evaluation with a padded last batch +12–27%; host arrays of device-resident datasets freed, −2.8 GB RAM; bilinear U-Net and concat-fusion resize dtype −4% time; evaluator syncs, object-metric copies and the ViT neck: no gain). E011c (softplus density head no worse than the raw head on OAM-TCD; now the default). E028–E053: vector outputs, below. Remaining candidates; a budget is set before each one starts:
 
 | Id | Question | Budget |
 | --- | --- | --- |
@@ -151,6 +151,7 @@ synthetically corrupted perfect targets (levels L0–L3), not trained models.
 | E050 / E050b | Stitching tiled predictions for vector decoding (blend vs cutlines), scored by agreement with a single-pass decode. Roads: any cut removes the seam effect (junction F1 0.971–0.972 vs blend 0.954); min-cost and object-aware seams add nothing over the midline. Roofs: no merge rule helps at 512 / 128 px tiles; the gap was context: at 1024 / 256 all-face agreement is 0.979 (blend) / 0.987 (midline). Ships as the midline cut with ≥ 1024 / 256 tiles; the cut's gain on roofs was not pre-registered | ✅ |
 | E051 | End to end through ManyPred (`merge="cut"`, `BlockPostprocess`, `block_decoder`): the block decode equals the whole-scene decode on a 1 km² roof scene (5537 faces, exact) and a 2048 px road scene (identical graph) | ✅ |
 | E052 | Absolute vs normalised distance target on FTW fields, 2 seeds (per-tile normalisation changes 3–34 fields at seams in the end-to-end test). Absolute: boundary F +0.008, detection F1 +0.008: it is the fields default; roof faces untested | ✅ |
+| E053 | Minimum seed size 8 vs 0 px in block decoding (a narrow part cut off by boundary bands got its own seed: an extra 17–25 px face at hip-roof tips, extra pieces at field necks), on trained checkpoints. Test, 0 → 8: roofs face F1 +0.041, height RMSE 1.35 → 1.28 m (E047b, 1 seed); footprints detection F1 +0.024, boundary F +0.004 (E036, 2 seeds); fields detection F1 +0.008, boundary F −0.0002 (E052, 2 seeds). Passes for all three: `min_seed=8` is the `block_decoder` default (`instances_from_outputs` keeps 0) | ✅ |
 | — | Shared schema and utilities: done (target encoders, `block_decoder` / `decode_scene`, `SceneRecords`, GeoJSON / GeoPackage). One model with task-specific heads vs separate models: not tested | ⏳ |
 | — | LoD1: footprint + ground / eave / roof height; roof-to-footprint offset for off-nadir imagery | ⏳ |
 | — | LoD2 remainder: watertight solids and CityJSON export (0.1.0 writes faces and a 3-D roof mesh) | ⏳ |
@@ -164,6 +165,9 @@ Ships in 0.1.0, marked experimental (names and defaults may change before 1.0):
   (found by the end-to-end test).
 * LoD2 roofs: trained faces (F3) + planar joining (E047b, E048b), robust plane per face + J2
   mesh (E043b). An nDSM input is required (E049).
+* Footprints, fields and roofs decode with seeds of at least 8 px (E053).
+* Known limitation: under the fields' 3 px seed threshold, a narrow strip of a field (under
+  about 8 px, e.g. beside a hole) can split into pieces, also in a single pass.
 * Large scenes: ManySeg's block decoders run in ManyPred's `merge="cut"` stitching with block
   post-processing, or in `decode_scene` on a stitched raster; block and whole-scene decodes
   are equal (E051). Tiles of at least 1024 px with 256 px overlap (E050b).
@@ -202,15 +206,13 @@ Ships in 0.1.0, marked experimental (names and defaults may change before 1.0):
 * ✅ Fields default to `distance="absolute"` (E052).
 * ✅ Clip-edge corner suppression (`tile_edges="ignore"`) removed from the API; its negative
   result is in the CHANGELOG.
-* 🔄 Seeds in narrow parts of an instance: an acute hip-roof tip gets no seed or its own (lost
-  tip, or an extra 17–25 px face, also in a single pass); fields get extra pieces at narrow
-  necks. A minimum seed size (`instances_from_outputs(min_seed=)`) is being checked on the
-  E047b roof, E036 footprint and E052 field checkpoints (E053). A holed field's narrow strip
-  breaking into pieces has another cause and stays a documented limitation.
+* ✅ Seeds in narrow parts of an instance (extra faces at hip-roof tips, extra pieces at field
+  necks): fixed by a minimum seed size of 8 px (E053). A field's narrow strip splitting under
+  the 3 px seed threshold has another cause and is a documented limitation.
 * ✅ API reference (one page per public module, from the docstrings); ManyPred section in
   the README.
-* ⏳ `manyseg.losses`: the bench losses move into the library, with re-exports from
-  `manyseg_bench`.
+* ✅ `manyseg.losses`: the bench losses moved into the library (re-exported by the bench), plus
+  `multiclass_dice` and `multi_head_loss`.
 * ✅ ManyPred's vector-blocks branch (`merge="cut"`, block post-processing) is on ManyPred's
   main (2026-11-02).
 * ⏳ Make the repositories public, so Read the Docs can build them.
