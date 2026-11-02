@@ -1,7 +1,8 @@
 """Build the documentation site (MkDocs + Material) from the repo's existing Markdown.
 
 Assembles README.md (home), CHANGELOG.md, docs/*.md, the model builder page (docs/builder),
-examples/README.md, every experiments/E*/README.md and an API reference generated from the
+examples/README.md, the notebooks (with their saved outputs; nothing is executed), every
+experiments/E*/README.md and an API reference generated from the
 docstrings (mkdocstrings, one page per public module in REFERENCE) into build/site_src
 (gitignored), writes a generated MkDocs config with the nav, and builds static HTML into
 build/site. No new runtime dependency: the docs tools are listed in docs/requirements.txt, and
@@ -98,6 +99,13 @@ def main() -> int:
         shutil.copy(ROOT / "docs" / name, SRC / "docs" / name)
     (SRC / "examples").mkdir()
     shutil.copy(ROOT / "examples" / "README.md", SRC / "examples" / "index.md")
+    (SRC / "notebooks").mkdir()
+    shutil.copy(ROOT / "notebooks" / "README.md", SRC / "notebooks" / "index.md")
+    notebooks = []
+    for nb in sorted((ROOT / "notebooks").glob("*.ipynb")):
+        shutil.copy(nb, SRC / "notebooks" / nb.name)
+        title = next(c for c in json.loads(nb.read_text())["cells"] if c["cell_type"] == "markdown")
+        notebooks.append((title["source"][0].lstrip("# ").strip(), f"notebooks/{nb.name}"))
     (SRC / "reference").mkdir()
     for mod in PAGES:
         (SRC / "reference" / f"{mod}.md").write_text(f"::: {mod}\n")
@@ -111,7 +119,9 @@ def main() -> int:
     nav += [f"      - {t}: docs/{n}" for t, n in DOCS]
     nav += ["      - Changelog: CHANGELOG.md"]
     nav += ["  - Model builder: docs/builder/index.html"]
-    nav += ["  - Examples: examples/index.md", "  - API reference:"]
+    nav += ["  - Examples: examples/index.md", "  - Notebooks:", "      - Overview: notebooks/index.md"]
+    nav += [f"      - {json.dumps(t)}: {p}" for t, p in notebooks]
+    nav += ["  - API reference:"]
     for section, mods in REFERENCE:
         nav += [f"      - {section}:"] + [f"          - {m}: reference/{m}.md" for m in mods]
     nav += ["  - Experiments:"]
@@ -134,6 +144,7 @@ def main() -> int:
         "markdown_extensions: [tables, admonition, toc, pymdownx.highlight, pymdownx.superfences]",
         "plugins:",
         "  - search",
+        "  - mkdocs-jupyter: {execute: false, include_source: true}",
         "  - mkdocstrings:",
         "      default_handler: python",
         f"      handlers: {{python: {json.dumps(HANDLER)}}}",  # JSON is valid YAML

@@ -5,4 +5,5 @@ mkdocs>=1.6,<2
 mkdocs-material>=9.5,<10
 mkdocstrings>=1,<2
 mkdocstrings-python>=2,<3
+mkdocs-jupyter>=0.25,<1  # renders notebooks/ with their saved outputs; never runs them
 ruff>=0.6  # mkdocstrings formats long signatures with it

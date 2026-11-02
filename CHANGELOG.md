@@ -290,6 +290,11 @@ First release. Python 3.10–3.14, PyTorch ≥ 2.10, timm ≥ 1.0.20.
   6% faster compiled. Whether a step is exactly 2x is decided per pair of levels, so sparse
   `out_indices` (e.g. strides 4, 16, 32) keep the gather where levels are 4x apart. A crop to an unchanged size no longer copies.
 
+### Notebooks
+
+* `notebooks/`: flood mapping on Sen1Floods11, optical + radar with several heads, and one notebook
+  per vector output (footprints, fields, roads, roofs, points), saved with their figures and rendered on the docs site.
+
 ### Testing
 
 * Unit tests in CI on Linux, with macOS and Windows on pull requests and nightly; the slow

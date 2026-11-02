@@ -182,6 +182,7 @@ Ships in 0.1.0, marked experimental (names and defaults may change before 1.0):
   Lightning, Accelerate, TorchGeo, vector outputs (footprints, fields, roads, roofs, points;
   14–18), plus walkthroughs (metadata conditioning, instance fields, point counting, vector
   presets). Each runs on CPU (seconds; the training walkthroughs 10–20 s); the slow tier runs them all.
+* ✅ Notebooks (`notebooks/`) with real data and saved figures: flood mapping on Sen1Floods11, optical + radar with several heads, one per vector output (footprints, fields, roads, roofs, points). The nightly tier runs them in smoke mode. Add Colab links when the repo goes public.
 * ✅ Docs site (MkDocs Material, `scripts/build_docs.py` → `build/site`): home, design docs, examples and every experiment write-up. Built locally and ready for **Read the Docs** (`.readthedocs.yaml`; the RTD-style pip build is tested). It goes live when the project is imported on RTD at release: RTD Community needs a public repo.
 * ✅ API review before 0.1.0 (Codex as a new user): config vocabulary (`in_channels` /
   `out_channels` / `num_features`, head type follows scope, `decoder` as a dict), internal

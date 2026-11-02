@@ -67,7 +67,7 @@ jobs:
       - run: |
           uv venv --python 3.12
           uv pip install --torch-backend cpu -e "packages/manyseg[test]" \
-            fastai lightning accelerate torchgeo
+            fastai lightning accelerate torchgeo nbclient ipykernel matplotlib
       # heavy tests (Swin compile and export probes, minutes each) run nightly and on demand
       - run: >-
           uv run --no-sync pytest packages/manyseg -n 2 -q --durations=15
@@ -80,7 +80,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
-      - run: uvx ruff check packages examples scripts/sync_readme.py
+      - run: uvx ruff check packages examples notebooks scripts/sync_readme.py
       - run: python3 scripts/sync_readme.py --check  # PyPI README matches the repository one
 
   package:

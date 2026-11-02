@@ -380,6 +380,8 @@ Every claim here comes from a pre-registered, multi-seed experiment in
 * [`docs/builder/`](docs/builder/): the model builder, a page where you pick inputs, encoders,
   fusion, decoder and heads and get a live diagram plus the `create_model` code. Open
   `docs/builder/index.html` in a browser; it needs no server.
+* [`notebooks/`](notebooks/): walkthroughs with real data and figures: flood mapping, radar plus
+  optical with several outputs, and one notebook for each vector output.
 * [`examples/`](examples/): runnable scripts for most of the tasks above.
 * [`docs/api_design.md`](docs/api_design.md): the full API (inputs, fusion, decoders, heads,
   metadata, resolution, export, quantisation).

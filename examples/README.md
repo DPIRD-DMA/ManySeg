@@ -1,5 +1,7 @@
 # Examples
 
+For walkthroughs with real data and figures, see the [notebooks](../notebooks/).
+
 Short scripts that run on CPU with random weights: the numbered ones in a few seconds (09–13,
 which train two short epochs, in about 5–15 s), the walkthroughs that train briefly
 (`instance_fields`, `point_counting`) in 10–20 s (`pretrained=False`; each script shows where
