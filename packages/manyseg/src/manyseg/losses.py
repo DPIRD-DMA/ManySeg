@@ -9,9 +9,9 @@
 * Density heads: :func:`~manyseg.points.density_loss` (re-exported here).
 * Several heads: :func:`multi_head_loss` sums a loss per head of a model's output dict.
 
-The training code that chose these (and the weights between heads used in the experiments) is
-in ``manyseg-bench`` (``manyseg_bench.tasks``), which re-exports this module as
-``manyseg_bench.losses``. ``distance_map`` needs SciPy (``manyseg[instances]``).
+The training code that chose these, with the weights between heads used in the experiments,
+is in the ``manyseg-bench`` package, which re-exports this module. ``distance_map`` needs SciPy
+(``manyseg[instances]``).
 """
 
 from __future__ import annotations

@@ -1,7 +1,6 @@
 """manyseg.losses: the functions moved from manyseg-bench (tested there through the re-export)
 plus multiclass_dice and multi_head_loss."""
 
-import manyseg_bench.losses as bench_losses
 import pytest
 import torch
 import torch.nn.functional as F
@@ -10,11 +9,6 @@ from manyseg import losses
 
 def onehot_logits(target, classes, scale=20.0):
     return F.one_hot(target, classes).permute(0, 3, 1, 2).float() * scale - scale / 2
-
-
-def test_bench_reexports_the_same_functions():
-    for name in losses.__all__:
-        assert getattr(bench_losses, name) is getattr(losses, name)
 
 
 def test_multiclass_dice_perfect_wrong_and_gradient():

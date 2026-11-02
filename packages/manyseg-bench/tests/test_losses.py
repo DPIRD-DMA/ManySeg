@@ -49,3 +49,10 @@ def test_heatmap_focal_explicit_positives():
     good = torch.where(pos, 4.0, -4.0)
     assert losses.heatmap_focal(good, t, pos=pos) < losses.heatmap_focal(-good, t, pos=pos)
     assert not (t >= 0.999).any()  # the default would find no positives here
+
+
+def test_reexports_the_library_losses():
+    import manyseg.losses
+
+    for name in manyseg.losses.__all__:
+        assert getattr(losses, name) is getattr(manyseg.losses, name)
