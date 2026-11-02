@@ -136,12 +136,15 @@ def _polygon(ring: np.ndarray, corners: np.ndarray, direction: np.ndarray, *, sn
 def polygons_from_corners(labels, corner, direction, *, corner_threshold: float = 0.3,
                           kernel: int = 3, snap_radius: float = 4.0, big_dev: float = 8.0,
                           agree: float = 0.4, merge_deg: float = 15.0, simplify: float = 1.0,
-                          min_area: float = 16) -> list:
+                          min_area: float = 16, holes: bool = True) -> list:
     """Straight-walled polygons from instance ``labels`` (H, W), a ``corner`` probability map
     (H, W) and a ``direction`` field (2, H, W) of ``(cos 2t, sin 2t)`` (numpy or torch).
     Instances with fewer than 3 snapped corners, or whose straightened polygon degenerates
     (< 3 walls, invalid, empty), fall back to their outline simplified by ``simplify`` px, so a
-    building the instance mask found is never dropped.
+    building the instance mask found is never dropped. With ``holes``, an instance's holes of at
+    least ``min_area`` (courtyards) are cut out as their traced outline simplified by
+    ``simplify`` px: only exterior walls are straightened, as :func:`corner_targets` puts corners
+    and directions only there.
 
     A low-level building block with generic defaults (E035b's oracle level-1/2 tuning). The
     settings tuned on trained models are in ``block_decoder("footprints")`` (E038 B3:
@@ -156,6 +159,7 @@ def polygons_from_corners(labels, corner, direction, *, corner_threshold: float 
     from scipy import ndimage
 
     peaks = _corner_peaks(cp, corner_threshold, kernel)[1]
+    peaks = peaks[np.argsort(peaks[:, 0], kind="stable")]  # each instance reads the ones near it
     lab = labels.detach().cpu().numpy() if hasattr(labels, "detach") else np.asarray(labels)
     if lab.ndim != 2:
         raise ValueError(f"expected a (H, W) label map, got shape {lab.shape}")
@@ -163,9 +167,14 @@ def polygons_from_corners(labels, corner, direction, *, corner_threshold: float 
     for i, sl in enumerate(ndimage.find_objects(lab.astype(np.int64)), start=1):
         if sl is None:
             continue
-        q = _instance_polygon(lab[sl] == i, sl[0].start, sl[1].start, peaks, dr,
+        x0, x1 = np.searchsorted(peaks[:, 0], (sl[1].start - snap_radius, sl[1].stop + snap_radius))
+        near = peaks[x0:x1]
+        near = near[(near[:, 1] >= sl[0].start - snap_radius)
+                    & (near[:, 1] <= sl[0].stop + snap_radius)]
+        q = _instance_polygon(lab[sl] == i, sl[0].start, sl[1].start, near, dr,
                               snap_radius=snap_radius, big_dev=big_dev, agree=agree,
-                              merge_deg=merge_deg, simplify=simplify, min_area=min_area)
+                              merge_deg=merge_deg, simplify=simplify, min_area=min_area,
+                              holes=holes)
         if q is not None:
             out.append(q)
     return out
@@ -174,7 +183,7 @@ def polygons_from_corners(labels, corner, direction, *, corner_threshold: float 
 def _instance_polygon(mask: np.ndarray, y0: int, x0: int, peaks: np.ndarray,
                       direction: np.ndarray, origin: tuple[int, int] = (0, 0), *,
                       snap_radius: float, big_dev: float, agree: float, merge_deg: float,
-                      simplify: float, min_area: float):
+                      simplify: float, min_area: float, holes: bool = False):
     """:func:`polygons_from_corners` for one instance: bool ``mask`` with its top-left pixel at
     scene ``(y0, x0)``, ``peaks`` (x, y) and ``direction`` with its top-left pixel at scene
     ``origin`` (row, col). None if the outline is under ``min_area`` or degenerates."""
@@ -183,8 +192,24 @@ def _instance_polygon(mask: np.ndarray, y0: int, x0: int, peaks: np.ndarray,
     if poly.geom_type != "Polygon" or poly.area < min_area:
         return None
     ring = np.asarray(shapely.segmentize(poly.exterior, 1.0).coords)
-    return _polygon(ring, peaks, direction, snap_radius=snap_radius, big_dev=big_dev,
-                    agree=agree, merge_deg=merge_deg, simplify=simplify, origin=origin)
+    q = _polygon(ring, peaks, direction, snap_radius=snap_radius, big_dev=big_dev,
+                 agree=agree, merge_deg=merge_deg, simplify=simplify, origin=origin)
+    return _cut_holes(q, poly, simplify, min_area) if holes and q is not None else q
+
+
+def _cut_holes(q, outline, simplify: float, min_area: float):
+    """``q`` without the holes of ``outline`` of at least ``min_area``, each simplified by
+    ``simplify`` px. A hole that straightening left outside or across ``q``'s walls cuts only
+    what it overlaps; if that splits ``q``, the largest part stays."""
+    shapely = _deps()[1]
+    cut = [h.simplify(simplify) for h in map(shapely.Polygon, outline.interiors)]
+    cut = [h for h in cut if h.area >= min_area]
+    if not cut:
+        return q
+    out = q.difference(shapely.union_all(cut))
+    if out.geom_type != "Polygon":
+        out = max(getattr(out, "geoms", []), key=lambda g: g.area, default=q)
+    return out if out.geom_type == "Polygon" and out.area > 1 else q
 
 
 def _corner_peaks(corner: np.ndarray, threshold: float = 0.3, kernel: int = 3,

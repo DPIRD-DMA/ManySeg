@@ -14,6 +14,7 @@ grade separation: two roads that cross on a bridge become a junction.
 
 from __future__ import annotations
 
+import heapq
 from dataclasses import dataclass
 
 import numpy as np
@@ -24,11 +25,24 @@ def _deps():
         import networkx
         import shapely
         from scipy.spatial import cKDTree
-        from skimage.morphology import remove_small_objects, skeletonize
+        from skimage.morphology import skeletonize
     except ImportError as e:  # pragma: no cover - exercised without the extra
         raise ImportError("manyseg.vectors needs the 'vectors' extra: "
                           "pip install 'manyseg[vectors]'") from e
-    return networkx, shapely, cKDTree, remove_small_objects, skeletonize
+    return networkx, shapely, cKDTree, skeletonize
+
+
+def _remove_small(mask: np.ndarray, min_area: int) -> np.ndarray:
+    """``mask`` without 4-connected blobs under ``min_area`` pixels (``remove_small_objects``
+    renamed its size argument between the scikit-image versions we support)."""
+    from scipy import ndimage
+
+    lab, n = ndimage.label(mask)
+    if not n or min_area <= 1:
+        return mask
+    small = np.bincount(lab.reshape(-1), minlength=n + 1) < min_area
+    small[0] = False
+    return mask & ~small[lab]
 
 
 @dataclass
@@ -213,47 +227,82 @@ def _degrees(chains) -> dict:
 
 
 def _contract_short(nodes, chains, min_len=3.0):
-    """Merge nodes joined by a chain shorter than ``min_len`` px (junction artefacts)."""
-    changed = True
-    while changed:
-        changed = False
-        for i, (u, v, c) in enumerate(chains):
-            if u != v and _chain_len(c) < min_len:
-                nodes[u] = (np.asarray(nodes[u]) + np.asarray(nodes[v])) / 2
-                new = []
-                for j, (a, b, cc) in enumerate(chains):
-                    if j == i:
-                        continue
-                    a2, b2 = (u if a == v else a), (u if b == v else b)
-                    cc = cc.copy()
-                    if a2 == u:
-                        cc[0] = nodes[u]
-                    if b2 == u:
-                        cc[-1] = nodes[u]
-                    new.append((a2, b2, cc))
-                del nodes[v]
-                chains, changed = new, True
-                break
-    return nodes, chains
+    """Merge nodes joined by a chain shorter than ``min_len`` px (junction artefacts): always the
+    first such chain in list order, until none is left. A merge only changes the chains at its
+    two nodes, so the rest are not looked at again (noise has thousands of short chains)."""
+    chains = dict(enumerate(chains))
+    at: dict = {}
+    for i, (u, v, _) in chains.items():
+        at.setdefault(u, set()).add(i)
+        at.setdefault(v, set()).add(i)
+    short = [i for i, (u, v, c) in chains.items() if u != v and _chain_len(c) < min_len]
+    heapq.heapify(short)  # may hold chains no longer short; checked when popped
+    while short:
+        i = heapq.heappop(short)
+        if i not in chains:
+            continue
+        u, v, c = chains[i]
+        if u == v or _chain_len(c) >= min_len:
+            continue
+        nodes[u] = (np.asarray(nodes[u]) + np.asarray(nodes[v])) / 2
+        del chains[i]
+        at[u].discard(i)
+        at[v].discard(i)
+        at[u] |= at.pop(v)
+        del nodes[v]
+        for j in at[u]:
+            a, b, cc = chains[j]
+            a, b, cc = (u if a == v else a), (u if b == v else b), cc.copy()
+            if a == u:
+                cc[0] = nodes[u]
+            if b == u:
+                cc[-1] = nodes[u]
+            chains[j] = (a, b, cc)
+            if a != b and _chain_len(cc) < min_len:
+                heapq.heappush(short, j)
+    return nodes, [chains[i] for i in sorted(chains)]
 
 
 def _join_degree2(nodes, chains):
-    """Join chains through nodes of degree 2 (not loops)."""
-    while True:
-        deg = _degrees(chains)
-        loops = {u for u, v, _ in chains if u == v}
-        n2 = next((n for n, d in deg.items() if d == 2 and n not in loops), None)
-        if n2 is None:
-            return nodes, chains
-        ids = [i for i, (a, b, _) in enumerate(chains) if a == n2 or b == n2]
-        (a1, b1, c1), (a2, b2, c2) = chains[ids[0]], chains[ids[1]]
+    """Join chains through nodes of degree 2 (not loops), first node in chain order first; a
+    joined chain goes to the end of the order."""
+    chains = dict(enumerate(chains))
+    at: dict = {}
+    for i, (u, v, _) in chains.items():
+        at.setdefault(u, set()).add(i)
+        at.setdefault(v, set()).add(i)
+
+    def rank(n):
+        """Where ``n`` first appears in the chains if it can be joined, else None."""
+        if len(at[n]) != 2 or any(chains[i][0] == chains[i][1] for i in at[n]):
+            return None
+        return min((i, 0 if chains[i][0] == n else 1) for i in at[n])
+
+    todo = [(r, n) for r, n in ((rank(n), n) for n in at) if r is not None]
+    heapq.heapify(todo)  # may hold stale ranks; checked when popped
+    next_id = len(chains)
+    while todo:
+        r, n2 = heapq.heappop(todo)
+        if n2 not in at or rank(n2) != r:
+            continue
+        i1, i2 = sorted(at.pop(n2))
+        a1, b1, c1 = chains.pop(i1)
+        a2, b2, c2 = chains.pop(i2)
         if b1 != n2:
             a1, b1, c1 = b1, a1, c1[::-1]
         if a2 != n2:
             a2, b2, c2 = b2, a2, c2[::-1]
-        chains = [c for i, c in enumerate(chains) if i not in ids]
-        chains.append((a1, b2, np.concatenate([c1, c2[1:]])))
+        chains[next_id] = (a1, b2, np.concatenate([c1, c2[1:]]))
+        at[a1].discard(i1)
+        at[b2].discard(i2)
+        at[a1].add(next_id)
+        at[b2].add(next_id)
+        next_id += 1
         nodes.pop(n2, None)
+        for n in {a1, b2}:
+            if (q := rank(n)) is not None:
+                heapq.heappush(todo, (q, n))
+    return nodes, list(chains.values())
 
 
 # A road cut by the image border ends its skeleton about half a road width inside (3.25 px for
@@ -287,7 +336,7 @@ def bridge_ends(g, gap: float, shape):
 
     **Modifies** ``g`` **in place** (adds edges) and returns it, for chaining; copy it first
     (``g.copy()``) to keep the original."""
-    nx, _, cKDTree, _, _ = _deps()
+    nx, _, cKDTree, _ = _deps()
     if gap <= 0:
         return g
     ends = [n for n in g if g.degree(n) == 1 and not _near_border(g.nodes[n]["xy"], shape)]
@@ -328,11 +377,11 @@ def graph_from_mask(prob, threshold: float = 0.5, *, spur: float = 10, gap: floa
         min_area: Foreground blobs smaller than this many pixels are dropped before skeletonizing.
         scale: The head's ``scale``; coordinates are returned in input pixels.
     """
-    nx, shapely, _, remove_small_objects, skeletonize = _deps()
+    skeletonize = _deps()[3]
     p = prob.detach().float().cpu().numpy() if hasattr(prob, "detach") else np.asarray(prob)
     if p.ndim != 2:
         raise ValueError(f"expected a (H, W) probability map, got shape {p.shape}")
-    m = remove_small_objects(p > threshold, max_size=max(min_area - 1, 0))
+    m = _remove_small(p > threshold, min_area)
     return _graph_from_skeleton(*np.nonzero(skeletonize(m)), p.shape, spur=spur, gap=gap,
                                 simplify=simplify, min_length=min_length, scale=scale)
 
@@ -394,7 +443,7 @@ def graph_from_mask_blocks(prob, threshold: float = 0.5, *, block: int = 2048, h
     """
     from .blocks import block_grid
 
-    remove_small_objects, skeletonize = _deps()[3:]
+    skeletonize = _deps()[3]
     from scipy import ndimage
 
     if hasattr(prob, "detach"):  # as graph_from_mask (Codex 10-28 #2)
