@@ -859,15 +859,19 @@ Why these decoders (pre-registered experiments in [`experiments/`](../experiment
 * **Roof faces, E047b + E048b** (3D BAG, Netherlands, 1 seed): trained faces on RGB + nDSM
   reached face F1 0.57-0.59 against 0.28-0.31 for plane segmentation of the nDSM, with lower
   height error (1.3-1.4 m vs 1.8-2.1 m RMSE). The shipped corner decoder gives straight outlines
-  (C-IoU 0.64 vs 0.15-0.21 for pixel outlines) at 0.01-0.04 lower face F1. Joining faces into a
+  (C-IoU 0.64 vs 0.15-0.21 for pixel outlines) at 0.01-0.04 lower face F1, so E047b's rule did
+  not prefer it over pixel outlines; it ships because E048b's face joining and meshes were built
+  and tested on it (straight shared edges, an order of magnitude fewer mesh vertices). Joining faces into a
   planar partition raised seam closure from 0.38 to 0.71-0.73 (3D BAG's own faces: 0.79).
   **E049:** from RGB alone, with predicted heights, face F1 fell by 0.28-0.38 and height RMSE
   rose by 1.8-2.9 m: not viable.
 * **Stitching, E050 / E050b**: decode stitched predictions made with `merge="cut"` (each pixel
   from the most central tile) and tiles of at least 1024 px with 256 px overlap. Cutting removed
   the seam effect on road junctions (agreement with a single-pass prediction +0.017 over
-  blending); for roofs, tile context mattered most (face agreement with the single pass 0.944
-  at 512 / 128 px, 0.987 at 1024 / 256 px, both cut).
+  blending; E050's rule met for roads). For roofs E050's rule was not met at 512 / 128 px tiles
+  (cut -0.001); E050b showed tile context mattered most (face agreement with the single pass
+  0.944 at 512 / 128 px, 0.987 at 1024 / 256 px, both cut). At 1024 / 256 px the cut also beat
+  blending on roofs (+0.008), but that comparison was not pre-registered.
 
 **One scene, end to end.** Coordinates are pixel `(x, y)` with pixel corners at integers, so
 an affine geotransform in rasterio order (`dataset.transform`; GDAL's through `from_gdal`) maps

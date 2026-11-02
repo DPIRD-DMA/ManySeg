@@ -1,6 +1,6 @@
 # E034: wall-tolerant vertex loss for the graph method (pre-registered 2026-10-27 12:45)
 
-Status: **pre-registered**. Motivated by an analysis of the trained B2 (E030 seed 0, 200 val tiles,
+Status: **complete: screened out on seed 0** (2026-10-27; see Results). Motivated by an analysis of the trained B2 (E030 seed 0, 200 val tiles,
 `OPTIONS.md`): the outline is densified to points every ≤ 20 px, whose positions along a wall are
 arbitrary (they depend on the wall's whole length); 72% of B2's spurious vertex peaks (15,783 of
 21,975) lie on a true wall, and densified wall points are recovered less often than corners (0.40

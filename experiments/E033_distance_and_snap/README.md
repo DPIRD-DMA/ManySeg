@@ -1,6 +1,6 @@
 # E033: distance-aware vertex loss and snap offsets for graph vertices (pre-registered 2026-10-27 11:35)
 
-Status: **pre-registered**. Asked for by the user: a correct but slightly offset vertex should be
+Status: **complete: screened out on seed 0** (2026-10-27; see Results). Asked for by the user: a correct but slightly offset vertex should be
 penalised less than a far one, the penalty should grow with distance, and training should push
 predictions towards the right place, as general tools usable for points, lines and boundaries.
 Codex reviewed a first version; its issues (scale mismatch, no real "pull", distorted soft targets,

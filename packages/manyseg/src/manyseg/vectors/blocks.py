@@ -1,9 +1,10 @@
 """Block decoders: vectors from large stitched scenes, block by block (experimental).
 
-Contract with ManyPred: ``ManySeg-e028/notes/large_scene_vectors_contract.md`` §2-3; design:
-``notes/tile_edges_manypred.md`` option (c). ManySeg never imports ManyPred: blocks and scenes
-are duck-typed (``index``, ``core``, ``window``, ``scene_edges``; ``height``, ``width``,
-``transform``, ``crs``), and :func:`decode_scene` is an in-memory driver with the same calls::
+The same decoders run inside ManyPred's block post-processing (``manypred.blocks``), which
+calls ``decoder(window_fields, block, scene)`` per block and ``decoder.combine(results,
+scene)`` once. ManySeg never imports ManyPred: blocks and scenes are duck-typed (``index``,
+``core``, ``window``, ``scene_edges``; ``height``, ``width``, ``transform``, ``crs``), and
+:func:`decode_scene` is an in-memory driver with the same calls::
 
     dec = block_decoder("footprints")
     records = decode_scene(fields, dec, scene=scene)                # or, with ManyPred:
@@ -102,9 +103,14 @@ class BlockDecoder(Protocol):
     """Decodes one window (``fields``: name -> (C, h, w) arrays cropped to ``block.window``)
     into a picklable result; ``combine`` merges the results of all blocks in grid order."""
 
-    def __call__(self, fields: dict[str, np.ndarray], block, scene) -> Any: ...
+    def __call__(self, fields: dict[str, np.ndarray], block, scene) -> Any:
+        """Decode one block's window; the result must be picklable (it may come from a
+        worker process)."""
+        ...
 
-    def combine(self, results: list, scene) -> Any: ...
+    def combine(self, results: list, scene) -> Any:
+        """Join the per-block results (in grid order) into the scene's output."""
+        ...
 
 
 _UNSET: Any = object()  # "argument not given" (``None`` means pixel coordinates)
@@ -567,6 +573,7 @@ class InstanceBlockDecoder:
         return complete, pieces, partial, lab, ctx
 
     def __call__(self, fields, block, scene) -> _BlockResult:
+        """Decode one block's window: records of the objects it settles, pieces of the rest."""
         complete, pieces, _, _, ctx = self._split(fields, block, scene)
         records = []
         for anchor, box, m, inside, _ in complete:
@@ -605,6 +612,7 @@ class InstanceBlockDecoder:
         return out, len(pieces)
 
     def combine(self, results: list, scene) -> SceneRecords:
+        """Join pieces across blocks, vectorise each object once: :class:`SceneRecords`."""
         records = [r for res in results for r in res.records]
         merged, n_pieces = self._merged(results, scene)
         for anchor, box, m, g in merged:
@@ -682,6 +690,7 @@ class RoofBlockDecoder(InstanceBlockDecoder):
         return _face_clusters(faces, self.tolerance)
 
     def __call__(self, fields, block, scene) -> _BlockResult:
+        """Decode one block's window: the face clusters it resolves, pieces of the rest."""
         from scipy import ndimage
 
         shapely = _deps()[1]
@@ -736,6 +745,8 @@ class RoofBlockDecoder(InstanceBlockDecoder):
                                   "pending": len(pending), "pieces": len(pieces)})
 
     def combine(self, results: list, scene) -> SceneRecords:
+        """Join pieces and clusters across blocks: faces with planes (and meshes), sorted by
+        ``(id, part)``."""
         records = [rec for res in results for rec in res.records]
         resolved = [a for res in results for a in res.resolved]
         if len(set(resolved)) != len(resolved):

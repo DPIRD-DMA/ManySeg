@@ -1,6 +1,8 @@
 # E030: Trained footprint polygons on WHU aerial: instance masks vs graph tensor (pre-registered)
 
-Status: **pre-registered** (2026-10-26). Local RTX 4090.
+Status: **complete, one seed** (2026-10-27; pre-registered 2026-10-26): B2 (graph tensor) well
+below B0 (mask instances) on seed 0, remaining seeds cancelled (amendment 3); the graph tensor
+was not shipped. Local RTX 4090.
 
 Background: in the E028 oracle (perfect OSM footprints with synthetic corruption), the
 Sat2Graph-style graph tensor decoded to faces (B2) gave the best polygons through corruption
@@ -96,7 +98,9 @@ such): C-IoU on GT outlines cleaned of raster staircase vertices, and detection 
 and PoLiS reported alongside, because the registered GT inflates vertex counts.
 
 ## Results
-(pending)
+Seed 0, test (amendment 3): B0 C-IoU 0.709, detection F1 0.850; B2 C-IoU 0.613, detection
+F1 0.750. The per-building fallback is E030b below. Registered 3-seed rule not applicable
+(seeds cancelled); reported as one seed.
 
 Outcome for the library (2026-10-29, user decision before 0.1.0): with B2 well below B0
 on seed 0 (see E030b's table) and the remaining seeds cancelled, the graph tensor was removed
