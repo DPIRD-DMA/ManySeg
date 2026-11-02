@@ -6,7 +6,7 @@ mkdocstrings renders a docstring, this rewrites:
   mkdocstrings cross-references when the target is a documented ManySeg object, else into inline
   code;
 - literal blocks (a paragraph ending in ``::`` followed by an indented block) into fenced code;
-- directives (``.. warning:: text``) into Material admonitions;
+- directives (``.. warning:: text``) into Material admonitions, ``.. code-block::`` into code;
 - the first paragraph into one line, so summary tables show the whole first sentence.
 
 Double-backtick literals need no change: Markdown renders ````x```` as inline code too.
@@ -20,11 +20,21 @@ import re
 from collections.abc import Callable
 
 ROLE = re.compile(r":(?:py:)?(?:func|class|mod|meth|attr|data|obj|exc|const):`([^`]+)`")
-DIRECTIVE = re.compile(r"^(\s*)\.\. (\w+)::\s*(.*)$")
+DIRECTIVE = re.compile(r"^(\s*)\.\. ([\w-]+)::\s*(.*)$")
 
 
 def _indent(line: str) -> int:
     return len(line) - len(line.lstrip())
+
+
+def _dedent(block: list[str]) -> list[str]:
+    """An indented block without its common indent and surrounding blank lines."""
+    while block and not block[0].strip():
+        block = block[1:]
+    while block and not block[-1].strip():
+        block = block[:-1]
+    strip = min((_indent(b) for b in block if b.strip()), default=0)
+    return [b[strip:] if b.strip() else "" for b in block]
 
 
 def _roles(text: str, link: Callable[[str], str | None]) -> str:
@@ -50,15 +60,22 @@ def _blocks(lines: list[str]) -> list[str]:
         if d:  # ".. warning:: first line" + lines indented deeper than the directive
             ind, kind, first = d.groups()
             body = [first] if first else []
+            lines_raw = []
             i += 1
             while i < len(lines) and (not lines[i].strip() or _indent(lines[i]) > len(ind)):
                 body.append(lines[i].strip())
+                lines_raw.append(lines[i])
                 i += 1
             while body and not body[-1]:
                 body.pop()
-            out.append(f"{ind}!!! {kind.lower()}")
-            out += [f"{ind}    {b}" if b else "" for b in body]
-            out.append("")
+            if kind in ("code-block", "code", "sourcecode"):  # first = the language
+                out += ["", f"{ind}```{first or 'python'}"]
+                out += [f"{ind}{b}" if b else "" for b in _dedent(lines_raw)]
+                out += [f"{ind}```", ""]
+            else:
+                out.append(f"{ind}!!! {kind.lower()}")
+                out += [f"{ind}    {b}" if b else "" for b in body]
+                out.append("")
             continue
         if line.rstrip().endswith("::") and not line.strip().startswith(".."):
             j = i + 1

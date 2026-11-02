@@ -33,9 +33,28 @@ def _module(name: str):
     return mod
 
 
+def _exports(path: Path) -> list[str] | None:
+    """A module's ``__all__`` (with ``+=`` extensions), or None without one."""
+    names = None
+    for n in ast.parse(path.read_text()).body:
+        target = n.targets[0] if isinstance(n, ast.Assign) else getattr(n, "target", None)
+        if isinstance(target, ast.Name) and target.id == "__all__":
+            names = (names or []) + ast.literal_eval(n.value)
+    return names
+
+
+def _imports(path: Path) -> set[str]:
+    return {a.asname or a.name.split(".")[0] for n in ast.parse(path.read_text()).body
+            if isinstance(n, (ast.Import, ast.ImportFrom)) for a in n.names}
+
+
+def _source(page: str) -> Path:
+    rel = Path(*page.split(".")[1:])
+    return PACKAGE / rel / "__init__.py" if (PACKAGE / rel).is_dir() else PACKAGE / f"{rel}.py"
+
+
 def _has_all(path: Path) -> bool:
-    return any(isinstance(n, (ast.Assign, ast.AugAssign)) and "__all__" in ast.dump(n)
-               for n in ast.parse(path.read_text()).body)
+    return _exports(path) is not None
 
 
 def test_every_public_subpackage_has_a_page():
@@ -47,8 +66,7 @@ def test_every_public_subpackage_has_a_page():
     assert "manyseg" in pages
     assert public - NOT_PAGES <= pages, sorted(public - NOT_PAGES - pages)
     for page in pages:  # every page names a module that exists
-        rel = Path(*page.split(".")[1:])
-        assert (PACKAGE / rel / "__init__.py").exists() or (PACKAGE / f"{rel}.py").exists(), page
+        assert _source(page).exists(), page
 
 
 def test_convert_roles_blocks_directives():
@@ -71,6 +89,8 @@ def test_convert_roles_blocks_directives():
     assert "    x: see `manyseg.points`." in out
     assert not re.search(r":(func|class|mod):`|::\n|\.\. ", out)
     assert convert("Args:\n    x: y") == "Args:\n    x: y"  # sections are not joined
+    code = convert("A.\n\n.. code-block:: bash\n\n    pip install manyseg\n\nB.")
+    assert "```bash\npip install manyseg\n```" in code
 
 
 def _docs_python() -> str | None:
@@ -104,6 +124,13 @@ def test_reference_builds_offline_without_warnings(tmp_path, monkeypatch):
         html = (tmp_path / "site" / "reference" / page / "index.html").read_text()
         assert f'id="{page}"' in html, page
         assert not re.search(r":(func|class|mod|meth|attr|data):`|\]\[manyseg", html), page
+        shown = set(re.findall(rf'id="{re.escape(page)}\.(\w+)"', html))
+        exports = _exports(_source(page))
+        if exports is not None:  # exactly the module's __all__
+            assert shown == set(exports), (page, set(exports) ^ shown)
+        else:  # public names defined there; no imports, nothing private
+            assert shown and not shown & _imports(_source(page)), (page, shown)
+            assert not [n for n in shown if n.startswith("_")], (page, shown)
     html = (tmp_path / "site" / "reference" / "manyseg.vectors" / "index.html").read_text()
     assert 'id="manyseg.vectors.road_targets"' in html  # the function, not the submodule
     assert "doc-signature" in html
