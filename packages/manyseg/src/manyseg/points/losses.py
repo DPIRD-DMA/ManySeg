@@ -5,7 +5,6 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 
-import torch
 import torch.nn.functional as F
 from torch import Tensor
 
@@ -50,14 +49,11 @@ def density_loss(pred: Tensor, points: Sequence[Tensor], sigma=3.0, *,
     p = pred.float()
     target = density_map([q.to(p.device) for q in points], tuple(p.shape[-2:]), sigma)
     target = target * value_scale
-    if mask is None:
-        m = torch.ones_like(p)
-    else:
-        m = (_squeeze(mask, "mask", like=p)[:, None].to(p.device) > 0).float()
+    m = None if mask is None else (_squeeze(mask, "mask", like=p)[:, None].to(p.device) > 0).float()
     err = F.mse_loss(p, target, reduction="none") if kind == "mse" else (p - target).abs()
-    loss = (err * m).sum() / m.sum().clamp(min=1)
+    loss = err.mean() if m is None else (err * m).sum() / m.sum().clamp(min=1)
     if count_weight:
-        count_pred = (p * m).flatten(1).sum(1) / value_scale
-        count_true = (target * m).flatten(1).sum(1) / value_scale
+        count_pred = (p if m is None else p * m).flatten(1).sum(1) / value_scale
+        count_true = (target if m is None else target * m).flatten(1).sum(1) / value_scale
         loss = loss + count_weight * (count_pred - count_true).abs().mean()
     return loss
