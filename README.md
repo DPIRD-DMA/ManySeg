@@ -328,8 +328,9 @@ predict_files(model, ["scene.tif"], load_func=load_raster, output_dir="predictio
               patch_size=1024, overlap=256, output="argmax", nodata=0)
 ```
 
-`device=` and `dtype=` default to the GPU and float16 where it is fast. Overlapping patches
-are blended by default (`merge="blend"`, a weighted mean that fades towards each patch edge).
+`device` defaults to CUDA, then MPS, then the CPU, and `dtype` to float16 on GPUs where it is
+fast (float32 elsewhere). Overlapping patches are blended by default (`merge="blend"`, a
+weighted mean that fades towards each patch edge).
 `merge="cut"` takes each pixel from the patch it is most central in, so nothing is averaged;
 it can be set per head (`merge={"extent": "cut"}`). Use it for heads that are decoded into
 vectors or instances afterwards, and keep blend for maps used as rasters. On City-Scale roads,
