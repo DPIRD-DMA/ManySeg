@@ -377,6 +377,7 @@ class InstanceBlockDecoder:
     extent_threshold: float = 0.6
     boundary_threshold: float = 0.5
     seed_threshold: float = 0.15
+    min_seed: int = 0
     min_size: int = 16
     logits: bool = False
     backend: str = "auto"
@@ -434,7 +435,8 @@ class InstanceBlockDecoder:
         return instances_from_outputs(
             *t, logits=self.logits, extent_threshold=self.extent_threshold,
             boundary_threshold=self.boundary_threshold, seed_threshold=self.seed_threshold,
-            min_size=0, backend=self.backend, origin=origin, scene_width=scene_width,
+            min_seed=self.min_seed, min_size=0, backend=self.backend, origin=origin,
+            scene_width=scene_width,
         )[0].numpy()
 
     def _context(self, fields, origin) -> dict:
@@ -785,9 +787,9 @@ _DEFAULTS = {
     # E038 B3 (corner 0.5 / big_dev 4 / agree 0.4 / merge 8) on E030's B0 thresholds
     "footprints": {"method": "corners", "extent_threshold": 0.6, "boundary_threshold": 0.5,
                    "seed_threshold": 0.15},
-    # E046 B0 on FTW: thresholds 0.6 / 0.3 / 0.3, Douglas-Peucker 0.5 px
-    "fields": {"method": "outline", "extent_threshold": 0.6, "boundary_threshold": 0.3,
-               "seed_threshold": 0.3, "simplify": 0.5},
+    # E052 B0 on FTW with absolute distance: thresholds 0.4 / 0.3 / 3 px, Douglas-Peucker 0.5 px
+    "fields": {"method": "outline", "extent_threshold": 0.4, "boundary_threshold": 0.3,
+               "seed_threshold": 3.0, "simplify": 0.5},
 }
 
 
@@ -799,7 +801,9 @@ def block_decoder(task: str, **params) -> BlockDecoder:
 
     * ``"footprints"``: extent, boundary, distance + corner, direction; ``method="corners"``
       (B3, E038) or ``"outline"`` (B0, ``simplify`` 1 px unless given).
-    * ``"fields"``: extent, boundary, distance; outline decoding (B0, E046).
+    * ``"fields"``: extent, boundary, distance; outline decoding (B0, E046), absolute distance
+      (``seed_threshold`` in px, E052; for a model trained on normalised distance pass
+      ``seed_threshold=0.3, extent_threshold=0.6``, E046's).
     * ``"roofs"``: as footprints + ``height`` (nDSM, metres); E047 F3 thresholds and corners,
       :func:`planar_faces` (2.5 px), E043b robust planes, J2 mesh (``mesh=None`` skips it).
     * ``"roads"``: mask, keypoints, direction; :class:`manyseg.vectors.roads.RoadBlockDecoder`.
