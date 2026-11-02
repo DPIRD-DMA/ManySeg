@@ -26,6 +26,7 @@ import torch
 from torch import Tensor, nn
 
 FORMATS = ("text", "mermaid", "dot")
+"""``describe(format=...)`` values."""
 STAGES = ("input", "adapter", "encoder", "fusion", "decoder", "head")
 _STAGE_TITLES = {"input": "inputs", "adapter": "channel adapters", "encoder": "encoders",
                  "fusion": "fusion", "decoder": "decoders", "head": "heads"}
@@ -57,6 +58,9 @@ class Node:
 
 @dataclass
 class Edge:
+    """An edge of the model graph that :meth:`~manyseg.DenseModel.describe` draws, from node
+    ``src`` to ``dst``."""
+
     src: str
     dst: str
     label: str = ""

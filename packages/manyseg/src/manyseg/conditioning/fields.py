@@ -18,6 +18,7 @@ from torch import Tensor, nn
 from ..registry import Registry
 
 FIELD_TYPES = Registry("metadata field type")
+"""Metadata field encoders by field ``"type"``; ``FIELD_TYPES.register("name")`` adds one."""
 
 
 @FIELD_TYPES.register("continuous")

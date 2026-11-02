@@ -40,6 +40,11 @@ _SATLAS_CITE = ("Bastani, F., Wolters, P., Gupta, R., Ferdinando, J., Kembhavi, 
 
 @dataclass(frozen=True)
 class Weights:
+    """One set of remote-sensing pretrained weights: the timm architecture and tag it loads
+    into, where it downloads from, the bands it expects in order, and the normalisation it was
+    pretrained with (``(x - mean) / std`` with ``x`` in ``units``, clipped to [0, 1] when
+    ``clip``), with its licence and citation. Listed in :data:`WEIGHTS`."""
+
     model: str          # timm architecture
     tag: str
     url: str
@@ -109,12 +114,16 @@ _ENTRIES = (
                "081d6607431bf36bdb59c223777cbb267131b8f2/sentinel2_resnet152_mi_ms-fd35b4bb.pth"),
 )
 WEIGHTS: dict[str, Weights] = {w.key: w for w in _ENTRIES}
+"""Every set of remote-sensing pretrained weights, keyed ``"<architecture>.<tag>"``
+(``create_model(backbone=..., pretrained="<tag>")`` selects one)."""
 
 # Checkpoint keys outside the backbone (classifier / pre-logits norm) that may be unused.
 _HEAD_PREFIXES = ("fc.", "head.", "classifier.", "norm.", "fc_norm.")
 
 
 def get_weights(model: str, tag: str) -> Weights:
+    """The :class:`Weights` for timm architecture ``model`` (a pretrained-tag suffix such as
+    ``.a1_in1k`` is ignored) and weights tag ``tag``; a ValueError lists the tags available."""
     arch = model.split(".", 1)[0]
     w = WEIGHTS.get(f"{arch}.{tag}")
     if w is None:

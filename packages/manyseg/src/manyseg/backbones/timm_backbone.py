@@ -202,6 +202,8 @@ def find_stem_convs(model: nn.Module, first_conv=None,
 
 
 def find_stem_conv(model: nn.Module, first_conv=None) -> tuple[str, nn.Conv2d]:
+    """The first of :func:`find_stem_convs`: ``(name, conv)`` of the convolution that consumes
+    the image."""
     return find_stem_convs(model, first_conv)[0]
 
 
@@ -460,6 +462,8 @@ def _bn_stash(m: nn.Module, args) -> None:
 
 
 def create_backbone(name: str, pretrained: bool | str = True, **kwargs) -> TimmBackbone:
+    """A :class:`TimmBackbone` for timm model ``name`` (same arguments), for composing a
+    :class:`~manyseg.DenseModel` by hand."""
     return TimmBackbone(name, pretrained=pretrained, **kwargs)
 
 

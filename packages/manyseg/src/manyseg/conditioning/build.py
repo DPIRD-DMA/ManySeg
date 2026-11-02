@@ -15,6 +15,8 @@ from .inject import Conditioner, DecoderFiLM, FiLM, used_levels
 
 VECTOR_KEYS = {"kind", "fields", "num_features", "dim", "dropout", "conditioning"}
 MODES = ("film", "head", "channels")
+"""How a vector input conditions the model: FiLM, a bias on the heads, or extra input
+channels."""
 _MODE_OPTIONS = {"film": {"on"}, "head": {"pixel"}, "channels": {"target"}}
 
 

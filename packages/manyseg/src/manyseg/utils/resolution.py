@@ -32,6 +32,7 @@ from torch import Tensor
 from .spatial import crop_to
 
 SCALES = (1, 0.5, 0.25, 0.125)
+"""Allowed per-head ``"scale"`` values (output resolution relative to the input)."""
 
 
 def scale_factor(scale) -> int:

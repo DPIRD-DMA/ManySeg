@@ -16,6 +16,7 @@ from ..features import FeatureSpec
 from ..registry import Registry
 
 DECODERS = Registry("decoder")
+"""Decoder classes by ``decoder=`` name; ``DECODERS.register("name")`` adds one."""
 
 
 def pyramid_levels(specs: Sequence[FeatureSpec], min_stride: int = 4,

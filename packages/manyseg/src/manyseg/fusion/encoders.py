@@ -17,6 +17,7 @@ from ..utils.spatial import crop_to, pad_to_multiple, resize_bilinear
 from .ops import FUSION_OPS
 
 ALIGNMENTS = ("same_grid", "same_extent")
+"""Input ``"alignment"`` values: same pixel grid, or same extent at another resolution."""
 
 
 def _check_inputs(inputs: Mapping[str, Tensor], names: Sequence[str],

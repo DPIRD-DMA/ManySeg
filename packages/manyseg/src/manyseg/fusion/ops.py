@@ -16,6 +16,7 @@ from torch import Tensor, nn
 from ..registry import Registry
 
 FUSION_OPS = Registry("fusion op")
+"""Fusion ops by ``fusion={"op": ...}`` name; ``FUSION_OPS.register("name")`` adds one."""
 
 
 def _proj(cin: int, cout: int) -> nn.Module:
