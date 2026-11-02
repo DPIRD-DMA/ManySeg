@@ -343,7 +343,7 @@ The vector decoders (**Vector outputs** above) run on large scenes through `many
 `postprocess_blocks` decodes saved rasters block by block, and
 `predict_files(..., merge="cut", block_postprocess=BlockPostprocess(...))` decodes while it
 predicts ([guide](docs/api_design.md#vector-outputs-line-graphs-polygons)). `merge` and
-`manypred.blocks` need ManyPred's next release.
+`manypred.blocks` are on ManyPred's GitHub main since 2026-11-02.
 
 ## Tips from our benchmarks
 
