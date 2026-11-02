@@ -323,3 +323,28 @@ def test_calibrated_count_equals_find_peaks_at_best(metric):
     assert n == 1
     if metric == "count_mae":
         assert curve[best] == abs(n - 1)
+
+
+def test_density_map_matches_explicit_gaussian_stack():
+    torch.manual_seed(0)
+    pts = torch.cat([torch.rand(1500, 2) * torch.tensor([40.0, 50.0]),  # > 1 chunk, some at borders
+                     torch.tensor([[-3.0, 25.0], [39.0, 49.0]])])
+    sigma = 1.0 + 4 * torch.rand(len(pts))
+    ys, xs = torch.arange(40.0), torch.arange(50.0)
+    g = torch.exp(-((ys[None] - pts[:, :1]) ** 2) / (2 * sigma[:, None] ** 2))[:, :, None] \
+        * torch.exp(-((xs[None] - pts[:, 1:]) ** 2) / (2 * sigma[:, None] ** 2))[:, None, :]
+    ref = (g / g.sum((1, 2), keepdim=True)).sum(0)
+    d = density_map([pts], (40, 50), [sigma])[0, 0]
+    assert torch.allclose(d, ref, atol=1e-6, rtol=1e-5)
+    assert float(d.sum()) == pytest.approx(len(pts), rel=1e-4)
+    assert density_map([torch.zeros(0, 2)], (8, 8), 2.0).abs().sum() == 0
+
+
+def test_density_map_tiny_sigma_and_points_far_outside():
+    d = density_map([torch.tensor([[2.5, 2.5], [3.0, 3.0]])], (8, 8), 0.3)
+    assert float(d.sum()) == pytest.approx(2.0, rel=1e-5)
+    # So far outside that the Gaussian underflows inside the image: it carries no mass, and
+    # the other point keeps its own.
+    d = density_map([torch.tensor([[-200.0, -200.0], [2.0, 2.0]])], (8, 8), 1.0)
+    assert float(d.sum()) == pytest.approx(1.0, rel=1e-5)
+    assert float(density_map([torch.tensor([[-11.75, -9.6]])], (4, 4), 1.0).max()) < 1e-30

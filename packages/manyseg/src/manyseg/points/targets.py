@@ -24,6 +24,7 @@ import torch
 from torch import Tensor
 
 _CHUNK = 64  # points per chunk when rendering Gaussians
+_AXIS_CHUNK = 1024  # the same for density_map, which keeps only each Gaussian's two axes
 
 
 def _grid(h: int, w: int, device) -> tuple[Tensor, Tensor]:
@@ -32,11 +33,17 @@ def _grid(h: int, w: int, device) -> tuple[Tensor, Tensor]:
     return ys, xs
 
 
-def _gaussians(pts: Tensor, sigma: Tensor, h: int, w: int) -> Tensor:
-    """(N, H, W) unnormalised Gaussians (separable)."""
+def _gaussian_axes(pts: Tensor, sigma: Tensor, h: int, w: int) -> tuple[Tensor, Tensor]:
+    """The factors (N, H) and (N, W) of N unnormalised, separable Gaussians."""
     ys, xs = _grid(h, w, pts.device)
-    gy = torch.exp(-((ys[None] - pts[:, :1]) ** 2) / (2 * sigma[:, None] ** 2))  # (N, H)
-    gx = torch.exp(-((xs[None] - pts[:, 1:]) ** 2) / (2 * sigma[:, None] ** 2))  # (N, W)
+    gy = torch.exp(-((ys[None] - pts[:, :1]) ** 2) / (2 * sigma[:, None] ** 2))
+    gx = torch.exp(-((xs[None] - pts[:, 1:]) ** 2) / (2 * sigma[:, None] ** 2))
+    return gy, gx
+
+
+def _gaussians(pts: Tensor, sigma: Tensor, h: int, w: int) -> Tensor:
+    """(N, H, W) unnormalised Gaussians."""
+    gy, gx = _gaussian_axes(pts, sigma, h, w)
     return gy[:, :, None] * gx[:, None, :]
 
 
@@ -87,9 +94,10 @@ def density_map(points: Sequence[Tensor], size: tuple[int, int], sigma=3.0) -> T
         pts = pts.float()
         d = torch.zeros(h, w, device=pts.device)
         s = _sigmas(sig, len(pts), pts.device)
-        for i in range(0, len(pts), _CHUNK):
-            g = _gaussians(pts[i:i + _CHUNK], s[i:i + _CHUNK], h, w)
-            d = d + (g / g.sum(dim=(1, 2), keepdim=True).clamp(min=1e-12)).sum(0)
+        for i in range(0, len(pts), _AXIS_CHUNK):
+            gy, gx = _gaussian_axes(pts[i:i + _AXIS_CHUNK], s[i:i + _AXIS_CHUNK], h, w)
+            mass = (gy.sum(1) * gx.sum(1)).clamp(min=1e-12)
+            d = d + (gy / mass[:, None]).T @ gx  # the summed Gaussians, without an (N, H, W) stack
         out.append(d)
     return torch.stack(out)[:, None]
 

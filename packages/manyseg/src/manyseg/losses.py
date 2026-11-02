@@ -162,15 +162,25 @@ def multiclass_dice(logits: Tensor, target: Tensor, *, ignore_index: int | None 
     if target.shape != logits.shape[:1] + logits.shape[2:]:
         raise ValueError(f"target {tuple(target.shape)} does not match logits "
                          f"{tuple(logits.shape)}")
+    classes = logits.shape[1]
+    valid = None if ignore_index is None else target != ignore_index
+    labels = target if valid is None else target[valid]
+    if labels.numel() and not (labels.min() >= 0 and labels.max() < classes):
+        raise ValueError(f"target has class ids outside [0, {classes}) that are not ignore_index")
+    # Per-class sums by label rather than through a one-hot, which takes C x H x W longs. Summed
+    # in float64 where available: float32 counts stop growing at 2^24 pixels.
     p = logits.float().softmax(1)
-    valid = torch.ones_like(target, dtype=torch.bool) if ignore_index is None \
-        else target != ignore_index
-    onehot = F.one_hot(target.where(valid, 0), logits.shape[1]).permute(0, 3, 1, 2).float()
-    v = valid[:, None].float()
-    p, onehot = p * v, onehot * v
-    inter = (p * onehot).sum((0, 2, 3))
-    denom = p.sum((0, 2, 3)) + onehot.sum((0, 2, 3))
-    return (1 - (2 * inter + eps) / (denom + eps)).mean()
+    wide = torch.float32 if p.device.type == "mps" else torch.float64
+    index = (target if valid is None else target.where(valid, 0))[:, None]
+    weight = None if valid is None else valid[:, None].to(wide)
+    at_label = p.gather(1, index).to(wide)
+    at_label = at_label if weight is None else at_label * weight
+    count = torch.ones_like(at_label) if weight is None else weight
+    inter = at_label.new_zeros(classes).scatter_add(0, index.flatten(), at_label.flatten())
+    labelled = at_label.new_zeros(classes).scatter_add(0, index.flatten(), count.flatten())
+    total = p if valid is None else p * valid[:, None]
+    denom = total.sum((0, 2, 3)) + labelled.to(p.dtype)
+    return (1 - (2 * inter.to(p.dtype) + eps) / (denom + eps)).mean()
 
 
 def multi_head_loss(outputs: Mapping[str, Tensor], targets: Mapping[str, Tensor],
