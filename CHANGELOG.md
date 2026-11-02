@@ -154,8 +154,16 @@ First release. Python 3.10–3.14, PyTorch ≥ 2.10, timm ≥ 1.0.20.
   targets, 700 x 1000 px, tiles 256 / 32-128 and 512 / 256): seam-zone objects changed by
   stitching, keep vs ignore, footprints 0 vs 0 of 199 (cut) and 1 vs 3 of 636 (blend), roof
   faces 0 vs 0 (cut) and 63 vs 63 (blend; 15 vs 15 with absolute distance), same seam-zone IoU.
-* Known limitation: a hip-end roof face's 45-degree tip can become an extra small face (also in
-  a single pass, from perfect targets); fix planned after 0.1.0.
+* **Seed fragments no longer become objects** (`instances_from_outputs(min_seed=)`, default 0;
+  `block_decoder` default 8 for footprints, fields and roofs, E053): seed components under
+  `min_seed` px are flooded by the instance around them. It fixes the 45-degree tip of a
+  hip-end roof face, and 1 px seeds at field corners under the 3 px seed threshold, that became
+  extra 13-25 px objects even from perfect targets. On trained models (test, fixed settings):
+  roof face F1 +0.041 (E047b), footprint detection F1 +0.024 and boundary F +0.004 (WHU, 2
+  seeds), field detection F1 +0.008 with boundary F unchanged (FTW, 2 seeds).
+* Known limitation: with fields' 3 px seed threshold, a strip of a field narrower than about
+  8 px gets broken seeds, so the field can split there (seen in the end-to-end oracle on a field
+  with a hole).
 * **One decode path for any scene size:** `decode_scene(fields, block_decoder(task))` (tuned
   defaults for `"footprints"`, `"fields"`, `"roofs"`, `"roads"`, `"points"`, `"density"`;
   default `block=4096`, so a smaller scene is one block), over arrays or memmaps; `block_grid`,

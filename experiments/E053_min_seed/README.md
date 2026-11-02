@@ -28,3 +28,24 @@ Per task, on test (mean over seeds where there are two), min_seed 8 - min_seed 0
 `min_seed=8` becomes the task's `block_decoder` default if the primary metric (roofs face F1;
 footprints and fields boundary F) is >= -0.005 and detection F1 (roofs: face F1) >= -0.005.
 Otherwise the task keeps 0, and its oracle failures stay documented limitations.
+
+## Results (09:00; `runs/e053_*.json`; GPU shared with test runs, timings not reported)
+Test, `min_seed` 0 -> 8 at the shipped settings. min_seed 0 reproduces the earlier results
+(E047b F3 face F1 0.571 / 0.589; E052 A runs).
+
+| task (checkpoints) | primary 0 -> 8 | detection F1 0 -> 8 | objects 0 -> 8 | other |
+|---|---|---|---|---|
+| roofs (E047b s0) | face F1 0.580 -> 0.621 (leidscherijn 0.571 -> 0.588, staphorst 0.589 -> 0.656) | (face F1) | 2481 -> 2113 | height RMSE 1.35 -> 1.28 m, corner F1 0.314 -> 0.337 |
+| footprints (E036 s0, s1) | boundary F 0.654 -> 0.658, 0.659 -> 0.662 | 0.828 -> 0.854, 0.830 -> 0.852 | -5.8%, -4.9% | C-IoU +0.001-0.002 |
+| fields (E052 A s0, s1) | boundary F 0.5957 -> 0.5956, 0.5985 -> 0.5983 | 0.592 -> 0.601, 0.599 -> 0.605 | -3.2%, -2.5% | C-IoU -0.001 |
+
+Mean 8 - 0: roofs face F1 +0.041; footprints boundary F +0.004, detection F1 +0.024; fields
+boundary F -0.0002, detection F1 +0.008. Val agrees in direction for every task.
+**Decision (rule above): `min_seed=8` becomes the `block_decoder` default for footprints,
+fields and roofs.** Trained models make many more seed fragments than the oracle: the dropped
+seeds were mostly spurious objects, not lost ones: object precision 0 -> 8 rose (roofs 0.558 ->
+0.648, footprints 0.792 -> 0.841 / 0.792 -> 0.833, fields 0.595 -> 0.615 / 0.629 -> 0.644) while recall
+moved by at most 0.007 (roofs 0.604 -> 0.597; footprints and fields within 0.001).
+`instances_from_outputs` keeps 0 (a low-level function with generic defaults). In the e2e
+oracle all hip-tip and field-corner cases now pass; the holed field's narrow strip (3 px seed
+threshold) still splits and stays a documented limitation.

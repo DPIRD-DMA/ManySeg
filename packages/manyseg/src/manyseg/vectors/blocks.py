@@ -383,7 +383,7 @@ class InstanceBlockDecoder:
     extent_threshold: float = 0.6
     boundary_threshold: float = 0.5
     seed_threshold: float = 0.15
-    min_seed: int = 0
+    min_seed: int = 8
     min_size: int = 16
     logits: bool = False
     backend: str = "auto"

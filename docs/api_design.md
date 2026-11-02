@@ -853,6 +853,9 @@ Why these decoders (pre-registered experiments in [`experiments/`](../experiment
   each other's corners, curved edges were straightened). **E052** (2 seeds): an absolute
   distance target (px) is as good as the normalised one (boundary F +0.008, detection F1
   +0.008), and stitches large scenes without seam errors, so it is the fields default.
+* **Seed fragments, E053** (fixed decoder settings, trained models): dropping seed components
+  under 8 px (`min_seed`) raised roof face F1 by 0.041, footprint detection F1 by 0.024 and
+  field detection F1 by 0.008 with boundary F unchanged or better; default in `block_decoder`.
 * **Roads, E044 / E044b** (City-Scale, 3 seeds): `graph_from_road_heads` (R4) matched a mask
   skeleton (APLS +0.003 to +0.005, junction F1 +0.02 to +0.03) and kept 22-25 points more of
   the overpasses (0.54-0.59 vs 0.32-0.34).
@@ -949,9 +952,12 @@ over arrays or memmaps you stitched yourself.
   on your data, and re-tune thresholds there (`block_decoder(task, extent_threshold=...)`).
 * Roofs need a height input (nDSM in metres, on the image grid): planes are fitted to it, and
   without it the face partition collapses (E049).
-* Roofs: the 45-degree tip of a hip-end face, between two walls' boundary bands, can get its
-  own seed and come out as an extra small face (17-25 px at 0.25 m), even from perfect targets
-  and in a single pass. Filter faces by area if that matters; a fix is planned after 0.1.0.
+* Fields: with the 3 px seed threshold (absolute distance, E052) a strip of a field narrower
+  than about 8 px has broken seeds, so the field can split along it, even from perfect targets.
+* Roofs: the acute tip of a hip-end face, cut off by two walls' boundary bands, can be flooded
+  from a neighbouring face's seed, so the face loses its tip (single-pass face IoU down to 0.75
+  on synthetic scenes). Seed fragments under `min_seed` (8 px, E053) no longer become extra
+  faces.
 * Distance target: fields use absolute distance (E052). Footprints and roof faces keep the
   normalised one (as trained in E038 / E047; absolute is not tested there), whose per-tile
   normalisation can reshape roof faces in tile overlaps under ManyPred's `merge="blend"`:

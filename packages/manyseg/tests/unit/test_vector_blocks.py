@@ -278,10 +278,11 @@ def _terraces(seed=3, H=400, W=500, long_row=True):
 THR = dict(extent_threshold=0.6, boundary_threshold=0.5, seed_threshold=0.15)
 
 
-def _labels(f, backend="auto", **thr):
+def _labels(f, backend="auto", min_seed=8, **thr):
+    """Whole-scene labels as the block decoders make them (``min_seed`` 8, E053)."""
     t = [torch.from_numpy(f[n]) for n in ("extent", "boundary", "distance")]
     return instances_from_outputs(*[x[None] for x in t], logits=False, min_size=16,
-                                  backend=backend, **(thr or THR))[0]
+                                  min_seed=min_seed, backend=backend, **(thr or THR))[0]
 
 
 @pytest.mark.parametrize("backend", ["skimage", "torch"])
