@@ -216,8 +216,8 @@ class MultiEncoder(nn.Module):
         h, w = x.shape[-2], x.shape[-1]
         if h > fixed[0] or w > fixed[1]:
             raise ValueError(f"input {n!r}: its backbone has a fixed input size {fixed}; got "
-                             f"{(h, w)}. Use tiled inference or backbone_kwargs={{'img_size': "
-                             "...}}")
+                             f"{(h, w)}. Use tiled inference (ManyPred) or "
+                             "backbone_kwargs={'img_size': ...}")
         return F.pad(x, (0, fixed[1] - w, 0, fixed[0] - h))
 
     def _encode(self, inputs: Mapping[str, Tensor]):

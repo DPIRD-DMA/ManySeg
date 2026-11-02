@@ -313,7 +313,7 @@ class DenseModel(nn.Module):
         if h > fixed[0] or w > fixed[1]:
             raise ValueError(
                 f"backbone {getattr(self.backbone, 'name', '')!r} has a fixed input size {fixed}; "
-                f"input {(h, w)} is larger. Use tiled inference, or rebuild with "
+                f"input {(h, w)} is larger. Use tiled inference (ManyPred), or rebuild with "
                 f"backbone_kwargs={{'img_size': (H, W)}} for a larger fixed size (see "
                 "docs/backbone_compatibility.md)."
             )
