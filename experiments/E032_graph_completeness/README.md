@@ -1,6 +1,6 @@
 # E032: completeness losses for the graph method (pre-registered 2026-10-27 11:00)
 
-Status: **pre-registered**. Plan in `PLAN.md`, reviewed by Codex (`notes/codex_plan_e032.md` in the
+Status: **complete: screened out on seed 0** (2026-10-27; see Results). Plan in `PLAN.md`, reviewed by Codex (`notes/codex_plan_e032.md` in the
 E028 worktree); changes from the review are applied below.
 
 ## Question

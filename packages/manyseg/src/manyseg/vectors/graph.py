@@ -57,6 +57,7 @@ class VectorGraph:
         return self.xy[self.degree >= 3]
 
     def to_networkx(self):
+        """A ``networkx.Graph``: nodes ``0..N-1`` with an ``xy`` attribute, the edges."""
         nx = _deps()[0]
         g = nx.Graph()
         for i, p in enumerate(self.xy):

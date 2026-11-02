@@ -108,12 +108,21 @@ def graph_from_road_heads(
     """Road graph from the unified road heads (numpy or torch).
 
     Args:
-        mask: ``(H, W)`` road-surface probability (logit with ``logits=True``).
-        keypoints: ``(3, H, W)`` junction, end and crossing heatmaps (probabilities; logits
-            with ``logits=True``).
-        direction: ``(4, H, W)`` two ``(cos 2t, sin 2t)`` modes (the second only at crossings).
-        threshold, spur, gap, simplify, min_length, min_area: as :func:`graph_from_mask` on the
-            surface (gap bridging runs once, on the final graph).
+        mask (np.ndarray | torch.Tensor): ``(H, W)`` road-surface probability (logit with
+            ``logits=True``).
+        keypoints (np.ndarray | torch.Tensor): ``(3, H, W)`` junction, end and crossing
+            heatmaps (probabilities; logits with ``logits=True``).
+        direction (np.ndarray | torch.Tensor): ``(4, H, W)`` two ``(cos 2t, sin 2t)`` modes (the
+            second only at crossings).
+        threshold: Road-surface threshold, as :func:`graph_from_mask`.
+        spur: Dangling branches shorter than this (px) are removed, as :func:`graph_from_mask`.
+        gap: Mutually-nearest dangling ends closer than this (px) are joined (0 disables), as
+            :func:`graph_from_mask` (gap bridging runs once, on the final graph).
+        simplify: Douglas-Peucker tolerance (px) of the edges, as :func:`graph_from_mask`.
+        min_length: Connected pieces shorter than this (px) are dropped, as
+            :func:`graph_from_mask`.
+        min_area: Surface blobs smaller than this many pixels are dropped first, as
+            :func:`graph_from_mask`.
         keypoint_threshold: Heatmap peak threshold; peaks off the road surface are ignored.
         zone_radius: Radius (px) of the disk around each keypoint where arms are rejoined.
         pair_deg: Arms through a crossing are paired if their headings are at least this far apart.
@@ -252,7 +261,7 @@ def _rejoin(surf, peaks, allk, d, zr, pair_deg, nx, shapely, minimum_spanning_tr
 
 
 # --------------------------------------------------------------------------------------
-# Block-wise decoding of large scenes (contract: notes/large_scene_vectors_contract.md §2-3)
+# Block-wise decoding of large scenes (the block contract of manyseg.vectors.blocks)
 # --------------------------------------------------------------------------------------
 
 
@@ -335,6 +344,8 @@ class RoadBlockDecoder:
         return max(int(math.ceil(p["zone_radius"])) + 10, int(p["min_area"]) - 1)
 
     def __call__(self, fields, block, scene) -> dict:
+        """Dense steps on one block's window: the core's skeleton pixels, keypoint maxima and
+        the direction samples around them (see the class note)."""
         from scipy import ndimage
 
         skeletonize = _deps()[4]
@@ -405,6 +416,8 @@ class RoadBlockDecoder:
         return out
 
     def combine(self, results: list, scene) -> VectorGraph:
+        """Sparse, global steps on all blocks' results: the scene's road :class:`VectorGraph`
+        (see the class note)."""
         import warnings
 
         p = self.params

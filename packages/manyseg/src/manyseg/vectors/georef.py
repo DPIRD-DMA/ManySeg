@@ -189,15 +189,18 @@ def to_pixels(features, transform, shape: tuple[int, int], *, crs=None, raster_c
     :func:`roof_face_targets`, :func:`road_graph`).
 
     Args:
-        features: shapely geometries, GeoJSON-like mappings (geometries, ``Feature``\\ s or a
-            ``FeatureCollection``), objects with ``__geo_interface__``, or a geopandas
-            ``GeoDataFrame`` / ``GeoSeries`` (its ``crs`` is used when ``crs`` is not given).
+        features (shapely geometries | GeoJSON | GeoDataFrame): shapely geometries,
+            GeoJSON-like mappings (geometries, ``Feature``\\ s or a ``FeatureCollection``),
+            objects with ``__geo_interface__``, or a geopandas ``GeoDataFrame`` /
+            ``GeoSeries`` (its ``crs`` is used when ``crs`` is not given).
             ``None`` and empty geometries are skipped; Z is dropped.
-        transform: the tile's affine geotransform in rasterio order (``dataset.transform``, an
-            ``affine.Affine`` or ``(a, b, c, d, e, f)``; GDAL order through :func:`from_gdal`).
+        transform (affine.Affine | tuple): the tile's affine geotransform in rasterio order
+            (``dataset.transform``, an ``affine.Affine`` or ``(a, b, c, d, e, f)``; GDAL order
+            through :func:`from_gdal`).
         shape: the tile's ``(H, W)``.
-        crs, raster_crs: the features' and the raster's CRS (anything rasterio's
-            ``CRS.from_user_input`` takes, or a pyproj CRS). When both are known and differ,
+        crs: the features' CRS (anything rasterio's ``CRS.from_user_input`` takes, or a
+            pyproj CRS); a GeoDataFrame's own ``crs`` when not given.
+        raster_crs: the raster's CRS, as ``crs``. When both are known and differ,
             vertices are reprojected (rasterio / PROJ; edges stay straight, so densify long
             edges first if the projections differ strongly). When neither is known, the
             features are taken to be in the raster's CRS. When only one is known this raises,
@@ -207,8 +210,9 @@ def to_pixels(features, transform, shape: tuple[int, int], *, crs=None, raster_c
             in the raster's CRS.
         kind: ``"polygons"``, ``"lines"`` or ``"points"``; inferred when ``None`` (mixed inputs
             raise).
-        min_area, min_length: drop clipped parts at or below this size (px² / px; the default
-            drops only empty and degenerate parts).
+        min_area: drop clipped polygon parts with this area (px²) or less (the default drops
+            only empty and degenerate parts).
+        min_length: drop clipped line parts this long (px) or shorter (as ``min_area``).
         return_index: also return, per output part, the index of its source feature.
 
     Polygons are made valid (``shapely.make_valid``), clipped to ``[0, W] x [0, H]`` and split

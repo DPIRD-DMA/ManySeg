@@ -1,7 +1,7 @@
 """Block-wise point and count decoding of large scenes (stitched rasters, core + halo blocks).
 
-Follows the ManySeg <-> ManyPred block contract (``ManySeg-e028/notes/
-large_scene_vectors_contract.md``, sections 2-3): a decoder is called once per block as
+Follows the block contract of :mod:`manyseg.vectors.blocks` (as ManyPred's block
+post-processing calls it): a decoder is called once per block as
 ``decoder(fields, block, scene)``, with ``fields`` name -> numpy ``(C, h, w)`` cropped to
 ``block.window``, and ``decoder.combine(results, scene)`` joins the per-block results in grid
 order. ``block`` and ``scene`` are duck-typed: ``block.core`` / ``block.window`` are ``(top,
@@ -133,7 +133,10 @@ class PointBlockDecoder:
     Args:
         field: the heatmap field (:func:`point_heads` names it ``"heatmap"``), 1 channel,
             probabilities (or logits with ``logits=True``).
-        threshold, kernel, smooth_sigma: as :func:`find_peaks`.
+        threshold: peak threshold, as :func:`find_peaks`.
+        kernel: odd non-maximum suppression window (heatmap px), as :func:`find_peaks`.
+        smooth_sigma: Gaussian blur of the heatmap before peak finding (0: none), as
+            :func:`find_peaks`.
         max_points: keep the best ``max_points`` of the whole scene (applied in
             :meth:`combine`, after sorting).
         offsets: the offset field (``"offset"`` in :func:`point_heads` ``offsets=True``), 2
@@ -175,6 +178,7 @@ class PointBlockDecoder:
         return self.kernel // 2 + blur_radius(self.smooth_sigma)
 
     def __call__(self, fields, block, scene) -> ScenePoints:
+        """Peaks of one block's window whose pixel lies in the block's core."""
         core, win, (it, ib, il, ir) = _layout(block, scene, self.min_halo)
         hm = torch.from_numpy(np.array(_field(fields, self.field, 1, win), np.float32))
         if self.logits:
@@ -242,6 +246,7 @@ class DensityBlockDecoder:
     min_halo = 0
 
     def __call__(self, fields, block, scene) -> tuple[tuple[int, int, int, int], float]:
+        """The block's core and the sum of the density field over it."""
         core, win, (it, ib, il, ir) = _layout(block, scene, 0)
         a = np.asarray(fields[self.field])
         a = a[None] if a.ndim == 2 else a
@@ -252,6 +257,7 @@ class DensityBlockDecoder:
         return core, float(d.sum()) / self.value_scale
 
     def combine(self, results: list, scene) -> SceneCount:
+        """The scene total and per-block counts: :class:`SceneCount`."""
         res = list(results)
         counts = np.array([c for _, c in res], np.float64)
         return SceneCount(float(counts.sum()), counts, [core for core, _ in res])
