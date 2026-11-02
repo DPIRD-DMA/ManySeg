@@ -219,6 +219,10 @@ def test_connected_components_origin_matches_scene_labels():
         connected_components(m, origin=(0, 5), scene_width=100)
 
 
+# _terraces' distance is normalised: the fields decoder gets E046's thresholds, not E052's px
+NORM = {"extent_threshold": 0.6, "seed_threshold": 0.3}
+
+
 def _terraces(seed=3, H=400, W=500, long_row=True):
     """Noisy instance fields of rows of touching houses (+ a terrace longer than any halo),
     corner blobs at house corners and random wall directions; height = a plane per house."""
@@ -350,7 +354,7 @@ def test_fields_blocks_equal_whole_scene():
     thr = dict(extent_threshold=0.6, boundary_threshold=0.3, seed_threshold=0.3)
     ref = polygons_from_labels(_labels(f, **thr), simplify=0.5, min_area=16)
     for block, halo, off in GRIDS:
-        out = decode_scene(f, block_decoder("fields"), block, halo, offset=off)
+        out = decode_scene(f, block_decoder("fields", **NORM), block, halo, offset=off)
         assert _canon(r["geometry"] for r in out) == _canon(ref), (block, halo, off)
 
 
@@ -478,9 +482,9 @@ def test_decode_scene_empty_fields_and_default_one_block():
     with pytest.raises(ValueError, match="must not be empty"):
         decode_scene({}, block_decoder("footprints"))
     f = _terraces()
-    one = decode_scene(f, block_decoder("fields"))  # default block 4096 > scene: one block
+    one = decode_scene(f, block_decoder("fields", **NORM))  # default 4096 px > scene: one block
     assert one.stats["blocks"] == 1
-    ref = decode_scene(f, block_decoder("fields"), 200, 40)
+    ref = decode_scene(f, block_decoder("fields", **NORM), 200, 40)
     assert _canon(r["geometry"] for r in one) == _canon(r["geometry"] for r in ref)
 
 
@@ -521,9 +525,10 @@ def test_roads_registry_entry():
 def test_names_mapping_and_2d_fields():
     f = _terraces()
     ren = {"ext": f["extent"][0], "bnd": f["boundary"], "dst": f["distance"]}
-    dec = block_decoder("fields", names={"extent": "ext", "boundary": "bnd", "distance": "dst"})
+    dec = block_decoder("fields", names={"extent": "ext", "boundary": "bnd", "distance": "dst"},
+                        **NORM)
     out = decode_scene(ren, dec, 200, 40)
-    ref = decode_scene(f, block_decoder("fields"), 200, 40)
+    ref = decode_scene(f, block_decoder("fields", **NORM), 200, 40)
     assert _canon(r["geometry"] for r in out) == _canon(r["geometry"] for r in ref)
 
 
@@ -648,7 +653,9 @@ def test_real_fields_blocks_equal_whole_scene(task, scene):
         thr = dict(extent_threshold=0.6, boundary_threshold=0.3, seed_threshold=0.3)
         ref = polygons_from_labels(_labels(a, **thr), simplify=0.5, min_area=16)
     for block, halo, off in ((768, 128, (0, 0)), (1024, 256, (333, 333))):
-        out = decode_scene(f, block_decoder(task), block, halo, offset=off)
+        # E051's fields are a roof model's (normalised distance): E046's fields thresholds
+        out = decode_scene(f, block_decoder(task, **(NORM if task == "fields" else {})),
+                           block, halo, offset=off)
         if task == "roofs":
             _assert_same_roofs(out, ref, (block, halo))
         else:

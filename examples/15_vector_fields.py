@@ -67,6 +67,8 @@ def main():
     print("targets:", {k: v.shape for k, v in t.items()})
 
     # 2. The model: the instance heads (13 Sentinel-2 bands). extent and boundary are logits.
+    #    field_targets' distance is absolute (px; E052): train with
+    #    InstanceTask(boundary_width=2, distance="absolute") from manyseg-bench.
     model = create_model(backbone="resnet18", pretrained=False, in_channels=13,
                          heads=instance_heads()).eval()
     with torch.no_grad():
@@ -77,7 +79,7 @@ def main():
 
     # 3. Block by block; every field here crosses a seam of the 3 x 3 grid of 160 px blocks.
     scene = Scene(*SHAPE, transform=TRANSFORM, crs=CRS)
-    dec = block_decoder("fields")  # outline decoding, E046 thresholds, 0.5 px simplification
+    dec = block_decoder("fields")  # outline decoding, E052 thresholds, 0.5 px simplification
     records = decode_scene(fields, dec, block=160, halo=32, scene=scene)
     whole = decode_scene(fields, dec, scene=scene)  # default block 4096 px: one block
     same = len(records) == len(whole) and all(

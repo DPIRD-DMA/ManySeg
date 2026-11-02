@@ -797,10 +797,9 @@ class CornerLineTask(Task):
     :class:`InstanceTask`; ``loss`` is the full loss, ``instance_loss`` its instance part (the
     experiments' validation loss).
 
-    Experimental tile-invariant targets: ``distance="absolute"`` (unnormalised distance, so an
-    instance cut by the tile edge gets the same values as in the whole scene; decode with a
-    ``seed_threshold`` in pixels) and a ``corner_ignore`` label (``corner_targets(...,
-    tile_edges="ignore")``): those pixels are left out of the corner loss."""
+    ``distance="absolute"`` (experimental for footprints and roofs; the default for fields,
+    E052): unnormalised distance, so an instance cut by the tile edge gets the same values as
+    in the whole scene; decode with a ``seed_threshold`` in pixels."""
 
     name = "corner_lines"
     primary_metric = "pq"
@@ -827,10 +826,7 @@ class CornerLineTask(Task):
         _full_resolution(out, t["instances"], self.name)
         inner = t["inner"] if "inner" in t else self.inner.targets(t["instances"])
         tc = t["corner"].float()[:, None]
-        logits = out["corner"]
-        if "corner_ignore" in t:  # tile_edges="ignore": neither corner nor background there
-            logits = logits.masked_fill(t["corner_ignore"].bool()[:, None], -20.0)
-        corner = losses.heatmap_focal(logits, tc, pos=losses.heatmap_peaks(tc))
+        corner = losses.heatmap_focal(out["corner"], tc, pos=losses.heatmap_peaks(tc))
         m = t["direction_mask"].bool()[:, None]
         direction = losses.masked_regression(out["direction"], t["direction"], m)
         return {"instances": self.inner.loss(out, inner), "corner": corner,

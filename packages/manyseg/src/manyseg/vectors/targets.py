@@ -136,12 +136,17 @@ def roof_face_targets(faces, shape: tuple[int, int], **kwargs) -> dict[str, np.n
 
 
 def field_targets(polygons, shape: tuple[int, int], *, boundary_width: float = 2.0,
-                  distance: str = "normalized", min_area: int = 16,
+                  distance: str = "absolute", min_area: int = 16,
                   fill_holes: bool = True) -> dict[str, np.ndarray]:
     """Targets for field boundaries with the instance heads only (B0: outline decoding with
     :func:`polygons_from_labels`; E046 on Fields of The World), from pixel-coordinate polygons:
     ``instances`` ``(H, W)`` int32 and ``extent``, ``boundary``, ``distance`` ``(H, W)``
-    float32 (``InstanceTask(boundary_width=2)`` in ``manyseg-bench``).
+    float32 (``InstanceTask(boundary_width=2, distance="absolute")`` in ``manyseg-bench``).
+
+    ``distance`` is ``"absolute"`` (px) by default (E052: as good as normalised on trained FTW
+    models, and an instance cut by a tile edge keeps its whole-scene values, so large scenes
+    stitch without seam errors); train with the same setting and decode with a
+    ``seed_threshold`` in pixels (``block_decoder("fields")`` does).
 
     E046's single accepted set of fields: every 4-connected piece of a field is its own
     instance, pieces under ``min_area`` pixels are dropped, and holes holding only background

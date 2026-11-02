@@ -850,7 +850,9 @@ Why these decoders (pre-registered experiments in [`experiments/`](../experiment
   boundary F (+0.02) and C-IoU × F1 (0.63 vs 0.46-0.47), at 0.01-0.02 lower detection F1.
 * **Fields, E046** (Fields of The World, Netherlands, 1 seed): pixel outlines (B0) beat corners
   and walls on boundary F (0.59 vs 0.57), as in the E045 oracle (touching fields snapped to
-  each other's corners, curved edges were straightened).
+  each other's corners, curved edges were straightened). **E052** (2 seeds): an absolute
+  distance target (px) is as good as the normalised one (boundary F +0.008, detection F1
+  +0.008), and stitches large scenes without seam errors, so it is the fields default.
 * **Roads, E044 / E044b** (City-Scale, 3 seeds): `graph_from_road_heads` (R4) matched a mask
   skeleton (APLS +0.003 to +0.005, junction F1 +0.02 to +0.03) and kept 22-25 points more of
   the overpasses (0.54-0.59 vs 0.32-0.34).
@@ -943,6 +945,13 @@ over arrays or memmaps you stitched yourself.
   on your data, and re-tune thresholds there (`block_decoder(task, extent_threshold=...)`).
 * Roofs need a height input (nDSM in metres, on the image grid): planes are fitted to it, and
   without it the face partition collapses (E049).
+* Roofs: the 45-degree tip of a hip-end face, between two walls' boundary bands, can get its
+  own seed and come out as an extra small face (17-25 px at 0.25 m), even from perfect targets
+  and in a single pass. Filter faces by area if that matters; a fix is planned after 0.1.0.
+* Distance target: fields use absolute distance (E052). Footprints and roof faces keep the
+  normalised one (as trained in E038 / E047; absolute is not tested there), whose per-tile
+  normalisation can reshape roof faces in tile overlaps under ManyPred's `merge="blend"`:
+  stitch roof predictions with `merge="cut"`.
 * The halo must be at least the decoder's `min_halo`: 17 px for footprints and 30 px for roofs
   (corner decoding), 2 px for fields, 29 px for roads, `kernel // 2` plus the blur radius for
   points, 0 for density. `decode_scene` raises below it. 256 px is a safe default.
@@ -1033,7 +1042,7 @@ t = road_targets(g, shape, crossings=crossings)     # mask, line, keypoints, dir
 | --- | --- | --- | --- |
 | Footprints (B3; E036, E038) | `footprint_targets(polygons, shape)` | `instances`, `corner`, `direction`, `direction_mask` (what `CornerLineTask` reads) + `extent`, `boundary`, `distance` (`instance_targets`, `boundary_width=2`; `instance_heads=False` drops them, the task derives them itself) | `CornerLineTask` |
 | Roof faces (E047) | `roof_face_targets(faces, shape)` | as footprints; faces sharing an edge stay separate instances. Heights are not a target: the nDSM is an input channel and planes are fitted after decoding | `CornerLineTask` |
-| Fields (B0; E046) | `field_targets(polygons, shape)` | `instances`, `extent`, `boundary`, `distance`: 4-connected pieces as instances, pieces < 16 px dropped, background holes filled | `InstanceTask(boundary_width=2)` |
+| Fields (B0; E046) | `field_targets(polygons, shape)` | `instances`, `extent`, `boundary`, `distance`: 4-connected pieces as instances, pieces < 16 px dropped, background holes filled | `InstanceTask(boundary_width=2, distance="absolute")` |
 | Roads (R4; E044) | `road_graph(lines)` → `road_targets(graph, shape, crossings=)` | `mask`, `line`, `keypoints`, `direction` | `RoadGraphTask` |
 
 Pixel coordinates are `(x, y)` with pixel corners at integers, the inverse of `to_geojson`'s

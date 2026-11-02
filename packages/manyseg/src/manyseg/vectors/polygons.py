@@ -31,7 +31,8 @@ def polygons_from_labels(labels, *, simplify: float = 1.0, min_area: float = 16,
     half a pixel.)
 
     A low-level building block with generic defaults. The settings tuned for fields are in
-    ``block_decoder("fields")`` (E046 B0: instance thresholds 0.6 / 0.3 / 0.3, ``simplify=0.5``)
+    ``block_decoder("fields")`` (E046 B0, E052 absolute distance: instance thresholds
+    0.4 / 0.3 / 3 px, ``simplify=0.5``)
     and for footprints outlines in ``block_decoder("footprints", method="outline")`` (E038 B0);
     use those with :func:`decode_scene` unless you need this step on its own.
     """

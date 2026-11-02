@@ -287,7 +287,8 @@ def test_field_round_trip():
     fields[0] = fields[0].difference(fields[0].centroid.buffer(6))
     t = field_targets(fields, (size, size))
     assert set(t) == {"instances", "extent", "boundary", "distance"}
-    ref = instance_targets(torch.from_numpy(t["instances"]).long(), boundary_width=2)
+    ref = instance_targets(torch.from_numpy(t["instances"]).long(), boundary_width=2,
+                           distance="absolute")
     for k in ("extent", "boundary", "distance"):
         assert np.array_equal(t[k], ref[k][0, 0].numpy()), k
     c = fields[0].centroid

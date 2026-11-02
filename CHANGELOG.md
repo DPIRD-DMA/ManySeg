@@ -144,6 +144,20 @@ First release. Python 3.10–3.14, PyTorch ≥ 2.10, timm ≥ 1.0.20.
   `BORDER_MARGIN` = 5 px of the image border (was 3 px) count as at the border: roads leaving the
   scene run to its edge, and two cut ends are no longer bridged by a fake road along it (found by
   the end-to-end test; on the City-Scale fixtures only graph parts within 30 px of the border change).
+* **Fields default to an absolute distance target** (`field_targets(distance="absolute")`, px;
+  train with `InstanceTask(boundary_width=2, distance="absolute")`): the per-instance normalised
+  target changed 3-34 fields at tile seams in the end-to-end test (0 with absolute), and in E052
+  (FTW, 2 seeds) absolute was as good when trained (boundary F +0.008, detection F1 +0.008).
+  `block_decoder("fields")` now uses E052's thresholds (extent 0.4, boundary 0.3, seed 3 px);
+  for a normalised model pass `seed_threshold=0.3, extent_threshold=0.6`. Footprints and roof
+  faces keep normalised distance (absolute untested there; `CornerLineTask(distance=)`).
+  Tried and dropped: leaving clip-edge corners and walls out of the corner targets
+  (`tile_edges="ignore"`) changed nothing at seams in the end-to-end seam study (perfect
+  targets, 700 x 1000 px, tiles 256 / 32-128 and 512 / 256): seam-zone objects changed by
+  stitching, keep vs ignore, footprints 0 vs 0 of 199 (cut) and 1 vs 3 of 636 (blend), roof
+  faces 0 vs 0 (cut) and 63 vs 63 (blend; 15 vs 15 with absolute distance), same seam-zone IoU.
+* Known limitation: a hip-end roof face's 45-degree tip can become an extra small face (also in
+  a single pass, from perfect targets); fix planned after 0.1.0.
 * **One decode path for any scene size:** `decode_scene(fields, block_decoder(task))` (tuned
   defaults for `"footprints"`, `"fields"`, `"roofs"`, `"roads"`, `"points"`, `"density"`;
   default `block=4096`, so a smaller scene is one block), over arrays or memmaps; `block_grid`,

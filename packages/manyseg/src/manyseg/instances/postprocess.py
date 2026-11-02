@@ -191,6 +191,19 @@ def _ensure_seed_per_component(fg: Tensor, seeds: Tensor, dist: Tensor) -> Tenso
     return seeds | extra.view_as(seeds)
 
 
+def _drop_small_seeds(seeds: Tensor, min_seed: int) -> Tensor:
+    """Seeds without their 4-connected components of fewer than ``min_seed`` pixels.
+
+    Such fragments sit where boundary bands meet (the tip of an acute corner, a pixel on the
+    seed threshold's edge) and would each grow into an extra instance; the instance around them
+    floods their pixels instead. A foreground component left without any seed gets one back
+    from :func:`_ensure_seed_per_component`, so small objects are kept.
+    """
+    comp = connected_components(seeds)
+    _, inv, counts = torch.unique(comp, return_inverse=True, return_counts=True)
+    return seeds & (counts[inv] >= min_seed)
+
+
 def _foreground(extent: Tensor, logits: bool, threshold: float) -> Tensor:
     if extent.dtype in (torch.long, torch.int32, torch.int64, torch.uint8, torch.bool):
         return (extent if extent.dim() == 3 else extent[:, 0]) > 0
@@ -210,6 +223,7 @@ def instances_from_outputs(
     extent_threshold: float = 0.5,
     boundary_threshold: float = 0.5,
     seed_threshold: float = 0.25,
+    min_seed: int = 0,
     min_size: int = 0,
     backend: str = "auto",
     origin: tuple[int, int] | None = None,
@@ -228,6 +242,9 @@ def instances_from_outputs(
         extent_threshold: Foreground threshold on the extent probability.
         boundary_threshold: Pixels with a boundary probability at or above this are not seeds.
         seed_threshold: Seeds need a predicted distance above this.
+        min_seed: Seed fragments (4-connected) of fewer pixels are dropped, so they do not
+            become extra instances (0 keeps all; E053). A foreground component whose seeds are
+            all dropped still gets one, at its distance maximum.
         min_size: Instances smaller than this many pixels are removed (0 keeps all).
         backend: ``"skimage"`` (watershed), ``"torch"`` or ``"auto"`` (skimage if installed).
         origin: ``(row, col)`` of these arrays in a larger scene of width ``scene_width``
@@ -244,6 +261,8 @@ def instances_from_outputs(
     bnd = boundary[:, 0].sigmoid() if logits else boundary[:, 0]
     dist = distance[:, 0].float()
     seeds = fg & (bnd < boundary_threshold) & (dist > seed_threshold)
+    if min_seed > 1:
+        seeds = _drop_small_seeds(seeds, min_seed)
     seeds = _ensure_seed_per_component(fg, seeds, dist)
     markers = connected_components(seeds, origin=origin, scene_width=scene_width)
     if backend == "auto":
