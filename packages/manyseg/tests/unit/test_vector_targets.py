@@ -209,9 +209,8 @@ def test_footprint_round_trip():
 
 def test_footprint_from_world_with_courtyard_and_border():
     """World features -> to_pixels -> targets: a courtyard stays a hole; a building cut by the
-    tile border is clipped (its border corners are corners, as the experiments trained). The
-    corner decoder returns outer rings (holes are not straightened); the outline decoder keeps
-    the hole."""
+    tile border is clipped (its border corners are corners, as the experiments trained). Both
+    decoders keep the hole (the corner decoder as a traced outline, not straightened)."""
     size = 128
     court = shapely.Polygon(shapely.box(10, 10, 70, 70).exterior.coords,
                             [shapely.box(30, 30, 50, 50).exterior.coords])
@@ -223,8 +222,10 @@ def test_footprint_from_world_with_courtyard_and_border():
     assert t["instances"][40, size - 1] == 2
     clipped = cut.intersection(shapely.box(0, 0, size, size))
     pred = polygons_from_corners(t["instances"], t["corner"], t["direction"])
-    ious = _match(pred, [shapely.Polygon(court.exterior), clipped])
-    assert min(ious) > 0.95, ious
+    ious = _match(pred, [court, clipped])
+    assert min(ious) > 0.95 and len(pred[0].interiors) == 1, ious
+    filled = polygons_from_corners(t["instances"], t["corner"], t["direction"], holes=False)
+    assert min(_match(filled, [shapely.Polygon(court.exterior), clipped])) > 0.95
     out = polygons_from_labels(t["instances"])
     assert min(_match(out, [court, clipped])) > 0.95 and len(out[0].interiors) == 1
 
