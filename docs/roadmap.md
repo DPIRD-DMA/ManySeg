@@ -1,6 +1,6 @@
 # Roadmap
 
-Status as of 2026-11-02, 08:30 AWST. ✅ done · 🔄 in progress · ⏳ planned.
+Status as of 2026-11-02, 08:55 AWST. ✅ done · 🔄 in progress · ⏳ planned.
 
 ## Phase 1: research and architecture ✅
 
@@ -150,7 +150,7 @@ synthetically corrupted perfect targets (levels L0–L3), not trained models.
 | E049 / E049b | LoD2 from RGB only, with predicted height (and slope) heads. Face F1 −0.38 / −0.28 and height RMSE +2.88 / +1.82 m vs RGB + nDSM: not viable. A rescaled slope head failed its val gate (correlation 0.42 / 0.37 < 0.5). Line closed: roofs need an nDSM | ✅ |
 | E050 / E050b | Stitching tiled predictions for vector decoding (blend vs cutlines), scored by agreement with a single-pass decode. Roads: any cut removes the seam effect (junction F1 0.971–0.972 vs blend 0.954); min-cost and object-aware seams add nothing over the midline. Roofs: no merge rule helps at 512 / 128 px tiles; the gap was context: at 1024 / 256 all-face agreement is 0.979 (blend) / 0.987 (midline). Ships as the midline cut with ≥ 1024 / 256 tiles; the cut's gain on roofs was not pre-registered | ✅ |
 | E051 | End to end through ManyPred (`merge="cut"`, `BlockPostprocess`, `block_decoder`): the block decode equals the whole-scene decode on a 1 km² roof scene (5537 faces, exact) and a 2048 px road scene (identical graph) | ✅ |
-| E052 | Absolute vs normalised distance target on FTW fields, 2 seeds (per-tile normalisation changes 3–34 fields at seams in the end-to-end test). Absolute: boundary F +0.008, detection F1 +0.008: it becomes the fields default (library change 🔄); roof faces untested | ✅ |
+| E052 | Absolute vs normalised distance target on FTW fields, 2 seeds (per-tile normalisation changes 3–34 fields at seams in the end-to-end test). Absolute: boundary F +0.008, detection F1 +0.008: it is the fields default; roof faces untested | ✅ |
 | — | Shared schema and utilities: done (target encoders, `block_decoder` / `decode_scene`, `SceneRecords`, GeoJSON / GeoPackage). One model with task-specific heads vs separate models: not tested | ⏳ |
 | — | LoD1: footprint + ground / eave / roof height; roof-to-footprint offset for off-nadir imagery | ⏳ |
 | — | LoD2 remainder: watertight solids and CityJSON export (0.1.0 writes faces and a 3-D roof mesh) | ⏳ |
@@ -158,7 +158,7 @@ synthetically corrupted perfect targets (levels L0–L3), not trained models.
 Ships in 0.1.0, marked experimental (names and defaults may change before 1.0):
 
 * Footprints: B3 corners + lines (E038). Fields: B0 mask outlines (E046), with
-  `distance="absolute"` (E052; 🔄 the default change is being committed).
+  `distance="absolute"` (E052).
 * Roads: R4 unified heads, surface mode (E044b). Road ends within 5 px of the scene edge count
   as at the border (was 3 px), so two cut ends are not bridged by a fake road along the edge
   (found by the end-to-end test).
@@ -167,9 +167,9 @@ Ships in 0.1.0, marked experimental (names and defaults may change before 1.0):
 * Large scenes: ManySeg's block decoders run in ManyPred's `merge="cut"` stitching with block
   post-processing, or in `decode_scene` on a stitched raster; block and whole-scene decodes
   are equal (E051). Tiles of at least 1024 px with 256 px overlap (E050b).
-* Removed: the graph tensor (B2 / R2; E028, E030). Being removed (🔄): clip-edge corner
-  suppression (`corner_targets(tile_edges="ignore")`), which changed nothing measurable in the
-  end-to-end test.
+* Removed: the graph tensor (B2 / R2; E028, E030), and clip-edge corner suppression
+  (`corner_targets(tile_edges="ignore")`), which changed nothing measurable in the end-to-end
+  test (numbers in the CHANGELOG).
 
 ## Phase 6: release preparation 🔄
 
@@ -199,18 +199,20 @@ Ships in 0.1.0, marked experimental (names and defaults may change before 1.0):
   CHANGELOG entry, one end-to-end test per task, and a full-pipeline test through ManyPred
   (`tests/integration/test_vector_pipeline.py`: vectors in a CRS → per-tile targets → stitching
   → block decoding → GeoPackage). The graph tensor was moved out of the library (E030).
-* 🔄 Fields default to `distance="absolute"` (E052).
-* 🔄 Clip-edge corner suppression (`tile_edges="ignore"`) removed from the API; its negative
-  result goes into the CHANGELOG.
+* ✅ Fields default to `distance="absolute"` (E052).
+* ✅ Clip-edge corner suppression (`tile_edges="ignore"`) removed from the API; its negative
+  result is in the CHANGELOG.
 * 🔄 Seeds in narrow parts of an instance: an acute hip-roof tip gets no seed or its own (lost
   tip, or an extra 17–25 px face, also in a single pass); fields get extra pieces at narrow
-  necks. Both are being fixed in the instance decoder; if tuned decodes change, a
-  pre-registered check on the E047b, E052 and E038 test tiles follows.
-* 🔄 API reference page; ManyPred section in the README.
+  necks. A minimum seed size (`instances_from_outputs(min_seed=)`) is being checked on the
+  E047b roof, E036 footprint and E052 field checkpoints (E053). A holed field's narrow strip
+  breaking into pieces has another cause and stays a documented limitation.
+* ✅ API reference (one page per public module, from the docstrings); ManyPred section in
+  the README.
 * ⏳ `manyseg.losses`: the bench losses move into the library, with re-exports from
   `manyseg_bench`.
-* ⏳ Merge ManyPred's vector-blocks branch (`merge="cut"`, block post-processing) before the
-  ManySeg merge.
+* ✅ ManyPred's vector-blocks branch (`merge="cut"`, block post-processing) is on ManyPred's
+  main (2026-11-02).
 * ⏳ Make the repositories public, so Read the Docs can build them.
 * ⏳ PyPI release of 0.1.0 (done by the user).
 
