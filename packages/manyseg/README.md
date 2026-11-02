@@ -216,8 +216,11 @@ or sum a density map (`density_head`, `density_loss`). Which is better depends o
 With many small trees per tile, the density head halved count error (E011). With a few large
 plants per drone tile, peak counting was far better (count MAE 1.0 against 9–11), because a
 small background bias summed over every pixel adds up; count peaks for a few large objects.
-If you use a density head, `density_head(activation="softplus")` is recommended: on that
-drone data it cut density count error from 10.1 to 2.9. Validate on your data.
+`density_head()` uses a softplus output by default: on that drone data it cut density count
+error from 10.1 to 2.9, and on OAM-TCD it was no worse than the raw head (E011c). Softplus
+never reaches 0, so a mostly empty tile still sums to a small positive count (about 2 objects on
+an empty 792 x 792 drone tile); `density_head(activation=None)` gives the raw head. Validate on
+your data.
 
 **Vector outputs (experimental).** `manyseg.vectors` (the `[vectors]` extra) turns
 predictions into GIS layers: building footprints with straight walls, field boundaries,
@@ -262,6 +265,21 @@ The loaded model still takes the raw-scale input you trained on and returns logi
 the stored normalisation and activations is up to the inference code. The default head of a
 `num_classes=` model is named `"logits"`.
 
+**Share on the Hugging Face Hub.** `manyseg.push_to_hub` takes the same arguments as `save`,
+uploads the file to a model repository (private by default) and writes a model card listing
+the inputs, heads and the licences of the pretrained weights. `load` and `read_metadata` take
+Hub names as timm does:
+
+```python
+manyseg.push_to_hub(model, "your-org/water", activations={"logits": "softmax"},
+                    normalize=[{"type": "scale", "value": 10000}], license="mit",
+                    revision="v1")                  # optional: a branch name, created if needed
+model = manyseg.load("hf-hub:your-org/water@v1")   # token=... for a private repository
+```
+
+Both use `HF_TOKEN` or a stored `hf auth login` when no `token=` is given. Tags and commits
+can be loaded (`@<tag>`, `@<sha>`) but not pushed to.
+
 Don't save the whole model with `torch.save(model)`: that pickle refers to ManySeg's internal
 module paths, so it breaks when a later version moves or renames a class, and loading it
 needs `torch.load(weights_only=False)`, which can run arbitrary code. A `manyseg.save` file holds
@@ -279,6 +297,53 @@ autocast plus `torch.compile`.
 
 Most of these have a runnable script in [`examples/`](https://github.com/DPIRD-DMA/ManySeg/blob/main/examples/) that runs on CPU: the numbered
 scripts in a few seconds, the walkthroughs that train briefly in 10–20 s.
+
+## Large images with ManyPred
+
+A ManySeg model predicts a whole image in one forward pass, so memory limits the image size,
+and a fixed-size backbone refuses anything larger than its size. For larger scenes use
+[ManyPred](https://github.com/DPIRD-DMA/ManyPred), our tiled inference library: it predicts
+overlapping patches in batches, stitches them, skips nodata, and reads and writes GeoTIFFs
+larger than memory. It is a separate library so it can run any PyTorch model; ManySeg does not
+import it. Like ManySeg, it is not on PyPI yet (`[geo]` adds rasterio for GeoTIFFs):
+
+```bash
+pip install "manypred[geo] @ git+https://github.com/DPIRD-DMA/ManyPred"
+```
+
+ManyPred reads the model's `tiling_spec()` (padding multiple, fixed input size, each head's
+resolution) and the normalisation and activations stored by `manyseg.save`, so with a model
+saved as in "Save and load" above neither is repeated:
+
+```python
+import numpy as np
+import manyseg
+from manypred import predict_array, predict_files
+from manypred.geo import load_raster
+
+model = manyseg.load("model.safetensors")
+scene = np.random.randint(0, 10000, (4, 3000, 3000), dtype=np.uint16)  # raw scale, (C, H, W)
+probs = predict_array(model, scene, patch_size=1024, overlap=256)  # (2, 3000, 3000), softmax
+# GeoTIFFs in, GeoTIFFs out (predictions/scene_pred.tif); nodata=0 skips zero-filled borders
+predict_files(model, ["scene.tif"], load_func=load_raster, output_dir="predictions",
+              patch_size=1024, overlap=256, output="argmax", nodata=0)
+```
+
+`device=` and `dtype=` default to the GPU and float16 where it is fast. Overlapping patches
+are blended by default (`merge="blend"`, a weighted mean that fades towards each patch edge).
+`merge="cut"` takes each pixel from the patch it is most central in, so nothing is averaged;
+it can be set per head (`merge={"extent": "cut"}`). Use it for heads that are decoded into
+vectors or instances afterwards, and keep blend for maps used as rasters. On City-Scale roads,
+blending lost junctions where patches overlapped (junction agreement with a whole-scene pass
+0.954, cut 0.971, away from overlaps 0.972; E050). For roof faces patch size mattered more:
+agreement 0.945 with 512 px patches and 128 px overlap, and 0.979 (blend) or 0.987 (cut) with
+1024 px patches and 256 px overlap (E050b; [both experiments](https://github.com/DPIRD-DMA/ManySeg/blob/main/experiments/E050_stitching/README.md)).
+
+The vector decoders (**Vector outputs** above) run on large scenes through `manypred.blocks`:
+`postprocess_blocks` decodes saved rasters block by block, and
+`predict_files(..., merge="cut", block_postprocess=BlockPostprocess(...))` decodes while it
+predicts ([guide](https://github.com/DPIRD-DMA/ManySeg/blob/main/docs/api_design.md#vector-outputs-line-graphs-polygons)). `merge` and
+`manypred.blocks` need ManyPred's next release.
 
 ## Tips from our benchmarks
 
