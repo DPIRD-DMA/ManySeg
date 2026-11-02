@@ -86,9 +86,8 @@ def main():
         shapely.equals_exact(a["geometry"], b["geometry"], 0) for a, b in zip(records, whole))
     print(f"{len(records)} fields from {len(world)} parcels; {records.stats}; "
           f"equal to the whole-scene decode: {same}")
-    # Even from perfect targets one extra small field appears here: a parcel's narrow tip, cut
-    # off from the rest by the 2 px boundary band, gets a seed of its own. Raise min_size (px)
-    # or filter by area if that matters for your data.
+    # Seed fragments under min_seed (8 px, E053) are flooded by the field around them, so a
+    # parcel's narrow corner does not become a field of its own.
 
     out_dir = Path(tempfile.mkdtemp())
     records.write(out_dir / "fields.geojson")  # the scene's transform and CRS

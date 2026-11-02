@@ -1,0 +1,122 @@
+{
+ "task": "fields",
+ "limit": null,
+ "thr": {
+  "extent_threshold": 0.4,
+  "boundary_threshold": 0.3,
+  "seed_threshold": 3.0
+ },
+ "params": {
+  "simplify": 0.5
+ },
+ "$WORKSPACE/ManySeg-vectors/experiments/E052_absolute_distance/runs/A_s0.pt": {
+  "sha256": "fd7bb374f324064f7f37d09a94989d71f0f17dd30f2761f63ce655753d8ddf31",
+  "val": {
+   "min_seed_0": {
+    "boundary_f": 0.5970083543254514,
+    "boundary_p": 0.6177535002393718,
+    "boundary_r": 0.5776112491053762,
+    "det_f1": 0.5901080159181353,
+    "ciou": 0.264056223434709,
+    "polis_px": 1.561296936685747,
+    "tp": 2595.0,
+    "n_gt": 4489.0,
+    "n_pred": 4306.0
+   },
+   "min_seed_8": {
+    "boundary_f": 0.5965816988839459,
+    "boundary_p": 0.6174468894456987,
+    "boundary_r": 0.5770805939812743,
+    "det_f1": 0.5970666358701928,
+    "ciou": 0.2627879137389089,
+    "polis_px": 1.5651671615083127,
+    "tp": 2585.0,
+    "n_gt": 4489.0,
+    "n_pred": 4170.0
+   }
+  },
+  "test": {
+   "min_seed_0": {
+    "boundary_f": 0.5957291266131011,
+    "boundary_p": 0.6073777112365771,
+    "boundary_r": 0.5845189386284684,
+    "det_f1": 0.5917112029847736,
+    "ciou": 0.26344778887654186,
+    "polis_px": 1.529530333653691,
+    "tp": 2934.0,
+    "n_gt": 4989.0,
+    "n_pred": 4928.0
+   },
+   "min_seed_8": {
+    "boundary_f": 0.5955790576132761,
+    "boundary_p": 0.6074862824360728,
+    "boundary_r": 0.5841296419257677,
+    "det_f1": 0.6013728101628931,
+    "ciou": 0.2626191926523396,
+    "polis_px": 1.5256520382980197,
+    "tp": 2935.0,
+    "n_gt": 4989.0,
+    "n_pred": 4772.0
+   }
+  }
+ },
+ "$WORKSPACE/ManySeg-vectors/experiments/E052_absolute_distance/runs/A_s1.pt": {
+  "sha256": "d9fb0226ef29ea6e13fad74baeaaebaf817ea729f08d9ed86eddb33b94935e57",
+  "val": {
+   "min_seed_0": {
+    "boundary_f": 0.6037039429891013,
+    "boundary_p": 0.6449792703110382,
+    "boundary_r": 0.5673936902951794,
+    "det_f1": 0.5975391231633018,
+    "ciou": 0.2642464388728431,
+    "polis_px": 1.5717080503334353,
+    "tp": 2501.0,
+    "n_gt": 4489.0,
+    "n_pred": 3882.0
+   },
+   "min_seed_8": {
+    "boundary_f": 0.603258786245058,
+    "boundary_p": 0.6444438136756973,
+    "boundary_r": 0.5670216442672112,
+    "det_f1": 0.6049099044624501,
+    "ciou": 0.2634176122468825,
+    "polis_px": 1.5756073534823796,
+    "tp": 2501.0,
+    "n_gt": 4489.0,
+    "n_pred": 3780.0
+   }
+  },
+  "test": {
+   "min_seed_0": {
+    "boundary_f": 0.5985220847831385,
+    "boundary_p": 0.6268727279208869,
+    "boundary_r": 0.5726248308308991,
+    "det_f1": 0.598696657557284,
+    "ciou": 0.26462453615991505,
+    "polis_px": 1.5592729524864999,
+    "tp": 2848.0,
+    "n_gt": 4989.0,
+    "n_pred": 4525.0
+   },
+   "min_seed_8": {
+    "boundary_f": 0.5983103044812496,
+    "boundary_p": 0.6264878526006848,
+    "boundary_r": 0.5725583442030222,
+    "det_f1": 0.6047649436290151,
+    "ciou": 0.2637556409009582,
+    "polis_px": 1.5618835112023146,
+    "tp": 2843.0,
+    "n_gt": 4989.0,
+    "n_pred": 4413.0
+   }
+  }
+ },
+ "decision": {
+  "min_seed_8_minus_0": {
+   "n_pred": -134.0,
+   "det_f1": 0.007864946624925317,
+   "boundary_f": -0.00018092465085695064
+  },
+  "adopt": true
+ }
+}

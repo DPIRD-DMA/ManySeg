@@ -89,8 +89,10 @@ ORIGIN = (155_123.37, 463_456.81)
 # * roof faces: 0.991 (quoted for the vec/encoders round trip) is NOT reached by the oracle on
 #   these faces even in one pass without tiles (0.972 mean at 0.25 m, 0.964 at 0.5 m): ties of
 #   the distance target on the shared edges of touching faces move those edges by up to
-#   1 px, and acute hip-end tips narrower than the 2 x 2 px boundary band get no seed, so the
-#   face loses its tip (single-pass face IoU down to 0.75 on the large scenes). Roofs use the
+#   1 px, and the acute tip of a hip-end face, cut off by the two walls' boundary bands, has no
+#   seed of the face's own: it is flooded from a seed nearby, so the face can lose its tip
+#   (single-pass face IoU down to 0.75 on the large scenes). Before min_seed (E053) a tip with a
+#   few pixels above the seed threshold instead became an extra small face. Roofs use the
 #   in-repo round trip's mean (``unit/test_vector_targets.py::test_roof_face_round_trip``:
 #   mean > 0.93); its per-face 0.88 is for its three houses, so the per-face floor here is a
 #   regression guard below the worst single-pass face measured on these scenes (0.75, an
@@ -1170,26 +1172,15 @@ NORMALISED_ROOFS = ("per-tile normalised distance: roof faces in the overlap res
 
 
 # Failures that are not stitching: the single pass (no tiles) fails the same way.
-ACUTE_TIPS = ("decoder limit, also in the single pass: the 45-degree tip of a hip-end face "
-              "between two walls' boundary bands gets its own seed and becomes an extra "
-              "17-25 px face (instances_from_outputs)")
-FIELD_CORNER_SEEDS = ("decoder limit, also in the single pass: with absolute distance and a 3 px "
-                      "seed threshold (E052), a 1 px seed on the threshold's edge at a field's "
-                      "corner, cut off diagonally from the field's seed, becomes an extra 16 px "
-                      "field (instances_from_outputs)")
+# Fixed by min_seed (E053; block_decoder default 8): seed fragments of 1-6 px where boundary bands
+# meet (the 45-degree tip of a hip-end face, a 1 px seed on the 3 px threshold's edge at a
+# field corner) grew into extra 13-25 px objects; they are now flooded by the object around them.
 NARROW_STRIP = ("decoder limit, also in the single pass: with a 3 px seed threshold the narrow "
                 "strip of the holed field (under ~8 px wide) gets broken seeds, so the field "
                 "splits along it and loses its hole")
 
 # (task, merge, distance, str(grid)) that fail for these reasons
 _ORACLE = {
-    ("roofs", "cut", "normalized", "700x1000-p256-o32-s0,0"): ACUTE_TIPS,
-    ("roofs", "cut", "normalized", "700x1000-p256-o128-s17.3,-9.6"): ACUTE_TIPS,
-    ("roofs", "cut", "absolute", "700x1000-p256-o128-s17.3,-9.6"): ACUTE_TIPS,
-    ("roofs", "blend", "absolute", "700x1000-p256-o128-s17.3,-9.6"): ACUTE_TIPS,
-    ("roofs", "cut", "normalized", "700x1000-p512-o256-s-31.5,23.25"): ACUTE_TIPS,
-    **{("fields", m, "absolute", g): FIELD_CORNER_SEEDS for m in ("cut", "blend")
-       for g in ("290x410-p128-o32-s0,0", "700x1000-p256-o128-s17.3,-9.6")},
     **{("fields", m, "absolute", "700x1000-p512-o256-s-31.5,23.25"): NARROW_STRIP
        for m in ("cut", "blend")},
 }
@@ -1204,7 +1195,7 @@ def _expected_failure(task, distance, merge, grid):
         return None
     if task == "fields":
         return NORMALISED_SEAMS
-    if task == "roofs" and merge == "blend":
+    if task == "roofs" and merge == "blend" and grid.shape != (290, 410):
         return NORMALISED_ROOFS
     return None
 
@@ -1224,7 +1215,6 @@ class ExpectedFailure(AssertionError):
 _ALLOWED = {NORMALISED_SEAMS: {"agreement", "extra", "split", "merged", "missing", "mean_iou",
                                "min_iou", "polis", "holes", "blocks"},
             NORMALISED_ROOFS: {"agreement", "extra", "split", "merged", "missing", "mean_iou"},
-            ACUTE_TIPS: {"extra"}, FIELD_CORNER_SEEDS: {"extra"},
             NARROW_STRIP: {"extra", "split", "holes", "min_iou", "mean_iou", "polis"}}
 
 
