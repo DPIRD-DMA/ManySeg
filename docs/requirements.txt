@@ -1,0 +1,8 @@
+# Docs site tools (scripts/build_docs.py; Read the Docs installs these with pip). mkdocs 2.0
+# drops the plugin/theme system Material needs: stay on 1.x. mkdocstrings reads the source
+# statically, so neither torch nor manyseg's extras are needed to build the API reference.
+mkdocs>=1.6,<2
+mkdocs-material>=9.5,<10
+mkdocstrings>=1,<2
+mkdocstrings-python>=2,<3
+ruff>=0.6  # mkdocstrings formats long signatures with it

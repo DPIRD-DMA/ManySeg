@@ -6,7 +6,10 @@ import torch
 from torch import Tensor, nn
 
 WEIGHT_ADAPTERS = ("repeat", "mean", "rgb_plus_random", "rgb_plus_zero")
+"""``channel_adapter`` values that adapt the pretrained stem weights to the band count."""
 CHANNEL_ADAPTERS = (*WEIGHT_ADAPTERS, "projection")
+"""Every ``channel_adapter`` value: the weight adapters plus ``"projection"`` (a learned 1x1
+projection to the channels the stem expects)."""
 
 
 def _check_rgb_indices(rgb_indices, in_channels: int, c0: int):

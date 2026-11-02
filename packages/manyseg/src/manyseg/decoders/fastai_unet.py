@@ -108,6 +108,17 @@ class _ResBlock(nn.Module):
 
 @DECODERS.register("fastai_unet")
 class FastaiUNetDecoder(nn.Module):
+    """fastai's Dynamic U-Net decoder (``decoder="fastai_unet"``), parameter- and
+    FLOP-identical to fastai's, see the module docstring.
+
+    Args:
+        in_specs: The input image's spec followed by the encoder features' specs.
+        last_cross: Add fastai's last cross stage (the input image concatenated, then a
+            residual block) at input resolution; default: when ``out_stride`` is 1.
+        out_stride: Output stride (a power of two up to the deepest encoder stride); stages
+            below it are dropped.
+    """
+
     wants_input = True
 
     def __init__(self, in_specs: Sequence[FeatureSpec], last_cross: bool | None = None,

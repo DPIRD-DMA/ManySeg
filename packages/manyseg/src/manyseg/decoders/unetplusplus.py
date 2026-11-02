@@ -44,6 +44,15 @@ class _Node(nn.Module):
 
 @DECODERS.register("unetplusplus")
 class UNetPlusPlusDecoder(nn.Module):
+    """U-Net++ decoder (``decoder="unetplusplus"``), see the module docstring.
+
+    Args:
+        in_specs: The encoder features' specs.
+        out_stride: Output stride; encoder levels finer than it are dropped.
+        norm: Decoder normalisation (``"batch"``, ``"group"`` or None), as for the U-Net.
+        upsample: ``"nearest"``, ``"bilinear"`` or ``"aligned"``, as for the U-Net.
+    """
+
     def __init__(self, in_specs: Sequence[FeatureSpec], out_stride: int = 1,
                  norm: str | None = "batch", upsample: str = "nearest") -> None:
         super().__init__()

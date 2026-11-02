@@ -56,7 +56,11 @@ def push_to_hub(model: DenseModel, repo_id: str, *, normalize: Any = None,
     ``repo_id`` (``"org/name"``), creating the repository if needed. Returns the commit URL.
 
     Args:
-        normalize, activations, classes, bands, extra: as for :func:`manyseg.save`.
+        normalize: As for :func:`manyseg.save`.
+        activations: As for :func:`manyseg.save`.
+        classes: As for :func:`manyseg.save`.
+        bands: As for :func:`manyseg.save`.
+        extra: As for :func:`manyseg.save`.
         license: The licence of your fine-tuned weights, as a Hub licence id (``"mit"``,
             ``"cc-by-4.0"``, ...), for the model card. It must respect the licences of the
             pretrained weights the model started from, which the card lists.

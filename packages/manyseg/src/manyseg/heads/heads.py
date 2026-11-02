@@ -33,6 +33,7 @@ from ..utils.resolution import scale_factor
 from ..utils.spatial import pad_to_multiple
 
 HEADS = Registry("head type")
+"""Head constructors by head ``"type"``; ``HEADS.register("name")`` adds one."""
 
 
 class PixelHead(nn.Module):

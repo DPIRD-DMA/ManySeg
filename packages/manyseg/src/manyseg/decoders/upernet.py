@@ -30,6 +30,16 @@ class PPM(nn.Module):
 
 @DECODERS.register("upernet")
 class UPerNetDecoder(nn.Module):
+    """UPerNet decoder (``decoder="upernet"``): a pyramid pooling module on the deepest level
+    and an FPN, fused at stride 4.
+
+    Args:
+        in_specs: The encoder features' specs.
+        channels: Width of the PPM, FPN and fusion convolutions.
+        pool_scales: Output sizes of the pyramid pooling branches.
+        out_stride: Output stride (default: stride 4, the fusion's).
+    """
+
     def __init__(self, in_specs: Sequence[FeatureSpec], channels: int = 256,
                  pool_scales: Sequence[int] = (1, 2, 3, 6), out_stride: int | None = None) -> None:
         super().__init__()
