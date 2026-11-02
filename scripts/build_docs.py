@@ -38,7 +38,7 @@ DOCS = [("Architecture review", "architecture_review.md"), ("API design", "api_d
 # (an __init__ with __all__) is listed; tests/unit/test_docs_reference.py checks that.
 REFERENCE = [
     ("Models", ["manyseg", "manyseg.presets", "manyseg.weights", "manyseg.io", "manyseg.hub"]),
-    ("Outputs", ["manyseg.instances", "manyseg.points", "manyseg.vectors",
+    ("Outputs", ["manyseg.losses", "manyseg.instances", "manyseg.points", "manyseg.vectors",
                  "manyseg.vectors.roofs", "manyseg.utils"]),
     ("Deployment", ["manyseg.export", "manyseg.quantize", "manyseg.distributed",
                     "manyseg.describe"]),

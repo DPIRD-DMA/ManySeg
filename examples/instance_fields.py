@@ -3,7 +3,7 @@
 extent / boundary / distance heads -> targets from an instance-ID mask -> a few training steps ->
 instances via seeded growth in torch (`backend="torch"` here; the default `"auto"` uses
 scikit-image's watershed when `manyseg[instances]` is installed).
-Losses here are plain torch; manyseg-bench has Dice+BCE etc. (`manyseg_bench.losses`).
+Losses here are plain torch; `manyseg.losses` has Dice + BCE, masked regression and others.
 """
 
 import torch

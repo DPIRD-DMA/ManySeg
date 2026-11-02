@@ -136,7 +136,9 @@ registered with `manyseg.heads.HEADS.register("name")`.
 [TorchGeo](https://github.com/DPIRD-DMA/ManySeg/blob/main/examples/13_torchgeo.py) (its segmentation task with a ManySeg model), all tested
 in CI. With several heads, a loss and metrics read the dict (`out["landcover"]`), or
 `manyseg.utils.concat_heads(model, ["landcover", "height"])` returns one concatenated tensor
-for code that wants one.
+for code that wants one. `manyseg.losses` has the losses our benchmarks train with (Dice + BCE,
+multi-class Dice, masked regression, CenterNet heatmap focal loss) as plain functions, and
+`multi_head_loss` sums a weighted loss per head of the output dict.
 A model with metadata inputs takes a dict, so a loop that passes one tensor needs a small
 wrapper of your own that builds it. Save the model inside, not the wrapper
 (`manyseg.save(wrapper.model, ...)`), and wrap `manyseg.load(path)` again after loading.

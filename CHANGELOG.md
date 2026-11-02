@@ -196,6 +196,15 @@ First release. Python 3.10–3.14, PyTorch ≥ 2.10, timm ≥ 1.0.20.
   crop). Whole-scene decodes can differ marginally from development builds (2601 → 2600 roof
   faces on one test scene).
 
+### Losses (`manyseg.losses`)
+
+* The losses the benchmark trains with moved into the library unchanged: `soft_dice`,
+  `dice_bce`, `masked_regression`, `heatmap_focal` with `heatmap_peaks`,
+  `distance_weighted_bce` with `distance_map`; `density_loss` is re-exported.
+  `manyseg_bench.losses` re-exports them.
+* New: `multiclass_dice` (softmax, integer targets, `ignore_index`) and `multi_head_loss`
+  (weighted sum of a loss per head, with each head's loss for logging).
+
 ### Performance (E026; values unchanged up to rounding)
 
 * bf16 autocast no longer carries float32 activations where CUDA runs an op in float32:
