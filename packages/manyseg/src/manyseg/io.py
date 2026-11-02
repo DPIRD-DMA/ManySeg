@@ -136,6 +136,22 @@ def save(model: DenseModel, path: str | Path, *, normalize: Any = None,
             raise ValueError(f"Head {name!r} applies {model.heads[name].activation} itself; its "
                              f"output is the prediction, so its activation is 'none'.")
         acts[name] = act
+    # a single-input model's input has no name, so its bands can only be a list
+    image_inputs = [n for n, c in (config.get("inputs") or {None: {}}).items()
+                    if c.get("kind", "image") != "vector"]
+    for arg, value, names, what in (("classes", classes, heads, "head"),
+                                    ("bands", bands, image_inputs, "input")):
+        if value is None:
+            continue
+        if isinstance(value, Mapping) and names == [None]:
+            raise ValueError(f"This model has one unnamed input: pass {arg}=[...].")
+        if isinstance(value, Mapping):
+            unknown = [k for k in value if k not in names]
+            if unknown:
+                raise ValueError(f"{arg} given for unknown {what}s {unknown}; {what}s: {names}.")
+        elif isinstance(value, str) or len(names) != 1:
+            raise ValueError(f"{arg} as a list is for a model with one {what}; this one has "
+                             f"{names}: pass {arg}={{{what}: [...]}}.")
     missing = [n for n in heads if n not in acts]
     if missing:
         raise ValueError(
@@ -233,10 +249,22 @@ def _check_rebuildable(model: DenseModel, config: Mapping[str, Any]) -> None:
         )
 
 
-def read_metadata(path: str | Path) -> dict:
-    """The metadata stored by :func:`save`, without loading the weights."""
+def _local(path: str | Path, token: str | None = None) -> str | Path:
+    """``path``, or the cached download of a ``"hf-hub:org/name[@revision]"`` name."""
+    from .hub import PREFIX, download
+
+    if isinstance(path, str) and path.startswith(PREFIX):
+        return download(path, token=token)
+    return path
+
+
+def read_metadata(path: str | Path, *, token: str | None = None) -> dict:
+    """The metadata stored by :func:`save`, without loading the weights. ``path`` may name a
+    Hub model, ``"hf-hub:org/name[@revision]"`` (see :mod:`manyseg.hub`; ``token`` for a
+    private one, default ``HF_TOKEN`` or the stored login)."""
     from safetensors import safe_open
 
+    path = _local(path, token)
     with safe_open(str(path), framework="pt") as f:
         stored = (f.metadata() or {}).get(_KEY)
     if stored is None:
@@ -315,14 +343,19 @@ def _version_error(path, meta: dict, err: Exception) -> Exception:
                       f"report it.")
 
 
-def load(path: str | Path, map_location: str | torch.device = "cpu") -> DenseModel:
+def load(path: str | Path, map_location: str | torch.device = "cpu", *,
+         token: str | None = None) -> DenseModel:
     """Rebuild and load a model saved with :func:`save`, in eval mode, on ``map_location`` and
     in the dtype it was saved in. Its metadata is on ``model.saved_metadata`` and its
-    ``tiling_spec()`` includes the stored normalisation and activations."""
+    ``tiling_spec()`` includes the stored normalisation and activations. ``path`` may name a
+    Hub model, ``"hf-hub:org/name[@revision]"``, downloaded once and cached (see
+    :mod:`manyseg.hub`; ``token`` for a private one, default ``HF_TOKEN`` or the stored
+    login)."""
     from safetensors.torch import load_file
 
     from .models import create_model
 
+    path = _local(path, token)
     meta = read_metadata(path)
     try:
         model = create_model(**_no_download(meta["create_model"]))
