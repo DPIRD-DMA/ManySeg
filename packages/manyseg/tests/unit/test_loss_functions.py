@@ -74,3 +74,58 @@ def test_density_loss_is_reexported():
     from manyseg.points import density_loss
 
     assert losses.density_loss is density_loss
+
+
+def _multiclass_dice_onehot(logits, target, ignore_index=None, eps=1.0):
+    """The textbook form, as a reference for the sums by label in multiclass_dice."""
+    p = logits.float().softmax(1)
+    valid = torch.ones_like(target, dtype=torch.bool) if ignore_index is None \
+        else target != ignore_index
+    onehot = F.one_hot(target.where(valid, 0), logits.shape[1]).permute(0, 3, 1, 2).float()
+    v = valid[:, None].float()
+    p, onehot = p * v, onehot * v
+    inter = (p * onehot).sum((0, 2, 3))
+    denom = p.sum((0, 2, 3)) + onehot.sum((0, 2, 3))
+    return (1 - (2 * inter + eps) / (denom + eps)).mean()
+
+
+@pytest.mark.parametrize("ignore_index", [None, 255, -100])
+def test_multiclass_dice_matches_onehot_form_with_gradients(ignore_index):
+    torch.manual_seed(0)
+    a = torch.randn(3, 5, 32, 40, requires_grad=True)
+    b = a.detach().clone().requires_grad_()
+    t = torch.randint(0, 5, (3, 32, 40))
+    if ignore_index is not None:
+        t[:, :8] = ignore_index
+    fast, ref = losses.multiclass_dice(a, t, ignore_index=ignore_index), \
+        _multiclass_dice_onehot(b, t, ignore_index)
+    fast.backward()
+    ref.backward()
+    assert fast.item() == pytest.approx(ref.item(), abs=1e-6)
+    assert torch.allclose(a.grad, b.grad, atol=1e-7)
+
+
+def test_multiclass_dice_counts_past_float32_integer_limit():
+    t = torch.zeros(1, 4500, 4500, dtype=torch.long)  # 20 M pixels of one class > 2^24
+    logits = torch.zeros(1, 2, 4500, 4500)
+    logits[:, 0] = 40.0  # no stray probability on the absent class
+    assert losses.multiclass_dice(logits, t) == pytest.approx(0.0, abs=1e-3)
+
+
+def test_multiclass_dice_rejects_labels_out_of_range():
+    t = torch.zeros(1, 4, 4, dtype=torch.long)
+    t[0, 0, 0] = 3
+    with pytest.raises(ValueError, match="outside"):
+        losses.multiclass_dice(torch.zeros(1, 3, 4, 4), t)
+    t[0, 0, 0] = 255
+    with pytest.raises(ValueError, match="outside"):
+        losses.multiclass_dice(torch.zeros(1, 3, 4, 4), t)
+    assert losses.multiclass_dice(torch.zeros(1, 3, 4, 4), t, ignore_index=255) > 0
+
+
+def test_multiclass_dice_all_pixels_ignored():
+    x = torch.randn(2, 4, 16, 16, requires_grad=True)
+    v = losses.multiclass_dice(x, torch.full((2, 16, 16), 255), ignore_index=255)
+    v.backward()
+    assert v.item() == 0
+    assert x.grad.abs().max() == 0
