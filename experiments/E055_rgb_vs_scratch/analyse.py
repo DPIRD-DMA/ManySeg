@@ -1,5 +1,6 @@
 """E055 analysis: the registered decisions of README.md. Part A compares scratch arms with E024's
-imagenet runs and CloudSEN12 (part C) with its own (pooled SD); part B compares arms paired by seed (95% CI, t, df 4)."""
+imagenet runs and part C (CloudSEN12) with its own (pooled SD); part B compares arms paired by
+seed (95% CI, t, df 4)."""
 
 import glob
 import json
