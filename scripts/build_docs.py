@@ -125,6 +125,7 @@ def main() -> int:
     # README links point at docs/ and examples/ relative to the repo root; keep that layout.
     _copy_page(ROOT / "README.md", SRC / "index.md")
     _copy_page(ROOT / "CHANGELOG.md", SRC / "CHANGELOG.md")  # linked from README
+    _copy_page(ROOT / "CONTRIBUTING.md", SRC / "CONTRIBUTING.md")  # linked from README
     for _, name in DOCS:
         _copy_page(ROOT / "docs" / name, SRC / "docs" / name)
     (SRC / "examples").mkdir()
