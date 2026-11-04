@@ -26,7 +26,8 @@ pip install "manyseg[vectors]" rasterio matplotlib jupyter
 jupyter lab
 ```
 
-Downloads go to `data/` next to the notebook. Set `MANYSEG_DATA` to put them somewhere else.
+Downloads go to `data/` next to the notebook. Change `DATA` in the first cell to put them somewhere
+else.
 
 ## Results
 
@@ -34,16 +35,3 @@ The scores saved in notebooks 1 and 2 come from one seed on part of the dataset.
 vector notebooks come from damaged targets and not from a model. They all show the workflow and
 don't measure what the models can do. For measured comparisons see
 [`experiments/`](../experiments/).
-
-## Tests
-
-Tests in `packages/manyseg/tests/examples/test_notebooks.py` check on every commit that the saved
-notebooks have their figures, stay small and contain no local paths. A nightly job runs each one
-from scratch with `MANYSEG_NOTEBOOK_SMOKE=1`, which uses a few chips and one epoch. That shows the
-code still runs, but not that the saved results are still current, so re-run a notebook after
-changing what it demonstrates. To run the smoke test locally:
-
-```bash
-uv run --no-sync --with nbclient --with ipykernel python -m pytest \
-  packages/manyseg/tests/examples/test_notebooks.py -m slow
-```
