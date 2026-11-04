@@ -1,16 +1,14 @@
 #!/bin/bash -l
 # Slurm array over a task file: one manyseg-bench run per array element on 1 MI250X GCD.
 # Usage: sbatch --array=1-N%K [--time=HH:MM:SS] manyseg_array.sbatch <tasks.txt> <code_sha>
-#SBATCH --account=$PROJECT-gpu
 #SBATCH --partition=gpu
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
 #SBATCH --time=03:00:00
 #SBATCH --job-name=manyseg
-#SBATCH --output=$MANYSEG_ROOT/logs/%x_%A_%a.out
 set -eu
 TASKS=$1; CODE=$2
-ROOT=$MANYSEG_ROOT
+ROOT="${MANYSEG_ROOT:?set MANYSEG_ROOT to the working directory on scratch}"
 module load pytorch/2.7.1-rocm6.3.3
 export MANYSEG_BENCH_DATA=$ROOT/data OMP_NUM_THREADS=8 MIOPEN_USER_DB_PATH=/tmp/miopen-$SLURM_JOB_ID-$SLURM_ARRAY_TASK_ID
 export MIOPEN_CUSTOM_CACHE_DIR=$MIOPEN_USER_DB_PATH

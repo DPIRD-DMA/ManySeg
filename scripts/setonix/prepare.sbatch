@@ -3,17 +3,15 @@
 # /tmp (sequential writes; CPU nodes' /tmp is RAM-backed and too small for e.g. CloudSEN12+'s
 # 191 GB), then one sequential copy to $ROOT/data/cache. Uses a GPU node for its NVMe only.
 # Usage: sbatch prepare.sbatch <dataset> <code_sha>
-#SBATCH --account=$PROJECT-gpu
 #SBATCH --partition=gpu
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1,tmp:250G
 #SBATCH --ntasks=1
 #SBATCH --time=03:00:00
 #SBATCH --job-name=manyseg-prepare
-#SBATCH --output=$MANYSEG_ROOT/logs/%x_%j.out
 set -eu
 DS=$1; CODE=$2
-ROOT=$MANYSEG_ROOT
+ROOT="${MANYSEG_ROOT:?set MANYSEG_ROOT to the working directory on scratch}"
 module load pytorch/2.7.1-rocm6.3.3
 cd "$ROOT/code/$CODE"
 srun -N 1 -n 1 -c 8 singularity exec "$SINGULARITY_CONTAINER" bash -c "

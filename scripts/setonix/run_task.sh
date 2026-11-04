@@ -3,7 +3,7 @@
 # PyTorch container, using the ManySeg venv on scratch.
 set -eu
 TASKS=$1; IDX=$2
-ROOT=$MANYSEG_ROOT
+ROOT="${MANYSEG_ROOT:?set MANYSEG_ROOT to the working directory on scratch}"
 source "$ROOT/venv/bin/activate"
 # Import manyseg / manyseg_bench from *this* job's code snapshot, not whatever snapshot the
 # venv's editable install happens to point at.

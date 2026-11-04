@@ -8,17 +8,15 @@
 # (step ids follow launch timing, not task order). Usage: sbatch --array=1-M [--gres=gpu:N,tmp:400G --ntasks=N] [--time=HH:MM:SS] manyseg_pack.sbatch <tasks.txt> <code_sha> <N>
 # Node-local NVMe is a GRES on Setonix (tmp:3500G per node) and must be requested explicitly;
 # CPUs must not be (each GPU brings 8 cores; the cli_filter rejects --cpus-per-task).
-#SBATCH --account=$PROJECT-gpu
 #SBATCH --partition=gpu
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:8,tmp:400G
 #SBATCH --ntasks=8
 #SBATCH --time=06:00:00
 #SBATCH --job-name=manyseg-pack
-#SBATCH --output=$MANYSEG_ROOT/logs/%x_%A_%a.out
 set -eu
 TASKS=$1; CODE=$2; N=$3
-ROOT=$MANYSEG_ROOT
+ROOT="${MANYSEG_ROOT:?set MANYSEG_ROOT to the working directory on scratch}"
 module load pytorch/2.7.1-rocm6.3.3
 export MANYSEG_BENCH_DATA=$ROOT/data OMP_NUM_THREADS=8 MIOPEN_FIND_MODE=FAST
 export HF_HOME=$ROOT/hf HF_HUB_OFFLINE=1 MANYSEG_CODE_SHA=$CODE
