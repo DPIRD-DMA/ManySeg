@@ -1,7 +1,9 @@
 # ManySeg public API design
 
 Status: API for the first release, 0.1.0 (unreleased). Everything below is implemented and
-tested unless marked *(planned)*.
+tested, with two exceptions stated where they appear: the `token` conditioning mode raises
+`NotImplementedError`, and the large-scene flow through ManyPred needs a ManyPred release that
+is not out yet.
 
 ## Goals
 
@@ -11,6 +13,8 @@ tested unless marked *(planned)*.
    Nothing about the return type depends on runtime values.
 3. Every module in a forward pass is compile- and export-friendly: no tensor-dependent Python
    control flow, no hidden device transfers, no in-forward dictionary mutation keyed on data.
+   One exception: in training mode a time-series encoder selects the valid dates, so a partly
+   masked batch has a data-dependent shape (see [Time series](#time-series)).
 4. The configuration surface stays small. Options are added only when there is a test or an
    experiment that justifies them.
 
@@ -80,7 +84,7 @@ model = create_model(**preset("balanced"), in_channels=4, num_classes=3)
 PRESETS["balanced"].measured   # GPU and CPU latency, GFLOPs, params, val mIoU per dataset
 ```
 
-| preset | config | 4090 bf16 b8 512² | Pet val | Sen1Floods11 val |
+| preset | config | 4090 compiled bf16 b8 512², 15 ch | Pet val | Sen1Floods11 val |
 |---|---|---|---|---|
 | `fast` | PVTv2-b0 + SegFormer head | 4.5 ms | 0.820 | 0.901 |
 | `compact` | PVTv2-b0 + U-Net (64…8) | 4.9 ms | 0.823 | 0.901 |
@@ -91,7 +95,8 @@ PRESETS["balanced"].measured   # GPU and CPU latency, GFLOPs, params, val mIoU p
 Two datasets and one GPU; validate on your own data. On CPU the GPU ordering does not carry
 over. With fp32, one 3×1024² tile, batch 1 and 16 threads (Ryzen 9 5950X, light background
 load), the presets took 0.58–0.84 s eager and 0.48–0.60 s compiled, against 0.62 s and 0.58 s
-for the default (`measured["cpu_s"]`). In OmniCloudMask's architecture screen
+for the default (`measured["cpu_s"]`; a separate timing run with no record under `experiments/`,
+and not the setup of E018's CPU section). In OmniCloudMask's architecture screen
 ([#2](https://github.com/DPIRD-DMA/ManySeg/issues/2)), PVTv2 encoders were slow on CPU for
 their FLOPs, ResNet-34 and EdgeNeXt U-Nets were fast, and compiling changed the ranking, so
 time CPU candidates eager and compiled on the target machine. The ResNet-34 default stays
@@ -129,7 +134,8 @@ returns `2·C` channels, `[mean, log_variance]`, for heteroscedastic losses such
 
 ### Image classification and regression
 
-A model whose heads are all `"scope": "image"` builds **no decoder**: it is an encoder, a
+A model whose heads are all `"scope": "image"` builds **no decoder** (unless a head sets
+`"source": "decoder"`): it is an encoder, a
 global average pool of the deepest feature and a linear layer per head, i.e. a classifier or
 regressor. Everything else composes as for dense models: multiple inputs at different
 resolutions, fusion, metadata conditioning (`film` modulates the pooled feature; `head` and
@@ -151,16 +157,20 @@ model = create_model(
 out = model({"s2_10m": a, "s2_20m": b, "meta": doy})   # crop (N, 10), harvest (N, 2)
 ```
 
-For a single RGB/multispectral tensor and one output this matches
-`timm.create_model(backbone, num_classes=K, in_chans=C)`: same encoder, pretrained weights and
-stem adaptation, pool + linear head. Exception: families whose timm head has a pre-logits norm
-(ConvNeXt's LayerNorm) are pooled without it here.
+For a single RGB/multispectral tensor and one output this builds what
+`timm.create_model(backbone, num_classes=K, in_chans=C)` builds for backbones whose timm head is
+a pool + linear layer, such as ResNet-50 and PVTv2-b0 (same parameter count): same encoder,
+pretrained weights and stem adaptation. Other families differ, because ManySeg always pools the
+encoder's last features into a linear layer. ConvNeXt and Swin lose timm's head LayerNorm;
+EfficientNet, MobileNetV3, MaxViT and VGG lose the extra layers timm has before the classifier;
+plain ViTs go through `ViTPyramidNeck`, so they have more parameters than timm's.
 
 > **Evidence (E019):** on EuroSAT-MS (13 bands) and Pet breeds, with ResNet-50, ConvNeXt-T and
 > PVTv2-b0, ManySeg and timm classifiers are at parity on validation accuracy in all six cells.
-> On test ManySeg averaged 0.43 points lower, mostly ConvNeXt, whose timm head has a pretrained
-> LayerNorm that ManySeg's image head lacks. `{"init_std": 0.02}` in an image head's config uses
-> timm's classifier init; it narrowed the gap to 0.27 (E019b), not enough to become the default.
+> On test ManySeg averaged 0.43 points lower (ConvNeXt −0.81, PVTv2-b0 −0.64, ResNet-50 +0.15).
+> `{"init_std": 0.02}` in an image head's config uses timm's classifier init; it narrowed the gap
+> to 0.27 (E019b), not enough to become the default. What remains is mostly ConvNeXt, whose timm
+> head has a pretrained LayerNorm that ManySeg's image head lacks.
 >
 > **Evidence (E020, BigEarthNet v2, 19-class multi-label, ResNet-50):** parity with timm for
 > classification and for class-fraction regression. Resolution band groups, Sentinel-1 (stacked
@@ -169,7 +179,9 @@ stem adaptation, pool + linear head. Exception: families whose timm head has a p
 > +2.1), mostly on hard classes. One encoder, a 60k-patch subset and a fixed 12-epoch budget; a
 > post-hoc look suggests regularisation (no gain at the classifier's early peak, less late
 > overfitting), so the gain may shrink with early stopping. Worth trying when pixel labels exist;
-> cost: the decoder's parameters and ~37% lower training throughput. Mix image and pixel heads freely: the decoder is built only when a pixel
+> cost: the decoder's parameters and ~37% lower training throughput.
+
+Mix image and pixel heads freely: the decoder is built only when a pixel
 head needs it. After training with auxiliary heads, `model.select_heads(["crop"])` keeps only
 the heads you deploy and removes decoders (and FiLM / head-bias layers) only the dropped heads
 used; the kept outputs are unchanged in eval mode. `manyseg.save` records the selection and
@@ -251,9 +263,10 @@ source and pretraining normalisation; `manyseg.save` stores the list in the file
 checkpoints the weights tag's `pretrained_cfg` (RGB in [0, 1]). The timm statistics are not
 always ImageNet's: of the 46 tested backbones' default tags, ViT AugReg
 (`vit_small_patch16_224`, `vit_base_patch16_224`), SigLIP, `tf_efficientnetv2_s` and
-`coatnet_0_rw_224` use 0.5 / 0.5 and EVA-02 uses CLIP's. The model applies none of it. `manyseg.save` does not take it as the default
-`normalize` for timm backbones: with an adapted stem the RGB statistics are not what the bands
-were trained with, so pass the normalisation you used.
+`coatnet_0_rw_224` use 0.5 / 0.5 and EVA-02 uses CLIP's. The model applies none of it. `manyseg.save` never takes it as a default: without `normalize`
+it stores none and warns, and `normalize="weights"` works only for remote-sensing weights tags.
+With an adapted stem timm's RGB statistics are not what the bands were trained with, so pass the
+normalisation you used.
 
 > **Evidence (E024; Sen1Floods11, BigEarthNet v2, PASTIS; ResNet-50, full fine-tuning after
 > one frozen epoch):** with each weight fed its own pretraining normalisation (ImageNet: dataset
@@ -312,7 +325,8 @@ out = model({"optical": o, "sar": s})
 
 #### Time series
 
-`{"kind": "timeseries", "in_channels": C, "temporal": ...}` takes `(B, T, C, H, W)` for any `T`.
+`{"kind": "timeseries", "in_channels": C, "temporal": ...}` takes `(B, T, C, H, W)`, for any `T`
+except with `"concat"` and `"diff"`, which need an exact number of dates.
 One 2D encoder (any timm backbone, pretrained weights unchanged) runs on every date, and each
 feature level is aggregated over time, so fusion, decoders and heads see an ordinary pyramid.
 Optional entries in the input dict: `"<name>_mask"` `(B, T)` bool (False = missing, cloudy or
@@ -334,10 +348,12 @@ out = model({"s2": s2, "s2_mask": valid, "s2_dates": doy, "dem": dem})
 | `"mean"` (default) | masked mean over valid dates |
 | `"max"` | masked per-channel max |
 | `"attention"` | per-pixel temporal attention over dates (L-TAE style: learned query, keys from features + a sinusoidal date encoding, `heads` channel groups). Starts as the masked mean (zero query). Options: `heads` (4), `key_dim` (16), `date_dim` (32), `max_period` (10000) |
+| `{"type": "concat", "dates": N}` | the features of exactly `N` dates concatenated in date order, then a 1×1 conv-BN-ReLU |
+| `"diff"` | `\|f_2 - f_1\|` of exactly two dates (bitemporal change); zero where either date is masked |
 
 Time series combine with other rasters (any alignment), metadata vectors and every head type;
 fusion must be intermediate or late (early fusion cannot stack a `T` axis). Exports with
-dynamic `T`, `H` and `W`. The encoder runs once per date, so memory scales with `T`. Masked
+dynamic `T`, `H` and `W` (`T` is static for `"concat"` and `"diff"`). The encoder runs once per date, so memory scales with `T`. Masked
 dates never affect the output: in training mode only valid dates are encoded (so they stay out
 of BatchNorm batch statistics; a partly masked batch has a data-dependent shape, so
 `torch.compile(fullgraph=True)` of a training step needs fully valid batches), and NaNs in
@@ -497,6 +513,29 @@ model. `export_model` gives vector inputs and masks no spatial dimensions (only 
 above all). Evaluate conditioned models on splits that hold out whole events or regions. See
 `experiments/E009_metadata_conditioning`.
 
+> **Evidence (E009, Sen1Floods11, leave-events-out):** FiLM beat metadata-as-channels (+1.3
+> water IoU, 2.9 SE, all folds); FiLM vs no metadata was +0.9 but under the 2 SE bar. Lat/lon added
+> nothing on held-out events. **E013 (CloudSEN12+, unseen locations):** FiLM with lat/lon, day of
+> year and solar angles was −0.08 val / −0.26 test vs no metadata, and lat/lon added nothing.
+> **E016 (PASTIS, single-date crop types):** day-of-year by FiLM was +0.12 val mIoU (bar 0.99),
+> the same as a shuffled-date control. Metadata conditioning has now shown no benefit on three
+> datasets (flood events, unseen cloud scenes, crop phenology), so treat it as a tool to test on
+> your data, not a default. The mechanism itself is verified end to end: a label-deciding metadata
+> bit is learned to > 0.95 mIoU through the bench's real training recipe, and a shuffled bit stays
+> at chance. The negative results are about the metadata, not the plumbing. Only use `coords` fields with geographic or event-level
+> splits; otherwise the model can memorise locations and the evaluation will not show it.
+> **Downstream (OmniCloudMask, CloudSEN12, single runs):** per-band presence of zero-filled
+> bands by FiLM gained nothing and may have cost a little (see [Missing bands](#missing-bands)).
+
+**Which mode.** `film` and `head` are for information the pixels do not hold: sensor, date,
+task, a prompt. FiLM acts on the encoder features the decoder reads, after the encoder has
+mixed the bands, so it cannot change how the encoder treats its input. For information about
+the input itself (band availability, quality flags), use extra input channels with
+`channel_adapter="rgb_plus_zero"`: a raster input for per-pixel masks, `channels` mode for
+per-image values. The model then starts exactly as the image-only model (tested). That is the
+sensible way to add such information, not a measured gain. If the information is already
+visible in the pixels, as a zero-filled band is, it may not help at all.
+
 ## Spatial policy
 
 Most CNN encoders need inputs divisible by their total stride (32) so that skip connections
@@ -566,11 +605,12 @@ They accept `out_stride` only if it equals that stride; anything else is a `Valu
 >
 > **External data point (OmniCloudMask training on CloudSEN12+, not a pre-registered ManySeg
 > experiment; [#4](https://github.com/DPIRD-DMA/ManySeg/issues/4)):** 4 decoders × 5 small
-> backbones (EdgeNeXt, ConvNeXtV2-femto, EfficientViT-B1, PVTv2-b0), 3 repeats, 20 epochs.
+> backbones (EdgeNeXt small and x-small, ConvNeXtV2-femto, EfficientViT-B1, PVTv2-b0), 3 repeats,
+> 20 epochs.
 > `upernet` led on almost every backbone (mean dice 0.840 vs 0.836 for `unet`), mostly on cloud
 > shadow, at about 1.5–3× the GPU cost. `segformer` matched `unet` at lower cost, including on
-> thin cloud, and `unetplusplus` added nothing. `fpn` and `deeplabv3plus` were about 0.007
-> behind, weakest on shadow. In full-length training (35 epochs, 2 seeds, independent test
+> thin cloud, and `unetplusplus` added nothing. In a single-run screen on EdgeNeXt-small,
+> `fpn` and `deeplabv3plus` were about 0.007 behind, weakest on shadow. In full-length training (35 epochs, 2 seeds, independent test
 > sets), a pair of SegFormer models beat a pair of U-Nets at about 0.8× the GPU time, and
 > stride-4 logits did no harm at 20 m input.
 
@@ -684,7 +724,8 @@ project (cloud and shadow masking of Sentinel-2, Landsat 8 and PlanetScope: R, G
 z-score normalisation) sets a missing band to 0 after normalisation. In training, it zeroes
 whole bands at random: 20% of images lose one band and 10% lose two. With that recipe, zero
 filling alone handled missing bands. Two extra signals added nothing clear (CloudSEN12 val mean
-dice, ManySeg U-Net, one run per arm; run-to-run noise about ±0.003):
+dice, ManySeg U-Net, one run per arm; run-to-run noise about ±0.003; reported by that project, not
+reproduced in this repo):
 
 | bands present | edgenext_small: zero-fill | + mask channels | + presence FiLM | convnextv2_femto: zero-fill | + mask channels |
 |---|---|---|---|---|---|
@@ -727,20 +768,24 @@ and conditioning are configured by dicts only.
 > **Evidence:** E010 (AI4Boundaries): boundary + distance heads doubled PQ over extent +
 > connected components (0.145 → 0.290), and per-head decoders (`decoders="separate"`) added
 > +0.06 more, so they are the recommended preset for field delineation. E011 (OAM-TCD): MSE
-> regression heatmaps beat focal-loss heatmaps. Calibrate the `find_peaks` threshold on
+> focal-loss heatmaps were no better than MSE regression on val (within noise) and worse on
+> test, so MSE stays the default. Calibrate the `find_peaks` threshold on
 > validation data: E011b raised test point F1 from 0.40 (fixed 0.5) to 0.59 (val-chosen 0.15–0.2,
 > since MSE peaks rarely reach 1). With calibrated peaks, counting peaks (MAE 20.6) is close to
-> the density head (19.4). `density_head()` stays slightly better for counting and needs no
-> threshold, **for many small objects per tile** (OAM-TCD trees, σ = 2 px). On a downstream
-> drone dataset with a few large plants per tile (1–20 per 792 px tile, about 115 px across),
-> peak counting on a separately decoded heatmap was far better (count MAE 1.0 vs 9–11 for
-> the density head): a background bias of about 0.01 per pixel, summed over 600k pixels,
-> adds phantom objects. A Gaussian blur before NMS (`smooth_sigma=3`) and a foreground mask
-> were its biggest peak-counting gains. With 45 validation images, calibrated thresholds
-> differed between folds and did not beat a fixed 0.3. A softplus density output cut the
-> density head's count MAE there from 10.1 to 2.9 (a floor of about +1.75 objects per image
-> remains); a ReLU output died (map at 0) and was removed. Softplus is recommended but not
-> the default until E011's density arm is rerun with it.
+> the density head (19.4 raw; 19.8 with the softplus default, E011c). The density head stays
+> slightly better for counting and needs no threshold, **for many small objects per tile**
+> (OAM-TCD trees, σ = 2 px). A downstream drone-imagery project (not reproduced in this repo; one
+> seed, 45 validation images) found the opposite with a few large plants per tile (1–20 per
+> 792 px tile, about 115 px across): peak counting on a separately decoded heatmap was far better
+> (count MAE 1.0 vs 7.5–11 for raw density heads), because a background bias of about 0.01 per
+> pixel, summed over 600k pixels, adds phantom objects. A Gaussian blur before NMS
+> (`smooth_sigma=3`) and a foreground mask were its biggest peak-counting gains, and calibrated
+> thresholds differed between folds and did not beat a fixed 0.3. A softplus density output
+> brought the density head's count MAE there to 2.9, from 7.5 for the raw head summed as
+> `count_from_density` does (10.1 clamped at 0); a floor of about +1.75 objects per image remains.
+> A ReLU output died (map at 0) and was removed. Softplus is the default since E011c found it no
+> worse on OAM-TCD (test MAE 19.8 vs 19.3 raw, within the margin); `density_head(activation=None)`
+> keeps the raw head.
 
 
 Dense instance-style outputs are built from ordinary pixel heads, optionally with per-head
@@ -775,10 +820,9 @@ count = count_from_density(out["density"])
 `decoders=None` shares the model decoder. `"separate"` gives each head its own `unet`. A name or
 `{head: decoder}` mapping chooses decoders per head. Post-processing (peak picking, seeded
 growth or watershed, grouping) is **not part of the exported graph**: export the model, then
-run the post-processing functions on its outputs. Losses and object metrics (PQ, object F1,
-over-/under-segmentation, point F1, count MAE) live in `manyseg-bench`, except
-`manyseg.points.density_loss`
-(`manyseg_bench.losses`, `manyseg_bench.evaluation.objects`, `manyseg_bench.tasks`).
+run the post-processing functions on its outputs. Losses are in `manyseg.losses`. Object metrics
+(PQ, object F1, over-/under-segmentation, point F1, count MAE) and task-aware training live in
+`manyseg-bench` (`manyseg_bench.evaluation.objects`, `manyseg_bench.tasks`).
 
 ### Vector outputs (line graphs, polygons)
 
@@ -852,7 +896,9 @@ Why these decoders (pre-registered experiments in [`experiments/`](../experiment
   and walls on boundary F (0.59 vs 0.57), as in the E045 oracle (touching fields snapped to
   each other's corners, curved edges were straightened). **E052** (2 seeds): an absolute
   distance target (px) is as good as the normalised one (boundary F +0.008, detection F1
-  +0.008), and stitches large scenes without seam errors, so it is the fields default.
+  +0.008). With perfect targets, stitched large scenes change no fields at seams under
+  `merge="cut"` and at most one under blending (3-34 and 8-30 for the normalised target), so it
+  is the fields default.
 * **Seed fragments, E053** (fixed decoder settings, trained models): dropping seed components
   under 8 px (`min_seed`) raised roof face F1 by 0.041, footprint detection F1 by 0.024 and
   field detection F1 by 0.008 with boundary F unchanged or better; default in `block_decoder`.
@@ -864,15 +910,18 @@ Why these decoders (pre-registered experiments in [`experiments/`](../experiment
   height error (1.3-1.4 m vs 1.8-2.1 m RMSE). The shipped corner decoder gives straight outlines
   (C-IoU 0.64 vs 0.15-0.21 for pixel outlines) at 0.01-0.04 lower face F1, so E047b's rule did
   not prefer it over pixel outlines; it ships because E048b's face joining and meshes were built
-  and tested on it (straight shared edges, an order of magnitude fewer mesh vertices). Joining faces into a
-  planar partition raised seam closure from 0.38 to 0.71-0.73 (3D BAG's own faces: 0.79).
+  and tested on it (straight shared edges; 2,957-3,353 shared mesh vertices after planar joining and J2, about 4x
+  fewer than pixel outlines' 10,690-13,075). Joining F3 faces into a planar partition raised
+  their seam closure from 0.38 to 0.71-0.73 (3D BAG's own faces: 0.79). That catches up with pixel
+  outlines rather than beating them: those reach 0.68-0.73 with J2 alone, with lower vertex
+  height error (0.40-0.52 m vs 0.48-0.61 m).
   **E049:** from RGB alone, with predicted heights, face F1 fell by 0.28-0.38 and height RMSE
   rose by 1.8-2.9 m: not viable.
 * **Stitching, E050 / E050b**: decode stitched predictions made with `merge="cut"` (each pixel
   from the most central tile) and tiles of at least 1024 px with 256 px overlap. Cutting removed
   the seam effect on road junctions (agreement with a single-pass prediction +0.017 over
   blending; E050's rule met for roads). For roofs E050's rule was not met at 512 / 128 px tiles
-  (cut -0.001); E050b showed tile context mattered most (face agreement with the single pass
+  (best cut arm -0.001, the shipped midline cut -0.002); E050b showed tile context mattered most (face agreement with the single pass
   0.944 at 512 / 128 px, 0.987 at 1024 / 256 px, both cut). At 1024 / 256 px the cut also beat
   blending on roofs (+0.008), but that comparison was not pre-registered.
 
@@ -899,10 +948,10 @@ records.write("buildings.geojson")  # ".gpkg" with geopandas; = write_records(re
 
 `decode_scene` cuts the scene into blocks (cores that partition it, plus a `halo` of context;
 defaults `block=4096`, `halo=256`, so a smaller scene is one block) and joins the objects that
-cross block edges; the result equals a whole-scene decode when the halo is at least the
-decoder's `min_halo` and, for roads, also covers the skeleton's data-dependent reach (see the
-limitations below; tested on seams, block corners, several grids and real stitched
-predictions). Footprints, fields and roofs return `SceneRecords`: a list of dicts, carrying the
+cross block edges. The halo must be at least the decoder's `min_halo`, and the result equals a
+whole-scene decode when the halo also covers how far decoding reaches in that data, which
+`min_halo` does not bound (see the limitations below; equality tested on seams, block corners,
+several grids and real stitched predictions). Footprints, fields and roofs return `SceneRecords`: a list of dicts, carrying the
 scene's `transform` and `crs` for `.write(path)` / `.to_geojson()`, with
 `id` (the scene pixel index of the object's first pixel, so it does not depend on the grid),
 `geometry` (shapely, scene pixels), `pixels` and `scene_edge` (touches the scene edge, so it
@@ -917,14 +966,22 @@ to [`18_vector_points.py`](../examples/18_vector_points.py).
 **Large scenes with ManyPred** (*requires the ManyPred release that adds `merge="cut"` and
 `BlockPostprocess`; not released yet*). ManyPred stitches the tiles' outputs and calls the
 decoder on each block of the stitched rasters while it predicts, so one call writes the
-vectors and memory stays bounded:
+vectors. Memory stays bounded when `load_func` returns a lazy reader, as here, with the default
+GeoTIFF writer and no `postprocess=`: it then holds a strip of block rows plus `2 * halo` rows per
+field. `load_raster` reads the whole scene, and such scenes are stitched in memory. Return
+`(reader, reader.profile)`, not the reader alone, or the outputs lose their transform and CRS.
+`.gpkg` needs geopandas, which `manyseg[vectors]` does not install.
 
 ```python
 from pathlib import Path
 
 from manypred import BlockPostprocess, predict_files
-from manypred.geo import load_raster
+from manypred.geo import RasterioReader
 from manyseg.vectors import block_decoder, write_records
+
+def load(item):
+    reader = RasterioReader(item)
+    return reader, reader.profile
 
 dec = block_decoder("footprints")
 post = BlockPostprocess(
@@ -933,7 +990,7 @@ post = BlockPostprocess(
     fields=["extent", "boundary", "distance", "corner", "direction"],
 )
 predict_files(
-    model, ["scene_1.tif", "scene_2.tif"], load_func=load_raster,
+    model, ["scene_1.tif", "scene_2.tif"], load_func=load,
     patch_size=1024, overlap=256, merge="cut",  # E050b: tiles >= 1024 px, 256 px overlap
     activation={"extent": "sigmoid", "boundary": "sigmoid", "corner": "sigmoid"},
     block_postprocess=post,
@@ -964,8 +1021,9 @@ over arrays or memmaps you stitched yourself.
   stitch roof predictions with `merge="cut"`.
 * The halo must be at least the decoder's `min_halo`: 17 px for footprints and 30 px for roofs
   (corner decoding), 2 px for fields, 29 px for roads, `kernel // 2` plus the blur radius for
-  points, 0 for density. `decode_scene` raises below it. 256 px is a safe default.
-* Roads: `min_halo` is necessary, not sufficient. Skeletonisation can reach further than the
+  points, 0 for density. `decode_scene` raises below it. 256 px is the default. `min_halo` is necessary, not sufficient
+  for equality with a whole-scene decode (next two points).
+* Roads: skeletonisation can reach further than the
   other steps, about the half-width of the widest road blob and up to ~3 times that for blobs
   with holes (car parks). If that exceeds the halo, the graph near a seam may differ from a
   whole-scene decode; `combine` warns when a block's skeleton changed with its halo. Use a
@@ -973,7 +1031,10 @@ over arrays or memmaps you stitched yourself.
 * Instances equal a whole-scene decode when each window labels an instance as the whole scene
   would, which holds when the decoder's reach stays below the halo. Where windows disagree
   beyond that (an instance much larger than the halo), an object may split at a seam, but no
-  pixel is lost or claimed twice.
+  pixel is lost or claimed twice. This depends on the predictions: on noise-like field outputs
+  (400 px scene, `block=100`), halos of 2 to 64 px gave 209-239 objects against 241 for a
+  whole-scene decode, while E051's trained roof scene matched exactly. Compare on your own
+  outputs if an exact match matters.
 
 #### Building blocks
 
@@ -989,7 +1050,7 @@ over arrays or memmaps you stitched yourself.
 
 These are the steps `block_decoder` composes, for use on their own (one tile, a custom
 pipeline). Their defaults are generic; the tuned settings are in `block_decoder(task)`
-(footprints E038, fields E046, roofs E047b; `graph_from_road_heads` shares the roads ones,
+(footprints E038, E053, E054; fields E046, E052, E053; roofs E047b, E053; `graph_from_road_heads` shares the roads ones,
 E044). Decoding runs outside the exported model. Coordinates are `(x, y)` in GIS raster convention
 (pixel corners at integers), unlike `manyseg.points` (`(y, x)`, centres at integers), so a
 geotransform maps them directly (`to_geojson(..., transform=)`). Needs `manyseg[vectors]`.
@@ -1035,6 +1096,7 @@ footprints, field parcels, LoD2 roof faces) become one tile's targets in two cal
 as numpy arrays under the preset's head names.
 
 ```python
+import rasterio
 from manyseg.vectors import footprint_targets, road_graph, road_targets, to_pixels
 
 with rasterio.open("tile.tif") as src:              # or a GDAL geotransform via from_gdal(gt)
@@ -1054,7 +1116,7 @@ t = road_targets(g, shape, crossings=crossings)     # mask, line, keypoints, dir
 | --- | --- | --- | --- |
 | Footprints (B3; E036, E038) | `footprint_targets(polygons, shape)` | `instances`, `corner`, `direction`, `direction_mask` (what `CornerLineTask` reads) + `extent`, `boundary`, `distance` (`instance_targets`, `boundary_width=2`; `instance_heads=False` drops them, the task derives them itself) | `CornerLineTask` |
 | Roof faces (E047) | `roof_face_targets(faces, shape)` | as footprints; faces sharing an edge stay separate instances. Heights are not a target: the nDSM is an input channel and planes are fitted after decoding | `CornerLineTask` |
-| Fields (B0; E046) | `field_targets(polygons, shape)` | `instances`, `extent`, `boundary`, `distance`: 4-connected pieces as instances, pieces < 16 px dropped, background holes filled | `InstanceTask(boundary_width=2, distance="absolute")` |
+| Fields (B0; E046, E052) | `field_targets(polygons, shape)` | `instances`, `extent`, `boundary`, `distance`: 4-connected pieces as instances, pieces < 16 px dropped, background holes filled | `InstanceTask(boundary_width=2, distance="absolute")` |
 | Roads (R4; E044) | `road_graph(lines)` → `road_targets(graph, shape, crossings=)` | `mask`, `line`, `keypoints`, `direction` | `RoadGraphTask` |
 
 Pixel coordinates are `(x, y)` with pixel corners at integers, the inverse of `to_geojson`'s
@@ -1068,9 +1130,10 @@ needs both CRSs: `to_pixels` raises when only one of the features' CRS (`crs=` o
 GeoDataFrame's `.crs`) and `raster_crs` is known, unless `assume_same_crs=True`; with neither
 known the features are taken to be in the raster's CRS. Unit tests
 encode synthetic vectors and decode the targets with the shipped decoders
-(`polygons_from_corners`, `polygons_from_labels`, `graph_from_road_heads`): footprints IoU
-> 0.98 with the same vertex count, roof faces > 0.99, fields > 0.97, roads within 3 px with
-both junctions kept and the overpass left uncrossed.
+(`polygons_from_corners`, `polygons_from_labels`, `graph_from_road_heads`). They assert mean IoU
+above 0.96 for footprints (each above 0.93, at least 90% with the same vertex count), mean above
+0.93 for roof faces (each above 0.88), each field above 0.95, and roads within 3 px with both
+junctions kept and the overpass left uncrossed.
 
 **Points (trees, animals, wells) in a CRS and over large scenes.** `manyseg.points` works in
 `(y, x)` with pixel centres at integers; `manyseg.vectors` in `(x, y)` with pixel corners at
@@ -1087,7 +1150,8 @@ xy = to_pixels(trees_gdf, transform, shape, raster_crs=crs, kind="points")  # (N
 hm = gaussian_heatmap([points_from_xy(xy)], shape, sigma=2.0)               # (1, 1, H, W)
 
 # One tile: peaks -> GeoJSON Points with scores
-((yx, scores),) = find_peaks(torch.sigmoid(out["heatmap"]), threshold=0.3)
+# point_heads() defaults to a regression heatmap: no sigmoid (a sigmoid makes background 0.5)
+((yx, scores),) = find_peaks(out["heatmap"], threshold=0.3)
 fc = to_geojson(points_to_xy(yx), transform, properties={"score": scores.numpy()})
 
 # A stitched scene, block by block (halo >= dec.min_halo = kernel // 2 + blur radius)
@@ -1109,29 +1173,6 @@ these two decoders. `ScenePoints.to_geojson()` reserves the `score` property (a 
 `properties["score"]` raises).
 `to_pixels(kind="points")` keeps `0 <= x < W`, `0 <= y < H`, so a point on a shared tile edge
 goes to one tile (within float rounding of the edge it can go either way).
-
-> **Evidence (E009, Sen1Floods11, leave-events-out):** FiLM beat metadata-as-channels (+1.3
-> water IoU, 2.9 SE, all folds); FiLM vs no metadata was +0.9 but under the 2 SE bar. Lat/lon added
-> nothing on held-out events. **E013 (CloudSEN12+, unseen locations):** FiLM with lat/lon, day of
-> year and solar angles was −0.08 val / −0.26 test vs no metadata, and lat/lon added nothing.
-> **E016 (PASTIS, single-date crop types):** day-of-year by FiLM was +0.12 val mIoU (bar 0.99),
-> the same as a shuffled-date control. Metadata conditioning has now shown no benefit on three
-> datasets (flood events, unseen cloud scenes, crop phenology), so treat it as a tool to test on
-> your data, not a default. The mechanism itself is verified end to end: a label-deciding metadata
-> bit is learned to > 0.95 mIoU through the bench's real training recipe, and a shuffled bit stays
-> at chance. The negative results are about the metadata, not the plumbing. Only use `coords` fields with geographic or event-level
-> splits; otherwise the model can memorise locations and the evaluation will not show it.
-> **Downstream (OmniCloudMask, CloudSEN12, single runs):** per-band presence of zero-filled
-> bands by FiLM gained nothing and may have cost a little (see [Missing bands](#missing-bands)).
-
-**Which mode.** `film` and `head` are for information the pixels do not hold: sensor, date,
-task, a prompt. FiLM acts on the encoder features the decoder reads, after the encoder has
-mixed the bands, so it cannot change how the encoder treats its input. For information about
-the input itself (band availability, quality flags), use extra input channels with
-`channel_adapter="rgb_plus_zero"`: a raster input for per-pixel masks, `channels` mode for
-per-image values. The model then starts exactly as the image-only model (tested). That is the
-sensible way to add such information, not a measured gain. If the information is already
-visible in the pixels, as a zero-filled band is, it may not help at all.
 
 ## Inspecting a built model
 
@@ -1368,8 +1409,9 @@ has no dynamic-activation conv, so `"int8_dynamic"` differs from weight-only onl
 layers. For a ResNet U-Net the two modes are identical. `conv=False` quantises Linear layers
 only. The model is copied unless `inplace=True`.
 
-Measured on CPU (4 threads, shared machine, so the timings are contended): a ResNet-34 U-Net
-(ImageNet encoder, random decoder, 6 classes) at 256², with 16 calibration batches.
+Measured once on CPU (4 threads, shared machine, so the timings are contended; no record under
+`experiments/`): a ResNet-34 U-Net (ImageNet encoder, random decoder, 6 classes) at 256², with
+16 calibration batches.
 
 | | Size | Max / mean abs diff | Argmax agreement | Latency |
 | --- | --- | --- | --- | --- |
@@ -1382,14 +1424,16 @@ trained model on your own validation data.
 
 ## Registries
 
-Decoders, heads, fusion ops, metadata field types and channel adapters register by name in a plain `dict`-backed
-registry. Backbones do not need one, because timm's model registry is used as is.
+Decoders, heads, fusion ops and metadata field types register by name in a plain `dict`-backed
+registry. Channel adapters are a fixed list. Backbones do not need one, because timm's model registry is used as is.
 Compatibility with a given timm model is discovered by probing (see
 `architecture_review.md`), not from hand-maintained allow-lists.
 
 ## Non-goals
 
-* Loss functions and training loops. These live in `manyseg-bench` or in user code.
-* Data loading, augmentation, and georeferencing.
+* Training loops. These live in `manyseg-bench` or in user code; `manyseg.losses` provides the
+  losses.
+* Data loading and general augmentation. `manyseg.vectors` has only what vector targets need:
+  dihedral transforms and coordinate and CRS conversion for labels and outputs.
 * A config-file DSL. Plain keyword arguments and dicts are enough, and they serialise to
   YAML or JSON if a user wants files.

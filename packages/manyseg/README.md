@@ -62,7 +62,8 @@ tensor of raw logits; with `heads=` it is a dict of raw logits keyed by head nam
 
 Not sure how to combine inputs, fusion and heads? The [model builder](https://github.com/DPIRD-DMA/ManySeg/blob/main/docs/builder/) draws the
 model as you pick options and writes the `create_model` call, refusing combinations ManySeg would
-reject. Open `docs/builder/index.html` in a browser; it needs no server.
+reject. In a clone of this repository, open `docs/builder/index.html` in a browser; it needs no
+server.
 
 <a href="https://github.com/DPIRD-DMA/ManySeg/blob/main/docs/builder/"><picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/DPIRD-DMA/ManySeg/main/docs/assets/builder-dark.png">
@@ -94,8 +95,9 @@ model = create_model(**preset("balanced"), in_channels=4, num_classes=2)
 
 Relative to the default ResNet-34 U-Net, on an RTX 4090 with bf16 + `torch.compile`; accuracy
 on two datasets. Validate on your own data. On CPU the speed-up disappears: with fp32, one
-1024² tile and 16 threads, the presets ran at 0.48–0.60 s compiled against the default's 0.58 s
-(`PRESETS[name].measured["cpu_s"]`), although the default has 2–6× their FLOPs. For CPU
+1024² tile and 16 threads, the presets ran at 0.48–0.60 s compiled against the default's 0.58 s,
+and 0.58–0.84 s eager against 0.62 s (`PRESETS[name].measured["cpu_s"]`; one run on one machine,
+not recorded in `experiments/`), although the default has 2.5–6.5× their FLOPs. For CPU
 inference, time your candidates on the target machine, eager and compiled separately.
 
 **Several inputs, possibly at different resolutions**, e.g. optical + radar:
@@ -135,8 +137,9 @@ registered with `manyseg.heads.HEADS.register("name")`.
 [Lightning](https://github.com/DPIRD-DMA/ManySeg/blob/main/examples/11_lightning.py), [Accelerate](https://github.com/DPIRD-DMA/ManySeg/blob/main/examples/12_accelerate.py) and
 [TorchGeo](https://github.com/DPIRD-DMA/ManySeg/blob/main/examples/13_torchgeo.py) (its segmentation task with a ManySeg model), all tested
 in CI. With several heads, a loss and metrics read the dict (`out["landcover"]`), or
-`manyseg.utils.concat_heads(model, ["landcover", "height"])` returns one concatenated tensor
-for code that wants one. `manyseg.losses` has the losses our benchmarks train with (Dice + BCE,
+`manyseg.utils.concat_heads(model, ["landcover", "height"])` wraps the model so it returns one
+concatenated tensor, for code that wants one. `manyseg.losses` has the losses our benchmarks
+train with (Dice + BCE,
 multi-class Dice, masked regression, CenterNet heatmap focal loss) as plain functions, and
 `multi_head_loss` sums a weighted loss per head of the output dict.
 A model with metadata inputs takes a dict, so a loop that passes one tensor needs a small
@@ -212,28 +215,34 @@ record each pretrained backbone's licence and citation, and `describe()` lists t
 
 **Objects and counts.** `manyseg.instances` (touching fields, crowns, buildings) and
 `manyseg.points` (trees, animals: centres, counts) provide the heads, training targets (from
-instance masks, points or YOLO / COCO boxes), losses and post-processing. To count, either
+instance masks, points or YOLO / COCO boxes) and post-processing; the losses are in
+`manyseg.losses`, plus `density_loss` in `manyseg.points`. To count, either
 find peaks in a centre heatmap (`find_peaks`, with optional smoothing and a foreground mask)
 or sum a density map (`density_head`, `density_loss`). Which is better depends on the data.
-With many small trees per tile, the density head halved count error (E011). With a few large
-plants per drone tile, peak counting was far better (count MAE 1.0 against 9–11), because a
-small background bias summed over every pixel adds up; count peaks for a few large objects.
-`density_head()` uses a softplus output by default: on that drone data it cut density count
-error from 10.1 to 2.9, and on OAM-TCD it was no worse than the raw head (E011c). Softplus
-never reaches 0, so a mostly empty tile still sums to a small positive count (about 2 objects on
-an empty 792 x 792 drone tile); `density_head(activation=None)` gives the raw head. Validate on
-your data.
+With many small trees per tile, the density head had half the count error of peaks at a fixed
+threshold (E011), and about the same once the threshold was calibrated on validation data (test
+MAE 19.4 against 20.6; E011b). With a few large plants per drone tile, peak counting was far
+better (count MAE 1.0 against 7.5–11 for raw density heads), because a small background bias
+summed over every pixel adds up; count peaks for a few large objects. `density_head()` uses a
+softplus output by default: on that drone data its count MAE was 2.9, against 10.1 for the raw
+head clamped at 0 and 7.5 summed as is, and on OAM-TCD it was no worse than the raw head (E011c).
+Softplus never reaches 0, so a mostly empty tile still sums to a small positive count (about 2
+objects on an empty 792 x 792 drone tile); `density_head(activation=None)` gives the raw head.
+The drone numbers come from one downstream dataset (45 validation images, one seed) and are not
+reproduced in this repository. Validate on your data.
 
 **Vector outputs (experimental).** `manyseg.vectors` (the `[vectors]` extra) turns
 predictions into GIS layers: building footprints with straight walls, field boundaries,
 road graphs with junctions and overpasses, LoD2 roof faces with a plane and 3-D mesh each
 (heights from an nDSM input), and points. Each task has a head preset, target encoders that
-take your vector labels in any CRS, and a decoder tested in experiments (`docs/api_design.md`
-gives each one's evidence). One call decodes a scene of any size: large scenes block by block,
-with the same result as a whole-scene decode when the blocks' halo is at least the decoder's
-`min_halo`, except that an instance reaching much further than the halo can split at a block
-seam, and for roads the halo must also cover the skeleton's data-dependent reach (the decoder
-warns). With ManyPred this happens while it predicts (needs ManyPred's next release).
+work in pixel coordinates (`to_pixels` brings your vector labels there from any CRS), and a
+decoder tested in experiments (`docs/api_design.md` gives each one's evidence). One call decodes
+a scene of any size: large scenes block by block, with the default 256 px halo. `min_halo` is
+only the smallest halo a decoder accepts and doesn't guarantee the same result as a whole-scene
+decode: on noise-like field predictions, halos up to 64 px gave different objects. An instance
+reaching much further than the halo can split at a block seam, and for roads the halo must also
+cover the skeleton's data-dependent reach (the decoder warns). With ManyPred this happens while
+it predicts (needs ManyPred's next release).
 
 ```python
 from manyseg.vectors import Scene, block_decoder, decode_scene
@@ -241,7 +250,7 @@ from manyseg.vectors import Scene, block_decoder, decode_scene
 # probs: head name -> the stitched predictions (numpy; sigmoid on the logit heads)
 scene = Scene(H, W, transform=src.transform, crs=src.crs)  # the image's grid (rasterio)
 records = decode_scene(probs, block_decoder("footprints"), scene=scene)  # 4096 px blocks
-records.write("buildings.gpkg")  # polygons in the raster's CRS
+records.write("buildings.geojson")  # polygons in the raster's CRS; .gpkg also needs geopandas
 ```
 
 Examples [14–18](https://github.com/DPIRD-DMA/ManySeg/blob/main/examples/README.md) cover each task from vector labels to GeoJSON; the
@@ -315,7 +324,8 @@ Only load `.pt2` files from sources you trust. `manyseg.load` refuses the ways w
 file could run code while loading, but that is not a sandbox, and the program runs when called.
 
 Most of these have a runnable script in [`examples/`](https://github.com/DPIRD-DMA/ManySeg/blob/main/examples/) that runs on CPU: the numbered
-scripts in a few seconds, the walkthroughs that train briefly in 10–20 s.
+scripts in a few seconds (5–15 s for 09–13, which train two short epochs), the walkthroughs that
+train briefly in 10–20 s.
 
 ## Large images with ManyPred
 
@@ -323,8 +333,9 @@ A ManySeg model predicts a whole image in one forward pass, so memory limits the
 and a fixed-size backbone refuses anything larger than its size. For larger scenes use
 [ManyPred](https://github.com/DPIRD-DMA/ManyPred), our tiled inference library: it predicts
 overlapping patches in batches, stitches them, skips nodata, and reads and writes GeoTIFFs
-larger than memory. It is a separate library so it can run any PyTorch model; ManySeg does not
-import it. Like ManySeg, it is not on PyPI yet (`[geo]` adds rasterio for GeoTIFFs):
+larger than memory. It is a separate library so it can run any PyTorch model that returns a
+tensor or a dict of tensors; ManySeg does not import it. Like ManySeg, it is not on PyPI yet
+(`[geo]` adds rasterio for GeoTIFFs):
 
 ```bash
 pip install "manypred[geo] @ git+https://github.com/DPIRD-DMA/ManyPred"
@@ -338,13 +349,18 @@ saved as in "Save and load" above neither is repeated:
 import numpy as np
 import manyseg
 from manypred import predict_array, predict_files
-from manypred.geo import load_raster
+from manypred.geo import RasterioReader
 
 model = manyseg.load("model.safetensors")
 scene = np.random.randint(0, 10000, (4, 3000, 3000), dtype=np.uint16)  # raw scale, (C, H, W)
 probs = predict_array(model, scene, patch_size=1024, overlap=256)  # (2, 3000, 3000), softmax
+
+def load(path):  # patches are read as needed, so the scene can be larger than memory
+    reader = RasterioReader(path)
+    return reader, reader.profile  # the profile georeferences the output
+
 # GeoTIFFs in, GeoTIFFs out (predictions/scene_pred.tif); nodata=0 skips zero-filled borders
-predict_files(model, ["scene.tif"], load_func=load_raster, output_dir="predictions",
+predict_files(model, ["scene.tif"], load_func=load, output_dir="predictions",
               patch_size=1024, overlap=256, output="argmax", nodata=0)
 ```
 
@@ -352,12 +368,14 @@ predict_files(model, ["scene.tif"], load_func=load_raster, output_dir="predictio
 fast (float32 elsewhere). Overlapping patches are blended by default (`merge="blend"`, a
 weighted mean that fades towards each patch edge).
 `merge="cut"` takes each pixel from the patch it is most central in, so nothing is averaged;
-it can be set per head (`merge={"extent": "cut"}`). Use it for heads that are decoded into
-vectors or instances afterwards, and keep blend for maps used as rasters. On City-Scale roads,
-blending lost junctions where patches overlapped (junction agreement with a whole-scene pass
-0.954, cut 0.971, away from overlaps 0.972; E050). For roof faces patch size mattered more:
-agreement 0.945 with 512 px patches and 128 px overlap, and 0.979 (blend) or 0.987 (cut) with
-1024 px patches and 256 px overlap (E050b; [both experiments](https://github.com/DPIRD-DMA/ManySeg/blob/main/experiments/E050_stitching/README.md)).
+it can be set per head (`merge={"extent": "cut"}`). Use it for road heads decoded into graphs,
+and keep blend for maps used as rasters. On City-Scale roads, blending lost junctions where
+patches overlapped (junction agreement with a whole-scene pass 0.954, cut 0.971, away from
+overlaps 0.972; E050). For roof faces patch size mattered more: agreement 0.945 (blend) or 0.944
+(cut) with 512 px patches and 128 px overlap, and 0.979 (blend) or 0.987 (cut) with 1024 px
+patches and 256 px overlap, a gain for cut that wasn't the pre-registered comparison (E050b;
+[both experiments](https://github.com/DPIRD-DMA/ManySeg/blob/main/experiments/E050_stitching/README.md)). Cut and blend haven't been compared
+on trained field or footprint models.
 
 The vector decoders (**Vector outputs** above) run on large scenes through `manypred.blocks`:
 `postprocess_blocks` decodes saved rasters block by block, and
@@ -367,7 +385,7 @@ predicts ([guide](https://github.com/DPIRD-DMA/ManySeg/blob/main/docs/api_design
 
 ## Tips from our benchmarks
 
-* **Small batches** (≤ 4 per GPU): keep the encoder's BatchNorm layers in eval mode during
+* **Small batches** (measured at 2 per GPU): keep the encoder's BatchNorm layers in eval mode during
   training (frozen running statistics; their weights still train;
   [recipe](https://github.com/DPIRD-DMA/ManySeg/blob/main/docs/api_design.md#small-batches)).
 * **Memory-bound?** `decoder_kwargs={"out_stride": 2}` costs no accuracy for the U-Net and
@@ -383,21 +401,22 @@ predicts ([guide](https://github.com/DPIRD-DMA/ManySeg/blob/main/docs/api_design
   encoder: compiled steps match it, and eager steps are 18–25% faster (bf16, E025).
 * **Fusion:** stacking all bands (optical and SAR) into one input matched the fancier fusion
   options on Sen1Floods11 (E005); start there. Splitting Sentinel-2 bands into resolution groups
-  helped on one dataset (E015) and not on another (E016).
+  helped on one of the four datasets we tried (E015; not E016, E017 or E020).
 * **Several dates** beat one by a wide margin. Stacking dates as channels is a strong baseline;
-  the time-series input (`"kind": "timeseries"`) beat it on field delineation but not on crop
-  types, so try both.
+  the time-series input (`"kind": "timeseries"`) with `"temporal": "attention"` beat it on field
+  delineation (the default masked mean fell just short) but not on crop types, so try both (E021).
 * **Change detection:** a Siamese encoder (shared weights per date) with a difference fusion
   (`"op": "diff"` or `"concat_diff"`) beat stacking the two dates on both datasets we tried.
 
-Every claim here comes from a pre-registered, multi-seed experiment in
-[`experiments/`](https://github.com/DPIRD-DMA/ManySeg/blob/main/experiments/), where negative results are kept too.
+These come from experiments in [`experiments/`](https://github.com/DPIRD-DMA/ManySeg/blob/main/experiments/), where negative results are kept
+too. Most are pre-registered and multi-seed; the speed and memory figures (E025, E026) are timing
+runs without seeds.
 
 ## Documentation
 
 * [`docs/builder/`](https://github.com/DPIRD-DMA/ManySeg/blob/main/docs/builder/): the model builder, a page where you pick inputs, encoders,
-  fusion, decoder and heads and get a live diagram plus the `create_model` code. Open
-  `docs/builder/index.html` in a browser; it needs no server.
+  fusion, decoder and heads and get a live diagram plus the `create_model` code. In a clone of
+  this repository, open `docs/builder/index.html` in a browser; it needs no server.
 * [`notebooks/`](https://github.com/DPIRD-DMA/ManySeg/blob/main/notebooks/): walkthroughs with real data and figures: flood mapping, radar plus
   optical with several outputs, and one notebook for each vector output.
 * [`examples/`](https://github.com/DPIRD-DMA/ManySeg/blob/main/examples/): runnable scripts for most of the tasks above.
@@ -410,7 +429,8 @@ Every claim here comes from a pre-registered, multi-seed experiment in
 
 A separate package for comparing segmentation libraries (ManySeg, segmentation_models_pytorch,
 fastai, timm) under identical data, augmentation and training.
-It is not published; it installs only from the uv workspace in this repository (`uv sync`).
+It is not published; install it from a clone of this repository (`uv sync`, or
+`pip install -e packages/manyseg-bench`).
 See [`docs/benchmark_design.md`](https://github.com/DPIRD-DMA/ManySeg/blob/main/docs/benchmark_design.md).
 
 ## Contributing

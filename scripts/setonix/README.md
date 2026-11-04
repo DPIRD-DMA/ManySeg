@@ -7,13 +7,17 @@ Layout on Setonix (`$MANYSEG_ROOT`): `code/<sha>/` (frozen snapshots via
 
 1. Snapshot code: `git archive HEAD | ssh $HOST "mkdir -p .../code/$SHA && tar -x -C .../code/$SHA"`.
 2. venv (once): `module load pytorch/2.7.1-rocm6.3.3; venv venv`, then inside the container
-   `pip install -c constraints.txt ...` with **numpy pinned to the container's 1.26** (the
+   `pip install ...` with **numpy pinned to the container's 1.26** (the
    container torch is built against NumPy 1; pyarrow < 16 for the same reason) and
-   `pip install --no-deps -e code/<sha>/packages/{manyseg,manyseg-bench}`.
+   `pip install --no-deps -e code/<sha>/packages/{manyseg,manyseg-bench}`. The repo keeps no
+   constraints file, so write the pins yourself.
 3. Pre-fetch pretrained weights on a login node (compute nodes have no internet):
    `HF_HOME=$ROOT/hf python -c "import timm; timm.create_model('resnet34.tv_in1k', pretrained=True)"`.
 4. Tasks: `EMIT_TASKS=tasks.txt OUT_ROOT=$MANYSEG_ROOT RECIPE=fastai_like bash experiments/<E>/run.sh`
-   writes the experiment's exact runs, one shell-quoted argument line each.
+   writes the experiment's exact runs, one shell-quoted argument line each. Only 11 `run.sh` files
+   handle `EMIT_TASKS`: E004, E006, E007, E009, E010, E011, E011b, E012, E013, E016 and E017. The
+   others ignore it and **start training**, so check first with
+   `grep -l EMIT_TASKS experiments/*/run.sh`.
 5. Submit: `sbatch --array=1-N%K manyseg_array.sbatch $ROOT/tasks.txt <sha>` (1 GCD per task).
 6. Copy results back: `rsync $HOST:$ROOT/experiments/<E>/runs/ experiments/<E>/runs/`.
 

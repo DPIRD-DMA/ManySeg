@@ -24,7 +24,8 @@ jobs:
       matrix:
         os: [ubuntu-latest]
         python: ["3.10", "3.14"]  # oldest and newest supported (3.15rc1 passes locally)
-        # macos-latest (arm64) exercises the MPS device tests; windows-latest the paths and
+        # macos-latest (arm64) covers macOS (its VMs can't allocate on MPS, so the MPS device
+        # tests skip there, see conftest.py); windows-latest the paths and
         # process handling. macOS bills at 10x and Windows at 2x, so both run on PRs, nightly
         # and on demand, not on every push.
         include: >-

@@ -1,6 +1,6 @@
 """The model builder page (docs/builder) promises that every configuration it offers either shows
 an error or produces code that runs with this ManySeg and returns the shapes it shows. This runs
-the page's own logic (model_builder_cases.js, under node) over ~90 configurations and executes
+the page's own logic (model_builder_cases.js, under node) over ~120 configurations and executes
 the generated code: valid ones must run with the predicted output shapes, refused ones must also
 be rejected by ManySeg. Needs node and a repo checkout (docs/builder); skipped otherwise."""
 

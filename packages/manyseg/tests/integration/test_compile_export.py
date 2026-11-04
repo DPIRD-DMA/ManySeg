@@ -133,9 +133,9 @@ def test_transformer_export_dynamic(backbone):
 
 @pytest.mark.heavy
 def test_swin_dynamic_export_known_limitation():
-    """timm Swin with dynamic H/W hangs in torch.export (see architecture_review §2.4).
-    Probe in a subprocess with a timeout; if it starts working, this test tells us. Heavy
-    (nightly): while it hangs, it always waits out the timeout."""
+    """timm Swin with dynamic H/W doesn't export: torch.export takes minutes, then raises a
+    constraint error (see architecture_review §2.4). Probe in a subprocess with a timeout; if
+    it starts working, this test tells us. Heavy (nightly): it usually waits out the timeout."""
     import subprocess
     import sys
 
@@ -147,7 +147,7 @@ def test_swin_dynamic_export_known_limitation():
     try:
         r = subprocess.run([sys.executable, "-c", code], timeout=120, capture_output=True)
     except subprocess.TimeoutExpired:
-        pytest.xfail("swin dynamic export still hangs (known timm/torch.export limitation)")
+        pytest.xfail("swin dynamic export still too slow (known timm/torch.export limitation)")
     if r.returncode != 0:
         pytest.xfail("swin dynamic export fails: " + r.stderr.decode()[-300:])
 

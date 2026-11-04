@@ -18,8 +18,9 @@ imports the benchmark; a test enforces this.
 | Provenance (environment, versions, contention) | |
 
 If a provider cannot meet the contract exactly (for example, fastai's `DynamicUnet` needs
-`img_size` at construction), the difference is handled in the provider and recorded in
-`BuiltModel.notes` (saved with each run as `model_notes`).
+`img_size` at construction), the difference is handled in the provider. `BuiltModel.notes`
+(saved with each run as `model_notes`) can record such differences; today only the ManySeg
+provider writes one (bands filled with the pretraining mean).
 
 ## Provider contract
 
@@ -58,10 +59,12 @@ recipe. Built-in recipes:
 
 * `standard`: AdamW (lr 5e-4, wd 1e-4, no decay on norm/bias), 1-epoch linear warmup, then
   cosine. One LR for all parameters. bf16 autocast, batch 16.
-* `fastai_like`: reproduces fastai `unet_learner` + `fine_tune` defaults (AdamW β=(0.9,0.99),
+* `fastai_like`: approximates fastai `unet_learner` + `fine_tune` defaults (AdamW β=(0.9,0.99),
   eps 1e-5, wd 1e-2, no decay on norm/bias; 1 epoch with the encoder frozen and norm layers
-  trainable; then encoder LR ×0.1; one-cycle). Any provider can be trained with it, so the
-  recipe effect can be separated from the architecture effect.
+  trainable; then encoder LR ×0.1; one-cycle). It differs in three ways: one cycle over the whole
+  run starting at LR/25 (fastai runs one per phase, the second starting at LR/5), two LR groups
+  (fastai has three, spanning a factor of 100), and no momentum cycling. Any provider can be
+  trained with it, so the recipe effect can be separated from the architecture effect.
 * `smoke`: 1 epoch, for CI.
 
 Model selection uses the **final epoch**, with no early stopping, so every model gets the
@@ -84,12 +87,13 @@ task option, `calibrate`, below):
 * Each dataset module provides `INFO` (classes, ignore index, normalisation, license,
   source), `prepare(raw, cache)` with integrity checks (list counts, label value sets), and
   fixed splits.
-* Prepared splits are uint8 `.npy` arrays. Small datasets are moved to the GPU once.
+* Prepared splits are uint8 or float16 `.npy` arrays. Small datasets are moved to the GPU once.
   Batching, random-resized-crop and flip augmentation (`grid_sample`: bilinear for images,
   nearest for masks) and normalisation all run on the device, seeded per run. The
   dataloader therefore never differs between providers, and it is not the bottleneck.
-* **Test splits are not used for model selection.** Validation comes from the training data
-  (for Pet, a deterministic 10% of `trainval` by name hash). `--evaluate-test` is an
+* **Test splits are not used for model selection.** Validation is the dataset's official split
+  where it has one, otherwise part of the training data (for Pet, a deterministic 10% of
+  `trainval` by name hash). `--evaluate-test` is an
   explicit flag, recorded in the result, for final comparisons of fixed configurations.
   It is never used during architecture search.
 * Remote-sensing datasets must use spatially disjoint splits: official geographic splits
@@ -108,7 +112,8 @@ task option, `calibrate`, below):
 * Inference: median, p10 and p90 latency at batch sizes 1, 8 and 32; images/s;
   megapixels/s; peak memory; eager vs compiled; fp32, bf16 and fp16; channels_last.
 * Training: steady-state images/s and peak memory per step; wall-clock per epoch and in
-  total; time to reach a target mIoU (from the history).
+  total; a per-epoch history, from which time to a target mIoU can be worked out (it isn't
+  computed for you).
 
 ### Timing protocol
 
@@ -136,8 +141,9 @@ not discard the others (E008).
 
 ### Remote execution (Pawsey Setonix)
 
-Experiments emit their exact runs as task lines (`EMIT_TASKS`), which run as Slurm arrays
-(`scripts/setonix/`). Datasets too large to copy once per task (CloudSEN12+, 191 GB) run as
+Experiments can emit their exact runs as task lines (`EMIT_TASKS`, in the `run.sh` files listed
+in `scripts/setonix/README.md`), which run as Slurm arrays. Datasets too large to copy once per
+task (CloudSEN12+, 190 GB) run as
 8-GCD **pack** jobs that stage only the needed cache files once into the job's node-local NVMe.
 A pack holds all its GCDs until its slowest run ends, so only runs of similar length are packed
 together. Steps are named by task index. Usage is charged at 64 units per GCD-hour; costs are
@@ -145,7 +151,9 @@ forecast before submission.
 
 ## Statistics
 
-* Important comparisons use at least 3 seeds and report mean ± standard deviation.
+* Important comparisons use at least 3 seeds and report mean ± standard deviation. Some later
+  experiments screen on seed 0 and add seeds only if a pre-registered margin calls for it (E036,
+  E046); their write-ups say how many seeds each result rests on.
 * A difference smaller than the seed standard deviation is reported as *no detectable
   difference*.
 * Short screens (fewer epochs, a data subset) may rule options out, but a claim that a decoder

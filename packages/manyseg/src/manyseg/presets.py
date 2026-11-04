@@ -10,8 +10,10 @@ the compiled bf16 forward of a batch of 8 at 512x512 with 15 input channels on o
 4090. On the same scale the default ResNet-34 U-Net is 10.9 ms, 0.8231 Pet, 0.8901 Sen1Floods11.
 ``cpu_s`` is the median CPU forward in seconds, eager and ``torch.compile``: fp32, batch 1, one
 3x1024x1024 tile, 4 classes, 16 threads on a Ryzen 9 5950X under light background load (spread
-up to ~1.5x). The default is 0.62 s eager, 0.58 s compiled: on CPU the presets are
-about as fast as the default, so the GPU ordering does not carry over.
+up to ~1.5x). The timings were measured separately from E018, whose own CPU section uses another
+setup, and have no record in this repository. The default is 0.62 s eager, 0.58 s compiled: on
+CPU most presets are about as fast as the default (``accurate`` is about 35% slower eager), so
+the GPU ordering does not carry over.
 Between presets, accuracy differences under ~0.3 mIoU are within seed noise; they are ordered
 by latency.
 """

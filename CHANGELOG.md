@@ -6,7 +6,7 @@ API, and every such change is listed here.
 
 ## 0.1.0 (unreleased)
 
-First release. Python 3.10–3.14, PyTorch ≥ 2.10, timm ≥ 1.0.20.
+First release. Python 3.10–3.14 (`manyseg-bench` lists 3.10–3.12), PyTorch ≥ 2.10, timm ≥ 1.0.20.
 
 ### Saving quantised models
 
@@ -51,10 +51,12 @@ First release. Python 3.10–3.14, PyTorch ≥ 2.10, timm ≥ 1.0.20.
   (E022, E023).
 * **Remote-sensing pretrained weights** (`manyseg.weights`): SSL4EO-S12 Sentinel-2
   MoCo (ResNet-18/50, ViT-S/16) and DINO (ResNet-50, ViT-S/16), SSL4EO-S12 Sentinel-1 MoCo
-  (ResNet-50) and SatlasPretrain Sentinel-2 (ResNet-50/152). SSL4EO beat ImageNet weights on three Sentinel-2
-  datasets with a ResNet-50 (E024); cite the authors (`WEIGHTS[key].citation`).
+  (ResNet-50) and SatlasPretrain Sentinel-2 (ResNet-50/152). Fed their own pretraining
+  normalisation, SSL4EO weights beat ImageNet weights on three Sentinel-2 datasets with a
+  ResNet-50 (E024); cite the authors (`WEIGHTS[key].citation`).
 * **Presets** (`manyseg.presets`): four measured speed / accuracy configurations, with GPU
-  and CPU (eager and compiled) latency; on CPU they run at about the default's speed.
+  and CPU (eager and compiled) latency; on CPU they run at about the default's speed, except
+  `accurate`, 35% slower eager (one run on one machine, not recorded in `experiments/`).
 * **Features and embeddings:** `features()`, `embed()`, an exportable `embedder()`;
   `select_heads()` for deployment.
 * Every parameter gets a gradient (DDP needs no `find_unused_parameters`): modules for
@@ -80,7 +82,8 @@ First release. Python 3.10–3.14, PyTorch ≥ 2.10, timm ≥ 1.0.20.
 * **Counting** (`manyseg.points`), from a downstream drone-imagery project:
   * `density_head(activation="softplus")` keeps the density positive (bias starts at -4).
     Validated on one downstream drone dataset (792 × 792 tiles, 1–20 plants of ~115 px,
-    σ = 12, 45 val images, one seed): density count MAE 10.1 → 2.9 against the raw head
+    σ = 12, 45 val images, one seed; run records are not in this repository): density count
+    MAE 10.1 → 2.9 against the raw head
     (clamped at 0; 7.5 summed raw). It leaves a floor of about +1.75 objects per image, as
     softplus never reaches 0; peak counting on a heatmap still scored 1.0 there.
   * `density_head()` defaults to `activation="softplus"` (E011c: no worse than the raw head on
@@ -117,8 +120,8 @@ First release. Python 3.10–3.14, PyTorch ≥ 2.10, timm ≥ 1.0.20.
 * `graph_from_mask` (line probability → `VectorGraph`: skeleton, junction merging, spur pruning,
   end bridging, simplification), `polygons_from_labels` (instance labels → exact pixel-edge
   polygons with holes), `to_geojson` (with an affine geotransform). Graph-tensor polygon heads
-  were evaluated (E028 oracle, E030 trained on WHU) and are not shipped: they fell below mask
-  instances, and the code stays in `experiments/E030_whu_polygons/`.
+  are not shipped: the E028 oracle favoured them, but trained on WHU they fell well below mask
+  instances (E030, one seed). The code stays in `experiments/E030_whu_polygons/`.
 * `manyseg-bench`: `evaluation.vectors` with APLS, GEO, junction F1, crossing scores and polygon
   metrics (C-IoU, detection F1, PoLiS, N-ratio).
 * **Experimental:** names and defaults may change before 1.0. Each task below has a head
@@ -130,7 +133,8 @@ First release. Python 3.10–3.14, PyTorch ≥ 2.10, timm ≥ 1.0.20.
   holes of at least `min_area` as traced outlines (`holes=False` fills them; E054). Only exterior
   walls are straightened, and roof faces stay outer rings.
 * **Garbage input:** road and corner decoding cost grows about linearly with scene area on an
-  untrained model's noise (about 30 s per megapixel for roads), with unchanged results on normal
+  untrained model's noise (roughly 30 s per megapixel for roads, in one profiled run on the shared
+  workstation), with unchanged results on normal
   input; a zone uses at most its 256 strongest junctions.
 * **Training presets:** `corner_line_heads` (instance heads + `corner` + `direction`; footprints
   and roof faces) and `road_heads` (`mask`, `line`, `keypoints`, `direction`); the focal-loss
@@ -171,20 +175,23 @@ First release. Python 3.10–3.14, PyTorch ≥ 2.10, timm ≥ 1.0.20.
   for a normalised model pass `seed_threshold=0.3, extent_threshold=0.6`. Footprints and roof
   faces keep normalised distance (absolute untested there; `CornerLineTask(distance=)`).
   Tried and dropped: leaving clip-edge corners and walls out of the corner targets
-  (`tile_edges="ignore"`) changed nothing at seams in the end-to-end seam study (perfect
-  targets, 700 x 1000 px, tiles 256 / 32-128 and 512 / 256): seam-zone objects changed by
+  (`tile_edges="ignore"`) changed nothing at seams in a one-off end-to-end seam study, not kept
+  in `experiments/` (perfect targets, 700 x 1000 px, tiles 256 / 32-128 and 512 / 256): seam-zone
+  objects changed by
   stitching, keep vs ignore, footprints 0 vs 0 of 199 (cut) and 1 vs 3 of 636 (blend), roof
   faces 0 vs 0 (cut) and 63 vs 63 (blend; 15 vs 15 with absolute distance), same seam-zone IoU.
 * **Seed fragments no longer become objects** (`instances_from_outputs(min_seed=)`, default 0;
   `block_decoder` default 8 for footprints, fields and roofs, E053): seed components under
-  `min_seed` px are flooded by the instance around them. It fixes the 45-degree tip of a
-  hip-end roof face, and 1 px seeds at field corners under the 3 px seed threshold, that became
-  extra 13-25 px objects even from perfect targets. On trained models (test, fixed settings):
+  `min_seed` px are flooded by the instance around them. The 45-degree tip of a hip-end roof face
+  no longer becomes an extra 17-25 px face, nor a 1 px seed at a field corner (3 px seed
+  threshold) an extra 16 px field, even from perfect targets. On trained models (test, fixed
+  settings):
   roof face F1 +0.041 (E047b), footprint detection F1 +0.024 and boundary F +0.004 (WHU, 2
   seeds), field detection F1 +0.008 with boundary F unchanged (FTW, 2 seeds).
-* Known limitation: with fields' 3 px seed threshold, a strip of a field narrower than about
+* Known limitations: with fields' 3 px seed threshold, a strip of a field narrower than about
   8 px gets broken seeds, so the field can split there (seen in the end-to-end oracle on a field
-  with a hole).
+  with a hole). A hip-end tip with no seed of its own is flooded from a seed nearby, so the tip
+  can go to a neighbouring face (single-pass face IoU down to 0.75 from perfect targets).
 * **One decode path for any scene size:** `decode_scene(fields, block_decoder(task))` (tuned
   defaults for `"footprints"`, `"fields"`, `"roofs"`, `"roads"`, `"points"`, `"density"`;
   default `block=4096`, so a smaller scene is one block), over arrays or memmaps; `block_grid`,
@@ -194,11 +201,12 @@ First release. Python 3.10–3.14, PyTorch ≥ 2.10, timm ≥ 1.0.20.
   `write_records` (GeoJSON, or a GeoPackage through geopandas, in the scene's CRS; roof faces
   optionally as 3-D meshes) read them without a separate scene. `decode_scene` checks every
   decoder's `min_halo` before decoding and rejects empty `fields`.
-  Seam-exact: objects crossing block edges are joined by their anchor (first scene pixel), so a
-  block decode equals the whole-scene decode, with nothing duplicated or cut at seams, when the
-  halo is at least the decoder's `min_halo` (enforced); road skeletons additionally need the
-  halo to cover thinning's data-dependent reach (roads warn), and instances much larger than
-  the halo may split at a seam (documented). Tested on
+  Objects crossing block edges are joined by their anchor (first scene pixel), so a block decode
+  equals the whole-scene decode, with nothing duplicated or cut at seams, when the decoder's reach
+  stays within the halo (default 256 px). `min_halo` is only the lower limit enforced: on noise-like
+  fields, halos up to 64 px gave different objects. Road skeletons also
+  need the halo to cover thinning's data-dependent reach (roads warn), and instances much larger
+  than the halo may split at a seam. Tested on
   seams, block corners, several grids and real stitched predictions. The same decoders run in ManyPred's
   `predict_files(merge="cut", block_postprocess=BlockPostprocess(...))` (ManyPred's next
   release); E050b: tiles of at least 1024 px with 256 px overlap.
@@ -221,7 +229,7 @@ First release. Python 3.10–3.14, PyTorch ≥ 2.10, timm ≥ 1.0.20.
   so a window decodes as the whole scene does; the scikit-image watershed now releases markers
   of equal distance in raster order (its tie-break followed heap internals and changed with the
   crop). Whole-scene decodes can differ marginally from development builds (2601 → 2600 roof
-  faces on one test scene).
+  faces on one test scene, in a run not kept in the repository).
 
 ### Losses (`manyseg.losses`)
 
@@ -244,7 +252,8 @@ First release. Python 3.10–3.14, PyTorch ≥ 2.10, timm ≥ 1.0.20.
   time, −77% memory.
 * Temporal mean sums bf16 features with a float32 accumulator instead of upcasting them;
   fastai_unet keeps channels_last through its pixel shuffles; `connected_components` uses
-  pointer jumping (18–44× faster on long or field-like components, same labels).
+  pointer jumping (18–44× faster on long or field-like components, 2× slower on small 256² blobs
+  on CPU, same labels).
 * Bilinear resizes keep the activation dtype in U-Net `upsample="bilinear"` / `"aligned"`
   (−7% memory) and in late / `same_extent` fusion before a concat (E027).
 * `model.set_grad_checkpointing()`: opt-in encoder gradient checkpointing (timm's), with
@@ -257,7 +266,8 @@ First release. Python 3.10–3.14, PyTorch ≥ 2.10, timm ≥ 1.0.20.
   activations and class names). Save format 2; format-1 files (development versions, which
   said `"channels"` for all three) are migrated on load. Compatibility policy (`manyseg.io`):
   renamed or reinterpreted config keys, modules or parameters bump the format and get a
-  migration; a committed golden file (`tests/data/golden_format2.safetensors`) must keep
+  migration; a committed golden file
+  (`packages/manyseg/tests/data/golden_format2.safetensors`) must keep
   loading to the same outputs. A file from a newer ManySeg that this one cannot rebuild
   fails with both versions named and an upgrade hint, instead of a bare `create_model`
   error. The README warns against `torch.save(model)` pickles, which depend on internal
@@ -305,7 +315,8 @@ First release. Python 3.10–3.14, PyTorch ≥ 2.10, timm ≥ 1.0.20.
   features now stay channels-last through the decoder; the upsampled maps keep the input
   dtype under autocast (which runs upsampling in float32), so bf16 decoders use no extra
   memory. U-Net steps are now at parity with SMP compiled and 18–25% faster eager (SMP's two
-  finest decoder blocks run in NCHW), with no more memory; FPN and the fastai U-Net are 14% and
+  finest decoder blocks run in NCHW), with no more memory except up to 1.5% compiled at 509²;
+  FPN and the fastai U-Net are 14% and
   6% faster compiled. Whether a step is exactly 2x is decided per pair of levels, so sparse
   `out_indices` (e.g. strides 4, 16, 32) keep the gather where levels are 4x apart. A crop to an unchanged size no longer copies.
 
@@ -317,20 +328,21 @@ First release. Python 3.10–3.14, PyTorch ≥ 2.10, timm ≥ 1.0.20.
 ### Testing
 
 * Unit tests in CI on Linux, with macOS and Windows on pull requests and nightly; the slow
-  tier (integration and examples: compile, export, ONNX, quantisation) on Linux. Python
-  3.13 and 3.14 pass every tier locally; Python 3.15 (release candidate) passes everything
-  except `torch.compile`, which PyTorch does not support on 3.15 yet.
+  tier (integration and examples: compile, export, ONNX, quantisation) on Linux. In one-off local
+  runs, not recorded here, Python 3.13 and 3.14 passed every tier and Python 3.15 (release
+  candidate) passed everything except `torch.compile`, which PyTorch does not support on 3.15 yet.
 * A random-configuration fuzzer (`packages/manyseg/tests/fuzz`) checks thousands of
-  `create_model` configurations on CPU and CUDA (bf16, `torch.compile`); about 25 bugs it
-  found are regression tests.
-* Training-framework integration tests (`tests/integration/test_trainers.py`): fastai,
-  Lightning (fp32 and bf16-mixed), Accelerate and TorchGeo fit on CPU, with checkpoint and
+  `create_model` configurations on CPU and CUDA (bf16, `torch.compile`); the bugs it found,
+  about 25 by our count, are regression tests.
+* Training-framework integration tests
+  (`packages/manyseg/tests/integration/test_trainers.py`): fastai, Lightning
+  (fp32 and bf16-mixed), Accelerate and TorchGeo fit on CPU, with checkpoint and
   `manyseg.save` round trips. CI's slow job installs the frameworks and sets
   `MANYSEG_REQUIRE_TRAINERS=1`, so a missing one fails rather than skips.
 * A `heavy` marker for slow tests that take minutes on CI (the Swin compile and export
   probes): pushes run `slow and not heavy`, nightly and manual runs all of `slow`. The
-  Swin compile test uses one block per stage and one input size: 2.8x faster locally (438 s
-  to 155 s), which should fit the floor job's 900 s limit.
+  Swin compile test uses one block per stage and one input size: 2.8x faster in one local run
+  (438 s to 155 s, not recorded here), which should fit the floor job's 900 s limit.
 
 ### Benchmark (`manyseg-bench`)
 
@@ -338,8 +350,9 @@ First release. Python 3.10–3.14, PyTorch ≥ 2.10, timm ≥ 1.0.20.
   seeded data loading; recipes; JSON run records with provenance.
 * Datasets: Oxford Pet, Sen1Floods11, CloudSEN12+, AI4Boundaries, OAM-TCD, PASTIS, EuroSAT,
   BigEarthNet v2, OSCD, LEVIR-CD, SECOND.
-* Pre-registered experiments E000–E027 with write-ups in `experiments/`, negative results
-  included.
+* Experiments E000–E054 in `experiments/`, negative results included. Most are pre-registered
+  with a write-up; E026 and E027 are performance audits without a registration, and E000 keeps
+  only its scripts and audit notes.
 * Training loop without per-step host syncs on CUDA: fused AdamW, a non-finite loss skips the
   update on the device (as before, without waiting for the GPU), losses summed on the device,
   one gradient-scaling kernel; the loader copies the epoch order to the GPU once and normalises

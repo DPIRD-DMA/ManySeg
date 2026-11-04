@@ -5,8 +5,8 @@ CPUs without VNNI unless reduce_range=True. Standalone: torch, torchao, timm.
 
 Observed (torch 2.14.1, torchao 0.18.0, timm 1.0.30, AMD Ryzen 9 5950X = Zen 3, AVX2, no
 VNNI): with the default reduce_range=False the compiled stage-4 ResNet-34 features differ from
-the eager quantise/dequantise reference by ~50% (mean relative difference); with
-reduce_range=True by ~6%. Expected: the compiled int8 graph should match its eager reference
+the eager quantise/dequantise reference by ~85% (mean relative difference); with
+reduce_range=True by ~7%. Expected: the compiled int8 graph should match its eager reference
 (or the quantizer should default to / require reduce_range on such CPUs).
 """
 

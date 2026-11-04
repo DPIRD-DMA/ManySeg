@@ -47,7 +47,7 @@ locations never seen in training. Dataset details, licence and leakage rules are
   The baseline is valid for Q2 because in stack mode the runner drops metadata vectors
   (`vectors_dropped`), so it is the same S2-only model.
 * Budget: 24 runs, about 30–40 GCD-hours, run as three 8-GCD packs (one per seed) via
-  `scripts/setonix/manyseg_pack.sbatch`. Each pack stages the 191 GB cache once onto node NVMe.
+  `scripts/setonix/manyseg_pack.sbatch`. Each pack stages the 190 GB cache once onto node NVMe.
 * Reported per arm: val and test mIoU, per-class IoU (thin cloud and shadow especially),
   boundary F1, params, FLOPs and throughput.
 

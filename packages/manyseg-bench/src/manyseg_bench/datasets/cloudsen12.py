@@ -47,7 +47,7 @@ are unseen locations. Label-derived columns of the sample table (``*_percentage`
 
 Variants (one shared cache, ``cloudsen12plus_high``): ``cloudsen12`` (S2 only),
 ``cloudsen12_s2_aux`` (dict inputs ``s2`` + ``s1gbm`` + ``dem``), ``cloudsen12_meta``
-(S2 + a metadata vector: sample-centre lat/lon, day of year, solar zenith and azimuth) and
+(S2 + a metadata vector: chip-centre lat/lon, day of year, solar zenith and azimuth) and
 ``cloudsen12_meta_nogeo`` (the same vector without lat/lon).
 """
 

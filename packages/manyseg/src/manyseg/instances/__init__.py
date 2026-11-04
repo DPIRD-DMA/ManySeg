@@ -1,7 +1,8 @@
 """Boundary + distance instance outputs: presets, targets, post-processing.
 
-Losses and metrics live in ``manyseg-bench`` (training orchestration is not part of the model
-library). Post-processing runs outside the exported graph.
+Losses are in :mod:`manyseg.losses`; metrics and training tasks live in ``manyseg-bench``
+(training orchestration is not part of the model library). Post-processing runs outside the
+exported graph.
 """
 
 from .postprocess import (

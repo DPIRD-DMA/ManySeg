@@ -13,8 +13,8 @@ compiled model matches the reference.
 
 The docstring of `get_default_x86_inductor_quantization_config` already says to set
 `reduce_range=True` "on earlier CPUs without VNNI to avoid accuracy issue". In practice the
-default silently produces wrong results on such CPUs, which include current AMD desktop parts
-(Zen 3), and the user has no signal.
+default silently produces wrong results on such CPUs, which include AMD desktop parts up to
+Zen 3, and the user has no signal.
 
 ## Reproduction
 
