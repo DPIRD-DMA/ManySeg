@@ -688,6 +688,13 @@ create_model(backbone="resnet34", pretrained=True, in_channels=13, channel_adapt
 > **Evidence (E004, 13-band Sentinel-2):** no adapter beat `repeat`, which stays the default;
 > `projection` was harmful, in a run that froze it for epoch 1 and then trained it at 0.1×
 > learning rate, so a normally trained projection may do better.
+>
+> **Evidence (E055, ResNet-50, Sentinel-2):** RGB weights are not guaranteed to beat random weights
+> on inputs that aren't RGB. Against the better of two scratch recipes, the final val metric moved
+> +4.2 points on CloudSEN12+, +1.0 on PASTIS, −0.6 on Sen1Floods11 and −1.0 on BigEarthNet. Using
+> 12-252 Sen1Floods11 chips, the arms were level at every size. ImageNet weights ran under one
+> recipe and scratch under two, and BigEarthNet's result depends on it: with ImageNet's recipe,
+> scratch finishes 4.7 points behind.
 
 **Channels that are not image bands.** `repeat` and `mean` treat every input channel as a
 band. Take RGB plus three 0/1 validity masks (`in_channels=6`): `repeat` gives each mask a copy
