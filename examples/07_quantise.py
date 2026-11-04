@@ -35,8 +35,10 @@ def main():
     print(f"pt2e int8:   {model_size(ep) * mb:.1f} MB vs {model_size(float_ep) * mb:.1f} MB "
           "exported float")
     print("  ", {k: round(v, 3) for k, v in compare_outputs(model, ep, test).items()})
-    # torch.export.save(ep, "model_int8.pt2"). Eager ep.module() simulates int8 in float and
-    # is slower than float; for speed compile it (and check compare_outputs on that module):
+    # manyseg.save(ep, "model_int8.pt2", source=model, normalize=..., activations=...) keeps the
+    # metadata; manyseg.load gives a callable with tiling_spec(), not an nn.Module.
+    # Eager ep.module() simulates int8 in float and is slower than float; for speed compile it
+    # (and check compare_outputs on that module):
     #     torch._inductor.config.freezing = True
     #     fast = torch.compile(ep.module())
 
@@ -45,6 +47,8 @@ def main():
     print(f"weight-only: {model_size(q) * mb:.1f} MB vs {model_size(model) * mb:.1f} MB "
           "float state_dict")
     print("  ", {k: round(v, 3) for k, v in compare_outputs(model, q, test).items()})
+    # manyseg.save(q, "model_int8.safetensors", normalize=..., activations=...) keeps the size
+    # saving and the metadata; manyseg.load gives an nn.Module with int8 weights.
 
 
 if __name__ == "__main__":

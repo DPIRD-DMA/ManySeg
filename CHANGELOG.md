@@ -8,6 +8,19 @@ API, and every such change is listed here.
 
 First release. Python 3.10–3.14, PyTorch ≥ 2.10, timm ≥ 1.0.20.
 
+### Saving quantised models
+
+* `manyseg.save` and `manyseg.load` take `quantize_weights` models (`.safetensors`, about 0.26x
+  the float file) and `quantize_pt2e` programs (`.pt2`, with `source=` the float model). Both keep
+  the metadata and `tiling_spec()`. Quantised files are save format 3; float files stay format 2.
+* The `quant` extra now needs torchao ≥ 0.18: `quantize_weights` fails on convs before 0.15, and
+  Linear weights can't be saved or loaded before 0.18.
+* A loaded `.pt2` is a `manyseg.quantize.QuantizedProgram`, a callable rather than an `nn.Module`,
+  with `batch_size`, `fixed_size`, `input_shapes` and `device`. Its `tiling_spec()` reports a fixed
+  size as `max_size`.
+* Neither file holds pickled data, and `manyseg.load` refuses `.pt2` archives that would unpickle
+  anything or evaluate anything but plain shape expressions when loaded.
+
 ### Models (`manyseg.create_model`)
 
 * **Config vocabulary:** an input's bands are `in_channels` (also the single-input argument),

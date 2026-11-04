@@ -2,12 +2,16 @@
 
 The PT2E (static int8, exported) path is in ``integration/test_quantize_pt2e.py`` (slow)."""
 
+import json
 import sys
 
+import manyseg
 import pytest
 import torch
 from manyseg import create_model
 from manyseg.quantize import compare_outputs, model_size, quantize_pt2e, quantize_weights
+from safetensors import safe_open
+from safetensors.torch import save_file
 from torch import nn
 
 
@@ -275,3 +279,246 @@ def test_check_deployment_warns_when_unrecorded():
     ep = torch.export.export(m, (torch.randn(1, 3, 4, 4),))
     with pytest.warns(UserWarning, match="not produced by"):
         check_deployment(ep)
+
+
+# --- save / load ---------------------------------------------------------------------------
+
+_NORM = [{"type": "scale", "value": 10000}]
+
+
+def _save_args(model):
+    return {"activations": {h: "softmax" for h in model.heads}, "normalize": _NORM}
+
+
+def _same_outputs(a, b, x):
+    with torch.no_grad():
+        out_a, out_b = a(x), b(x)
+    if isinstance(out_a, dict):
+        assert set(out_a) == set(out_b)
+        for k in out_a:
+            assert torch.equal(out_a[k], out_b[k]), k
+    else:
+        assert torch.equal(out_a, out_b)
+
+
+@pytest.mark.parametrize("mode", ["int8_weight_only", "int8_dynamic"])
+@pytest.mark.parametrize("kw", [{"backbone": "resnet18"},
+                                {"backbone": "resnet18", "decoder": "segformer"},
+                                {"backbone": "mobilenetv3_small_100"},
+                                {"backbone": "pvt_v2_b0"}],
+                         ids=lambda k: "-".join(map(str, k.values())))
+def test_weights_round_trip_same_outputs(tmp_path, mode, kw):
+    pytest.importorskip("torchao")
+    q = quantize_weights(_model(**kw), mode)
+    path = manyseg.save(q, tmp_path / "q.safetensors", **_save_args(q))
+    loaded = manyseg.load(path)
+    assert isinstance(loaded, manyseg.DenseModel) and not loaded.training
+    _same_outputs(q, loaded, torch.randn(1, 3, 97, 131))
+    # int8 for real, and the same layers as before saving
+    want, have = q.state_dict(), loaded.state_dict()
+    assert {k: type(v) for k, v in want.items()} == {k: type(v) for k, v in have.items()}
+    for k, v in want.items():  # torchao keeps the real values in attributes, not in .data
+        for part in getattr(v, "tensor_data_names", ()):
+            a, b = getattr(v, part), getattr(have[k], part)
+            assert a.dtype == b.dtype and torch.equal(a, b), f"{k}:{part}"
+    assert any(getattr(v, "qdata", None) is not None and v.qdata.dtype == torch.int8
+               for v in have.values())
+
+
+def test_weights_conv_false_round_trip(tmp_path):
+    pytest.importorskip("torchao")
+    q = quantize_weights(_model("pvt_v2_b0"), conv=False)
+    loaded = manyseg.load(manyseg.save(q, tmp_path / "q.safetensors", **_save_args(q)))
+    _same_outputs(q, loaded, torch.randn(1, 3, 65, 97))
+    assert loaded.saved_metadata["quantization"]["conv"] is False
+
+
+def test_weights_file_size_under_target(tmp_path):
+    pytest.importorskip("torchao")
+    model = _model()
+    q = quantize_weights(model)
+    a = manyseg.save(model, tmp_path / "f.safetensors", **_save_args(model))
+    b = manyseg.save(q, tmp_path / "q.safetensors", **_save_args(q))
+    assert b.stat().st_size < 0.35 * a.stat().st_size
+
+
+def test_float_files_keep_format_2(tmp_path):
+    model = _model()
+    path = manyseg.save(model, tmp_path / "f.safetensors", **_save_args(model))
+    meta = manyseg.read_metadata(path)
+    assert meta["format"] == 2 and "quantization" not in meta
+
+
+def test_weights_file_is_format_3_without_pickle(tmp_path):
+    pytest.importorskip("torchao")
+    q = quantize_weights(_model())
+    path = manyseg.save(q, tmp_path / "q.safetensors", **_save_args(q))
+    meta = manyseg.read_metadata(path)
+    assert meta["format"] == 3
+    assert meta["quantization"]["route"] == "weights"
+    assert meta["quantization"]["mode"] == "int8_weight_only"
+    with safe_open(str(path), framework="pt") as f:  # safetensors: plain tensors only
+        assert "backbone.model.conv1.weight:qdata" in set(f.keys())
+        assert f.get_tensor("backbone.model.conv1.weight:qdata").dtype == torch.int8
+
+
+def _reduced_head_model():
+    return create_model(backbone="resnet18", pretrained=False, heads={
+        "seg": {"type": "segmentation", "out_channels": 3},
+        "coarse": {"type": "segmentation", "out_channels": 2, "scale": 0.25},
+        "label": {"type": "classification", "scope": "image", "out_channels": 4},
+        "height": {"type": "regression", "out_channels": 1}}).eval()
+
+
+def test_weights_tiling_spec_matches_float_after_load(tmp_path):
+    pytest.importorskip("torchao")
+    model = _reduced_head_model()
+    args = {"normalize": _NORM, "activations": {"seg": "softmax", "coarse": "sigmoid",
+                                                "label": "softmax"},
+            "classes": {"seg": ["a", "b", "c"]}, "bands": ["r", "g", "b"]}
+    float_loaded = manyseg.load(manyseg.save(model, tmp_path / "f.safetensors", **args))
+    q = quantize_weights(model)
+    loaded = manyseg.load(manyseg.save(q, tmp_path / "q.safetensors", **args))
+    spec = loaded.tiling_spec()
+    assert spec == float_loaded.tiling_spec()
+    assert spec["normalize"] == _NORM
+    assert spec["outputs"]["coarse"]["scale"] == 0.25
+    assert spec["outputs"]["coarse"]["activation"] == "sigmoid"
+    assert loaded.saved_metadata["classes"]["seg"] == ["a", "b", "c"]
+    x = torch.randn(1, 3, 97, 131)
+    _same_outputs(q, loaded, x)
+    assert loaded(x)["coarse"].shape[-2:] == (25, 33)
+
+
+def test_weights_single_output_round_trip(tmp_path):
+    pytest.importorskip("torchao")
+    model = _reduced_head_model()
+    model.select_heads(["coarse"])
+    q = quantize_weights(model)
+    loaded = manyseg.load(manyseg.save(q, tmp_path / "q.safetensors", **_save_args(q)))
+    _same_outputs(q, loaded, torch.randn(1, 3, 97, 131))
+    assert loaded.tiling_spec() == {**model.tiling_spec(), "normalize": _NORM, "outputs": {
+        "coarse": {**model.tiling_spec()["outputs"]["coarse"], "activation": "softmax"}}}
+
+
+@pytest.mark.parametrize("share", [False, True], ids=["two-encoders", "shared-encoder"])
+def test_weights_multi_input_round_trip(tmp_path, share):
+    pytest.importorskip("torchao")
+    inputs = ({"a": {"in_channels": 3}, "b": {"in_channels": 3, "backbone": "shared:a"}}
+              if share else {"a": {"in_channels": 4}, "b": {"in_channels": 2}})
+    model = create_model(inputs=inputs, backbone="resnet18", pretrained=False,
+                         num_classes=2).eval()
+    q = quantize_weights(model)
+    loaded = manyseg.load(manyseg.save(q, tmp_path / "q.safetensors", **_save_args(q),
+                                       ))
+    c = (3, 3) if share else (4, 2)
+    x = {"a": torch.randn(1, c[0], 97, 131), "b": torch.randn(1, c[1], 97, 131)}
+    _same_outputs(q, loaded, x)
+    assert loaded.tiling_spec()["inputs"] == model.tiling_spec()["inputs"]
+
+
+def test_weights_one_feature_vector_input_round_trip(tmp_path):
+    """torchao can't quantise nn.Linear(1, n), so that layer stays float."""
+    pytest.importorskip("torchao")
+    model = create_model(backbone="resnet18", pretrained=False, num_classes=2, inputs={
+        "img": {"in_channels": 4}, "doy": {"kind": "vector", "num_features": 1}}).eval()
+    q = quantize_weights(model)
+    loaded = manyseg.load(manyseg.save(q, tmp_path / "q.safetensors", **_save_args(q)))
+    _same_outputs(q, loaded, {"img": torch.randn(1, 4, 97, 131), "doy": torch.rand(1, 1)})
+    assert loaded.tiling_spec()["inputs"]["doy"] == {"kind": "vector"}
+
+
+def test_weights_window_attention_round_trip(tmp_path):
+    pytest.importorskip("torchao")
+    q = quantize_weights(_model("swin_tiny_patch4_window7_224"))
+    loaded = manyseg.load(manyseg.save(q, tmp_path / "q.safetensors", **_save_args(q)))
+    _same_outputs(q, loaded, torch.randn(1, 3, 224, 224))
+    assert loaded.tiling_spec()["max_size"] == q.tiling_spec()["max_size"]
+
+
+def test_weights_loaded_model_moves_and_resaves(tmp_path):
+    """ManyPred calls .to(device=..., dtype=...) on a module; a second save still works."""
+    pytest.importorskip("torchao")
+    q = quantize_weights(_model())
+    loaded = manyseg.load(manyseg.save(q, tmp_path / "q.safetensors", **_save_args(q)))
+    x = torch.randn(1, 3, 65, 97)
+    _same_outputs(q, loaded.to(device="cpu", dtype=torch.float32).eval(), x)
+    again = manyseg.load(manyseg.save(loaded, tmp_path / "r.safetensors", **_save_args(q)))
+    _same_outputs(q, again, x)
+
+
+def test_weights_changed_model_is_refused(tmp_path):
+    pytest.importorskip("torchao")
+    q = quantize_weights(_model())
+    q.decoder.extra = nn.Conv2d(1, 1, 1)
+    with pytest.raises(ValueError, match="differs from what its create_model"):
+        manyseg.save(q, tmp_path / "q.safetensors", **_save_args(q))
+
+
+def test_save_refuses_weights_quantised_outside_manyseg(tmp_path):
+    pytest.importorskip("torchao")
+    q = quantize_weights(_model())
+    del q.quantization
+    with pytest.raises(ValueError, match="did not come from"):
+        manyseg.save(q, tmp_path / "q.safetensors", **_save_args(q))
+
+
+def test_load_quantised_file_without_torchao_names_the_extra(tmp_path, monkeypatch):
+    pytest.importorskip("torchao")
+    q = quantize_weights(_model())
+    path = manyseg.save(q, tmp_path / "q.safetensors", **_save_args(q))
+    monkeypatch.setitem(sys.modules, "torchao", None)
+    assert manyseg.read_metadata(path)["format"] == 3  # the metadata needs no torchao
+    with pytest.raises(ImportError, match=r"manyseg\[quant\]"):
+        manyseg.load(path)
+
+
+def test_older_torchao_part_mismatch_is_a_clear_error(tmp_path):
+    """A file whose quantised layers don't line up names the versions, not a KeyError."""
+    pytest.importorskip("torchao")
+    q = quantize_weights(_model())
+    path = manyseg.save(q, tmp_path / "q.safetensors", **_save_args(q))
+    with safe_open(str(path), framework="pt") as f:
+        meta, tensors = f.metadata(), {k: f.get_tensor(k) for k in f.keys()}  # noqa: SIM118
+    del tensors["backbone.model.conv1.weight:scale"]
+    bad = tmp_path / "bad.safetensors"
+    save_file(tensors, str(bad), metadata=meta)
+    with pytest.raises(ValueError, match="cannot be rebuilt"):
+        manyseg.load(bad)
+
+
+def test_save_refuses_weights_that_do_not_split(tmp_path):
+    """Older torchao's Linear weights are a subclass without plain parts."""
+    pytest.importorskip("torchao")
+
+    class Opaque(torch.Tensor):
+        pass
+
+    q = quantize_weights(_model())
+    q.backbone.model.bn1.weight = nn.Parameter(q.backbone.model.bn1.weight.as_subclass(Opaque))
+    with pytest.raises(ValueError, match="upgrade it"):
+        manyseg.save(q, tmp_path / "q.safetensors", **_save_args(q))
+
+
+def test_format_3_without_quantisation_metadata_is_refused(tmp_path):
+    model = _model()
+    path = manyseg.save(model, tmp_path / "f.safetensors", **_save_args(model))
+    with safe_open(str(path), framework="pt") as f:
+        meta, tensors = f.metadata(), {k: f.get_tensor(k) for k in f.keys()}  # noqa: SIM118
+    stored = json.loads(meta["manyseg"])
+    stored["format"] = 3
+    bad = tmp_path / "bad.safetensors"
+    save_file(tensors, str(bad), metadata={**meta, "manyseg": json.dumps(stored)})
+    with pytest.raises(ValueError, match="without quantisation metadata"):
+        manyseg.load(bad)
+
+
+def test_save_ep_needs_source_and_module_is_rejected(tmp_path):
+    pytest.importorskip("torchao")
+    ep = torch.export.export(nn.Conv2d(3, 1, 1).eval(), (torch.randn(1, 3, 8, 8),))
+    with pytest.raises(TypeError, match="source="):
+        manyseg.save(ep, tmp_path / "m.pt2")
+    with pytest.raises(TypeError, match="ExportedProgram itself"):
+        manyseg.save(ep.module(), tmp_path / "m.pt2")
+    with pytest.raises(TypeError, match="source= is only"):
+        manyseg.save(_model(), tmp_path / "m.safetensors", source=_model())

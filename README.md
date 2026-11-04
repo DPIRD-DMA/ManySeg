@@ -297,6 +297,22 @@ dynamically; see the [compatibility table](docs/backbone_compatibility.md)), and
 quantisation (`import manyseg.quantize`). For fast GPU inference use bf16
 autocast plus `torch.compile`.
 
+`manyseg.save` and `manyseg.load` also handle quantised models, with their metadata and
+`tiling_spec()`, so ManyPred can run them from a file (both need `manyseg[quant]` to load):
+
+```python
+q = quantize_weights(model)                 # CPU or GPU: an nn.Module with int8 weights
+manyseg.save(q, "model_int8.safetensors", normalize=spec, activations={"logits": "softmax"})
+
+ep = quantize_pt2e(model, example, batches)  # CPU: static int8
+manyseg.save(ep, "model_int8.pt2", source=model, normalize=spec,
+             activations={"logits": "softmax"})
+program = manyseg.load("model_int8.pt2")     # a callable with tiling_spec(), not an nn.Module
+```
+
+Only load `.pt2` files from sources you trust. `manyseg.load` refuses the ways we know a crafted
+file could run code while loading, but that is not a sandbox, and the program runs when called.
+
 Most of these have a runnable script in [`examples/`](examples/) that runs on CPU: the numbered
 scripts in a few seconds, the walkthroughs that train briefly in 10–20 s.
 

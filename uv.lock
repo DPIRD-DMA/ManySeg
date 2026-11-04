@@ -2525,8 +2525,8 @@ requires-dist = [
     { name = "shapely", marker = "extra == 'vectors'", specifier = ">=2" },
     { name = "timm", specifier = ">=1.0.20" },
     { name = "torch", specifier = ">=2.10" },
-    { name = "torchao", marker = "extra == 'quant'", specifier = ">=0.13" },
-    { name = "torchao", marker = "extra == 'test'", specifier = ">=0.13" },
+    { name = "torchao", marker = "extra == 'quant'", specifier = ">=0.18" },
+    { name = "torchao", marker = "extra == 'test'", specifier = ">=0.18" },
 ]
 provides-extras = ["onnx", "instances", "vectors", "quant", "test"]
 

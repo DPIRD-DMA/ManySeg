@@ -15,6 +15,7 @@ from safetensors.torch import load_file
 
 DATA = Path(__file__).resolve().parents[1] / "data"
 GOLDEN = sorted(DATA.glob("golden_format*[0-9].safetensors"))
+QUANTIZED = sorted(DATA.glob("golden_quantized_format*[0-9].safetensors"))
 
 
 def test_golden_files_exist():
@@ -85,3 +86,21 @@ def test_rebuild_failure_names_versions_for_older_files(tmp_path):
     save_file(load_file(str(src)), str(bad), metadata={**stored, "manyseg": json.dumps(meta)})
     with pytest.raises(ValueError, match=r"saved by ManySeg 0\.0\.1.*missing migration"):
         manyseg.load(bad)
+
+
+@pytest.mark.parametrize("path", QUANTIZED, ids=[p.stem for p in QUANTIZED])
+def test_golden_quantized_file_loads_to_the_same_outputs(path):
+    pytest.importorskip("torchao")
+    model = manyseg.load(path)
+    io = load_file(str(path.with_name(path.stem + "_io.safetensors")))
+    with torch.no_grad():
+        out = model({"img": io["in_img"], "doy": io["in_doy"]})
+    want = {k.removeprefix("out_"): v for k, v in io.items() if k.startswith("out_")}
+    assert set(out) == set(want)
+    for k in want:
+        torch.testing.assert_close(out[k], want[k], atol=1e-4, rtol=1e-4, msg=k)
+    assert model.saved_metadata["quantization"]["mode"] == "int8_dynamic"
+
+
+def test_golden_quantized_file_exists():
+    assert QUANTIZED, "add a golden file for the quantised save format"

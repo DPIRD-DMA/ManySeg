@@ -1298,7 +1298,8 @@ from manyseg.quantize import compare_outputs, model_size, quantize_pt2e, quantiz
 ep = quantize_pt2e(model, example, calibration)         # calibration: iterable of inputs
 ep = quantize_pt2e(multi_input_model, {"optical": o, "sar": s}, dict_batches)
 ep = quantize_pt2e(swin_model, example, batches, dynamic=False)   # fixed size only
-torch.export.save(ep, "model_int8.pt2")
+manyseg.save(ep, "model_int8.pt2", source=model, normalize=spec, activations=activations)
+program = manyseg.load("model_int8.pt2")                # callable with tiling_spec()
 
 torch._inductor.config.freezing = True
 fast = torch.compile(ep.module())                       # oneDNN int8 kernels
@@ -1306,6 +1307,8 @@ fast = torch.compile(ep.module())                       # oneDNN int8 kernels
 # int8 weights on the eager module (CPU or GPU), no calibration.
 q = quantize_weights(model)                             # "int8_weight_only" (default)
 q = quantize_weights(model, "int8_dynamic")             # + int8 activations in Linear layers
+manyseg.save(q, "model_int8.safetensors", normalize=spec, activations=activations)
+q = manyseg.load("model_int8.safetensors")              # nn.Module with int8 weights
 
 model_size(ep), model_size(q)                           # serialized bytes
 compare_outputs(model, ep, test_batches)
@@ -1336,6 +1339,27 @@ records the choice in the program (it survives `torch.export.save` / `load`). In
 script, `manyseg.quantize.check_deployment(ep)` raises if this CPU cannot run that program
 correctly. Window-attention backbones are rejected before export, because their
 dynamic export hangs rather than fails.
+
+**Saved files.** `manyseg.save` keeps the metadata and `tiling_spec()` for both routes, and
+loading needs `manyseg[quant]`. Quantised files are save format 3, so an older ManySeg asks to be
+upgraded; float files stay format 2.
+
+* A `quantize_weights` file is safetensors: each int8 weight as its plain `qdata`, `scale` and
+  `zero_point` tensors. `load` rebuilds the model, quantises it with the stored `mode` and `conv`,
+  and puts those tensors back.
+* A `quantize_pt2e` file is a `.pt2` archive with the metadata inside and no sample inputs, the one
+  part `torch.export.save` always pickles. `save` needs `source=`, the float model, and refuses a
+  program it can't write, such as a dynamic-size ViT (use `dynamic=False`).
+* `load` on a `.pt2` returns a `QuantizedProgram`, not an `nn.Module`, because `ep.module()` raises
+  on `.eval()`. It has `__call__`, `tiling_spec()`, `program`, `module`, `device`, `batch_size`
+  (None if dynamic), `fixed_size` (None if dynamic) and `input_shapes`. `map_location` sets its
+  device, and a wrong device, batch size or fixed size raises an error naming the fix.
+* `torch.export.load` can run code from a crafted file, through pickled entries and through shape
+  strings passed to `sympy.sympify`. `load` checks for both first, but this is no sandbox: only
+  load `.pt2` files from sources you trust.
+* In ManyPred, pass `device="cpu"` for a program loaded on the CPU, and the program's `batch_size`
+  if it has one. Patches are square, so a non-square fixed size can only be called directly.
+  `torch.compile` gives int8 kernels only with `torch._inductor.config.freezing = True`.
 
 `quantize_weights` stores Linear and Conv2d weights as int8, symmetric per output channel.
 Depthwise convs stay float, because torchao rejects their weights and they are tiny anyway.

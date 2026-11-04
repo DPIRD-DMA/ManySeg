@@ -1,12 +1,14 @@
 """Write the golden saved-model file for test_saved_files_load.py (once per save format).
 
     uv run python packages/manyseg/tests/data/make_golden.py
+    uv run python packages/manyseg/tests/data/make_golden.py --quantized  # needs manyseg[quant]
 
 The file is committed: it is what a user saved with this ManySeg version, and every later
 version must keep loading it (migrating its config if keys were renamed) to the same outputs.
 Do not regenerate it to make a failing test pass.
 """
 
+import sys
 from pathlib import Path
 
 import manyseg
@@ -33,6 +35,8 @@ def main():
             if isinstance(m, torch.nn.BatchNorm2d):
                 m.running_mean.uniform_(-0.1, 0.1)
                 m.running_var.uniform_(0.8, 1.2)
+    if "--quantized" in sys.argv:
+        return quantized(model)
     name = f"golden_format{manyseg.io.FORMAT}"  # one file per save format
     path = manyseg.save(model, HERE / f"{name}.safetensors",
                         normalize=[{"type": "scale", "value": 10000}],
@@ -42,6 +46,25 @@ def main():
     x = {"img": torch.randn(2, 4, 45, 61, generator=g), "doy": torch.rand(2, 1, generator=g)}
     with torch.no_grad():
         out = model(x)
+    save_file({"in_img": x["img"], "in_doy": x["doy"], **{f"out_{k}": v for k, v in out.items()}},
+              str(HERE / f"{name}_io.safetensors"))
+    print(path, path.stat().st_size // 1024, "KiB")
+
+
+def quantized(model):
+    """The same model through ``quantize_weights``."""
+    from manyseg.quantize import quantize_weights
+
+    q = quantize_weights(model, "int8_dynamic")
+    name = f"golden_quantized_format{manyseg.io.QUANTIZED_FORMAT}"
+    path = manyseg.save(q, HERE / f"{name}.safetensors",
+                        normalize=[{"type": "scale", "value": 10000}],
+                        activations={"seg": "softmax", "label": "softmax"},
+                        classes={"seg": ["a", "b", "c"], "label": ["no", "yes"]})
+    g = torch.Generator().manual_seed(1)
+    x = {"img": torch.randn(2, 4, 45, 61, generator=g), "doy": torch.rand(2, 1, generator=g)}
+    with torch.no_grad():
+        out = q(x)
     save_file({"in_img": x["img"], "in_doy": x["doy"], **{f"out_{k}": v for k, v in out.items()}},
               str(HERE / f"{name}_io.safetensors"))
     print(path, path.stat().st_size // 1024, "KiB")

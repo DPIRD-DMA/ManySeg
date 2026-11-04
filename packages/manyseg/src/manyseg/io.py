@@ -24,6 +24,18 @@ paths.
 Normalisation is stored as a ManyPred normalisation spec (plain data): a list of steps such as
 ``[{"type": "scale", "value": 10000}, {"type": "zscore", "mean": [...], "std": [...]}]``, or
 ``{input_name: steps}`` for several inputs.
+
+Quantised models (save format 3; float files stay format 2, so older ManySeg keeps reading them,
+and refuses a quantised file with an upgrade message rather than failing obscurely):
+
+* ``quantize_weights`` models go in a ``.safetensors`` file too. Each int8 weight is stored as
+  its plain tensors (``"<name>:qdata"``, ``":scale"``, ``":zero_point"``), with the arguments it
+  was quantised with in the metadata. :func:`load` rebuilds the float model, quantises it with
+  those arguments and puts the stored tensors back, so the file depends on no torchao class or
+  prototype API.
+* ``quantize_pt2e`` programs go in a ``.pt2`` file (see :mod:`manyseg.quantize`): the
+  metadata travels as an extra file in the archive, and :func:`load` returns a
+  :class:`~manyseg.quantize.QuantizedProgram`. Neither kind holds pickled data.
 """
 
 from __future__ import annotations
@@ -41,6 +53,7 @@ from .models import DenseModel
 from .weights import attribution
 
 FORMAT = 2  # 2: in_channels / out_channels / num_features (1: "channels"; migrated on read)
+QUANTIZED_FORMAT = 3  # quantised files only: float files keep FORMAT
 _KEY = "manyseg"
 ACTIVATIONS = ("softmax", "sigmoid", "none")
 
@@ -84,14 +97,40 @@ def _weights_normalize(config: Mapping[str, Any]) -> Any:
     return per_input or None
 
 
-def save(model: DenseModel, path: str | Path, *, normalize: Any = None,
+def _require_dense(model: Any) -> None:
+    if isinstance(model, DenseModel):
+        return
+    inner = next((n for n, m in model.named_children() if isinstance(m, DenseModel)), None) \
+        if isinstance(model, torch.nn.Module) else None
+    hint = (f" It wraps one as .{inner}: save that, and rebuild the wrapper around "
+            f"manyseg.load(path)." if inner else "")
+    if isinstance(model, torch.fx.GraphModule):
+        hint = (" An ep.module() can't be saved: save the ExportedProgram itself, "
+                "manyseg.save(ep, 'model.pt2', source=float_model).")
+    raise TypeError(
+        f"save takes a manyseg DenseModel, got {type(model).__name__}.{hint} Unwrap "
+        f"compiled, DataParallel or wrapped models first (e.g. model._orig_mod, model.module, "
+        f"model.model)."
+    )
+
+
+def save(model: DenseModel | torch.export.ExportedProgram, path: str | Path, *,
+         source: DenseModel | None = None, normalize: Any = None,
          activations: Mapping[str, str] | None = None,
          classes: Mapping[str, Sequence[str]] | Sequence[str] | None = None,
          bands: Mapping[str, Sequence[str]] | Sequence[str] | None = None,
          extra: Mapping[str, Any] | None = None) -> Path:
     """Save ``model`` (built with :func:`manyseg.create_model`) to ``path`` (``.safetensors``).
 
+    Quantised models save too, and need ``torchao`` again to load (``manyseg[quant]``):
+
+    * A :func:`~manyseg.quantize.quantize_weights` model: as above, to a ``.safetensors`` file.
+    * A :func:`~manyseg.quantize.quantize_pt2e` program: to a ``.pt2`` file, with
+      ``source=`` the float model it was quantised from (an ``ExportedProgram`` doesn't know
+      its heads, scales or padding).
+
     Args:
+        source: The float model an ``ExportedProgram`` came from; only for those.
         normalize: How inputs must be normalised for this model, as a ManyPred normalisation
             spec: pass the normalisation you trained with. ``"weights"`` uses what the
             remote-sensing pretrained weights the model was built with expect
@@ -107,16 +146,40 @@ def save(model: DenseModel, path: str | Path, *, normalize: Any = None,
         bands: Band names, per input (``{input: [...]}``) or for a single input.
         extra: Any other JSON-compatible metadata, stored as is.
     """
-    if not isinstance(model, DenseModel):
-        inner = next((n for n, m in model.named_children() if isinstance(m, DenseModel)), None) \
-            if isinstance(model, torch.nn.Module) else None
-        hint = (f" It wraps one as .{inner}: save that, and rebuild the wrapper around "
-                f"manyseg.load(path)." if inner else "")
-        raise TypeError(
-            f"save takes a manyseg DenseModel, got {type(model).__name__}.{hint} Unwrap "
-            f"compiled, DataParallel, quantised or wrapped models first (e.g. "
-            f"model._orig_mod, model.module, model.model)."
-        )
+    names = {"normalize": normalize, "activations": activations, "classes": classes,
+             "bands": bands, "extra": extra}
+    if isinstance(model, torch.export.ExportedProgram):
+        if source is None:
+            raise TypeError("save(ExportedProgram) needs source=<the float DenseModel it was "
+                            "quantised from>: the program doesn't know its heads, scales or "
+                            "padding.")
+        from .quantize import _save_program
+
+        _require_dense(source)
+        return _save_program(model, source, Path(path), _metadata(source, **names))
+    if source is not None:
+        raise TypeError("source= is only for saving an ExportedProgram.")
+    _require_dense(model)
+    quantised = _quantization(model)
+    meta = _metadata(model, **names)
+    if quantised is not None:
+        meta["format"] = QUANTIZED_FORMAT
+        meta["quantization"] = quantised
+    from safetensors.torch import save_file
+
+    tensors, aliases = _dedup_state(model)
+    tensors, parts = _split_quantized(tensors)
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    stored = {_KEY: json.dumps(meta), _ALIASES: json.dumps(aliases)}
+    if parts:
+        stored[_PARTS] = json.dumps(parts)
+    save_file(tensors, str(path), metadata=stored)
+    return path
+
+
+def _metadata(model: DenseModel, *, normalize: Any, activations, classes, bands, extra) -> dict:
+    """Check what :func:`save` was given and return the metadata every file stores."""
     config = getattr(model, "build_config", None)
     if config is None:
         raise ValueError(
@@ -168,7 +231,7 @@ def save(model: DenseModel, path: str | Path, *, normalize: Any = None,
         warnings.warn(
             "No normalisation stored: whoever runs this model must normalise inputs as in "
             "training. Pass normalize=<the spec you trained with>.",
-            stacklevel=2,
+            stacklevel=3,
         )
     _check_rebuildable(model, config)
     first = next(iter(model.parameters()))
@@ -187,20 +250,87 @@ def save(model: DenseModel, path: str | Path, *, normalize: Any = None,
         "extra": dict(extra or {}),
     }
     try:
-        meta = _plain(meta)
+        return _plain(meta)
     except TypeError as e:
         raise ValueError(f"save metadata must be plain JSON-compatible data: {e}") from None
-    from safetensors.torch import save_file
-
-    tensors, aliases = _dedup_state(model)
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    save_file(tensors, str(path), metadata={_KEY: json.dumps(meta),
-                                            _ALIASES: json.dumps(aliases)})
-    return path
 
 
 _ALIASES = "manyseg_aliases"
+_PARTS = "manyseg_quantized"  # {weight name: its plain tensors' names}
+
+
+def _is_quantized(t: torch.Tensor) -> bool:
+    """A torchao quantised weight: a tensor subclass made of plain tensors."""
+    return hasattr(t, "tensor_data_names")
+
+
+def _quantization(model: DenseModel) -> dict | None:
+    """What :func:`load` needs to quantise the rebuilt model the same way; None for a float
+    model. Raises for weights quantised some other way, which load could not rebuild."""
+    recipe = getattr(model, "quantization", None)
+    state = model.state_dict(keep_vars=True).values()
+    foreign = {type(t).__name__ for t in state if not _is_quantized(t)
+               and type(t) not in (torch.Tensor, torch.nn.Parameter)}
+    if foreign:
+        import torchao
+
+        raise ValueError(
+            f"Can't save weights of type {sorted(foreign)}: they don't split into plain tensors. "
+            f"This torchao ({torchao.__version__}) quantises some layers that way; upgrade it "
+            f"(manyseg[quant] needs 0.18 or newer), then quantise again."
+        )
+    if not any(_is_quantized(t) for t in state):
+        return None
+    if recipe is None:
+        raise ValueError(
+            "This model has torchao quantised weights but did not come from "
+            "manyseg.quantize.quantize_weights, so load could not rebuild it. Quantise it with "
+            "quantize_weights, or quantize_pt2e and save the ExportedProgram."
+        )
+    import torchao
+
+    return {"route": "weights", **recipe, "torchao_version": torchao.__version__}
+
+
+def _split_quantized(tensors: Mapping[str, torch.Tensor]) -> tuple[dict, dict]:
+    """Replace each quantised weight by its plain tensors, which safetensors can store;
+    ``parts`` maps the weight's name to their names."""
+    plain, parts = {}, {}
+    for name, t in tensors.items():
+        if not _is_quantized(t):
+            plain[name] = t
+            continue
+        present = [p for p in (*t.tensor_data_names,
+                               *(getattr(t, "optional_tensor_data_names", None) or ()))
+                   if getattr(t, p) is not None]
+        parts[name] = present
+        for p in present:
+            plain[f"{name}:{p}"] = getattr(t, p).detach().contiguous().clone()
+    return plain, parts
+
+
+def _fill_quantized(model: DenseModel, stored: dict, parts: Mapping[str, Sequence[str]]) -> None:
+    """Put the stored tensors into the rebuilt model's quantised weights, and raise if the two
+    don't line up (the installed torchao quantises differently from the one that saved)."""
+    own = {k: t for k, t in model.state_dict(keep_vars=True).items() if _is_quantized(t)}
+    seen: dict[int, str] = {}
+    canonical = {k: t for k, t in own.items() if seen.setdefault(id(t), k) == k}
+    if set(canonical) != set(parts):
+        diff = sorted(set(canonical) ^ set(parts))
+        raise RuntimeError(f"quantised weights differ from the file's: {diff[:3]}")
+    for name, tensor in canonical.items():
+        want = [p for p in (*tensor.tensor_data_names,
+                            *(getattr(tensor, "optional_tensor_data_names", None) or ()))
+                if getattr(tensor, p) is not None]
+        if sorted(want) != sorted(parts[name]):
+            raise RuntimeError(f"{name} is made of {want} here, {list(parts[name])} in the file")
+        for p in want:
+            new = stored[f"{name}:{p}"]
+            old = getattr(tensor, p)
+            if new.shape != old.shape:
+                raise RuntimeError(f"{name}:{p} has shape {tuple(new.shape)} in the file, "
+                                   f"{tuple(old.shape)} here")
+            setattr(tensor, p, new.to(old.device))
 
 
 def _dedup_state(model: torch.nn.Module) -> tuple[dict, dict]:
@@ -215,7 +345,7 @@ def _dedup_state(model: torch.nn.Module) -> tuple[dict, dict]:
             aliases[name] = first[id(t)]
             continue
         first[id(t)] = name
-        tensors[name] = t.detach().contiguous().clone()
+        tensors[name] = t if _is_quantized(t) else t.detach().contiguous().clone()
     return tensors, aliases
 
 
@@ -259,10 +389,16 @@ def _check_rebuildable(model: DenseModel, config: Mapping[str, Any]) -> None:
     from .models import create_model
 
     rebuilt = create_model(**_no_download(dict(config)))
+    recipe = getattr(model, "quantization", None)
     if model.single_output is not None and rebuilt.single_output is None:
         rebuilt.select_heads([model.single_output])
     elif list(rebuilt.heads) != list(model.heads):
         rebuilt.select_heads(list(model.heads))
+    if recipe is not None:
+        from .quantize import quantize_weights
+
+        quantize_weights(rebuilt, recipe["mode"], conv=recipe["conv"], inplace=True)
+        rebuilt.to(next(model.parameters()).device)
     want, have = _structure(model), _structure(rebuilt)
     if want != have:
         diff = sorted(set(want) ^ set(have)) or sorted(k for k in want if want[k] != have[k])
@@ -289,23 +425,45 @@ def read_metadata(path: str | Path, *, token: str | None = None) -> dict:
     from safetensors import safe_open
 
     path = _local(path, token)
-    with safe_open(str(path), framework="pt") as f:
-        stored = (f.metadata() or {}).get(_KEY)
+    if _is_zip(path):
+        stored = _read_archive_metadata(path)
+    else:
+        with safe_open(str(path), framework="pt") as f:
+            stored = (f.metadata() or {}).get(_KEY)
     if stored is None:
-        raise ValueError(f"{path} was not written by manyseg.save (no {_KEY!r} metadata).")
+        raise ValueError(f"{path} was not written by manyseg.save (no {_KEY!r} metadata). A "
+                         f"program from torch.export.save has none: save it with "
+                         f"manyseg.save(ep, path, source=float_model).")
     meta = json.loads(stored)
     fmt = meta.get("format")
     if not isinstance(fmt, int) or fmt < 1:
         raise ValueError(f"{path}: invalid save format {fmt!r}.")
-    if fmt > FORMAT:
-        raise ValueError(f"{path} uses save format {fmt}; this ManySeg reads up to {FORMAT}. "
-                         f"Upgrade ManySeg.")
+    if fmt > QUANTIZED_FORMAT:
+        raise ValueError(f"{path} uses save format {fmt}; this ManySeg reads up to "
+                         f"{QUANTIZED_FORMAT}. Upgrade ManySeg.")
+    if fmt == QUANTIZED_FORMAT and not isinstance(meta.get("quantization"), Mapping):
+        raise ValueError(f"{path}: save format {fmt} without quantisation metadata.")
     missing = {"create_model", "heads", "activations"} - set(meta)
     if missing:
         raise ValueError(f"{path}: metadata lacks {sorted(missing)}.")
     if fmt < 2:
         meta["create_model"] = _migrate_v1(meta["create_model"])
     return meta
+
+
+def _is_zip(path: str | Path) -> bool:
+    """A ``.pt2`` archive is a zip file; a safetensors file starts with its header's length."""
+    with open(path, "rb") as f:
+        return f.read(4) == b"PK\x03\x04"
+
+
+def _read_archive_metadata(path: str | Path) -> str | None:
+    """The metadata in a ``.pt2`` archive, read as text: nothing else in it is touched."""
+    import zipfile
+
+    with zipfile.ZipFile(path) as z:
+        name = next((n for n in z.namelist() if n.endswith(f"/extra/{_KEY}.json")), None)
+        return z.read(name).decode() if name is not None else None
 
 
 def _migrate_v1(config: dict) -> dict:
@@ -357,6 +515,14 @@ def _version_error(path, meta: dict, err: Exception) -> Exception:
     model was built once when it was saved, so a failure here is either a newer ManySeg's
     option or a missing migration."""
     saved = meta.get("manyseg_version", "unknown")
+    recipe = meta.get("quantization")
+    if recipe is not None:
+        import torchao
+
+        return ValueError(f"{path} cannot be rebuilt: it was saved with torchao "
+                          f"{recipe.get('torchao_version')}, and this torchao "
+                          f"({torchao.__version__}) quantises it differently ({err}). Install "
+                          f"the torchao it was saved with, or a newer one.")
     if _is_newer(saved, __version__):
         return ValueError(f"{path} was saved by ManySeg {saved}; this is {__version__}, which "
                           f"cannot rebuild it ({err}). It may use options added since: upgrade "
@@ -368,19 +534,34 @@ def _version_error(path, meta: dict, err: Exception) -> Exception:
 
 
 def load(path: str | Path, map_location: str | torch.device = "cpu", *,
-         token: str | None = None) -> DenseModel:
+         token: str | None = None) -> Any:
     """Rebuild and load a model saved with :func:`save`, in eval mode, on ``map_location`` and
     in the dtype it was saved in. Its metadata is on ``model.saved_metadata`` and its
     ``tiling_spec()`` includes the stored normalisation and activations. ``path`` may name a
     Hub model, ``"hf-hub:org/name[@revision]"``, downloaded once and cached (see
     :mod:`manyseg.hub`; ``token`` for a private one, default ``HF_TOKEN`` or the stored
-    login)."""
+    login).
+
+    A quantised file needs torchao (``manyseg[quant]``). A ``quantize_weights`` file gives a
+    :class:`~manyseg.DenseModel` with int8 weights, like the one saved. A ``quantize_pt2e`` file
+    gives a :class:`~manyseg.quantize.QuantizedProgram`: a callable with ``tiling_spec()``, not an
+    ``nn.Module``."""
     from safetensors.torch import load_file
 
     from .models import create_model
 
     path = _local(path, token)
     meta = read_metadata(path)
+    recipe = meta.get("quantization")
+    if recipe is not None:
+        from .quantize import _load_program, _require_torchao
+
+        _require_torchao(f"{path} holds a quantised model; loading it")
+        if recipe.get("route") == "pt2e":
+            return _load_program(path, meta, map_location)
+        if recipe.get("route") != "weights":
+            raise ValueError(f"{path}: unknown quantisation route {recipe.get('route')!r}. "
+                             f"Upgrade ManySeg.")
     try:
         model = create_model(**_no_download(meta["create_model"]))
     except (TypeError, ValueError) as e:
@@ -395,14 +576,32 @@ def load(path: str | Path, map_location: str | torch.device = "cpu", *,
     from safetensors import safe_open
 
     with safe_open(str(path), framework="pt") as f:
-        aliases = json.loads((f.metadata() or {}).get(_ALIASES, "{}"))
+        stored = f.metadata() or {}
+    aliases = json.loads(stored.get(_ALIASES, "{}"))
     state = load_file(str(path), device="cpu")
-    state.update({alias: state[name] for alias, name in aliases.items()})
     try:
-        model.load_state_dict(state, strict=True)
-    except RuntimeError as e:
+        if recipe is not None:
+            from .quantize import quantize_weights
+
+            quantize_weights(model, recipe["mode"], conv=recipe["conv"], inplace=True)
+            parts = json.loads(stored.get(_PARTS, "{}"))
+            _fill_quantized(model, state, parts)
+            quantised = {k for k, t in model.state_dict(keep_vars=True).items()
+                         if _is_quantized(t)}
+            state = {k: v for k, v in state.items() if k.rpartition(":")[0] not in parts}
+            state.update({a: state[n] for a, n in aliases.items() if a not in quantised})
+            result = model.load_state_dict(state, strict=False)
+            bad = [*result.unexpected_keys, *(set(result.missing_keys) - quantised)]
+            if bad:
+                raise RuntimeError(f"state dict mismatch: {sorted(bad)[:3]}")
+        else:
+            state.update({alias: state[name] for alias, name in aliases.items()})
+            model.load_state_dict(state, strict=True)
+    except (RuntimeError, KeyError) as e:
         raise _version_error(path, meta, e) from e
     model.saved_metadata = meta
+    if recipe is not None:
+        model.quantization = {"mode": recipe["mode"], "conv": recipe["conv"]}
     for rec in meta.get("pretrained_weights") or []:  # load built the backbones without them
         rec = dict(rec)
         model.get_submodule(rec.pop("module")).restored_attribution = rec
