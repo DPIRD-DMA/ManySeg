@@ -28,7 +28,7 @@ import torch.nn.functional as F
 sys.path.insert(0, str(Path(__file__).parent))
 import models  # noqa: E402
 
-CACHE = Path(os.environ.get("MANYSEG_BENCH_DATA", "$MANYSEG_BENCH_DATA")) \
+CACHE = Path(os.environ.get("MANYSEG_BENCH_DATA", "data")) \
     / "cache" / "cloudsen12plus_high"
 
 

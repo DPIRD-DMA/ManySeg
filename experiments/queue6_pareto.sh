@@ -9,8 +9,8 @@
 #   nohup bash experiments/queue6_pareto.sh > experiments/queue6.log 2>&1; \
 #     echo $? > experiments/queue6.log.exit
 set -u
-MAIN="$WORKSPACE/ManySeg"
-DATA="$MANYSEG_BENCH_DATA"
+MAIN="${MANYSEG_REPO:?set to the main checkout}"
+DATA="${MANYSEG_BENCH_DATA:?set to the dataset root}"
 cd "$MAIN"
 until [ -f experiments/queue3.log.exit ]; do sleep 60; done
 # Name the other queues explicitly: a generic "queue*.sh" pattern would match this script.
@@ -20,7 +20,7 @@ for ds in oxford_pet sen1floods11; do
   [ -f "$DATA/cache/$ds/test_masks.npy" ] || { echo "DATASET NOT PREPARED: $ds"; exit 3; }
 done
 SHA=$(git rev-parse --short HEAD)
-WT="$WORKSPACE/ManySeg-runs/$SHA"
+WT="${MANYSEG_RUNS:?set to the frozen-worktree directory}/$SHA"
 [ -d "$WT" ] || git worktree add --detach "$WT" "$SHA"
 cd "$WT" && uv sync --all-packages -q
 export OUT_ROOT="$MAIN" RECIPE=fastai_like MANYSEG_BENCH_DATA="$DATA"

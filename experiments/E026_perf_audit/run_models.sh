@@ -2,7 +2,7 @@
 # E026 model grid: current code vs each patch, alternating (A B A B) so drift hits both.
 # Run from the frozen worktree; results go to the main tree's runs/.
 set -u
-MAIN="$WORKSPACE/ManySeg"
+MAIN="${MANYSEG_REPO:?set to the main checkout}"
 D="experiments/E026_perf_audit"
 OUT="$MAIN/$D/runs/models.jsonl"
 mkdir -p "$MAIN/$D/runs"

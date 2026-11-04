@@ -5,7 +5,7 @@
 set -euo pipefail
 MAIN="$(cd "$(dirname "$0")/../.." && pwd)"
 SHA=$(git -C "$MAIN" rev-parse --short HEAD)
-WT="$WORKSPACE/ManySeg-runs/e011c-$SHA"
+WT="${MANYSEG_RUNS:?set to the frozen-worktree directory}/e011c-$SHA"
 [ -d "$WT" ] || git -C "$MAIN" worktree add --detach "$WT" "$SHA"
 (cd "$WT" && uv sync --all-packages -q)
 OUT_ROOT=${OUT_ROOT:-$MAIN}

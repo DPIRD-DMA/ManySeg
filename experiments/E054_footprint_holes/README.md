@@ -3,7 +3,7 @@
 Why: the Codex release review (2026-11-02) found that the B3 decoder fills holes:
 `polygons_from_corners` straightens only an instance's exterior ring, so with perfect targets a
 3,200 px courtyard building decodes as 3,600 px with no interior, although `footprint_targets`
-keeps courtyards. The user asked for this to be fixed, not documented. New option `holes`: an
+keeps courtyards. The maintainer asked for this to be fixed, not documented. New option `holes`: an
 instance's holes of at least `min_area` (16 px) are cut out of the straightened polygon as their
 traced outline simplified by `simplify` px. `corner_targets` puts no corners or directions on
 hole walls, so holes are not straightened. Risk on trained models: a predicted instance mask can

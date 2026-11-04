@@ -193,7 +193,7 @@ graph/segmentation hybrid is a candidate oracle (E031b) if LoD2 becomes a priori
 
 # E031b: roof graph with a plane-segmentation fallback (pre-registered 2026-10-27 10:20)
 
-Suggested by the user after E031: one model with roof-graph heads and a building-mask head, the
+Suggested by the maintainer after E031: one model with roof-graph heads and a building-mask head, the
 height model as input; decode with the graph where it works and fall back to plane segmentation
 where it does not. The fallback needs no extra head (A0 uses only the mask and the height model).
 

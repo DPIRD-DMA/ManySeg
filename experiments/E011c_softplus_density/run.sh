@@ -2,7 +2,7 @@
 # E011c: plain vs softplus density head on OAM-TCD (E011 density-arm protocol).
 # PREFLIGHT=1: one epoch of each arm (seed 0, models saved for the visual check) instead.
 set -u
-export MANYSEG_BENCH_DATA="$MANYSEG_BENCH_DATA"
+export MANYSEG_BENCH_DATA="${MANYSEG_BENCH_DATA:?set to the dataset root}"
 RECIPE=${RECIPE:-fastai_like}
 EXP=${OUT_ROOT:-.}/experiments/E011c_softplus_density
 PLAIN='{"density": true, "density_activation": null}'  # explicit since the default changed

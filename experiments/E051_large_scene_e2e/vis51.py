@@ -4,6 +4,7 @@ decoder's block cores, overview + seam close-ups.
     uv run python vis51.py roofs|roads <out dir>
 """
 
+import os
 import pickle
 import sys
 from pathlib import Path
@@ -16,7 +17,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 from matplotlib.collections import LineCollection, PatchCollection  # noqa: E402
 from matplotlib.patches import Polygon as MP  # noqa: E402
 
-DATA = Path("$MANYSEG_BENCH_DATA")
+DATA = Path(os.environ.get("MANYSEG_BENCH_DATA", "data"))
 OUT = DATA / "cache" / "e051_out"
 PATCH, OVERLAP, BLOCK = 1024, 256, 1024
 task, dest = sys.argv[1], Path(sys.argv[2])
@@ -30,7 +31,7 @@ else:
 
 
 def tile_cuts(n):  # ManyPred cut lines: middle of each overlap between neighbouring windows
-    sys.path.insert(0, "$WORKSPACE/ManyPred-wt/blocks/src")
+    sys.path.insert(0, os.environ.get("MANYPRED_SRC", "../ManyPred/src"))
     from manypred.windows import make_patch_indexes
     starts = sorted({w[0] for w in make_patch_indexes(n, n, PATCH, OVERLAP)})
     return [(a + PATCH + b) / 2 for a, b in zip(starts[:-1], starts[1:])]

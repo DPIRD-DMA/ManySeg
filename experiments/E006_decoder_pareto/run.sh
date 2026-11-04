@@ -3,7 +3,7 @@
 # for the configs listed in $FRONTIER (written by analyse.py --write-frontier; <= 32 runs).
 # STAGE=profile: the timing / memory sweep only (repeatable on an idle GPU; no training).
 set -u
-export MANYSEG_BENCH_DATA="${MANYSEG_BENCH_DATA:-$MANYSEG_BENCH_DATA}"
+export MANYSEG_BENCH_DATA="${MANYSEG_BENCH_DATA:?set to the dataset root}"
 RECIPE=${RECIPE:-fastai_like}
 STAGE=${STAGE:?set STAGE=1, 2 or profile}
 DIR=experiments/E006_decoder_pareto

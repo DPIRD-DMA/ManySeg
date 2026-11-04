@@ -1,6 +1,6 @@
 # E011: Tree localisation and counting heads on OAM-TCD (pre-registered)
 
-Status: **complete** (2026-10-14; 9 runs on Pawsey Setonix, AMD MI250X; hm_mse/density code `e69f564`, hm_focal `cfb0548` after the amendment below). Dataset approved by the user:
+Status: **complete** (2026-10-14; 9 runs on Pawsey Setonix, AMD MI250X; hm_mse/density code `e69f564`, hm_focal `cfb0548` after the amendment below). Dataset approved by the maintainer:
 OAM-TCD CC BY 4.0 subset, stored at 1024² (20 cm). Trees are points (polygon centroids) and
 canopy groups are ignore regions.
 

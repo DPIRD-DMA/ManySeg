@@ -22,7 +22,7 @@ import e037 as P
 
 E = P.E
 HERE = Path(__file__).resolve().parent
-DATA = "$MANYSEG_BENCH_DATA"
+DATA = os.environ.get("MANYSEG_BENCH_DATA", "data")
 OSM_AREAS = ("murdoch", "northam")
 CITYSCALE = Path(DATA) / "cache/cityscale"
 WHU = Path(DATA) / "cache/whu_aerial/val_poly.npz"

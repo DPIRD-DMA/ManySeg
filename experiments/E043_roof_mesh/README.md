@@ -1,7 +1,7 @@
 # E043: roof meshes from graph faces + per-face planes (pre-registered 2026-10-28 17:00)
 
 User's idea (28 Oct): the graph gives the top-down roof faces; raster heads give the height; fit
-one 3D plane per face; join the oriented polygons into a mesh with the minimum adjustment. The user
+one 3D plane per face; join the oriented polygons into a mesh with the minimum adjustment. The maintainer
 asked whether height alone suffices (vs height + two slope rasters); both are tested. Code:
 `e043.py`, `run43.py`; E031's 3DBAG tiles (Leidsche Rijn, Staphorst; 40 tiles each, 0.25 m/px),
 levels L0-L3, seeds 0-4. Faces: E031b's hybrid decoder (its tuned settings per level), shared by all

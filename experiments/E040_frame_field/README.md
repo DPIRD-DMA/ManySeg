@@ -5,7 +5,7 @@ Why: the literature review (ManySeg-e028/notes/literature_unified_graphs.md) and
 pixel as the complex coefficients (c0, c2) of z^4 + c2 z^2 + c0. One head can then carry walls,
 corners and (for roads) crossings. If the field also gives corners (FFL's rule: a corner is where
 the outline switches between the two frame directions), the unified head set loses the corner map.
-Approved by the user (13:19: queue the most promising approaches, write the code, Codex review).
+Approved by the maintainer (13:19: queue the most promising approaches, write the code, Codex review).
 
 ## Arms (E035b harness: OSM vector GT, E028 corruptions, B0's instances for closure)
 * **heat**: B3r as E035b (corner heatmap + (cos 2t, sin 2t) line field), its 16-setting grid.

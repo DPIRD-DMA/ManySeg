@@ -5,7 +5,7 @@ copying staircases. Post hoc (E036 README) B3 had the most accurate outlines on 
 vertex-free measure but lost on C-IoU's vertex count. 42% of B3's mask failures touch the tile
 edge, where outlines are artificial cuts. This experiment fixes the score *before* looking at
 any new result: it re-scores existing models (no retraining) and adds seeds by the rule below.
-Approved by the user 2026-10-28 11:54.
+Approved by the maintainer 2026-10-28 11:54.
 
 ## Arms (decoders tuned on val, test once)
 * **B0**: E030 B0 instance thresholds (0.6 / 0.5 / 0.15, as registered for B3), Douglas-Peucker

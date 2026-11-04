@@ -21,7 +21,7 @@
   (they depend on the wall's whole length), and the loss penalises a geometrically equivalent
   vertex placed elsewhere on the same wall.
 
-## Options discussed with the user
+## Options discussed with the maintainer
 1. **B2t, wall-tolerant vertex loss:** keep B2 (densified points for the vectors) but do not
    penalise vertex-map predictions on a true wall; real corners stay exact targets.
 2. **B2c, corners only:** no densification; vectors reach the next real corner (long vectors).

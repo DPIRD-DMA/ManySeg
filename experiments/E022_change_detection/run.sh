@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # E022: binary change detection, early fusion vs Siamese fusions (README.md). Local RTX 4090.
 set -u
-export MANYSEG_BENCH_DATA="${MANYSEG_BENCH_DATA:-$MANYSEG_BENCH_DATA}"
+export MANYSEG_BENCH_DATA="${MANYSEG_BENCH_DATA:?set to the dataset root}"
 OUT=${OUT_ROOT:-.}/experiments/E022_change_detection/runs
 SEEDS=${SEEDS:-0,1,2}
 SIAM='"input_options": {"t2": {"backbone": "shared:t1", "share_norm": true}}'

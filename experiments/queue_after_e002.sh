@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Runs E003 -> E001b -> E005 from a frozen worktree after E002 finishes.
 set -u
-MAIN="$WORKSPACE/ManySeg"
+MAIN="${MANYSEG_REPO:?set to the main checkout}"
 cd "$MAIN"
 until [ -f experiments/E002_provider_comparison_pet/run.log.exit ]; do sleep 60; done
 echo "E002 finished with exit $(cat experiments/E002_provider_comparison_pet/run.log.exit)"
@@ -17,10 +17,10 @@ PY
 )
 echo "RECIPE=$RECIPE"
 SHA=$(git rev-parse --short HEAD)
-WT="$WORKSPACE/ManySeg-runs/$SHA"
+WT="${MANYSEG_RUNS:?set to the frozen-worktree directory}/$SHA"
 [ -d "$WT" ] || git worktree add --detach "$WT" "$SHA"
 cd "$WT" && uv sync --all-packages -q
-export OUT_ROOT="$MAIN" RECIPE MANYSEG_BENCH_DATA="$MANYSEG_BENCH_DATA"
+export OUT_ROOT="$MAIN" RECIPE MANYSEG_BENCH_DATA="${MANYSEG_BENCH_DATA:?set to the dataset root}"
 # Fail fast: one tiny real run through the same CLI path before committing hours of GPU time.
 if ! uv run manyseg-bench train --provider manyseg --recipe smoke --set '{"epochs": 1}' \
      --out "$MAIN/runs/preflight" --tag preflight; then

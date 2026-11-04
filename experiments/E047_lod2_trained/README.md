@@ -1,6 +1,6 @@
 # E047: trained LoD2 roof faces from aerial RGB + AHN heights (pre-registered 2026-10-28 18:20)
 
-Why: the user's roof idea (graph faces + one plane per face from height, E043/E043b) has only
+Why: the maintainer's roof idea (graph faces + one plane per face from height, E043/E043b) has only
 been tested as an oracle (E031, E043b). This is the first trained screen. User authorised
 autonomous overnight work (16:13), local or remote compute as reasonable.
 

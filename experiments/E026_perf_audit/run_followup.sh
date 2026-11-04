@@ -2,7 +2,7 @@
 # E026 follow-up: reruns after two harness fixes (checkpointing with timm's in-place ReLUs;
 # CloudSEN12 ignore labels in the fetch benchmark). Waits for part 2.
 set -u
-MAIN="$WORKSPACE/ManySeg"
+MAIN="${MANYSEG_REPO:?set to the main checkout}"
 D="experiments/E026_perf_audit"
 R="$MAIN/$D/runs"
 until [ -f "$MAIN/experiments/e026_rest.log.exit" ]; do sleep 20; done

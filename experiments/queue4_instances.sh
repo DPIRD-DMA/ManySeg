@@ -2,15 +2,15 @@
 # Queue 4: E010 instance heads. Waits for queue2 to finish AND for the dataset cache to exist
 # (dataset download needs user approval), then runs from a frozen worktree.
 set -u
-MAIN="$WORKSPACE/ManySeg"
-DATA="$MANYSEG_BENCH_DATA"
+MAIN="${MANYSEG_REPO:?set to the main checkout}"
+DATA="${MANYSEG_BENCH_DATA:?set to the dataset root}"
 cd "$MAIN"
 until [ -f experiments/queue2.log.exit ]; do sleep 60; done
 if [ ! -f "$DATA/cache/ai4boundaries/train_masks.npy" ]; then
   echo "DATASET NOT PREPARED: ai4boundaries (awaiting user approval)"; exit 3
 fi
 SHA=$(git rev-parse --short HEAD)
-WT="$WORKSPACE/ManySeg-runs/$SHA"
+WT="${MANYSEG_RUNS:?set to the frozen-worktree directory}/$SHA"
 [ -d "$WT" ] || git worktree add --detach "$WT" "$SHA"
 cd "$WT" && uv sync --all-packages -q
 export OUT_ROOT="$MAIN" MANYSEG_BENCH_DATA="$DATA"

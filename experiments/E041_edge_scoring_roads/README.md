@@ -6,7 +6,7 @@ candidate nodes and *score candidate edges*, rather than tracing a skeleton. E03
 centreline skeleton is fragile under corruption (spurs defeat gap bridging). R5 keeps the unified
 heads and replaces skeleton tracing with candidate nodes + edge scoring, and uses E040's frame
 field (two unordered directions per pixel; at crossings, the two roads' directions) instead of
-R4's two-mode direction field. Approved by the user 13:19; code reviewed by Codex before running
+R4's two-mode direction field. Approved by the maintainer 13:19; code reviewed by Codex before running
 (notes/codex_e040_e041.md, all 9 findings fixed: label-free use of the frame field, point-to-
 segment crossing test, crossing precedence over nearby junction/end peaks, across-crossing edges
 placed first, unused direction head dropped, this harness).

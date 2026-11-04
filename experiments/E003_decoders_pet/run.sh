@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -u
-export MANYSEG_BENCH_DATA="$MANYSEG_BENCH_DATA"
+export MANYSEG_BENCH_DATA="${MANYSEG_BENCH_DATA:?set to the dataset root}"
 RECIPE=${RECIPE:?set RECIPE}
 OUT=${OUT_ROOT:-.}/experiments/E003_decoders_pet/runs
 for seed in 0 1 2; do

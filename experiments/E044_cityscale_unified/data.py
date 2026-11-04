@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import os
 import argparse
 import json
 import sys
@@ -21,8 +22,8 @@ sys.path[:0] = [str(HERE.parent / "E039_unified_roads"), str(HERE.parent / "E028
 import e039 as R  # noqa: E402
 
 E = R.E
-GRAPHS = Path("$MANYSEG_BENCH_DATA/cache/cityscale")
-IMAGES = Path("$MANYSEG_BENCH_DATA/raw/rngdet_roads/cityscale/data/20cities")
+GRAPHS = Path(os.environ.get("MANYSEG_BENCH_DATA", "data"), "cache/cityscale")
+IMAGES = Path(os.environ.get("MANYSEG_BENCH_DATA", "data"), "raw/rngdet_roads/cityscale/data/20cities")
 T = E.TILE  # 1024
 WIDTH_PX = 6.0  # City-Scale has no road widths; 6 m at 1 m/px
 CH = ("mask", "line", "junction", "end", "crossing")

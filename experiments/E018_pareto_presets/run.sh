@@ -2,7 +2,7 @@
 # E018: encoder x decoder Pareto sweep (local RTX 4090). STAGE=screen (1 seed, all configs) |
 # confirm (seeds 1-2 for configs listed in CONFIRM) | profile (compiled bf16 latency, idle GPU).
 set -u
-export MANYSEG_BENCH_DATA="${MANYSEG_BENCH_DATA:-$MANYSEG_BENCH_DATA}"
+export MANYSEG_BENCH_DATA="${MANYSEG_BENCH_DATA:?set to the dataset root}"
 STAGE=${STAGE:-screen}
 OUT=${OUT_ROOT:-.}/experiments/E018_pareto_presets/runs
 ENCODERS="resnet18:tv_in1k resnet34:tv_in1k efficientnet_b0:ra_in1k pvt_v2_b0:in1k"

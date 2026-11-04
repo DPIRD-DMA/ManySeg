@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # E015 (local RTX 4090): 13-band 10 m stack vs native-resolution S2 band groups (Sen1Floods11).
 set -u
-export MANYSEG_BENCH_DATA="${MANYSEG_BENCH_DATA:-$MANYSEG_BENCH_DATA}"
+export MANYSEG_BENCH_DATA="${MANYSEG_BENCH_DATA:?set to the dataset root}"
 RECIPE=${RECIPE:-fastai_like}
 OUT=${OUT_ROOT:-.}/experiments/E015_s2_native_resolution/runs
 G='"band_groups": {"s2_10m": {"bands": [1, 2, 3, 7], "factor": 1}, "s2_20m": {"bands": [4, 5, 6, 8, 11, 12], "factor": 2}, "s2_60m": {"bands": [0, 9, 10], "factor": 6}}, "fusion": {"type": "intermediate", "op": "concat"}'

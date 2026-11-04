@@ -4,7 +4,7 @@
 # Q2: do Sentinel-2 resolution band groups with a shared encoder beat the stack (E015 replication)?
 # 6 arms x 3 seeds = 18 runs; e016-none is the shared baseline of Q1 and Q2.
 set -u
-export MANYSEG_BENCH_DATA="${MANYSEG_BENCH_DATA:-$MANYSEG_BENCH_DATA}"
+export MANYSEG_BENCH_DATA="${MANYSEG_BENCH_DATA:?set to the dataset root}"
 RECIPE=${RECIPE:-fastai_like}
 OUT=${OUT_ROOT:-.}/experiments/E016_pastis_date_metadata/runs
 SET='{"epochs": 30, "batch_size": 16}'

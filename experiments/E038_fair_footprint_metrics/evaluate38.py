@@ -8,6 +8,7 @@ Douglas-Peucker (1.5 px) GT; primary boundary F with tile-edge points excluded.
 
 from __future__ import annotations
 
+import os
 import argparse
 import itertools
 import json
@@ -27,7 +28,7 @@ from common import MEAN, STD, WHUTiles, b0_probabilities, b3_probabilities, load
 from train import build  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
-CACHE = Path("$MANYSEG_BENCH_DATA/cache/whu_aerial")
+CACHE = Path(os.environ.get("MANYSEG_BENCH_DATA", "data"), "cache/whu_aerial")
 TILE = 512
 B0_THR = dict(extent_threshold=0.6, boundary_threshold=0.5, seed_threshold=0.15)
 GRID = {

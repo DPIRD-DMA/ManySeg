@@ -3,7 +3,7 @@
 # input_cross (Q3) arms. 8 arms per seed: with EMIT_TASKS, each seed is one 8-GCD pack
 # (scripts/setonix/manyseg_pack.sbatch ... 8), so a pack stages the cache once.
 set -u
-export MANYSEG_BENCH_DATA="${MANYSEG_BENCH_DATA:-$MANYSEG_BENCH_DATA}"
+export MANYSEG_BENCH_DATA="${MANYSEG_BENCH_DATA:?set to the dataset root}"
 RECIPE=${RECIPE:-fastai_like}
 OUT=${OUT_ROOT:-.}/experiments/E013_cloudsen12/runs
 SET='{"epochs": 20, "batch_size": 16}'

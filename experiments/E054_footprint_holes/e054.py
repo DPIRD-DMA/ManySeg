@@ -20,7 +20,7 @@ import torch
 
 HERE = Path(__file__).resolve().parent
 EXP = HERE.parent
-RUNS = Path("$WORKSPACE/ManySeg-runs")
+RUNS = Path(os.environ.get("MANYSEG_RUNS", "../ManySeg-runs"))
 CKPT = [RUNS / f"e036-f2d2f86/experiments/E030_whu_polygons/runs/B3_s{s}.pt" for s in (0, 1)]
 THR = dict(extent_threshold=0.6, boundary_threshold=0.5, seed_threshold=0.15, min_seed=8)
 PARAMS = dict(corner_threshold=0.5, big_dev=4.0, agree=0.4, merge_deg=8.0)

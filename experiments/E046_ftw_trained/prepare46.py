@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import os
 import json
 import sys
 from pathlib import Path
@@ -24,8 +25,8 @@ from shapely.geometry import Polygon, shape  # noqa: E402
 MIN_AREA = 16
 SIMPLIFY = 1.0
 
-DATA = Path("$MANYSEG_BENCH_DATA/ftw/netherlands")
-CACHE = Path("$MANYSEG_BENCH_DATA/cache/e046_ftw_nl")
+DATA = Path(os.environ.get("MANYSEG_BENCH_DATA", "data"), "ftw/netherlands")
+CACHE = Path(os.environ.get("MANYSEG_BENCH_DATA", "data"), "cache/e046_ftw_nl")
 
 
 def instances(m: np.ndarray):

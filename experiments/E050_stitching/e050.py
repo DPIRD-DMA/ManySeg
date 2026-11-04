@@ -7,6 +7,7 @@ with a single-pass prediction of the whole scene.
 
 from __future__ import annotations
 
+import os
 import argparse
 import itertools
 import json
@@ -26,13 +27,13 @@ HERE = Path(__file__).resolve().parent
 EXP = HERE.parent
 sys.path[:0] = [str(EXP / d) for d in ("E030_whu_polygons", "E031_lod2_oracle", "E043_roof_mesh", "E047_lod2_trained",
                                        "E044_cityscale_unified", "E039_unified_roads", "E028_vector_oracle")]
-sys.path.insert(0, "$WORKSPACE/ManyPred/src")
+sys.path.insert(0, os.environ.get("MANYPRED_SRC", "../ManyPred/src"))
 from manypred.blend import gradient_weights  # noqa: E402
 from manypred.windows import make_patch_indexes  # noqa: E402
 
-DATA = Path("$MANYSEG_BENCH_DATA")
+DATA = Path(os.environ.get("MANYSEG_BENCH_DATA", "data"))
 SCENES = DATA / "cache" / "e050_roof_scenes"
-RUNS_E044 = Path("$WORKSPACE/ManySeg-runs/e044-90736d4/experiments/E044_cityscale_unified/runs")
+RUNS_E044 = Path(os.environ.get("MANYSEG_RUNS", "../ManySeg-runs"), "e044-90736d4/experiments/E044_cityscale_unified/runs")
 S = 2048
 CFG = {"roads": {"patch": 1024, "overlap": 256, "support": "mask"},
        "roofs": {"patch": 512, "overlap": 128, "support": "extent"}}

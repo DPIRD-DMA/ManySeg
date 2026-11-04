@@ -1,6 +1,6 @@
 # E046: B0 vs B3 trained on farm fields, FTW Netherlands (pre-registered 2026-10-28 18:00)
 
-Why: the user asked whether B3 (instances + corners + wall directions, the footprint default since
+Why: the maintainer asked whether B3 (instances + corners + wall directions, the footprint default since
 E038) extends to field boundaries. E045 tests this with perfect targets; this is the trained
 test on real imagery, registered before E045's result and run regardless of it.
 

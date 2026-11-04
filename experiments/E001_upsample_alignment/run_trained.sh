@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # E001b: does grid-consistent ("aligned") upsampling change trained accuracy / boundary F1?
 set -u
-export MANYSEG_BENCH_DATA="$MANYSEG_BENCH_DATA"
+export MANYSEG_BENCH_DATA="${MANYSEG_BENCH_DATA:?set to the dataset root}"
 RECIPE=${RECIPE:?set RECIPE}
 OUT=${OUT_ROOT:-.}/experiments/E001_upsample_alignment/runs
 for seed in 0 1 2; do

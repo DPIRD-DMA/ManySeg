@@ -28,7 +28,7 @@ difference ≥ 0.02 and > 2 SDs; detection F1 not more than 0.02 below B0). Also
 GT outlines cleaned of staircase vertices (post hoc), detection F1, matched IoU, PoLiS, N-ratio.
 
 ## Budget
-One run (~2–2.5 h) on the shared 4090 after agreeing a slot with the Cloud-Aug session.
+One run (~2–2.5 h) on a shared RTX 4090.
 
 ## Results (seed 0, 2026-10-28)
 Trained 09:45-10:54 (40 epochs, final val PQ 0.649); decoder tuned on val over the 16 settings

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # E019: ManySeg image-level classifiers vs plain timm (see README.md).
 set -u
-export MANYSEG_BENCH_DATA="${MANYSEG_BENCH_DATA:-$MANYSEG_BENCH_DATA}"
+export MANYSEG_BENCH_DATA="${MANYSEG_BENCH_DATA:?set to the dataset root}"
 OUT=${OUT_ROOT:-.}/experiments/E019_classification_parity/runs
 ENCODERS="resnet50:tv_in1k convnext_tiny:fb_in1k pvt_v2_b0:in1k"
 set_for() { case $1 in eurosat) echo '{"epochs": 30, "batch_size": 64}' ;;

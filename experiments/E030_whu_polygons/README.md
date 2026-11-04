@@ -87,7 +87,7 @@ workers, counts a tile whose decoding runs out of memory as an empty prediction
 (`failed_tiles`, reported); and the chain runs in a systemd scope capped at 12 GB, so a fault
 kills only this job. Nothing else changed.
 
-## Amendment 3 (2026-10-27 12:45, agreed with the user after a Codex review of the options, `E032_graph_completeness/OPTIONS.md`; no result of the affected runs exists): remaining seeds cancelled
+## Amendment 3 (2026-10-27 12:45, agreed with the maintainer after a Codex review of the options, `E032_graph_completeness/OPTIONS.md`; no result of the affected runs exists): remaining seeds cancelled
 Seed 0 (test): B0 C-IoU 0.709, detection F1 0.850; B2 C-IoU 0.613, F1 0.750. Both gaps (about 0.1)
 are far larger than plausible seed variation, so B2's seeds 1–2 and B0's seed 2 are cancelled to
 free the GPU for redesigns of the graph method; B0 seed 1 (already running) finishes, for baseline

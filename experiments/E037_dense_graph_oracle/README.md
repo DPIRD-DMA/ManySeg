@@ -1,6 +1,6 @@
 # E037: dense pixel graph (P8) and mask-supported local links (R3), oracle (pre-registered 2026-10-28 10:00)
 
-Why: the user proposed a dense pixel-graph output ([B, 11, H, W]: node confidence, 8-neighbour
+Why: the maintainer proposed a dense pixel-graph output ([B, 11, H, W]: node confidence, 8-neighbour
 links N..NW, sub-pixel XY offset; no vertex cap), asking that its limits be investigated rather
 than assumed away. Codex's options review (ManySeg-e028/notes/codex_options.md) recommends a
 cheap representation-loss and chain-survival gate before any corruption sweep or training, and a
@@ -147,7 +147,7 @@ pre-registration with a shift-tolerant link loss.
 P8rg (buildings 40 tiles, roofs 30, roads 20) and R3g (roads), 3 seeds; damage: independent
 one-sided link loss ("link"), runs of 3 links lost both ways ("link3"), missing node pixels whose
 neighbours still point at them ("node"). Decoders: AND/OR reciprocal rule, E028 end bridging
-(10 px), and the user's healing (`heal`: only ends with a dangling link heal, searching along the
+(10 px), and the maintainer's healing (`heal`: only ends with a dangling link heal, searching along the
 line's own direction, end-to-end or end-to-line). Primary metric (L0: buildings 0.990, roads APLS
 0.925, roofs face F1 0.995):
 

@@ -50,14 +50,14 @@ Added: E030's training-failure check applies (val extent IoU below 0.5 at the en
 fixed and rerun as an amendment).
 
 ## Amendment 2 (2026-10-27 12:10, before any E032 result): staged seeds
-At the user's request, to shorten iteration: every arm first runs **seed 0 only**. An arm goes on
+At the maintainer's request, to shorten iteration: every arm first runs **seed 0 only**. An arm goes on
 to seeds 1–2 only if its seed-0 **validation** C-IoU × detection F1 (the tuned decoder's val score)
 beats B2 seed 0's by more than 0.005; test is not looked at for this. The decision rule is
 unchanged and is applied only to arms with all 3 seeds; arms stopped after seed 0 are reported as
 "screened out on one seed", with no claim beyond that. Run order: B2e, B2w (E032), then B2d, B2s
 (E033), then the advanced arms' seeds 1–2.
 
-## Amendment 3 (2026-10-27 12:45, agreed with the user after a Codex review of the options, `E032_graph_completeness/OPTIONS.md`; no result of the affected runs exists)
+## Amendment 3 (2026-10-27 12:45, agreed with the maintainer after a Codex review of the options, `E032_graph_completeness/OPTIONS.md`; no result of the affected runs exists)
 B2w is dropped (it optimises the wrongly defined target: arbitrary densified points; see the vertex analysis in OPTIONS.md). B2e seed 0 (running) finishes and is screened. Controls for seeds 1–2, if needed, are trained then (E030 amendment 3).
 
 ## Results

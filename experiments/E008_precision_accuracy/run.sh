@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # E008: STAGE=train (6 checkpointed runs) then STAGE=evaluate (each run under 6 variants).
 set -u
-export MANYSEG_BENCH_DATA="${MANYSEG_BENCH_DATA:-$MANYSEG_BENCH_DATA}"
+export MANYSEG_BENCH_DATA="${MANYSEG_BENCH_DATA:?set to the dataset root}"
 RECIPE=${RECIPE:-fastai_like}
 STAGE=${STAGE:-train}
 E=${OUT_ROOT:-.}/experiments/E008_precision_accuracy

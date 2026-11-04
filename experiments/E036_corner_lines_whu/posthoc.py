@@ -9,6 +9,7 @@ rendered tiles.
 
 from __future__ import annotations
 
+import os
 import argparse
 import json
 import sys
@@ -24,7 +25,7 @@ from common import MEAN, STD, WHUTiles, b0_probabilities, b3_probabilities, load
 from evaluate import B0_FIXED  # noqa: E402
 from train import build  # noqa: E402
 
-CACHE = Path("$MANYSEG_BENCH_DATA/cache/whu_aerial")
+CACHE = Path(os.environ.get("MANYSEG_BENCH_DATA", "data"), "cache/whu_aerial")
 
 
 def regularise(polys):

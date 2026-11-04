@@ -2,7 +2,7 @@
 # E017: CloudSEN12+ (13 S2 bands) — stack vs resolution band groups through one shared encoder.
 # 2 arms x 3 seeds; with EMIT_TASKS, run as one 6-GCD pack (scripts/setonix/manyseg_pack.sbatch).
 set -u
-export MANYSEG_BENCH_DATA="${MANYSEG_BENCH_DATA:-$MANYSEG_BENCH_DATA}"
+export MANYSEG_BENCH_DATA="${MANYSEG_BENCH_DATA:?set to the dataset root}"
 RECIPE=${RECIPE:-fastai_like}
 OUT=${OUT_ROOT:-.}/experiments/E017_cloudsen12_band_groups/runs
 SET='{"epochs": 20, "batch_size": 16}'

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -u
-export MANYSEG_BENCH_DATA="$MANYSEG_BENCH_DATA"
+export MANYSEG_BENCH_DATA="${MANYSEG_BENCH_DATA:?set to the dataset root}"
 RECIPE=${RECIPE:?set RECIPE}
 OUT=${OUT_ROOT:-.}/experiments/E004_channel_adapters/runs
 SET='{"epochs": 60, "batch_size": 16, "eval_every": 10}'

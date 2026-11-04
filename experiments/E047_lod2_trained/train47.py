@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import os
 import argparse
 import json
 import pickle
@@ -25,7 +26,7 @@ from manyseg_bench.providers.base import split_params  # noqa: E402
 from manyseg_bench.training.recipe import get_recipe  # noqa: E402
 from manyseg_bench.training.trainer import train  # noqa: E402
 
-CACHE = Path("$MANYSEG_BENCH_DATA/cache/e047_lod2")
+CACHE = Path(os.environ.get("MANYSEG_BENCH_DATA", "data"), "cache/e047_lod2")
 MEAN = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1) * 255
 STD = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1) * 255
 NDSM_SCALE = 10.0  # m

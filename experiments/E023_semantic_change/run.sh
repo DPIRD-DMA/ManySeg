@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # E023: semantic change detection on SECOND, fused vs per-input land-cover heads (README.md).
 set -u
-export MANYSEG_BENCH_DATA="${MANYSEG_BENCH_DATA:-$MANYSEG_BENCH_DATA}"
+export MANYSEG_BENCH_DATA="${MANYSEG_BENCH_DATA:?set to the dataset root}"
 OUT=${OUT_ROOT:-.}/experiments/E023_semantic_change/runs
 SEEDS=${SEEDS:-0,1,2}
 SET="{\"epochs\": ${EPOCHS:-20}, \"batch_size\": 8}"  # 20: the pre-registered timing rule

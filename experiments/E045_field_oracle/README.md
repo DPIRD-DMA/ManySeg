@@ -1,6 +1,6 @@
 # E045: do the footprint representations transfer to farm fields? (pre-registered 2026-10-28 17:25)
 
-Why: the user asked whether the B3 approach (instances + corners + wall directions) extends to
+Why: the maintainer asked whether the B3 approach (instances + corners + wall directions) extends to
 field boundaries. Fields differ from buildings: larger (median ~635 px at 10 m), more irregular
 outlines (curved, ragged), and in some places they touch (shared edges). Oracle first, as for
 footprints (E028/E035): perfect targets + E028's corruption levels L0-L3, no training.

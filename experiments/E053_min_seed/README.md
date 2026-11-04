@@ -1,6 +1,6 @@
 # E053: dropping seed fragments (`min_seed`) on trained models (pre-registered 2026-11-02 09:00)
 
-Why: the user asked for the hip-roof tip fix before 0.1.0. In the end-to-end oracle
+Why: the maintainer asked for the hip-roof tip fix before 0.1.0. In the end-to-end oracle
 (`tests/integration/test_vector_pipeline.py`, perfect targets) the 45-degree tip of a hip-end
 face gets a seed of its own and becomes an extra 17-25 px face (5 slow-tier cases, also in a
 single pass), and with fields' absolute distance (E052, seed threshold 3 px) a 1 px seed on

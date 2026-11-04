@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # E020: BigEarthNet v2 image-level tasks: what ManySeg adds over a timm classifier (README.md).
 set -u
-export MANYSEG_BENCH_DATA="${MANYSEG_BENCH_DATA:-$MANYSEG_BENCH_DATA}"
+export MANYSEG_BENCH_DATA="${MANYSEG_BENCH_DATA:?set to the dataset root}"
 OUT=${OUT_ROOT:-.}/experiments/E020_bigearthnet_image_tasks/runs
 EPOCHS=${EPOCHS:?set from the smoke timing in README}
 SEEDS=${SEEDS:-0,1,2}

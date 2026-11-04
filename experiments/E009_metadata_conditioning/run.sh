@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -u
-export MANYSEG_BENCH_DATA="$MANYSEG_BENCH_DATA"
+export MANYSEG_BENCH_DATA="${MANYSEG_BENCH_DATA:?set to the dataset root}"
 RECIPE=${RECIPE:-fastai_like}
 OUT=${OUT_ROOT:-.}/experiments/E009_metadata_conditioning/runs
 SET='{"epochs": 60, "batch_size": 16}'

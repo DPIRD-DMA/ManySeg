@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # E007: decoder norm x encoder BN at batch 2, plus the batch-16 default (30 runs).
 set -u
-export MANYSEG_BENCH_DATA="${MANYSEG_BENCH_DATA:-$MANYSEG_BENCH_DATA}"
+export MANYSEG_BENCH_DATA="${MANYSEG_BENCH_DATA:?set to the dataset root}"
 RECIPE=${RECIPE:-fastai_like}
 OUT=${OUT_ROOT:-.}/experiments/E007_small_batch_norm/runs
 mb() {

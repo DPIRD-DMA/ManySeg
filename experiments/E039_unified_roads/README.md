@@ -1,6 +1,6 @@
 # E039: the unified head set on roads (R4), oracle (pre-registered 2026-10-28 12:40)
 
-Why: the user wants one solution for all graph-shaped outputs. B3 (buildings) = region + lines +
+Why: the maintainer wants one solution for all graph-shaped outputs. B3 (buildings) = region + lines +
 keypoints + line direction, decoded as "lines from the mask, nodes from keypoints, geometry from
 directions". E037 killed the dense pixel graph for roads (overpasses) and E028's R1 (mask +
 junction heatmap, no pairing) gave no gain. This tests whether the B3 head set, extended with a

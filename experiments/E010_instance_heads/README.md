@@ -1,9 +1,9 @@
 # E010: Boundary + distance instance heads for field delineation (pre-registered)
 
-Status: **complete, positive result** (2026-10-14; 9 runs on Pawsey Setonix, AMD MI250X, code `537848a`). Dataset approved by the user: AI4Boundaries orthophoto subset.
+Status: **complete, positive result** (2026-10-14; 9 runs on Pawsey Setonix, AMD MI250X, code `537848a`). Dataset approved by the maintainer: AI4Boundaries orthophoto subset.
 Proposed dataset: AI4Boundaries orthophoto subset (CC BY 4.0, 5.6 GB, 512×512 RGB at 1 m,
 official train 5,319 / val 1,140 / test 1,139). The official split is **random, not spatially
-blocked**, so we will also report a country-held-out evaluation. The user decides; see the
+blocked**, so we will also report a country-held-out evaluation. The maintainer decides; see the
 session summary.
 
 ## Questions
@@ -27,7 +27,7 @@ session summary.
 * Metrics: val PQ (primary), object F1@0.5, over/under-segmentation, extent IoU. Test and the
   country-held-out split are evaluated once per final run.
 * Budget: 9 runs, about 3–4 h on the shared 4090. If wall-clock exceeds 6 h, move to Setonix
-  after confirming the account with the user.
+  after confirming the account with the maintainer.
 
 ## Decision rule
 `bd_*` "beats" `extent_cc` if mean val PQ is higher by more than 2 pooled seed-SDs and test PQ

@@ -2,7 +2,7 @@
 # E026 part 2: training-loop variants, out-of-RAM prefetch, post-processing. Waits for the
 # model grid to finish. Run from the frozen worktree; results go to the main tree's runs/.
 set -u
-MAIN="$WORKSPACE/ManySeg"
+MAIN="${MANYSEG_REPO:?set to the main checkout}"
 D="experiments/E026_perf_audit"
 R="$MAIN/$D/runs"
 mkdir -p "$R"

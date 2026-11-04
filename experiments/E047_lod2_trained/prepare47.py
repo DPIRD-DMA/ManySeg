@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import os
 import gzip
 import hashlib
 import io
@@ -29,9 +30,9 @@ sys.path.insert(0, str(HERE.parent / "E031_lod2_oracle"))
 import e031 as E  # noqa: E402
 import fetch_3dbag as F  # noqa: E402
 
-RAW = Path("$MANYSEG_BENCH_DATA/raw/3dbag")
-WEB = Path("$MANYSEG_BENCH_DATA/raw/e047_web")  # cached WMS / WCS responses
-CACHE = Path("$MANYSEG_BENCH_DATA/cache/e047_lod2")
+RAW = Path(os.environ.get("MANYSEG_BENCH_DATA", "data"), "raw/3dbag")
+WEB = Path(os.environ.get("MANYSEG_BENCH_DATA", "data"), "raw/e047_web")  # cached WMS / WCS responses
+CACHE = Path(os.environ.get("MANYSEG_BENCH_DATA", "data"), "cache/e047_lod2")
 UA = {"User-Agent": "ManySeg-E047/0.1 (research)"}
 NEW_AREAS = {  # RD New boxes; first N 3DBAG tiles of each
     "amersfoort": ((157000, 465000, 159000, 467000), 8), "zwolle": ((202000, 501000, 204000, 503000), 8),

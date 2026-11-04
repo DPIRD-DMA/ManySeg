@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # E021: time-series inputs vs single date and dates-as-channels (README.md). Local RTX 4090.
 set -u
-export MANYSEG_BENCH_DATA="${MANYSEG_BENCH_DATA:-$MANYSEG_BENCH_DATA}"
+export MANYSEG_BENCH_DATA="${MANYSEG_BENCH_DATA:?set to the dataset root}"
 OUT=${OUT_ROOT:-.}/experiments/E021_time_series/runs
 SEEDS=${SEEDS:-0,1,2}
 fails=0

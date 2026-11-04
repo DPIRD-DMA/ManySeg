@@ -5,7 +5,7 @@ the normalised distance target (distance / the instance's maximum) changes 3-34 
 seams (merge="cut"; 8-30 with blend), because a clipped instance has a different maximum in each
 tile. The absolute distance (px) removes this (0 with cut, <= 1 with blend) and makes field block
 decoding independent of the block grid. Before making `distance="absolute"` the default we check
-that a trained model is not worse with it. This is the check offered to the user for 0.1.0.
+that a trained model is not worse with it. This is the check offered to the maintainer for 0.1.0.
 
 ## Design
 E046's B0 setup unchanged (FTW Netherlands chips, 8 channels, ResNet34 U-Net, fastai_like,
@@ -27,7 +27,7 @@ Mean over seeds 0 and 1 on test, A - N:
   detection F1 >= -0.01;
 * otherwise it stays an option and the default stays normalised.
 No further seeds. Roof faces (CornerLineTask) are not tested here: whatever the result, their
-default follows the shared `instance_targets` default only if the user agrees, and this is
+default follows the shared `instance_targets` default only if the maintainer agrees, and this is
 reported as untested for roofs.
 
 ## Results (23:00; NL test 388 chips; GPU otherwise idle)

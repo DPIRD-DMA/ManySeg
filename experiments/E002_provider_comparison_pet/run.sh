@@ -2,7 +2,7 @@
 # E002: ManySeg vs SMP vs fastai U-Net, resnet34 (identical tv_in1k weights), Oxford Pet 256².
 # Stage A: identical "standard" recipe. Stage B: identical "fastai_like" recipe.
 set -u
-export MANYSEG_BENCH_DATA="$MANYSEG_BENCH_DATA"
+export MANYSEG_BENCH_DATA="${MANYSEG_BENCH_DATA:?set to the dataset root}"
 OUT=experiments/E002_provider_comparison_pet/runs
 for recipe in standard fastai_like; do
   for seed in 0 1 2; do

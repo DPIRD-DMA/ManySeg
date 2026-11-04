@@ -1,7 +1,7 @@
 # E049: LoD2 roofs from RGB only, with predicted heights (pre-registered 2026-10-29 09:30)
 
 Why: E047b's roof model takes the AHN nDSM as an input channel and fits each face's plane to it,
-so it needs a DSM at inference time. The user asked (09:15) for RGB as the only input, with the
+so it needs a DSM at inference time. The maintainer asked (09:15) for RGB as the only input, with the
 model predicting the heights that the reconstruction then uses, normalised so that non-buildings
 are 0.
 
@@ -11,7 +11,7 @@ from 4 towns, val 59 Haarlem, test 48 Leidsche Rijn + Staphorst, 512 px = 128 m)
 precomputed once (`train49.py targets`): **height** = the 3DBAG roof planes rendered per pixel
 (E031 `height_map`: metres above each building part's mean ground; the same height the metric
 scores), **0 off roofs**. Trees, cars and terrain are 0, so the target is the building-only
-nDSM the user described. The AHN nDSM is not used by the H arms at all (input or planes).
+nDSM the maintainer described. The AHN nDSM is not used by the H arms at all (input or planes).
 
 ## Model
 E047's ResNet34 U-Net and B3 heads (CornerLineTask: face instances, corners, wall direction),
@@ -104,7 +104,7 @@ everything else unchanged (seed 0, 150 epochs; `train49.py --arm H1b`, `evaluate
 * Rule (as rule 3): slope head worth it if H1b's slope planes have normal error <= H0 (seed 0
   test) - 1 deg on both areas and RMSE <= H0 + 0.05 m. H1b's planes from its own height (H1br)
   reported. Rule 1 is not re-judged (face F1 gap 0.28-0.38).
-Seed 1 of H0 / H1 was stopped at the user's request (10:13, during H0_s1 training, nothing evaluated): the registered second-seed check on rule 3 is not run; it would have re-tested the collapsed head.
+Seed 1 of H0 / H1 was stopped at the maintainer's request (10:13, during H0_s1 training, nothing evaluated): the registered second-seed check on rule 3 is not run; it would have re-tested the collapsed head.
 
 ### E049b result (10:34; worktree e049b-2d4354d; `runs/eval_H1b_s0.json`)
 H1b trained 150 epochs (val PQ similar to H1). Val slope correlation (dz/dx, dz/dy) 0.42 / 0.37,
@@ -112,7 +112,7 @@ up from ~0.1 for H1 but below the 0.5 gate: **gate failed, test not opened**. Th
 roof slope partly; on this evidence a separate slope head does not give usable roof tilt from RGB.
 
 ## Close-out (10:35, user decision)
-The user closed the RGB-only line: the approach is shown to work with RGB + height data (E047b,
+The maintainer closed the RGB-only line: the approach is shown to work with RGB + height data (E047b,
 E048b), and RGB-only roofs are not viable with this model (E049). Not pursued: a pretrained
 height / depth backbone (E050 sketch: fine-tuned Depth Anything V2 Small or a canopy-height
 backbone as the height source, optionally fed to the face model as a 4th channel).

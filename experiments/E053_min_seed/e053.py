@@ -17,7 +17,7 @@ import torch
 
 HERE = Path(__file__).resolve().parent
 EXP = HERE.parent
-RUNS = Path("$WORKSPACE/ManySeg-runs")
+RUNS = Path(os.environ.get("MANYSEG_RUNS", "../ManySeg-runs"))
 SEEDS = (0, 8)
 CKPT = {
     "roofs": [RUNS / "e047b-54b73bc/experiments/E047_lod2_trained/runs/B3_s0_e150.pt"],

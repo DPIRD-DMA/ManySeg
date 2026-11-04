@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # E024: ImageNet vs remote-sensing pretrained ResNet-50 weights (README.md). Local RTX 4090.
 set -u
-export MANYSEG_BENCH_DATA="${MANYSEG_BENCH_DATA:-$MANYSEG_BENCH_DATA}"
+export MANYSEG_BENCH_DATA="${MANYSEG_BENCH_DATA:?set to the dataset root}"
 OUT=${OUT_ROOT:-.}/experiments/E024_rs_pretrained_weights/runs
 SEEDS=${SEEDS:-0,1,2}
 fails=0

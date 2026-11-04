@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import os
 import argparse
 import json
 import sys
@@ -25,7 +26,7 @@ from manyseg_bench.tasks import InstanceTask  # noqa: E402
 from manyseg_bench.training.recipe import get_recipe  # noqa: E402
 from manyseg_bench.training.trainer import train  # noqa: E402
 
-CACHE = Path("$MANYSEG_BENCH_DATA/cache/e046_ftw_nl")
+CACHE = Path(os.environ.get("MANYSEG_BENCH_DATA", "data"), "cache/e046_ftw_nl")
 TILE = 256
 
 

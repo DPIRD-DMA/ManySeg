@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # E012: unet vs unet+input_cross vs fastai_unet (all out_stride 1). STAGE=train | profile.
 set -u
-export MANYSEG_BENCH_DATA="${MANYSEG_BENCH_DATA:-$MANYSEG_BENCH_DATA}"
+export MANYSEG_BENCH_DATA="${MANYSEG_BENCH_DATA:?set to the dataset root}"
 RECIPE=${RECIPE:-fastai_like}
 STAGE=${STAGE:-train}
 OUT=${OUT_ROOT:-.}/experiments/E012_unet_input_cross/runs

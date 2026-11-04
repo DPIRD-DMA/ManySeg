@@ -25,8 +25,7 @@ def main():
     ap.add_argument("--mmap", action="store_true")
     ap.add_argument("--dataset", default="sen1floods11")
     a = ap.parse_args()
-    cache = Path(os.environ.get("MANYSEG_BENCH_DATA",
-                                "$MANYSEG_BENCH_DATA")) / "cache" / a.dataset
+    cache = Path(os.environ.get("MANYSEG_BENCH_DATA", "data")) / "cache" / a.dataset
     torch.zeros(1, device="cuda")  # CUDA context first, so its RSS is in every reading
     rec = {"dataset": a.dataset, "mmap": a.mmap, "rss_start_mb": rss_mb()}
     tr, va = load_split(cache, "train", mmap=a.mmap), load_split(cache, "val", mmap=a.mmap)

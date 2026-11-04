@@ -24,7 +24,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "E028_vector_oracle"))
 import e028 as E  # noqa: E402
 
-DATA = Path(os.environ.get("E045_DATA", "$MANYSEG_BENCH_DATA/ftw"))
+DATA = Path(os.environ.get("E045_DATA", "ftw"))
 OFFS = (0, 384, 768)
 SIMPLIFY = 1.0
 MIN_AREA = 16.0

@@ -6,6 +6,7 @@ manyseg.vectors block decoders, against a whole-scene decode of the same stitche
 
 from __future__ import annotations
 
+import os
 import argparse
 import json
 import pickle
@@ -20,7 +21,7 @@ from affine import Affine
 
 HERE = Path(__file__).resolve().parent
 EXP = HERE.parent
-DATA = Path("$MANYSEG_BENCH_DATA")
+DATA = Path(os.environ.get("MANYSEG_BENCH_DATA", "data"))
 OUT = DATA / "cache" / "e051_out"
 sys.path[:0] = [str(EXP / d) for d in ("E030_whu_polygons", "E031_lod2_oracle", "E047_lod2_trained",
                                        "E044_cityscale_unified", "E039_unified_roads", "E028_vector_oracle")]
@@ -61,7 +62,7 @@ class RoadModel(torch.nn.Module):
         super().__init__()
         from train44 import build
         self.net = build()
-        runs = Path("$WORKSPACE/ManySeg-runs/e044-90736d4/experiments/E044_cityscale_unified/runs")
+        runs = Path(os.environ.get("MANYSEG_RUNS", "../ManySeg-runs"), "e044-90736d4/experiments/E044_cityscale_unified/runs")
         self.net.load_state_dict(torch.load(runs / "U_s0.pt", map_location="cpu"))
         self.net.eval()
         self.register_buffer("mean", torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1) * 255)
@@ -106,7 +107,7 @@ def decoder(task):
     if task == "roofs":
         ev = json.loads((EXP / "E047_lod2_trained/runs/eval_B3_s0_e150.json").read_text())["selected"]["F3"]
         return block_decoder("roofs", **ev["thr"], **ev["params"])
-    ev = json.loads(Path("$WORKSPACE/ManySeg-runs/e044-90736d4/experiments/E044_cityscale_unified/runs/eval_U_s0.json").read_text())
+    ev = json.loads(Path(os.environ.get("MANYSEG_RUNS", "../ManySeg-runs"), "e044-90736d4/experiments/E044_cityscale_unified/runs/eval_U_s0.json").read_text())
     r0, r4 = ev["r0_params"], ev["r4_params"]
     return block_decoder("roads", threshold=r0["thr"], keypoint_threshold=r4["thr_k"], zone_radius=r4["zr"],
                          pair_deg=r4["pair_deg"], spur=r0["spur"], gap=r0["gap"], simplify=r0["simplify"],

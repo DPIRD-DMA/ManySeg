@@ -21,7 +21,7 @@ import e039 as R
 E = R.E
 HERE = Path(__file__).resolve().parent
 RUNS = HERE / "runs"
-BEST028 = Path(os.environ.get("E028_BEST", "$WORKSPACE/ManySeg-e028/experiments/E028_vector_oracle/runs/best.json"))
+BEST028 = Path(os.environ.get("E028_BEST", "best.json"))
 TUNE_AREA, TEST_AREAS = "innaloo", ("murdoch", "northam")
 TUNE_SEEDS, TEST_SEEDS = (0, 1), (0, 1, 2, 3, 4)
 GRID = [dict(thr_k=t, zr=z, pair_deg=150.0, thr_line=0.3, mode=m)

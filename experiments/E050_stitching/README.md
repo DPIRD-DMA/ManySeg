@@ -1,6 +1,6 @@
 # E050: stitching tiled predictions for vector outputs: blend vs cutlines (pre-registered 2026-10-29 11:20)
 
-Why: ManyPred blends overlapping patch predictions with gradient weights (averaging). The user
+Why: ManyPred blends overlapping patch predictions with gradient weights (averaging). The maintainer
 asked (10:47) whether a cutline (each pixel from one patch, the cut placed where neighbouring
 predictions agree) suits vector decoding better. Averaging can blur boundary ridges, split corner
 peaks and mix direction modes; a cut keeps every pixel's heads from one prediction.
