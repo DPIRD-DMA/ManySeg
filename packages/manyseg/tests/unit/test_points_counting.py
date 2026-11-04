@@ -17,6 +17,7 @@ from manyseg.points import (
     find_peaks,
     gaussian_heatmap,
     points_from_boxes,
+    targets,
 )
 
 # --- density head and loss ----------------------------------------------------------------
@@ -348,3 +349,60 @@ def test_density_map_tiny_sigma_and_points_far_outside():
     d = density_map([torch.tensor([[-200.0, -200.0], [2.0, 2.0]])], (8, 8), 1.0)
     assert float(d.sum()) == pytest.approx(1.0, rel=1e-5)
     assert float(density_map([torch.tensor([[-11.75, -9.6]])], (4, 4), 1.0).max()) < 1e-30
+
+
+def _assert_matches_whole_image_form(hm, pts, sigma):
+    """The whole-image form as a reference for the windows in gaussian_heatmap. Relative down to
+    1e-30, so that a window cutting off even a tiny tail fails."""
+    h, w = hm.shape
+    ys, xs = torch.arange(float(h)), torch.arange(float(w))
+    ref = torch.zeros(h, w)
+    for p, s in zip(pts.split(64), sigma.split(64)):
+        g = torch.exp(-((ys[None] - p[:, :1]) ** 2) / (2 * s[:, None] ** 2))[:, :, None] \
+            * torch.exp(-((xs[None] - p[:, 1:]) ** 2) / (2 * s[:, None] ** 2))[:, None, :]
+        ref = torch.maximum(ref, g.amax(0))
+    assert torch.allclose(hm, ref, rtol=1e-5, atol=1e-30)
+
+
+@pytest.fixture
+def stamps(monkeypatch):
+    """Counts the calls that render windows."""
+    calls = []
+    stamp = targets._stamp_gaussians
+    monkeypatch.setattr(targets, "_stamp_gaussians", lambda *a: (calls.append(a[3]), stamp(*a)))
+    return calls
+
+
+def test_heatmap_window_radius_is_where_float32_reaches_zero():
+    assert torch.exp(torch.tensor(-(targets._ZERO_BEYOND ** 2) / 2)) == 0
+
+
+@pytest.mark.parametrize("size, sigma, n, windows", [
+    ((256, 300), 1.0, 40, True),
+    ((256, 300), 1.0, 1500, True),  # several chunks
+    ((256, 300), 0.3, 40, True),  # a window of a few pixels
+    ((40, 48), 2.0, 200, False),  # a window larger than the image
+])
+def test_gaussian_heatmap_matches_whole_image_form(size, sigma, n, windows, stamps):
+    torch.manual_seed(0)
+    h, w = size
+    pts = torch.rand(n, 2) * torch.tensor([h + 60.0, w + 60.0]) - 30  # some outside the image
+    pts[0], pts[1] = torch.tensor([0.0, 0.0]), torch.tensor([h - 1.0, w - 1.0])
+    hm = gaussian_heatmap([pts], size, sigma)[0, 0]
+    _assert_matches_whole_image_form(hm, pts, torch.full((n,), sigma))
+    assert bool(stamps) == windows
+
+
+def test_gaussian_heatmap_per_point_sigma_mixes_windows_and_whole_images(stamps):
+    torch.manual_seed(0)
+    pts = torch.rand(150, 2) * 256
+    s = torch.cat([torch.full((70,), 9.0), 0.5 + 0.5 * torch.rand(80)])  # 9: no window fits
+    hm = gaussian_heatmap([pts], (256, 256), [s])[0, 0]
+    _assert_matches_whole_image_form(hm, pts, s)
+    assert stamps
+
+
+def test_gaussian_heatmap_odd_points():
+    assert gaussian_heatmap([torch.tensor([[1e30, -1e30]])], (256, 256), 1.0).sum() == 0
+    assert gaussian_heatmap([torch.tensor([[float("nan"), 3.0]])], (256, 256), 1.0).isnan().any()
+    assert gaussian_heatmap([torch.tensor([[3, 4]])], (256, 256), 1.0)[0, 0, 3, 4] == 1  # ints

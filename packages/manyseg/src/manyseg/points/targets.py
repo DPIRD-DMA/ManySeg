@@ -18,6 +18,7 @@ Coordinates are ``(y, x)`` in pixels, pixel centres at integer positions.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 
 import torch
@@ -25,6 +26,9 @@ from torch import Tensor
 
 _CHUNK = 64  # points per chunk when rendering Gaussians
 _AXIS_CHUNK = 1024  # the same for density_map, which keeps only each Gaussian's two axes
+_ZERO_BEYOND = 15.0  # sigmas: float32 exp(-r^2 / 2 sigma^2) is exactly 0 further out
+_WINDOW_COST = 30  # gaussian_heatmap renders windows if the image has this many times the pixels
+_WINDOW_MIN_GPU_PIXELS = 10 ** 8  # ... and on a GPU, if points x image pixels reaches this
 
 
 def _grid(h: int, w: int, device) -> tuple[Tensor, Tensor]:
@@ -45,6 +49,54 @@ def _gaussians(pts: Tensor, sigma: Tensor, h: int, w: int) -> Tensor:
     """(N, H, W) unnormalised Gaussians."""
     gy, gx = _gaussian_axes(pts, sigma, h, w)
     return gy[:, :, None] * gx[:, None, :]
+
+
+def _stamp_gaussians(hm: Tensor, pts: Tensor, sigma: Tensor, radius: int) -> None:
+    """``hm = max(hm, Gaussians)`` in place, computing only ``radius`` pixels around each point
+    (at least ``_ZERO_BEYOND * sigma``: everything further out is exactly 0)."""
+    h, w = hm.shape
+    offset = torch.arange(-radius, radius + 1, device=pts.device)
+    iy = pts[:, :1].floor().long() + offset  # (N, K)
+    ix = pts[:, 1:].floor().long() + offset
+    gy = torch.exp(-((iy.float() - pts[:, :1]) ** 2) / (2 * sigma[:, None] ** 2))
+    gx = torch.exp(-((ix.float() - pts[:, 1:]) ** 2) / (2 * sigma[:, None] ** 2))
+    inside = (((iy >= 0) & (iy < h))[:, :, None] & ((ix >= 0) & (ix < w))[:, None, :])
+    pixel = (iy[:, :, None] * w + ix[:, None, :])[inside]
+    hm.view(-1).scatter_reduce_(0, pixel, (gy[:, :, None] * gx[:, None, :])[inside], "amax")
+
+
+def _max_gaussians(pts: Tensor, sigma: Tensor, h: int, w: int) -> Tensor:
+    """(H, W) max over N Gaussians, by windows around the points where those are cheaper than
+    whole images: a windowed pixel costs some 12 (CPU) to 25 (GPU) times a whole-image pixel,
+    and setting up windows on a GPU costs about what 10^8 of its whole-image pixels do."""
+    hm = torch.zeros(h, w, device=pts.device)
+    min_pixels = 0 if pts.device.type == "cpu" else _WINDOW_MIN_GPU_PIXELS
+
+    def fits(sig: float) -> bool:
+        return (2 * math.ceil(_ZERO_BEYOND * sig) + 1) ** 2 * _WINDOW_COST <= h * w
+
+    # NaN points or sigmas keep propagating through the whole-image path; infinite sigmas stay
+    # there too. MPS has no tested scatter_reduce.
+    windowed = (len(pts) > 0 and pts.device.type != "mps" and len(pts) * h * w >= min_pixels
+                and bool(pts.isfinite().all() and sigma.isfinite().all())
+                and fits(float(sigma.min())))
+    if not windowed:
+        for i in range(0, len(pts), _CHUNK):
+            hm = torch.maximum(hm, _gaussians(pts[i:i + _CHUNK], sigma[i:i + _CHUNK], h, w).amax(0))
+        return hm
+    sigma, order = sigma.sort(descending=True)  # similar sigmas share a window size
+    pts, sig = pts[order], sigma.tolist()
+    i = 0
+    while i < len(pts):
+        if fits(sig[i]):
+            radius = math.ceil(_ZERO_BEYOND * sig[i])
+            n = max(1, _CHUNK * h * w // (8 * (2 * radius + 1) ** 2))  # 8: indices and mask too
+            _stamp_gaussians(hm, pts[i:i + n], sigma[i:i + n], radius)
+        else:
+            n = _CHUNK
+            hm = torch.maximum(hm, _gaussians(pts[i:i + n], sigma[i:i + n], h, w).amax(0))
+        i += n
+    return hm
 
 
 def _sigmas(sigma, n: int, device) -> Tensor:
@@ -77,11 +129,7 @@ def gaussian_heatmap(points: Sequence[Tensor], size: tuple[int, int], sigma=2.0)
     out = []
     for pts, sig in zip(points, _per_image(sigma, len(points))):
         pts = pts.float()
-        hm = torch.zeros(h, w, device=pts.device)
-        s = _sigmas(sig, len(pts), pts.device)
-        for i in range(0, len(pts), _CHUNK):
-            hm = torch.maximum(hm, _gaussians(pts[i:i + _CHUNK], s[i:i + _CHUNK], h, w).amax(0))
-        out.append(hm)
+        out.append(_max_gaussians(pts, _sigmas(sig, len(pts), pts.device), h, w))
     return torch.stack(out)[:, None]
 
 
