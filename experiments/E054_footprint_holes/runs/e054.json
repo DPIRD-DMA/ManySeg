@@ -12,7 +12,7 @@
   "agree": 0.4,
   "merge_deg": 8.0
  },
- "$WORKSPACE/ManySeg-runs/e036-f2d2f86/experiments/E030_whu_polygons/runs/B3_s0.pt": {
+ "$MANYSEG_RUNS/e036-f2d2f86/experiments/E030_whu_polygons/runs/B3_s0.pt": {
   "sha256": "50e1bdf3a2ec6a98f7dc331467082545bbff0c0a6d2e9738ae02dd37f8d7f0e0",
   "val": {
    "gt_holes": 218,
@@ -105,7 +105,7 @@
    }
   }
  },
- "$WORKSPACE/ManySeg-runs/e036-f2d2f86/experiments/E030_whu_polygons/runs/B3_s1.pt": {
+ "$MANYSEG_RUNS/e036-f2d2f86/experiments/E030_whu_polygons/runs/B3_s1.pt": {
   "sha256": "17429d06a039469b50d783b697284c054cb76d6c4eda0ed431dc702016b98bbb",
   "val": {
    "gt_holes": 218,

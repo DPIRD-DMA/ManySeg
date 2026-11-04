@@ -12,7 +12,7 @@
   "agree": 0.6,
   "merge_deg": 8.0
  },
- "$WORKSPACE/ManySeg-runs/e047b-54b73bc/experiments/E047_lod2_trained/runs/B3_s0_e150.pt": {
+ "$MANYSEG_RUNS/e047b-54b73bc/experiments/E047_lod2_trained/runs/B3_s0_e150.pt": {
   "sha256": "8963e0294b92d3af06c26c057f101a30c76a3e9f243e7ceb146f233f15e89528",
   "val": {
    "min_seed_0": {

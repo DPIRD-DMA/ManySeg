@@ -1,7 +1,7 @@
 {
  "seed": 1,
  "limit": null,
- "b0": "$WORKSPACE/ManySeg-runs/q2-20a4175/experiments/E030_whu_polygons/runs/B0_s1.pt",
+ "b0": "$MANYSEG_RUNS/q2-20a4175/experiments/E030_whu_polygons/runs/B0_s1.pt",
  "b3": "runs/B3_s1.pt",
  "B0": {
   "params": {
