@@ -1,6 +1,7 @@
 # E055: RGB-pretrained weights vs training from scratch on non-RGB inputs (pre-registered)
 
-Status: **registered** 2026-11-04, before any run. Local RTX 4090, no Pawsey units.
+Status: **parts A and B done, part C running** (registered 2026-11-04, before any run). Local
+RTX 4090, no Pawsey units.
 
 ## Question
 Does starting a multispectral encoder from ImageNet RGB weights beat starting from random
@@ -84,4 +85,39 @@ may favour whichever arm overfits least.
   BigEarthNet was re-reading from disk (epochs about 95 s, against 29 s in E024). Speed only.
 
 ## Results
+Tables: `uv run python experiments/E055_rgb_vs_scratch/analyse.py`. Part A and B: all 78 runs
+completed, no non-finite losses. Arms sharing a seed started from the same random weights.
+
+### Part A: three datasets, all labels
+Final epoch, mean ± SD over seeds 0-2. Differences are `imagenet` minus the arm, in points (val,
+with 2 pooled SD; test).
+
+| dataset | `imagenet` val | `scratch` val | `scratch_fair` val | vs `scratch` | vs `scratch_fair` | RGB weights |
+|---|---|---|---|---|---|---|
+| Sen1Floods11 | 0.8882 ± 0.0038 | 0.8937 ± 0.0007 | 0.8923 ± 0.0016 | −0.55 (0.54); −0.68 | −0.41 (0.58); −0.93 | hurt |
+| BigEarthNet | 0.7381 ± 0.0031 | 0.6911 ± 0.0043 | 0.7481 ± 0.0016 | +4.70 (0.75); +2.51 | −1.00 (0.50); −1.76 | hurt |
+| PASTIS | 0.2097 ± 0.0022 | 0.1936 ± 0.0007 | 0.1999 ± 0.0040 | +1.61 (0.33); +1.37 | +0.98 (0.65); +0.79 | help |
+
+* **Docs rule:** RGB weights help on 1 of 3 datasets and hurt on 2, so no general claim.
+* **The recipe matters as much as the weights.** On BigEarthNet, full encoder LR moves scratch by
+  5.7 points, from well below `imagenet` to above it. E004-style scratch arms understate scratch.
+* The Sen1Floods11 "hurt" is marginal: it passes by 0.01 points against `scratch` only.
+* `imagenet` was not given a second recipe, while scratch was, so scratch had one more chance.
+
+### Part B: scarce labels, Sen1Floods11
+Mean over 5 seeds. Differences are `imagenet` minus the arm, in val points, with the 95% CI.
+
+| chips | `imagenet` | `scratch` | `scratch_fair` | vs `scratch` | vs `scratch_fair` | RGB weights |
+|---|---|---|---|---|---|---|
+| 12 | 0.8514 | 0.8524 | 0.8539 | −0.10 ± 2.62 | −0.25 ± 1.72 | level |
+| 25 | 0.8462 | 0.8597 | 0.8615 | −1.35 ± 2.21 | −1.53 ± 3.11 | level |
+| 63 | 0.8647 | 0.8652 | 0.8762 | −0.05 ± 1.38 | −1.14 ± 1.50 | level |
+| 252 | 0.8898 | 0.8939 | 0.8920 | −0.41 ± 0.65 | −0.21 ± 0.51 | level |
+
+* **Docs rule:** no help at 12 or 25 chips, so no scarce-label claim. Intervals of ±2-3 points at
+  those sizes leave room for a small benefit.
+* `imagenet` at 252 chips (0.8898) matches E024's 0.8882 on the older commit.
+* Bolivia mIoU (not decisive, n = 15): `imagenet` is lowest at every size.
+
+### Part C: CloudSEN12+
 Pending.
