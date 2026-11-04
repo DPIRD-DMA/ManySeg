@@ -10,6 +10,9 @@ on:
     - cron: "0 18 * * *"  # 02:00 AWST; the only place macOS runs outside PRs
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 # Back-to-back pushes: only the newest commit gets tested.
 concurrency:
   group: ci-${{ github.ref }}

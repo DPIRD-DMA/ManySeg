@@ -2,6 +2,7 @@
 
 import json
 import math
+import os
 import pickle
 import warnings
 from dataclasses import dataclass
@@ -16,7 +17,7 @@ from manyseg.vectors.roads import (  # noqa: E402
     graph_from_road_heads,
 )
 
-FIXTURES = Path("$MANYSEG_BENCH_DATA/cache/e051_fields")
+FIXTURES = Path(os.environ.get("MANYSEG_E051_FIELDS", "e051_fields"))
 
 
 @dataclass(frozen=True)

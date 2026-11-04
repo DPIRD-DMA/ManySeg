@@ -440,7 +440,8 @@ uv run pytest packages/manyseg -n 4            # fast tests
 uv run pytest packages/manyseg -m slow -n 4    # compile, export, ONNX
 ```
 
-See [`docs/roadmap.md`](docs/roadmap.md) and [`docs/testing_strategy.md`](docs/testing_strategy.md).
+See [`CONTRIBUTING.md`](CONTRIBUTING.md), [`docs/roadmap.md`](docs/roadmap.md) and
+[`docs/testing_strategy.md`](docs/testing_strategy.md).
 
 ## License
 

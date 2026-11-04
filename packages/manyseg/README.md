@@ -441,7 +441,8 @@ uv run pytest packages/manyseg -n 4            # fast tests
 uv run pytest packages/manyseg -m slow -n 4    # compile, export, ONNX
 ```
 
-See [`docs/roadmap.md`](https://github.com/DPIRD-DMA/ManySeg/blob/main/docs/roadmap.md) and [`docs/testing_strategy.md`](https://github.com/DPIRD-DMA/ManySeg/blob/main/docs/testing_strategy.md).
+See [`CONTRIBUTING.md`](https://github.com/DPIRD-DMA/ManySeg/blob/main/CONTRIBUTING.md), [`docs/roadmap.md`](https://github.com/DPIRD-DMA/ManySeg/blob/main/docs/roadmap.md) and
+[`docs/testing_strategy.md`](https://github.com/DPIRD-DMA/ManySeg/blob/main/docs/testing_strategy.md).
 
 ## License
 

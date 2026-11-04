@@ -627,8 +627,7 @@ def test_graph_blocks_torch_and_empty():
 
 # ---------------------------------------------------------------- real stitched fields (slow)
 
-E051 = Path(os.environ.get("MANYSEG_E051_FIELDS",
-                           "$MANYSEG_BENCH_DATA/cache/e051_fields"))
+E051 = Path(os.environ.get("MANYSEG_E051_FIELDS", "e051_fields"))
 
 
 @pytest.mark.slow

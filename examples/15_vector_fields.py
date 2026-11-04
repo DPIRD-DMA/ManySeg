@@ -77,7 +77,7 @@ def main():
     print("model fields:", {k: v.shape for k, v in fields.items()})
     fields = {k: t[k] for k in ("extent", "boundary", "distance")}  # stand-in: perfect outputs
 
-    # 3. Block by block; every field here crosses a seam of the 3 x 3 grid of 160 px blocks.
+    # 3. Block by block, on a 3 x 3 grid of 160 px blocks.
     scene = Scene(*SHAPE, transform=TRANSFORM, crs=CRS)
     dec = block_decoder("fields")  # outline decoding, E052 thresholds, 0.5 px simplification
     records = decode_scene(fields, dec, block=160, halo=32, scene=scene)

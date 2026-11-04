@@ -226,6 +226,7 @@ notebooks/runs/
 *.pt
 *.pth
 *.onnx
+experiments/**/*.pkl
 experiments/**/run.log
 experiments/**/run.log.exit
 experiments/queue.log*
