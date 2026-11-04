@@ -97,6 +97,40 @@ def test_save_snippet(case, tmp_path, monkeypatch):
     assert got == {s["name"]: s["shape"] for s in case["shapes"]}
 
 
+@pytest.mark.skipif(not CASES, reason="needs node and docs/builder (a repo checkout)")
+@pytest.mark.parametrize(("name", "expected"), [("example-roads", '"keypoints": "sigmoid"'),
+                                                ("example-classifier", '"labels": "sigmoid"')])
+def test_independent_channels_save_with_sigmoid(name, expected):
+    assert expected in next(c for c in CASES if c["name"] == name)["code"]
+
+
+@pytest.mark.skipif(NODE is None or not (BUILDER / "core.js").exists(),
+                    reason="needs node and docs/builder (a repo checkout)")
+def test_head_groups_match_presets():
+    """The page's "add a set" buttons offer what the package's head presets build."""
+    from manyseg.instances import instance_heads
+    from manyseg.points import density_head, point_heads
+    from manyseg.vectors import corner_line_heads, road_heads
+
+    out = subprocess.run([NODE, str(Path(__file__).with_name("model_builder_cases.js")),
+                          str(BUILDER), "groups"], capture_output=True, text=True, timeout=120)
+    assert out.returncode == 0, out.stderr
+    groups = json.loads(out.stdout)
+    presets = {"instances": instance_heads(), "points": point_heads(offsets=True),
+               "density": density_head(), "density_raw": density_head(activation=None),
+               "corners": corner_line_heads(), "roads": road_heads()}
+    assert set(groups) == set(presets)
+    for key, heads in presets.items():
+        page = {h["name"]: h for h in groups[key]}
+        assert list(page) == list(heads), key
+        for name, cfg in heads.items():
+            h = page[name]
+            assert (h["type"], h["channels"]) == (cfg["type"], cfg["out_channels"]), (key, name)
+            assert h.get("activation") == cfg.get("activation"), (key, name)
+            bias = cfg.get("bias_init", 0)
+            assert h.get("bias_init", 0) == pytest.approx(bias, abs=1e-3), (key, name)
+
+
 @pytest.mark.skipif(not (ROOT / "scripts" / "build_model_builder.py").exists(),
                     reason="needs a repo checkout")
 def test_data_is_up_to_date():

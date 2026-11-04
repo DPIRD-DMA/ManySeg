@@ -1,7 +1,8 @@
 // Configurations for the model builder check (test_model_builder.py). Loads the page's own
 // data.js + core.js, builds each configuration's state the way the form would, and prints, per
 // case, the page's errors, the generated Python and the output shapes the page predicts.
-//   node model_builder_cases.js <docs/builder dir>   ->  JSON on stdout
+//   node model_builder_cases.js <docs/builder dir>          ->  JSON on stdout
+//   node model_builder_cases.js <docs/builder dir> groups   ->  the page's head sets, as JSON
 const fs = require("fs");
 const path = require("path");
 const vm = require("vm");
@@ -12,6 +13,7 @@ vm.createContext(ctx);
 vm.runInContext(fs.readFileSync(path.join(dir, "data.js"), "utf8") + "\n" +
   fs.readFileSync(path.join(dir, "core.js"), "utf8"), ctx);
 const C = ctx.module.exports;
+if (process.argv[3] === "groups") { process.stdout.write(JSON.stringify(C.HEAD_GROUPS)); process.exit(0); }
 
 // no downloads in tests: random init everywhere, small tiles, batch 1
 const small = (st, size = [96, 128]) => {
@@ -102,7 +104,7 @@ for (const agg of ["mean", "max", "attention", "concat", "diff"]) {
 { const st = state(ex("multitask")); Object.assign(st.heads[0], { hidden: "12", norm: "gn", scale: 0.5, bias_init: -2 }); ok("head-hidden-gn-scale", small(st)); }
 { const st = state(ex("segmentation")); st.heads[0].hidden = "8"; ok("head-hidden-single-returns-dict", small(st)); }
 { const st = state(ex("trees")); st.heads[2].activation = "softplus"; st.heads[2].bias_init = -4; ok("head-softplus", small(st)); }
-{ const st = state({ ...ex("segmentation"), heads: [...ex("segmentation").heads, ...C.HEAD_GROUPS.density_softplus] }); ok("group-density-softplus", small(st)); }
+for (const g of Object.keys(C.HEAD_GROUPS)) { const st = state({ ...ex("segmentation"), heads: [{ name: "landcover", type: "segmentation", channels: 3 }, ...C.HEAD_GROUPS[g]] }); ok(`group-${g}`, small(st)); }
 { const st = metaBase(); st.meta.mode = "head"; st.heads.push(C.normHead({ name: "d", type: "regression", activation: "softplus", hidden: [8] })); ok("meta-head-softplus", small(st)); }
 { const st = state({ ...ex("fusion"), fusion: { type: "late", op: "concat" } }); st.heads[0].hidden = "8, 8"; st.heads[0].dilation = "2, 3"; ok("late-head-hidden", small(st)); }
 { const st = state(ex("semantic")); for (const h of st.heads.slice(1)) Object.assign(h, { hidden: "16", norm: "gn" }); ok("semantic-share-hidden", small(st)); }

@@ -194,8 +194,10 @@ function renderForm() {
     <span class="hint" style="margin-left:6px">Add a set:</span>
     <button class="btn" type="button" data-act="group" data-g="instances">instances</button>
     <button class="btn" type="button" data-act="group" data-g="points">points</button>
-    <button class="btn" type="button" data-act="group" data-g="density">density</button>
-    <button class="btn" type="button" data-act="group" data-g="density_softplus" data-tipk="g.densp">density, softplus</button></div></section>`;
+    <button class="btn" type="button" data-act="group" data-g="density" data-tipk="g.dens">density</button>
+    <button class="btn" type="button" data-act="group" data-g="density_raw" data-tipk="g.densr">density, raw</button>
+    <button class="btn" type="button" data-act="group" data-g="corners" data-tipk="g.corners">footprints, roofs</button>
+    <button class="btn" type="button" data-act="group" data-g="roads" data-tipk="g.roads">roads</button></div></section>`;
 
   // options
   h += `<section class="sec"><h2>Options${info("sec.options", "options")}</h2>
@@ -608,7 +610,7 @@ function drawDiagram(s, D) {
       const unfused = unused && ftype === "intermediate" && i > 0;
       P.push(`<rect x="${bx}" y="${yy}" width="${w}" height="${BAR_H}" rx="3" fill="${color}" opacity="${unused ? 0.25 : enc.shared ? 0.55 : 1}"/>`);
       P.push(`<text class="mono" x="${bx - 6}" y="${yy + 8.5}" text-anchor="end"${unused ? ' opacity="0.5"' : ""}>${info.channels[k]}\u00b7/${st}</text>`);
-      if (unused) P.push(`<text class="mono" x="${bx + w + 6}" y="${yy + 8.5}" opacity="0.7">${unfused ? "not fused" : "not read"}</text>`);
+      if (unused) P.push(`<text class="mono halo" x="${bx + w + 6}" y="${yy + 8.5}" opacity="0.7">${unfused ? "not fused" : "not read"}</text>`);
       if (!unused) E.push(`<line class="edge" x1="${bx + w}" y1="${yy + BAR_H / 2}" x2="${railX}" y2="${yy + BAR_H / 2}" style="stroke:${color};opacity:.75"/>`);
       ports.push({ stride: st, ch: info.channels[k], x: railX - 3, y: yy + BAR_H / 2, unused });
     });

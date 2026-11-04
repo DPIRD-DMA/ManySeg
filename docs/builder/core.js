@@ -21,6 +21,9 @@ function weightTags(backbone) {
 
 // ---------- examples ----------
 
+// a focal-loss heatmap head starts at the prior p = 0.1: manyseg.vectors.presets.HEATMAP_PRIOR, rounded
+const HEATMAP_PRIOR = -2.197;
+
 const EXAMPLES = {
   segmentation: {
     label: "Segmentation",
@@ -126,14 +129,14 @@ const EXAMPLES = {
     state: {
       inputs: [{ name: "s2", channels: 12, backbone: "resnet50" }],
       heads: [
-        { name: "labels", type: "classification", channels: 19, scope: "image" },
+        { name: "labels", type: "classification", channels: 19, scope: "image", multilabel: true },
         { name: "aux_mask", type: "segmentation", channels: 19 },
       ],
     },
   },
   fields: {
     label: "Field boundaries",
-    blurb: "Instance heads (extent, boundary, distance), each with its own U-Net decoder (E010).",
+    blurb: "Instance heads (extent, boundary, distance), each with its own U-Net decoder (E010). Train with absolute distance targets (E052).",
     state: {
       inputs: [{ name: "image", channels: 4, backbone: "convnext_tiny" }],
       heads: [
@@ -143,15 +146,42 @@ const EXAMPLES = {
       ],
     },
   },
+  footprints: {
+    label: "Building footprints",
+    blurb: "corner_line_heads(): instance heads plus a corner heatmap and wall directions, for straight-edged outlines (E038). Decode with block_decoder(\"footprints\").",
+    state: {
+      inputs: [{ name: "image", channels: 3, backbone: "resnet34" }],
+      heads: [
+        { name: "extent", type: "segmentation", channels: 1 },
+        { name: "boundary", type: "segmentation", channels: 1 },
+        { name: "distance", type: "regression", channels: 1 },
+        { name: "corner", type: "segmentation", channels: 1, bias_init: HEATMAP_PRIOR },
+        { name: "direction", type: "regression", channels: 2 },
+      ],
+    },
+  },
+  roads: {
+    label: "Road network",
+    blurb: "road_heads(): road surface, centreline, junction / end / crossing heatmaps and two direction modes (R4, E044b). Decode with block_decoder(\"roads\").",
+    state: {
+      inputs: [{ name: "image", channels: 3, backbone: "resnet34" }],
+      heads: [
+        { name: "mask", type: "segmentation", channels: 1 },
+        { name: "line", type: "segmentation", channels: 1 },
+        { name: "keypoints", type: "segmentation", channels: 3, bias_init: HEATMAP_PRIOR, multilabel: true },
+        { name: "direction", type: "regression", channels: 4 },
+      ],
+    },
+  },
   trees: {
     label: "Tree counting",
-    blurb: "Centre heatmap, offsets and a density map for counting (E011).",
+    blurb: "Centre heatmap, offsets and a softplus density map for counting (E011, E011c).",
     state: {
       inputs: [{ name: "image", channels: 3, backbone: "resnet34" }],
       heads: [
         { name: "heatmap", type: "regression", channels: 1 },
         { name: "offset", type: "regression", channels: 2 },
-        { name: "density", type: "regression", channels: 1 },
+        { name: "density", type: "regression", channels: 1, activation: "softplus", bias_init: -4 },
       ],
     },
   },
@@ -182,9 +212,24 @@ const HEAD_GROUPS = {
     { name: "heatmap", type: "regression", channels: 1 },
     { name: "offset", type: "regression", channels: 2 },
   ],
-  density: [{ name: "density", type: "regression", channels: 1 }],
-  // manyseg.points.density_head(activation="softplus"): >= 0, bias starting near 0
-  density_softplus: [{ name: "density", type: "regression", channels: 1, activation: "softplus", bias_init: -4 }],
+  // manyseg.points.density_head(): softplus keeps it >= 0, bias starting near 0
+  density: [{ name: "density", type: "regression", channels: 1, activation: "softplus", bias_init: -4 }],
+  density_raw: [{ name: "density", type: "regression", channels: 1 }],  // density_head(activation=None)
+  // manyseg.vectors.corner_line_heads()
+  corners: [
+    { name: "extent", type: "segmentation", channels: 1 },
+    { name: "boundary", type: "segmentation", channels: 1 },
+    { name: "distance", type: "regression", channels: 1 },
+    { name: "corner", type: "segmentation", channels: 1, bias_init: HEATMAP_PRIOR },
+    { name: "direction", type: "regression", channels: 2 },
+  ],
+  // manyseg.vectors.road_heads()
+  roads: [
+    { name: "mask", type: "segmentation", channels: 1 },
+    { name: "line", type: "segmentation", channels: 1 },
+    { name: "keypoints", type: "segmentation", channels: 3, bias_init: HEATMAP_PRIOR, multilabel: true },
+    { name: "direction", type: "regression", channels: 4 },
+  ],
 };
 
 function normInput(i, idx) {
@@ -241,6 +286,7 @@ function normHead(h) {
     norm: h.norm === undefined ? "bn" : (h.norm ?? "none"),   // of the hidden layers: bn, gn, none
     activation: h.activation ?? "",      // "softplus" (regression): output > 0
     bias_init: h.bias_init ?? 0,         // the final conv's bias
+    multilabel: !!h.multilabel,          // channels are independent: sigmoid when saved, not softmax
   };
 }
 
@@ -549,7 +595,7 @@ function derive(s) {
   if (needsShared && d.input_cross) issues.push({ level: "tip", text: "input_cross helped water mapping (E012) but not pets or clouds. It suits targets decided by a pixel's own spectrum." });
   if (!pixelHeads.length && imageHeads.length) issues.push({ level: "tip", text: "No pixel heads, so no decoder is built: this is a classifier. With pixel labels, an auxiliary segmentation head raised mAP by 2.3 in E020; drop it before deployment with model.select_heads([...])." });
   if (s.heads.some((h) => h.activation && h.type === "regression"))
-    issues.push({ level: "tip", text: "Softplus keeps a head's output above 0. On a downstream drone dataset it cut density count MAE from 10.1 (raw head) to 2.9, leaving a floor of about +1.75 objects per image since softplus never reaches 0. For a few large objects per image, peak counting on a heatmap was still better (MAE 1.0). The output already is the prediction, so manyseg.save records the activation as 'none'." });
+    issues.push({ level: "tip", text: "Softplus keeps a head's output above 0. It is the default of density_head(). On a downstream drone dataset it cut density count MAE from 10.1 (raw head) to 2.9, leaving a floor of about +1.75 objects per image since softplus never reaches 0; on OAM-TCD it was no worse than the raw head (E011c). For a few large objects per image, peak counting on a heatmap was still better (MAE 1.0). The output already is the prediction, so manyseg.save records the activation as 'none'." });
   if (s.heads.some((h) => h.scope === "pixel" && headOptions(h).hidden.length))
     issues.push({ level: "tip", text: "Hidden head layers are opt-in and untested in our experiments: the default single conv is SMP's head. Compare against it. They run on the head's grid, so a head scale below 1 makes them cheaper." });
   if (s.heads.some((h) => h.uncertainty)) issues.push({ level: "tip", text: "Uncertainty heads return [mean, log_variance] (2x channels), for a Gaussian NLL loss." });
@@ -851,10 +897,10 @@ function generateCode(s, D) {
   else for (const o of shapes) lines.push(`# out[${py(o.name)}]: (${o.shape.join(", ")})`);
   lines.push("print(model.describe(x))  # what was built, with shapes and FLOPs");
   // after training: manyseg.save stores the weights plus what inference needs; activations are
-  // required for segmentation and classification heads (softmax, or sigmoid for one channel).
+  // required for segmentation and classification heads (softmax, or sigmoid for one channel or independent channels).
   // Regression heads default to "none", which is also the only choice for a softplus head.
   const acts = {};
-  for (const h of s.heads) if (h.type !== "regression") acts[single ? "logits" : h.name] = h.channels === 1 ? "sigmoid" : "softmax";
+  for (const h of s.heads) if (h.type !== "regression") acts[single ? "logits" : h.name] = h.channels === 1 || h.multilabel ? "sigmoid" : "softmax";
   const rs = s.inputs.filter((r) => !r.backbone.startsWith("shared:") && !(D.ftype === "early" && r !== s.inputs[0]));
   const rsWeights = rs.length && rs.every((r) => !["imagenet", "none"].includes(r.weights));
   lines.push("");
