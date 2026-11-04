@@ -227,6 +227,7 @@ notebooks/runs/
 *.pth
 *.onnx
 experiments/**/*.pkl
+experiments/E036_corner_lines_whu/**/*.png
 experiments/**/run.log
 experiments/**/run.log.exit
 experiments/queue.log*

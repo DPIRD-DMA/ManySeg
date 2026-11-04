@@ -5,6 +5,9 @@ polygons at every corruption level, but its registered rule compared it with B2,
 weakest arm once trained (E030: B2 C-IoU × F1 0.46 vs B0 0.60). This experiment compares B3 with
 the trained baseline that matters, B0.
 
+Figures from `gallery.py`, `failures.py` and `posthoc.py` are not in the repository: they draw
+WHU's labels, whose licence is not stated. Run the scripts to make them locally.
+
 ## Setup (E030's: WHU aerial 0.3 m, resnet34 U-Net, `fastai_like`, 40 epochs, batch 16,
 dihedral augmentation, 8 loader workers, decoder tuned on val, test once)
 **B3:** B0's instance heads (extent, boundary, distance; bench `InstanceTask` loss) + a `corner`
@@ -52,7 +55,7 @@ detection F1 comes from extra predictions (18,436 vs 16,931), plausibly because 
 decoder fixed B0's instance thresholds on B3's own, jointly trained heads.
 
 ### Post hoc: staircase-cleaned GT (registered as post hoc; does not change the decision)
-300 evenly spaced val tiles (`posthoc.py`, `posthoc.json`, `posthoc_tiles.png`); GT outlines
+300 evenly spaced val tiles (`posthoc.py`, `posthoc.json`; the script also draws `posthoc_tiles.png`); GT outlines
 regularised with buildingregulariser 0.2.5 (parallel_threshold 3 px, simplify_tolerance 1.5 px,
 as E037). Added the obvious baseline **B0 + regulariser** (B0's polygons through the same tool).
 
@@ -89,7 +92,7 @@ On every vertex-free measure B3 has the most accurate outlines, on all three GTs
 C-IoU's vertex count against staircase GT and ~0.02 detection F1. The regulariser costs boundary
 accuracy (0.61-0.62 on every GT).
 
-Failure analysis (`failures.py`, `failures/summary.json`, `failures/*.png`; 200 val tiles,
+Failure analysis (`failures.py`, `failures/summary.json`; the script also draws one PNG per failure type; 200 val tiles,
 2,699 buildings, failure = IoU < 0.75 vs regularised GT): B3 ok 85.7% (B0 + reg 82.3%); B3
 failures: mask too big/small 8.4% (B0 + reg 11.3%; 42% of these touch the tile edge), missed
 2.9% (3.1%), merged 1.6% (2.4%), split 1.0% (0.9%), **decoder 0.5%** (<1% of the IoU shortfall).
