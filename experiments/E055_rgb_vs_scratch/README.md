@@ -43,6 +43,18 @@ ResNet-50 U-Net, 3 arms x 4 sizes x 5 seeds = 60 runs, all from one new frozen c
 * The 12-chip size needs batch 8 because the loader drops short batches, so compare arms within
   a size, not across sizes.
 
+## Part C: CloudSEN12+ (added 2026-11-04, before any CloudSEN12 run)
+Added at the user's request, because Sen1Floods11 may be too easy to separate the arms. Part B was
+complete at this point, part A had finished Sen1Floods11 and one BigEarthNet seed.
+
+* `cloudsen12`: 13-band L1C, 4 classes, 19,450 train / 1,767 val / 2,335 test chips, with
+  ROI-disjoint splits, so test locations are unseen. Metric: val mIoU.
+* ResNet-50 U-Net, `fastai_like`, 20 epochs and batch 16 as in E013, all three arms, seeds 0-2.
+  9 new runs from frozen commit `7a3a544`, one seed of all arms at a time, on the local 4090. All
+  arms run here, because E013's baseline is a ResNet-34 on different hardware.
+* Decision: the part A per-dataset rule, with this part's own `imagenet` runs. The docs rule above
+  stays on its 3 registered datasets; CloudSEN12 is reported as further evidence beside it.
+
 ## Decision rules
 Primary metric: val mIoU (BigEarthNet: macro mAP) at the final epoch. Test is a veto only. Bolivia
 is reported but does not decide anything (n = 15). "Scratch" below means both scratch arms.
@@ -64,6 +76,12 @@ hurt on none. Say they help with scarce labels only if they help at 12 or 25 chi
 One recipe family, one encoder, and only Sentinel-2 optical bands: SAR, height and other sensors
 stay untested. Part B has one dataset. 900 steps at 12 chips is many passes over few images, which
 may favour whichever arm overfits least.
+
+## Run log
+* 2026-11-04 14:48: system restart during part B. The 45 finished runs were kept; the 252-chip
+  size and part A then ran from the same commits and seeds.
+* 2026-11-04 15:32: job memory cap raised live from 16 GB to 40 GB. The cap counts page cache, so
+  BigEarthNet was re-reading from disk (epochs about 95 s, against 29 s in E024). Speed only.
 
 ## Results
 Pending.
