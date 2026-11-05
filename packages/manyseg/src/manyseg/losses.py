@@ -72,7 +72,7 @@ def heatmap_focal(logits: Tensor, target: Tensor, alpha: float = 2.0, beta: floa
     p = logits.float().sigmoid().clamp(1e-6, 1 - 1e-6)
     pos = target >= 0.999 if pos is None else pos
     pos_loss = -((1 - p) ** alpha) * torch.log(p) * pos
-    neg_loss = -((1 - target) ** beta) * (p ** alpha) * torch.log(1 - p) * (~pos)
+    neg_loss = -((1 - target.float()) ** beta) * (p ** alpha) * torch.log(1 - p) * (~pos)
     return (pos_loss.sum() + neg_loss.sum()) / pos.sum().clamp(min=min_pos)
 
 

@@ -253,8 +253,8 @@ First release. Python 3.10–3.14 (`manyseg-bench` lists 3.10–3.12), PyTorch �
   `manyseg_bench.losses` re-exports them.
 * New: `multiclass_dice` (softmax, integer targets, `ignore_index`) and `multi_head_loss`
   (weighted sum of a loss per head, with each head's loss for logging).
-* `masked_regression` computes in float32 for both kinds. With a float64 target, `kind="mse"` used
-  to return float64 while `kind="l1"` returned float32.
+* `masked_regression` and `heatmap_focal` compute in float32. With a float64 target, `heatmap_focal`
+  and `masked_regression(kind="mse")` used to return float64, while `kind="l1"` returned float32.
 
 ### Performance (E026; values unchanged up to rounding)
 

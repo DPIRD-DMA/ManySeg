@@ -153,3 +153,14 @@ def test_masked_regression_loss_is_float32_for_a_float64_target(kind):
     mask = torch.ones(1, 1, 4, 4, dtype=torch.bool)
     assert losses.masked_regression(pred, target, kind=kind).dtype == torch.float32
     assert losses.masked_regression(pred, target, mask, kind=kind).dtype == torch.float32
+
+
+def test_heatmap_focal_loss_is_float32_for_a_float64_target():
+    """Regression: the raw target promoted the negative term, and the loss, to float64."""
+    logits = torch.zeros(1, 1, 8, 8, requires_grad=True)
+    target = torch.zeros(1, 1, 8, 8, dtype=torch.float32)
+    target[0, 0, 4, 4] = 1
+    single = losses.heatmap_focal(logits, target)
+    double = losses.heatmap_focal(logits, target.double())
+    assert single.dtype == double.dtype == torch.float32
+    assert torch.equal(single, double)
