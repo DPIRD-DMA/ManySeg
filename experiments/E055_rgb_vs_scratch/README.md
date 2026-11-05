@@ -1,7 +1,11 @@
 # E055: RGB-pretrained weights vs training from scratch on non-RGB inputs (pre-registered)
 
-Status: **parts A and B done, part C running** (registered 2026-11-04, before any run). Local
-RTX 4090, no Pawsey units.
+Status: **done** (registered 2026-11-04, before any run; finished 2026-11-05). Local RTX 4090, no
+Pawsey units.
+
+**Answer:** not in general. Against the better scratch recipe, RGB weights gained 4.2 points on
+CloudSEN12+ and 1.0 on PASTIS, and lost 0.6 on Sen1Floods11 and 1.0 on BigEarthNet. Scarce labels
+did not change the Sen1Floods11 result.
 
 ## Question
 Does starting a multispectral encoder from ImageNet RGB weights beat starting from random
@@ -85,7 +89,7 @@ may favour whichever arm overfits least.
   BigEarthNet was re-reading from disk (epochs about 95 s, against 29 s in E024). Speed only.
 
 ## Results
-Tables: `uv run python experiments/E055_rgb_vs_scratch/analyse.py`. Part A and B: all 78 runs
+Tables: `uv run python experiments/E055_rgb_vs_scratch/analyse.py`. All 87 runs
 completed, no non-finite losses. Arms sharing a seed started from the same random weights.
 
 ### Part A: three datasets, all labels
@@ -120,4 +124,41 @@ Mean over 5 seeds. Differences are `imagenet` minus the arm, in val points, with
 * Bolivia mIoU (not decisive, n = 15): `imagenet` is lowest at every size.
 
 ### Part C: CloudSEN12+
-Pending.
+Final epoch, mean ± SD over seeds 0-2, in the same format as part A.
+
+| dataset | `imagenet` val | `scratch` val | `scratch_fair` val | vs `scratch` | vs `scratch_fair` | RGB weights |
+|---|---|---|---|---|---|---|
+| CloudSEN12+ | 0.7382 ± 0.0006 | 0.6822 ± 0.0072 | 0.6960 ± 0.0049 | +5.60 (1.02); +5.67 | +4.22 (0.70); +3.82 | help |
+
+Mean test IoU per class:
+
+| arm | clear | thick cloud | thin cloud | shadow |
+|---|---|---|---|---|
+| `imagenet` | 0.909 | 0.872 | 0.408 | 0.584 |
+| `scratch` | 0.887 | 0.818 | 0.346 | 0.496 |
+| `scratch_fair` | 0.894 | 0.843 | 0.380 | 0.504 |
+
+* **Largest gain in this study.** `imagenet` leads both scratch arms on every class, and full
+  encoder LR does not close the gap as it did on BigEarthNet.
+* **20 epochs may flatter `imagenet`.** Its val lead over `scratch_fair` narrows from 8.1 points at
+  epoch 10 to 5.2 at epoch 15 and 4.2 at the end. Every run's best epoch was 17-20, so longer
+  training might narrow it further; this was not tested.
+* `imagenet` (val 0.738, test 0.693) is in line with E013's ResNet-34 baseline (val 0.732, test
+  0.685). The encoder and hardware differ, so this is a sanity check only.
+
+### Overall
+| dataset | `imagenet` minus better scratch arm, val points | RGB weights |
+|---|---|---|
+| CloudSEN12+ (beside the docs rule) | +4.22 | help |
+| PASTIS | +0.98 | help |
+| Sen1Floods11 | −0.55 | hurt |
+| BigEarthNet | −1.00 | hurt |
+
+* **Docs rule:** still no general claim. On the 3 registered datasets RGB weights help on 1 and
+  hurt on 2. CloudSEN12+ makes it 2 of 4 each way.
+* The losses are small and the largest gain is not, which supports keeping `tv_in1k` with `repeat`
+  as the default. It does not show that RGB weights always help.
+* Four datasets are too few to say what decides the outcome, so this study offers no rule for
+  predicting it on a new dataset.
+* Not run: `imagenet` under a second recipe, which could change the two "hurt" verdicts, and a
+  `projection` rerun.
