@@ -3,9 +3,8 @@
 A spec is ManyPred's plain-data format (its ``normalize.py`` documents the steps). ManySeg stores
 specs but never runs them and doesn't import ManyPred, so a typo would otherwise surface only
 when inference fails. These are the rules of ManyPred's ``validate_spec``, kept in step by
-``tests/unit/test_normalize_spec.py``, without callables, which a file can't hold. Two checks are
-ManySeg's own, as it knows the model's inputs: every raster input needs a spec, and a metadata
-input can't have one.
+``tests/unit/test_normalize_spec.py``, without callables, which a file can't hold. One check is
+ManySeg's own, as it knows the model's inputs: a per-input spec must name every raster input.
 """
 
 from __future__ import annotations
@@ -142,16 +141,27 @@ def check_steps(spec: Any) -> None:
         per_tile |= step.get("scope") == "tile"
 
 
+def _has_steps(spec: Any) -> bool:
+    steps = list(spec) if isinstance(spec, Sequence) and not isinstance(spec, str) else [spec]
+    return any(step["type"] != "none" for step in steps)
+
+
 def check_normalize(spec: Any, inputs: Sequence[str] | None) -> None:
-    """``spec`` for a model's raster ``inputs`` (None: one unnamed input, which takes steps). A
-    model with named inputs takes ``{input_name: steps}``, with every raster input present: a
-    forgotten one would silently get raw values."""
-    if inputs is None:
+    """``spec`` for a model's raster ``inputs`` (None: one unnamed input, which takes steps).
+
+    A plain spec suits one raster, whatever metadata inputs sit beside it, and a spec with no steps
+    suits any model. Otherwise several rasters take ``{input_name: steps}`` with every one present:
+    a forgotten one would silently get raw values."""
+    per_input = isinstance(spec, Mapping) and "type" not in spec
+    if inputs is None and per_input:
+        raise ValueError("This model has one unnamed input: pass normalize as steps (a dict with "
+                         f"'type' or a list of them), not per input {sorted(spec)}.")
+    if not per_input:
         check_steps(spec)
+        if inputs is not None and len(inputs) > 1 and _has_steps(spec):
+            raise ValueError(f"This model has several raster inputs {list(inputs)}: pass normalize "
+                             f"as {{input_name: steps}}, got {spec!r}.")
         return
-    if not isinstance(spec, Mapping) or "type" in spec:
-        raise ValueError(f"This model has named inputs {list(inputs)}: pass normalize as "
-                         f"{{input_name: steps}}, got {spec!r}.")
     unknown = sorted(set(spec) - set(inputs))
     if unknown:
         raise ValueError(f"normalize given for unknown inputs {unknown}; raster inputs: "

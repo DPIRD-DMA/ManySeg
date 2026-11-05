@@ -14,10 +14,10 @@ First release. Python 3.10–3.14 (`manyseg-bench` lists 3.10–3.12), PyTorch �
   and its discarded weight init used to shift all later dropout, augmentation and sampling, so
   the same seed gave a different run with and without a checkpoint.
 * `manyseg.save` checks `normalize`: unknown steps, misspelt options and invalid values are
-  refused at save time, with ManyPred's rules. A model built with `inputs=` needs
-  `{input_name: steps}` covering every raster input, as a forgotten input would run on raw values
-  (`{"type": "none"}` says that's intended). `False` and a plain list for such a model are refused
-  too: ManyPred can't run them. `manyseg.load` doesn't check, so existing files still open.
+  refused at save time, with ManyPred's rules. `push_to_hub` checks too. Several raster inputs need
+  `{input_name: steps}` covering every one, as a forgotten input would run on raw values
+  (`{"type": "none"}` says that's intended); a plain spec is fine for one raster, or when it has no
+  steps. `False` is refused. `manyseg.load` doesn't check, so existing files still open.
 * `manyseg.save` accepts models converted to `SyncBatchNorm` (with torch's conversion, or timm's
   for timm's `BatchNormAct2d` layers). They load with plain BatchNorm; convert again to resume
   multi-GPU training.
@@ -43,6 +43,16 @@ First release. Python 3.10–3.14 (`manyseg-bench` lists 3.10–3.12), PyTorch �
   no longer load: there's no migration, as this is the first release.
 * Any other `channel_adapter` on a `shared:` input is refused, as is `"projection"` with equal
   channels. They used to be ignored.
+
+### Working with ManyPred
+
+* `block_decoder("density")` counts NaN pixels as 0. ManyPred marks nodata with NaN, so one nodata
+  pixel made the scene's total NaN.
+* `"attention"` time-series models run in `float16` and `bfloat16`, as ManyPred's GPU default
+  needs.
+* `tiling_spec()` reports the saved names: `classes` on each returned head and a top-level `bands`.
+  `.pt2` files keep them. `manyseg.save` now refuses names that aren't strings. An ensemble's
+  members must have the same names, or ManyPred asks for `spec=`.
 
 ### Saving quantised models
 

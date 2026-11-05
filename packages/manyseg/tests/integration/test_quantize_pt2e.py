@@ -208,7 +208,8 @@ def test_saved_size_and_metadata(float_and_int8, saved):
 def test_saved_tiling_spec_matches_float(tmp_path):
     model = _reduced_head_model()
     args = {"normalize": _NORM, "activations": {"seg": "softmax", "coarse": "sigmoid",
-                                                "label": "softmax"}}
+                                                "label": "softmax"},
+            "classes": {"seg": ["a", "b", "c"]}, "bands": ["r", "g", "b"]}
     want = manyseg.load(manyseg.save(model, tmp_path / "f.safetensors", **args)).tiling_spec()
     ep = quantize_pt2e(model, torch.randn(1, 3, 64, 96), _batches(2))
     loaded = manyseg.load(manyseg.save(ep, tmp_path / "q.pt2", source=model, **args))
@@ -216,6 +217,9 @@ def test_saved_tiling_spec_matches_float(tmp_path):
     assert spec == want
     assert spec["outputs"]["coarse"]["scale"] == 0.25
     assert spec["normalize"] == _NORM
+    assert spec["outputs"]["seg"]["classes"] == ["a", "b", "c"]
+    assert "classes" not in spec["outputs"]["coarse"]
+    assert spec["bands"] == ["r", "g", "b"]
     x = torch.randn(1, 3, 97, 131)
     out, ref = loaded(x), ep.module()(x)
     assert set(out) == set(ref) and all(torch.equal(out[k], ref[k]) for k in ref)
@@ -230,7 +234,8 @@ def test_saved_multi_input(tmp_path):
         return {"a": torch.randn(1, 4, h, w), "b": torch.randn(1, 2, h, w)}
 
     ep = quantize_pt2e(model, mk(64, 96), [mk(64, 96) for _ in range(2)])
-    loaded = manyseg.load(manyseg.save(ep, tmp_path / "q.pt2", source=model, **_args(model)))
+    args = {**_args(model), "normalize": {"a": _NORM, "b": _NORM}}
+    loaded = manyseg.load(manyseg.save(ep, tmp_path / "q.pt2", source=model, **args))
     x = mk(97, 131)
     assert torch.equal(ep.module()(x), loaded(x))
     assert loaded.input_shapes == {"a": [1, 4, None, None], "b": [1, 2, None, None]}

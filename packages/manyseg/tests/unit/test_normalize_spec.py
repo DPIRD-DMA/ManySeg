@@ -105,20 +105,29 @@ def test_per_input_specs():
         check_normalize({"a": {"type": "none"}}, ["a", "b"])
     with pytest.raises(ValueError, match="scael"):
         check_normalize({"a": {"type": "none"}, "b": {"type": "scael"}}, ["a", "b"])
-    for one_spec in ({"type": "none"}, [{"type": "scale", "value": 2}], []):
-        with pytest.raises(ValueError, match="input_name"):
-            check_normalize(one_spec, ["a", "b"])
 
 
-def test_a_named_single_input_also_takes_a_dict_of_inputs():
-    check_normalize({"a": {"type": "none"}}, ["a"])
+@pytest.mark.parametrize("spec", [{"type": "scale", "value": 2}, [{"type": "scale", "value": 2}],
+                                  [{"type": "none"}, {"type": "scale", "value": 2}]], ids=repr)
+def test_several_rasters_refuse_a_plain_spec_with_steps(spec):
     with pytest.raises(ValueError, match="input_name"):
-        check_normalize({"type": "none"}, ["a"])
+        check_normalize(spec, ["a", "b"])
+
+
+@pytest.mark.parametrize("spec", [[], {"type": "none"}, [{"type": "none"}]], ids=repr)
+def test_a_plain_spec_with_no_steps_suits_several_rasters(spec):
+    check_normalize(spec, ["a", "b"])
+
+
+def test_one_raster_takes_a_plain_spec_or_a_dict_of_inputs():
+    """Metadata inputs aren't in the list: ManyPred gives a plain spec to the one raster."""
+    check_normalize({"type": "scale", "value": 2}, ["a"])
+    check_normalize({"a": {"type": "scale", "value": 2}}, ["a"])
 
 
 def test_an_unnamed_input_takes_steps_not_names():
     check_normalize([{"type": "scale", "value": 2}], None)
-    with pytest.raises(ValueError, match="no 'type'"):
+    with pytest.raises(ValueError, match="one unnamed input"):
         check_normalize({"image": {"type": "none"}}, None)
 
 
@@ -141,6 +150,7 @@ def test_save_checks_a_multi_input_model_against_its_rasters(tmp_path):
     path = tmp_path / "m.safetensors"
     with pytest.raises(ValueError, match="input_name"):
         manyseg.save(model, path, normalize=[{"type": "scale", "value": 2}], **KW)
+    manyseg.save(model, path, normalize=[], **KW)  # no steps: nothing to confuse
     with pytest.raises(ValueError, match="'b'"):
         manyseg.save(model, path, normalize={"a": {"type": "none"}}, **KW)
     with pytest.raises(ValueError, match="unknown inputs.*'meta'"):

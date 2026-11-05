@@ -140,10 +140,11 @@ def save(model: DenseModel | torch.export.ExportedProgram, path: str | Path, *,
     Args:
         source: The float model an ``ExportedProgram`` came from; only for those.
         normalize: How inputs must be normalised for this model, as a ManyPred normalisation
-            spec: pass the normalisation you trained with. A model built with ``inputs=`` takes
-            ``{input_name: steps}`` with every raster input present (``{"type": "none"}`` for
-            one left as is). A spec with an unknown step, a misspelt option or an invalid value
-            is refused here, not at inference. ``"weights"`` uses what the
+            spec: pass the normalisation you trained with, as steps. Several raster inputs take
+            ``{input_name: steps}`` with every one present (``{"type": "none"}`` for one left as
+            is); a plain spec with no steps suits any model. A spec with an unknown step, a
+            misspelt option or an invalid value is refused here, not at inference. ``"weights"``
+            uses what the
             remote-sensing pretrained weights the model was built with expect
             (``pretrained="ssl4eo_s2_moco"``), which is right only if you trained with it too.
             None stores nothing (with a warning): whoever runs the model must then know.
@@ -153,8 +154,9 @@ def save(model: DenseModel | torch.export.ExportedProgram, path: str | Path, *,
             classification head, as the head type can't tell softmax from sigmoid; regression
             heads default to "none", as do heads with a built-in output ``activation``
             (``"softplus"`` density heads: the model's output already is the prediction).
-        classes: Class names, per head (``{head: [...]}``) or for a single head.
-        bands: Band names, per input (``{input: [...]}``) or for a single input.
+        classes: Class names, per head (``{head: [...]}``) or for a single head. They reach
+            ``tiling_spec()``, and ManyPred writes them into its output files.
+        bands: Band names, per input (``{input: [...]}``) or for a single input. Likewise.
         extra: Any other JSON-compatible metadata, stored as is.
     """
     names = {"normalize": normalize, "activations": activations, "classes": classes,
@@ -387,7 +389,12 @@ def _structure(model: torch.nn.Module) -> dict[str, tuple]:
 
 def _check_names(model, config: dict, classes, bands) -> None:
     """One class name per head channel (a one-channel head may name both of its classes) and
-    one band name per input channel."""
+    one band name per input channel, all strings."""
+    for arg, value in (("classes", classes), ("bands", bands)):
+        for names in (value.values() if isinstance(value, Mapping) else [value]):
+            if names is not None and (isinstance(names, (str, bytes)) or not all(
+                    isinstance(n, str) for n in names)):
+                raise ValueError(f"{arg} must be lists of names (strings), got {names!r}.")
     if classes is not None:
         by_head = classes if isinstance(classes, Mapping) else {next(iter(model.heads)): classes}
         for head, names in by_head.items():

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 import torch.nn.functional as F
@@ -189,14 +189,16 @@ class DenseModel(nn.Module):
           ``same_extent`` input (its ratio is read from its shape). Empty for a model that
           takes a single tensor.
         * ``outputs``: ``{head: {"scope": "pixel" | "image", "kind": ..., "scale": s,
-          "activation": a}}`` (``scale`` for pixel heads only; ``activation`` when the model
-          was saved with one, see :func:`manyseg.save`); only ``single_output``'s head when
-          set, as the model then returns that one tensor.
+          "activation": a, "classes": names}}`` (``scale`` for pixel heads only; ``activation``
+          and ``classes`` when the model was saved with them, see :func:`manyseg.save`); only
+          ``single_output``'s head when set, as the model then returns that one tensor.
         * ``pad_multiple``: the primary input is padded to a multiple of this (1 with
           ``pad_to_stride=False``).
         * ``max_size``: ``(h, w)`` of a fixed-size backbone, else None.
         * ``normalize``: the normalisation stored by :func:`manyseg.save` (a ManyPred
           normalisation spec), or None.
+        * ``bands``: the input band names stored by :func:`manyseg.save`: a list for a model
+          that takes a single tensor, else ``{input: names}``; or None.
         """
         saved = getattr(self, "saved_metadata", None) or {}
         backbone = self.backbone
@@ -216,6 +218,9 @@ class DenseModel(nn.Module):
             for n in self.conditioner.vectors:
                 inputs[n] = {"kind": "vector"}
         outputs: dict[str, dict] = {}
+        classes = saved.get("classes") or {}
+        if not isinstance(classes, Mapping):  # save takes a list for a single head
+            classes = {next(iter(self.heads)): classes}
         returned = [self.single_output] if self.single_output is not None else list(self.heads)
         for name in returned:
             head = self.heads[name]
@@ -225,6 +230,8 @@ class DenseModel(nn.Module):
                 entry["scale"] = 1 / getattr(head, "factor", 1)
             if name in saved.get("activations", {}):
                 entry["activation"] = saved["activations"][name]
+            if classes.get(name):
+                entry["classes"] = [str(c) for c in classes[name]]
             outputs[name] = entry
         main = dict(encoders).get(primary, backbone)  # ModuleDict has no .get
         fixed = getattr(main, "fixed_size", None) or getattr(
@@ -236,7 +243,22 @@ class DenseModel(nn.Module):
                              if self.pad_to_stride else 1),
             "max_size": tuple(fixed) if fixed is not None else None,
             "normalize": saved.get("normalize"),
+            "bands": self._band_names(saved.get("bands")),
         }
+
+    def _band_names(self, bands: Mapping[str, Sequence[str]] | Sequence[str] | None
+                    ) -> dict[str, list[str]] | list[str] | None:
+        """``bands`` as :meth:`tiling_spec` reports them: :func:`manyseg.save` also takes a list
+        for one named image input, which the spec keys by that input."""
+        if not bands:
+            return None
+        if isinstance(bands, Mapping):
+            return {n: [str(b) for b in names] for n, names in bands.items()}
+        config = getattr(self, "build_config", None) or {}
+        images = [n for n, c in (config.get("inputs") or {}).items()
+                  if c.get("kind", "image") != "vector"]
+        names = [str(b) for b in bands]
+        return {images[0]: names} if images else names
 
     def describe(self, sample: Tensor | Mapping[str, Tensor] | None = None,
                  format: str = "text") -> str:

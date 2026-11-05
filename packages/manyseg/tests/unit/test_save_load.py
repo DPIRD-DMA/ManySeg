@@ -380,3 +380,62 @@ def test_a_lookalike_class_named_syncbatchnorm_is_refused(tmp_path):
     with pytest.raises(ValueError, match="differs from what its create_model"):
         manyseg.save(model, tmp_path / "m.safetensors", activations={"logits": "softmax"},
                      normalize=[{"type": "scale", "value": 1}])
+
+
+BAD_NORMALIZE = [
+    {"type": "zscor", "mean": [0], "std": [1]},
+    [{"type": "scale"}],
+    {"type": "scale", "value": 0},
+    {"type": "scale", "value": 1, "scope": "tile"},
+    {"type": "zscore"},
+    {"type": "zscore", "mean": [0]},
+    {"type": "zscore", "mean": [0], "std": [0]},
+    {"type": "zscore", "mean": [0], "std": [1], "scope": "tile"},
+    {"type": "zscore", "scope": "image"},
+    {"type": "minmax", "min": 1},
+    {"type": "minmax", "min": 1, "max": 1},
+    {"type": "minmax", "min": 0, "max": 1, "clip": "yes"},
+    {"type": "percentile", "low": 90, "high": 10},
+    {"type": "db", "eps": 0},
+    {"type": "clip"},
+    {"type": "clip", "min": 2, "max": 1},
+    [{"type": "zscore", "scope": "tile"}, {"type": "zscore", "scope": "scene"}],
+    ["scale"],
+]
+
+
+@pytest.mark.parametrize("bad", BAD_NORMALIZE, ids=str)
+def test_save_refuses_a_normalize_that_could_not_run(tmp_path, bad):
+    model = create_model(backbone="resnet18", pretrained=False, in_channels=3, num_classes=2)
+    with pytest.raises(ValueError):
+        manyseg.save(model, tmp_path / "m.safetensors", normalize=bad,
+                     activations={"logits": "softmax"})
+
+
+def test_save_checks_normalize_against_the_inputs(tmp_path):
+    def save(model, normalize):
+        return manyseg.save(model, tmp_path / "m.safetensors", normalize=normalize,
+                            activations={"logits": "softmax"})
+
+    two = create_model(backbone="resnet18", pretrained=False, num_classes=2, inputs={
+        "a": {"in_channels": 3}, "b": {"in_channels": 2}},
+        fusion={"type": "intermediate", "op": "concat"})
+    one = {"type": "scale", "value": 10000}
+    with pytest.raises(ValueError, match="input_name"):
+        save(two, one)
+    with pytest.raises(ValueError, match="unknown inputs"):
+        save(two, {"a": one, "b": one, "typo": one})
+    with pytest.raises(ValueError, match="doesn't cover"):
+        save(two, {"a": one})
+    save(two, {"a": one, "b": [one]})
+    save(two, [])  # no steps: nothing to confuse
+    save(two, {"type": "none"})
+    with_vector = create_model(backbone="resnet18", pretrained=False, num_classes=2, inputs={
+        "img": {"in_channels": 3},
+        "meta": {"kind": "vector", "fields": {"e": {"type": "continuous", "mean": 0., "std": 1.}}}})
+    save(with_vector, one)  # one image input: nothing to confuse it with
+    with pytest.raises(ValueError, match="unknown inputs"):
+        save(with_vector, {"img": one, "meta": one})
+    single = create_model(backbone="resnet18", pretrained=False, in_channels=3, num_classes=2)
+    with pytest.raises(ValueError, match="one unnamed input"):
+        save(single, {"x": one})

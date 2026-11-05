@@ -412,8 +412,8 @@ def test_weights_multi_input_round_trip(tmp_path, share):
     model = create_model(inputs=inputs, backbone="resnet18", pretrained=False,
                          num_classes=2).eval()
     q = quantize_weights(model)
-    loaded = manyseg.load(manyseg.save(q, tmp_path / "q.safetensors", **_save_args(q),
-                                       ))
+    args = {**_save_args(q), "normalize": {"a": _NORM, "b": _NORM}}
+    loaded = manyseg.load(manyseg.save(q, tmp_path / "q.safetensors", **args))
     c = (3, 3) if share else (4, 2)
     x = {"a": torch.randn(1, c[0], 97, 131), "b": torch.randn(1, c[1], 97, 131)}
     _same_outputs(q, loaded, x)

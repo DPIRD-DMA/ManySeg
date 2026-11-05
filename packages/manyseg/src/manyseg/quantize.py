@@ -410,7 +410,7 @@ def _save_program(ep: torch.export.ExportedProgram, source: nn.Module, path: Pat
 def _saved_spec(source: nn.Module, meta: dict, fixed: list[int] | None) -> dict:
     """``source.tiling_spec()`` as it will be once ``meta`` is stored, as plain data."""
     had = getattr(source, "saved_metadata", None)
-    source.saved_metadata = {"activations": meta["activations"], "normalize": meta["normalize"]}
+    source.saved_metadata = {k: meta[k] for k in ("activations", "normalize", "classes", "bands")}
     try:
         spec = source.tiling_spec()
     finally:
