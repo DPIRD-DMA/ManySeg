@@ -2,8 +2,10 @@
 outputs, metadata for inference (normalisation, activations, classes, bands)."""
 
 import json
+import random
 
 import manyseg
+import numpy as np
 import pytest
 import torch
 from manyseg import create_model
@@ -249,3 +251,101 @@ def test_save_names_the_model_inside_a_wrapper(tmp_path):
         "b": {"type": "regression", "out_channels": 1}})
     with pytest.raises(TypeError, match=r"It wraps one as \.model: save that"):
         manyseg.save(concat_heads(model, ["a", "b"]), tmp_path / "a.safetensors")
+
+
+def _rng_state():
+    return torch.get_rng_state(), random.getstate(), np.random.get_state()
+
+
+def _assert_same_rng(before, after):
+    assert torch.equal(before[0], after[0]), "torch RNG moved"
+    assert before[1] == after[1], "random RNG moved"
+    assert before[2][0] == after[2][0] and np.array_equal(before[2][1], after[2][1]) \
+        and before[2][2:] == after[2][2:], "numpy RNG moved"
+
+
+RNG_MODELS = {
+    "plain": {"in_channels": 4, "num_classes": 2},
+    "metadata": {"inputs": {"image": {"in_channels": 3},
+                            "meta": {"kind": "vector", "fields": FIELDS, "dropout": 0.5}},
+                 "num_classes": 2},
+    "shared_encoder": {"inputs": {"a": {"in_channels": 3},
+                                  "b": {"in_channels": 3, "backbone": "shared:a"}},
+                       "num_classes": 2},
+}
+
+
+@pytest.mark.parametrize("config", RNG_MODELS.values(), ids=RNG_MODELS)
+def test_save_and_load_leave_the_rng_alone(config, tmp_path):
+    """Regression: both rebuild the model, and its weight init used the caller's random stream,
+    so a checkpoint changed all later dropout, augmentation and sampling."""
+    model = create_model("resnet18", pretrained=False, **config)
+    before = _rng_state()
+    path = manyseg.save(model, tmp_path / "m.safetensors", **{
+        "activations": activations(model), "normalize": [{"type": "scale", "value": 1}]})
+    _assert_same_rng(before, _rng_state())
+    manyseg.load(path)
+    _assert_same_rng(before, _rng_state())
+
+
+def test_save_and_load_keep_the_rng_of_a_quantized_model(tmp_path):
+    pytest.importorskip("torchao")
+    from manyseg.quantize import quantize_weights
+
+    model = quantize_weights(create_model("resnet18", pretrained=False, num_classes=2))
+    before = _rng_state()
+    path = manyseg.save(model, tmp_path / "q.safetensors", activations={"logits": "softmax"},
+                        normalize=[{"type": "scale", "value": 1}])
+    _assert_same_rng(before, _rng_state())
+    manyseg.load(path)
+    _assert_same_rng(before, _rng_state())
+
+
+def test_a_checkpoint_does_not_change_a_seeded_training_run(tmp_path):
+    def run(checkpoint):
+        torch.manual_seed(0)
+        model = create_model("resnet18", pretrained=False, num_classes=2)
+        opt = torch.optim.SGD(model.parameters(), 0.01)
+        for step in range(3):
+            x, y = torch.randn(2, 3, 64, 64), torch.randint(0, 2, (2, 64, 64))
+            loss = torch.nn.functional.cross_entropy(model(x), y)
+            opt.zero_grad()
+            loss.backward()
+            opt.step()
+            if checkpoint and step == 0:
+                path = manyseg.save(model, tmp_path / "c.safetensors",
+                                    activations={"logits": "softmax"},
+                                    normalize=[{"type": "scale", "value": 1}])
+                manyseg.load(path)
+        return loss.item()
+
+    assert run(False) == run(True)
+
+
+def test_syncbatchnorm_models_save_and_load_as_batchnorm(tmp_path):
+    """Multi-GPU training converts BatchNorm to SyncBatchNorm: same weights and, outside
+    training, the same computation, so the file rebuilds the model it holds."""
+    plain = create_model("resnet18", pretrained=False, num_classes=2)
+    model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(plain)
+    assert any(isinstance(m, torch.nn.SyncBatchNorm) for m in model.modules())
+    loaded = roundtrip(model, torch.randn(2, 3, 64, 64), tmp_path)
+    assert not any(isinstance(m, torch.nn.SyncBatchNorm) for m in loaded.modules())
+
+
+def test_timm_syncbatchnorm_models_save(tmp_path):
+    """timm's own conversion keeps the activation inside BatchNormAct2d."""
+    from timm.layers import convert_sync_batchnorm
+
+    model = convert_sync_batchnorm(
+        create_model("efficientnet_b0", pretrained=False, num_classes=2))
+    roundtrip(model, torch.randn(2, 3, 64, 64), tmp_path)
+
+
+def test_torch_syncbatchnorm_conversion_that_drops_an_activation_is_refused(tmp_path):
+    """torch's conversion turns timm's BatchNormAct2d into a bare SyncBatchNorm, losing its
+    activation: the model computes something the file would not rebuild."""
+    model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(
+        create_model("efficientnet_b0", pretrained=False, num_classes=2))
+    with pytest.raises(ValueError, match="differs from what its create_model"):
+        manyseg.save(model, tmp_path / "m.safetensors", activations={"logits": "softmax"},
+                     normalize=[{"type": "scale", "value": 1}])

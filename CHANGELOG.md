@@ -8,6 +8,15 @@ API, and every such change is listed here.
 
 First release. Python 3.10–3.14 (`manyseg-bench` lists 3.10–3.12), PyTorch ≥ 2.10, timm ≥ 1.0.20.
 
+### Saving and loading
+
+* `manyseg.save` and `manyseg.load` leave the global random state alone. Both rebuild the model,
+  and its discarded weight init used to shift all later dropout, augmentation and sampling, so
+  the same seed gave a different run with and without a checkpoint.
+* `manyseg.save` accepts models converted to `SyncBatchNorm` (with torch's conversion, or timm's
+  for timm's `BatchNormAct2d` layers). They load with plain BatchNorm; convert again to resume
+  multi-GPU training.
+
 ### Saving quantised models
 
 * `manyseg.save` and `manyseg.load` take `quantize_weights` models (`.safetensors`, about 0.26x

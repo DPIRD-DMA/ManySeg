@@ -58,6 +58,13 @@ _KEY = "manyseg"
 ACTIVATIONS = ("softmax", "sigmoid", "none")
 
 
+def _keep_rng():
+    """Isolate a rebuild from the caller's random stream. A rebuild's weight init is thrown away
+    (the checkpoint's weights replace it), so it must not change later dropout, augmentation or
+    sampling. Rebuilds run on the CPU, so only the CPU generator needs saving."""
+    return torch.random.fork_rng(devices=[])
+
+
 def _plain(value: Any) -> Any:
     """``value`` as JSON-compatible plain data, or raise TypeError."""
     return json.loads(json.dumps(value))
@@ -349,12 +356,18 @@ def _dedup_state(model: torch.nn.Module) -> tuple[dict, dict]:
     return tensors, aliases
 
 
+# Multi-GPU training swaps these in. Outside training they compute the same as the type they
+# replace and hold the same weights, so a file rebuilds such a model with the plain type.
+_SYNC_NORMS = {"SyncBatchNorm": "BatchNorm2d", "SyncBatchNormAct": "BatchNormAct2d"}
+
+
 def _structure(model: torch.nn.Module) -> dict[str, tuple]:
     """Every parameter and buffer's shape, and every module's type and settings
     (``extra_repr``: kernel sizes, activation choices, ...)."""
     out: dict[str, tuple] = {k: ("tensor", tuple(v.shape)) for k, v in model.state_dict().items()}
     for name, module in model.named_modules():
-        out[f"module:{name}"] = (type(module).__qualname__, module.extra_repr())
+        kind = type(module).__qualname__
+        out[f"module:{name}"] = (_SYNC_NORMS.get(kind, kind), module.extra_repr())
     return out
 
 
@@ -388,17 +401,18 @@ def _check_rebuildable(model: DenseModel, config: Mapping[str, Any]) -> None:
     the modules alone (a replaced ``forward``) can't be seen."""
     from .models import create_model
 
-    rebuilt = create_model(**_no_download(dict(config)))
     recipe = getattr(model, "quantization", None)
-    if model.single_output is not None and rebuilt.single_output is None:
-        rebuilt.select_heads([model.single_output])
-    elif list(rebuilt.heads) != list(model.heads):
-        rebuilt.select_heads(list(model.heads))
-    if recipe is not None:
-        from .quantize import quantize_weights
+    with _keep_rng():
+        rebuilt = create_model(**_no_download(dict(config)))
+        if model.single_output is not None and rebuilt.single_output is None:
+            rebuilt.select_heads([model.single_output])
+        elif list(rebuilt.heads) != list(model.heads):
+            rebuilt.select_heads(list(model.heads))
+        if recipe is not None:
+            from .quantize import quantize_weights
 
-        quantize_weights(rebuilt, recipe["mode"], conv=recipe["conv"], inplace=True)
-        rebuilt.to(next(model.parameters()).device)
+            quantize_weights(rebuilt, recipe["mode"], conv=recipe["conv"], inplace=True)
+            rebuilt.to(next(model.parameters()).device)
     want, have = _structure(model), _structure(rebuilt)
     if want != have:
         diff = sorted(set(want) ^ set(have)) or sorted(k for k in want if want[k] != have[k])
@@ -563,7 +577,8 @@ def load(path: str | Path, map_location: str | torch.device = "cpu", *,
             raise ValueError(f"{path}: unknown quantisation route {recipe.get('route')!r}. "
                              f"Upgrade ManySeg.")
     try:
-        model = create_model(**_no_download(meta["create_model"]))
+        with _keep_rng():
+            model = create_model(**_no_download(meta["create_model"]))
     except (TypeError, ValueError) as e:
         raise _version_error(path, meta, e) from e
     if meta.get("single_output") is not None and model.single_output is None:
@@ -583,7 +598,8 @@ def load(path: str | Path, map_location: str | torch.device = "cpu", *,
         if recipe is not None:
             from .quantize import quantize_weights
 
-            quantize_weights(model, recipe["mode"], conv=recipe["conv"], inplace=True)
+            with _keep_rng():
+                quantize_weights(model, recipe["mode"], conv=recipe["conv"], inplace=True)
             parts = json.loads(stored.get(_PARTS, "{}"))
             _fill_quantized(model, state, parts)
             quantised = {k for k, t in model.state_dict(keep_vars=True).items()
