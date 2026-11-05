@@ -298,8 +298,7 @@ First release. Python 3.10–3.14 (`manyseg-bench` lists 3.10–3.12), PyTorch �
 ### Deployment
 
 * `manyseg.save` / `manyseg.load` (safetensors plus the stored configuration, normalisation,
-  activations and class names). Save format 2; format-1 files (development versions, which
-  said `"channels"` for all three) are migrated on load. Compatibility policy (`manyseg.io`):
+  activations and class names). Save format 2, the first released one. Compatibility policy (`manyseg.io`):
   renamed or reinterpreted config keys, modules or parameters bump the format and get a
   migration; a committed golden file
   (`packages/manyseg/tests/data/golden_format2.safetensors`) must keep

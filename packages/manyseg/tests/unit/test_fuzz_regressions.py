@@ -435,16 +435,6 @@ def test_head_type_must_match_its_scope(head, right):
         build(heads={"h": head})
 
 
-def test_old_channels_keys_name_their_replacement():
-    with pytest.raises(ValueError, match="in_channels"):
-        build(inputs={"a": {"channels": 3}}, num_classes=2)
-    with pytest.raises(ValueError, match="out_channels"):
-        build(heads={"h": {"type": "segmentation", "channels": 2}})
-    with pytest.raises(ValueError, match="num_features"):
-        build(inputs={"a": {"in_channels": 3}, "m": {"kind": "vector", "channels": 2}},
-              num_classes=2)
-
-
 def test_decoder_as_a_dict():
     a = build(decoder={"type": "unet", "out_stride": 2}, num_classes=2).eval()
     torch.manual_seed(0)

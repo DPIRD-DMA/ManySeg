@@ -14,8 +14,8 @@ Compatibility policy. The file stores a save ``format`` number and the ``manyseg
 wrote it, and holds only plain data (no pickled classes), so it survives refactors that move or
 rename modules. A change that renames or reinterprets ``create_model`` arguments, modules or
 parameters bumps ``FORMAT`` and adds a migration that :func:`read_metadata` applies to older
-files (format 1 -> 2 renamed ``channels``); the committed golden file in
-``tests/data`` checks that today's files keep loading to the same outputs. A file with a newer
+files. Format 2 is the first released one. The committed golden file in ``tests/data`` checks
+that today's files keep loading to the same outputs. A file with a newer
 format fails with an upgrade message. A newer ManySeg may also add options within a format (a
 new head option, say): an older ManySeg then cannot build the model, and :func:`load` names
 both versions. ``torch.save(model)`` pickles are not covered: they depend on internal module
@@ -53,7 +53,7 @@ from ._normalize_spec import check_normalize
 from .models import DenseModel
 from .weights import attribution
 
-FORMAT = 2  # 2: in_channels / out_channels / num_features (1: "channels"; migrated on read)
+FORMAT = 2  # the first released format
 QUANTIZED_FORMAT = 3  # quantised files only: float files keep FORMAT
 _KEY = "manyseg"
 ACTIVATIONS = ("softmax", "sigmoid", "none")
@@ -466,6 +466,9 @@ def read_metadata(path: str | Path, *, token: str | None = None) -> dict:
     fmt = meta.get("format")
     if not isinstance(fmt, int) or fmt < 1:
         raise ValueError(f"{path}: invalid save format {fmt!r}.")
+    if fmt < FORMAT:
+        raise ValueError(f"{path} uses save format {fmt}, which predates ManySeg 0.1.0 and can't "
+                         f"be read. Rebuild the model with create_model and load its weights.")
     if fmt > QUANTIZED_FORMAT:
         raise ValueError(f"{path} uses save format {fmt}; this ManySeg reads up to "
                          f"{QUANTIZED_FORMAT}. Upgrade ManySeg.")
@@ -474,8 +477,6 @@ def read_metadata(path: str | Path, *, token: str | None = None) -> dict:
     missing = {"create_model", "heads", "activations"} - set(meta)
     if missing:
         raise ValueError(f"{path}: metadata lacks {sorted(missing)}.")
-    if fmt < 2:
-        meta["create_model"] = _migrate_v1(meta["create_model"])
     return meta
 
 
@@ -494,32 +495,11 @@ def _read_archive_metadata(path: str | Path) -> str | None:
         return z.read(name).decode() if name is not None else None
 
 
-def _migrate_v1(config: dict) -> dict:
-    """Format 1 (before 0.1.0) used ``"channels"`` for input bands, head outputs and raw
-    vector widths; format 2 says ``in_channels`` / ``out_channels`` / ``num_features``."""
-    config = dict(config)
-
-    def rename(cfg, new):
-        cfg = dict(cfg)
-        if "channels" in cfg:
-            cfg[new] = cfg.pop("channels")
-        return cfg
-
-    if config.get("inputs"):
-        config["inputs"] = {n: rename(c, "num_features" if c.get("kind") == "vector"
-                                      else "in_channels") for n, c in config["inputs"].items()}
-    if config.get("heads"):
-        config["heads"] = {n: rename(c, "out_channels") for n, c in config["heads"].items()}
-    return config
-
-
 def _no_download(config: dict) -> dict:
     """The create_model arguments with every pretrained flag off (the weights come from the
     file)."""
     config = json.loads(json.dumps(config))
     config["pretrained"] = False
-    if config.get("inputs") is not None and config.get("in_channels") == 3:
-        config["in_channels"] = None  # files saved before in_channels defaulted to None
     for cfg in (config.get("inputs") or {}).values():
         if "pretrained" in cfg:
             cfg["pretrained"] = False

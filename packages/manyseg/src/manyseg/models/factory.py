@@ -25,9 +25,6 @@ _INPUT_KEYS = {"in_channels", "backbone", "pretrained", "channel_adapter", "alig
 
 def check_input_keys(name: str, cfg: Mapping) -> None:
     """A raster or time-series input config: known keys, ``in_channels`` given."""
-    if "channels" in cfg:
-        raise ValueError(f"input {name!r}: 'channels' was renamed 'in_channels' (heads: "
-                         "'out_channels'; vector inputs: 'num_features')")
     unknown = set(cfg) - _INPUT_KEYS
     if unknown:
         raise ValueError(f"input {name!r}: unknown keys {sorted(unknown)}")

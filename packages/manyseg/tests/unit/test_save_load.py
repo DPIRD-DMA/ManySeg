@@ -227,29 +227,33 @@ def test_errors(tmp_path):
             manyseg.read_metadata(tmp_path / "bad.safetensors")
 
 
-def test_format_1_files_with_the_old_channels_keys_still_load(tmp_path):
-    """Files saved before 0.1.0 (format 1) said "channels" for input bands, head outputs and
-    vector widths; load() migrates their stored config."""
+def test_files_from_before_the_first_release_are_refused_clearly(tmp_path):
+    """Format 1 never shipped, so nothing migrates it; the error says what to do."""
     from safetensors.torch import load_file, save_file
 
-    model = create_model(backbone="resnet18", pretrained=False,
-                         inputs={"img": {"in_channels": 3},
-                                 "meta": {"kind": "vector", "num_features": 2}},
-                         heads={"seg": {"type": "segmentation", "out_channels": 2}})
-    path = manyseg.save(model.eval(), tmp_path / "new.safetensors",
-                        activations={"seg": "softmax"})
+    model = create_model(backbone="resnet18", pretrained=False, num_classes=2)
+    path = manyseg.save(model, tmp_path / "new.safetensors", activations={"logits": "softmax"},
+                        normalize=[])
     with safe_open(str(path), framework="pt") as f:
         stored = dict(f.metadata())
     meta = json.loads(stored["manyseg"])
     meta["format"] = 1
-    cfg = meta["create_model"]
-    cfg["inputs"] = {"img": {"channels": 3}, "meta": {"kind": "vector", "channels": 2}}
-    cfg["heads"] = {"seg": {"type": "segmentation", "channels": 2}}
     old = tmp_path / "old.safetensors"
     save_file(load_file(str(path)), str(old), metadata={**stored, "manyseg": json.dumps(meta)})
-    x = {"img": torch.randn(1, 3, 64, 64), "meta": torch.randn(1, 2)}
-    loaded = manyseg.load(old)
-    assert torch.equal(outputs(model, x)["seg"], outputs(loaded, x)["seg"])
+    with pytest.raises(ValueError, match="predates ManySeg 0.1.0"):
+        manyseg.load(old)
+    with pytest.raises(ValueError, match="predates ManySeg 0.1.0"):
+        manyseg.read_metadata(old)
+
+
+@pytest.mark.parametrize("config", [
+    {"inputs": {"a": {"channels": 3}}, "num_classes": 2},
+    {"inputs": {"a": {"in_channels": 3}, "m": {"kind": "vector", "channels": 2}}, "num_classes": 2},
+    {"heads": {"h": {"type": "segmentation", "channels": 2}}},
+], ids=["input", "vector", "head"])
+def test_the_old_channels_key_is_an_ordinary_config_error(config):
+    with pytest.raises(ValueError, match="channels|unknown"):
+        create_model("resnet18", pretrained=False, **config)
 
 
 def test_save_names_the_model_inside_a_wrapper(tmp_path):

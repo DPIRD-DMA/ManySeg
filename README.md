@@ -277,8 +277,8 @@ can be loaded (`@<tag>`, `@<sha>`) but not pushed to.
 Don't save the whole model with `torch.save(model)`: that pickle refers to ManySeg's internal
 module paths, so it breaks when a later version moves or renames a class, and loading it
 needs `torch.load(weights_only=False)`, which can run arbitrary code. A `manyseg.save` file holds
-plain data: the `create_model` arguments, a save-format number and the weights. Files from an
-older format are migrated on load, and a file from a newer ManySeg fails with both versions
+plain data: the `create_model` arguments, a save-format number and the weights. When the format
+changes, older files are migrated on load, and a file from a newer ManySeg fails with both versions
 named. A library that keeps its own table of models (architecture names plus weights) should
 store one `manyseg.save` file per model and call `manyseg.load`; take
 `manyseg.load(path).state_dict()` if it needs a state dict.
