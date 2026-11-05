@@ -3,6 +3,8 @@ tiled inference (ManyPred)."""
 
 import json
 
+import manyseg
+import pytest
 from manyseg import create_model
 
 
@@ -74,3 +76,65 @@ def test_fixed_size_backbone():
     model = create_model(backbone="hiera_tiny_224", pretrained=False, in_channels=3,
                          num_classes=2, backbone_kwargs={"img_size": (128, 192)})
     assert model.tiling_spec()["max_size"] == (128, 192)
+
+
+SOFTMAX = {"activations": {"logits": "softmax"}, "normalize": []}
+
+
+def test_no_names_stored():
+    model = build(in_channels=3, num_classes=2)
+    assert model.tiling_spec()["bands"] is None
+    assert "classes" not in model.tiling_spec()["outputs"]["logits"]
+
+
+def test_single_tensor_model_keeps_its_names(tmp_path):
+    model = build(in_channels=3, num_classes=2)
+    path = manyseg.save(model, tmp_path / "m.safetensors", **SOFTMAX, classes=["bg", "water"],
+                        bands=["r", "g", "b"])
+    spec = manyseg.load(path).tiling_spec()
+    assert spec["outputs"]["logits"]["classes"] == ["bg", "water"]
+    assert spec["bands"] == ["r", "g", "b"]
+    json.dumps(spec)
+
+
+def test_names_only_on_returned_heads(tmp_path):
+    model = build(in_channels=3, heads={
+        "mask": {"type": "segmentation", "out_channels": 2},
+        "aux": {"type": "segmentation", "out_channels": 3}})
+    path = manyseg.save(model, tmp_path / "m.safetensors", normalize=[],
+                        activations={"mask": "softmax", "aux": "softmax"},
+                        classes={"mask": ["a", "b"], "aux": ["x", "y", "z"]})
+    loaded = manyseg.load(path)
+    assert loaded.tiling_spec()["outputs"]["aux"]["classes"] == ["x", "y", "z"]
+    loaded.select_heads(["mask"])
+    outputs = loaded.tiling_spec()["outputs"]
+    assert list(outputs) == ["mask"] and outputs["mask"]["classes"] == ["a", "b"]
+
+
+def test_list_of_bands_for_one_named_input_is_keyed_by_it(tmp_path):
+    model = build(num_classes=2, inputs={
+        "img": {"in_channels": 2}, "doy": {"kind": "vector", "num_features": 1}})
+    path = manyseg.save(model, tmp_path / "m.safetensors", **SOFTMAX, bands=["a", "b"])
+    assert manyseg.load(path).tiling_spec()["bands"] == {"img": ["a", "b"]}
+
+
+def test_one_channel_head_may_name_both_classes(tmp_path):
+    model = build(in_channels=3, num_classes=1)
+    path = manyseg.save(model, tmp_path / "m.safetensors", normalize=[],
+                        activations={"logits": "sigmoid"}, classes=["bg", "water"])
+    assert manyseg.load(path).tiling_spec()["outputs"]["logits"]["classes"] == ["bg", "water"]
+
+
+@pytest.mark.parametrize("names", [{"classes": [0, 1]}, {"classes": {"logits": "ab"}},
+                                   {"bands": [1, 2, 3]}, {"bands": "rgb"}])
+def test_save_refuses_names_that_are_not_strings(tmp_path, names):
+    model = build(in_channels=3, num_classes=2)
+    with pytest.raises(ValueError):
+        manyseg.save(model, tmp_path / "m.safetensors", **SOFTMAX, **names)
+
+
+def test_names_stored_before_they_were_checked_stay_valid():
+    model = build(in_channels=3, num_classes=2)
+    model.saved_metadata = {"classes": [0, 1], "bands": [1, 2, 3]}
+    spec = model.tiling_spec()
+    assert spec["outputs"]["logits"]["classes"] == ["0", "1"] and spec["bands"] == ["1", "2", "3"]

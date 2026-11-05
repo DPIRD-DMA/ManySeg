@@ -222,3 +222,38 @@ def test_dates_survive_a_half_dtype_under_real_manypred():
                              output="logits")
 
     assert np.abs(run([18000, 18010, 18020]) - run([18000, 18040, 18080])).max() > 1e-3
+
+
+def _named_model(path, classes, bands):
+    import manyseg
+
+    model = manyseg.create_model(backbone="resnet18", pretrained=False, num_classes=2, inputs={
+        "a": {"in_channels": 2}, "b": {"in_channels": 1}},
+        fusion={"type": "intermediate", "op": "concat"})
+    return manyseg.load(manyseg.save(model, path, normalize=[],
+                                     activations={"logits": "softmax"}, classes=classes,
+                                     bands=bands))
+
+
+def test_real_manypred_accepts_the_names_in_the_spec(tmp_path):
+    """Needs a ManyPred that knows ``classes`` and ``bands``: unknown spec keys are errors."""
+    spec_module = pytest.importorskip("manypred.spec")
+    spec = _named_model(tmp_path / "m.safetensors", ["no", "yes"],
+                        {"a": ["x", "y"], "b": ["z"]}).tiling_spec()
+    checked = spec_module.validate_tiling_spec(spec)
+    assert spec_module.output_classes(checked) == {"logits": ["no", "yes"]}
+    assert checked["bands"] == {"a": ["x", "y"], "b": ["z"]}
+
+
+def test_ensembles_compare_names_by_value_not_by_how_they_were_given(tmp_path):
+    get_tiling_spec = pytest.importorskip("manypred.spec").get_tiling_spec
+    bands = {"a": ["x", "y"], "b": ["z"]}
+    first = _named_model(tmp_path / "1.safetensors", ["no", "yes"], bands)
+    same = _named_model(tmp_path / "2.safetensors", {"logits": ("no", "yes")},
+                        {"b": ["z"], "a": ("x", "y")})
+    assert get_tiling_spec([first, same], None) == first.tiling_spec()
+    # class order is what would make averaging two models wrong, so this one must not pass
+    swapped = _named_model(tmp_path / "3.safetensors", ["yes", "no"], bands)
+    with pytest.raises(ValueError, match="pass spec="):
+        get_tiling_spec([first, swapped], None)
+    assert get_tiling_spec([first, swapped], first.tiling_spec())["bands"] == bands

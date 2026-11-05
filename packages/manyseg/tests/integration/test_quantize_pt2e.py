@@ -205,7 +205,8 @@ def test_saved_size_and_metadata(float_and_int8, saved):
 def test_saved_tiling_spec_matches_float(tmp_path):
     model = _reduced_head_model()
     args = {"normalize": _NORM, "activations": {"seg": "softmax", "coarse": "sigmoid",
-                                                "label": "softmax"}}
+                                                "label": "softmax"},
+            "classes": {"seg": ["a", "b", "c"]}, "bands": ["r", "g", "b"]}
     want = manyseg.load(manyseg.save(model, tmp_path / "f.safetensors", **args)).tiling_spec()
     ep = quantize_pt2e(model, torch.randn(1, 3, 64, 96), _batches(2))
     loaded = manyseg.load(manyseg.save(ep, tmp_path / "q.pt2", source=model, **args))
@@ -213,6 +214,9 @@ def test_saved_tiling_spec_matches_float(tmp_path):
     assert spec == want
     assert spec["outputs"]["coarse"]["scale"] == 0.25
     assert spec["normalize"] == _NORM
+    assert spec["outputs"]["seg"]["classes"] == ["a", "b", "c"]
+    assert "classes" not in spec["outputs"]["coarse"]
+    assert spec["bands"] == ["r", "g", "b"]
     x = torch.randn(1, 3, 97, 131)
     out, ref = loaded(x), ep.module()(x)
     assert set(out) == set(ref) and all(torch.equal(out[k], ref[k]) for k in ref)

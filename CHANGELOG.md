@@ -17,6 +17,9 @@ First release. Python 3.10–3.14 (`manyseg-bench` lists 3.10–3.12), PyTorch �
   pixel made the scene's total NaN.
 * `"attention"` time-series models run in `float16` and `bfloat16`, as ManyPred's GPU default
   needs.
+* `tiling_spec()` reports the saved names: `classes` on each returned head and a top-level `bands`.
+  `.pt2` files keep them. `manyseg.save` now refuses names that aren't strings. An ensemble's
+  members must have the same names, or ManyPred asks for `spec=`.
 
 ### Saving quantised models
 

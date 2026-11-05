@@ -343,7 +343,8 @@ pip install "manypred[geo] @ git+https://github.com/DPIRD-DMA/ManyPred"
 
 ManyPred reads the model's `tiling_spec()` (padding multiple, fixed input size, each head's
 resolution) and the normalisation and activations stored by `manyseg.save`, so with a model
-saved as in "Save and load" above neither is repeated:
+saved as in "Save and load" above neither is repeated. The class and band names you saved are in
+the spec too, and `predict_files` writes them into its output files:
 
 ```python
 import numpy as np
