@@ -356,9 +356,18 @@ def _dedup_state(model: torch.nn.Module) -> tuple[dict, dict]:
     return tensors, aliases
 
 
-# Multi-GPU training swaps these in. Outside training they compute the same as the type they
-# replace and hold the same weights, so a file rebuilds such a model with the plain type.
-_SYNC_NORMS = {"SyncBatchNorm": "BatchNorm2d", "SyncBatchNormAct": "BatchNormAct2d"}
+def _rebuilt_type(module: torch.nn.Module) -> str:
+    """The name of the type a file rebuilds ``module`` as. Multi-GPU training swaps in the
+    SyncBatchNorm classes: outside training they compute the same as the type they replace and
+    hold the same weights. Exact types, as a class that only shares the name may do anything."""
+    from timm.layers import SyncBatchNormAct
+
+    kind = type(module)
+    if kind is torch.nn.SyncBatchNorm:
+        return "BatchNorm2d"
+    if kind is SyncBatchNormAct:
+        return "BatchNormAct2d"
+    return kind.__qualname__
 
 
 def _structure(model: torch.nn.Module) -> dict[str, tuple]:
@@ -366,8 +375,7 @@ def _structure(model: torch.nn.Module) -> dict[str, tuple]:
     (``extra_repr``: kernel sizes, activation choices, ...)."""
     out: dict[str, tuple] = {k: ("tensor", tuple(v.shape)) for k, v in model.state_dict().items()}
     for name, module in model.named_modules():
-        kind = type(module).__qualname__
-        out[f"module:{name}"] = (_SYNC_NORMS.get(kind, kind), module.extra_repr())
+        out[f"module:{name}"] = (_rebuilt_type(module), module.extra_repr())
     return out
 
 

@@ -349,3 +349,21 @@ def test_torch_syncbatchnorm_conversion_that_drops_an_activation_is_refused(tmp_
     with pytest.raises(ValueError, match="differs from what its create_model"):
         manyseg.save(model, tmp_path / "m.safetensors", activations={"logits": "softmax"},
                      normalize=[{"type": "scale", "value": 1}])
+
+
+def test_a_lookalike_class_named_syncbatchnorm_is_refused(tmp_path):
+    """The exception is for the real classes: this one would not be rebuilt by the file."""
+
+    class SyncBatchNorm(torch.nn.BatchNorm2d):
+        def forward(self, x):
+            return super().forward(x) * 0
+
+    model = create_model("resnet18", pretrained=False, num_classes=2)
+    name = next(n for n, m in model.named_modules() if isinstance(m, torch.nn.BatchNorm2d))
+    parent, _, child = name.rpartition(".")
+    original = getattr(model.get_submodule(parent), child)
+    setattr(model.get_submodule(parent), child, SyncBatchNorm(original.num_features))
+    SyncBatchNorm.__qualname__ = "SyncBatchNorm"  # as a class defined at module level would be
+    with pytest.raises(ValueError, match="differs from what its create_model"):
+        manyseg.save(model, tmp_path / "m.safetensors", activations={"logits": "softmax"},
+                     normalize=[{"type": "scale", "value": 1}])
