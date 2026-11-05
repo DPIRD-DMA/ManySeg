@@ -25,15 +25,17 @@ Any number of bands, several inputs at different resolutions, metadata, and many
 
 ## Install
 
-ManySeg is not on PyPI yet. Install it from GitHub (Python ≥ 3.10, PyTorch ≥ 2.10):
+Python ≥ 3.10, PyTorch ≥ 2.10:
 
 ```bash
-pip install "manyseg @ git+https://github.com/DPIRD-DMA/ManySeg#subdirectory=packages/manyseg"
+pip install manyseg
+# or
+uv add manyseg
 ```
 
 Optional extras: `[quant]` (int8 quantisation), `[onnx]` (ONNX export), `[instances]`
-(instance post-processing), `[vectors]` (polygons, road graphs and points as GIS layers).
-After the first release this becomes `pip install manyseg`.
+(instance post-processing), `[vectors]` (polygons, road graphs and points as GIS layers), e.g.
+`pip install "manyseg[vectors]"` or `uv add "manyseg[vectors]"`.
 
 ## Quick start
 
@@ -334,8 +336,8 @@ and a fixed-size backbone refuses anything larger than its size. For larger scen
 [ManyPred](https://github.com/DPIRD-DMA/ManyPred), our tiled inference library: it predicts
 overlapping patches in batches, stitches them, skips nodata, and reads and writes GeoTIFFs
 larger than memory. It is a separate library so it can run any PyTorch model that returns a
-tensor or a dict of tensors; ManySeg does not import it. Like ManySeg, it is not on PyPI yet
-(`[geo]` adds rasterio for GeoTIFFs):
+tensor or a dict of tensors; ManySeg does not import it. It is not on PyPI yet, so install it
+from GitHub (`[geo]` adds rasterio for GeoTIFFs):
 
 ```bash
 pip install "manypred[geo] @ git+https://github.com/DPIRD-DMA/ManyPred"

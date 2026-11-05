@@ -23,6 +23,9 @@ The rest cover each vector output, from labels in a real CRS through targets and
 
 ```bash
 pip install "manyseg[vectors]" rasterio matplotlib jupyter
+# or
+uv add "manyseg[vectors]" rasterio matplotlib jupyter
+
 jupyter lab
 ```
 

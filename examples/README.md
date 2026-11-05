@@ -57,8 +57,8 @@ uv sync --all-packages --all-extras
 uv run python examples/01_single_input.py
 ```
 
-With pip, `pip install manyseg` is enough for 01-05, 08 and 10; 09 needs `fastai`, 11
-`lightning`, 12 `accelerate`, 13 `torchgeo`, and 14-18 and `vector_presets.py`
+Outside the repository, `pip install manyseg` or `uv add manyseg` is enough for 01-05, 08 and 10;
+09 needs `fastai`, 11 `lightning`, 12 `accelerate`, 13 `torchgeo`, and 14-18 and `vector_presets.py`
 `manyseg[vectors]` (plus `geopandas` for the GeoPackages). Optional parts skip with a message when
 their dependency is missing: ONNX in 06 needs `manyseg[onnx]` and `onnxruntime`, 07 needs
 `manyseg[quant]` (torchao), and the PNG in 03 needs the Graphviz `dot` binary.
