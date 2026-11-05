@@ -11,6 +11,7 @@ GOOD_STEPS = [
     {"type": "none"},
     {"type": "scale", "value": 10000},
     {"type": "scale", "value": [255, 255.0, 1e4]},
+    {"type": "scale", "value": [[1, 2], [3, 4]]},  # evenly nested values are flattened
     [{"type": "scale", "value": 10000}, {"type": "zscore", "mean": [0.5, 0.4], "std": [0.2, 0.1]}],
     {"type": "zscore", "mean": 0.5, "std": 0.2},
     {"type": "zscore", "scope": "tile"},
@@ -41,6 +42,11 @@ BAD_STEPS = [
     {"type": "scale", "value": "x"},
     {"type": "scale", "value": []},
     {"type": "scale", "value": float("nan")},
+    {"type": "scale", "value": [[1], [2, 3]]},  # uneven nesting
+    {"type": "scale", "value": [1, [2]]},
+    {"type": "zscore", "mean": [[0.5], [0.4, 0.3]], "std": 1},
+    {"type": "minmax", "min": [[0], [0, 0]], "max": 1},
+    {"type": "clip", "max": [[1], [2, 3]]},
     {"type": "zscore"},
     {"type": "zscore", "mean": 0.5},
     {"type": "zscore", "std": 0.5},
@@ -76,7 +82,8 @@ def test_bad_steps_fail(spec):
 
 @pytest.mark.parametrize("spec", GOOD_STEPS + BAD_STEPS, ids=repr)
 def test_agrees_with_manypred(spec):
-    """ManySeg can't import ManyPred, so it keeps its own copy of the rules. Any drift fails."""
+    """ManySeg can't import ManyPred, so it keeps its own copy of the rules. A change on either
+    side that alters the verdict on any spec listed here fails."""
     validate_spec = pytest.importorskip("manypred.normalize").validate_spec
 
     def accepted(check):

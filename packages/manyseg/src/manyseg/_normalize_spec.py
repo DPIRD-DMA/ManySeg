@@ -26,18 +26,26 @@ _OPTIONS = {
 _SCOPES = ("tile", "scene")
 
 
+def _flatten(value: Any) -> list:
+    """A number or an evenly nested list of them, as a flat list of floats; ValueError if uneven
+    (numpy, which ManyPred reads these with, can't make an array of it)."""
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        return [float(value)]
+    parts = [_flatten(v) for v in value]
+    nested = {isinstance(v, Sequence) and not isinstance(v, (str, bytes)) for v in value}
+    if len(nested) > 1 or len({len(p) for p in parts}) > 1:
+        raise ValueError("uneven nesting")
+    return [x for p in parts for x in p]
+
+
 def _numbers(value: Any, name: str, *, nonzero: bool = False, positive: bool = False) -> list:
     """A number or a (nested) list of them, as a flat list of finite floats."""
     if hasattr(value, "tolist"):  # numpy arrays and tensors reach the JSON check with a clear error
         value = value.tolist()
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
-        flat = [x for v in value for x in _numbers(v, name)] if len(value) else []
-    else:
-        try:
-            flat = [float(value)]
-        except (TypeError, ValueError):
-            raise ValueError(f"{name} must be a number or a list of numbers, got {value!r}.") \
-                from None
+    try:
+        flat = _flatten(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} must be a number or a list of numbers, got {value!r}.") from None
     if not flat or not all(math.isfinite(x) for x in flat):
         raise ValueError(f"{name} must be finite numbers, got {value!r}.")
     if nonzero and any(x == 0 for x in flat):
