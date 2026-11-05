@@ -6,7 +6,7 @@ API, and every such change is listed here.
 
 ## 0.1.0 (unreleased)
 
-First release. Python 3.10–3.14 (`manyseg-bench` lists 3.10–3.12), PyTorch ≥ 2.10, timm ≥ 1.0.20.
+First release. Python 3.11–3.14 (`manyseg-bench` lists 3.11–3.12), PyTorch ≥ 2.10, timm ≥ 1.0.20.
 
 ### Saving and loading
 

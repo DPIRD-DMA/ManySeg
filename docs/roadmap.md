@@ -205,7 +205,7 @@ Ships in 0.1.0, marked experimental (names and defaults may change before 1.0):
   hooks private, keyword-only tuning arguments, `pack_metadata`, save format 2 with migration,
   weights citations; `CHANGELOG.md`.
 * ✅ Python 3.13 and 3.14 pass every tier locally; 3.15rc1 everything except `torch.compile` (not yet
-  supported by PyTorch). CI: Linux 3.10 / 3.14, Windows on PRs and nightly.
+  supported by PyTorch). CI: Linux 3.11 / 3.14, Windows on PRs and nightly.
 * ✅ GPU fuzzer (CUDA vs CPU, bf16, `torch.compile`): found a PyTorch Inductor bug in dynamic
   nearest upsampling, worked around (`docs/upstream/`).
 * ✅ README status line and classifiers: alpha.

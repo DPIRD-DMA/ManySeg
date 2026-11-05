@@ -25,7 +25,7 @@ Any number of bands, several inputs at different resolutions, metadata, and many
 
 ## Install
 
-Python ≥ 3.10, PyTorch ≥ 2.10:
+Python ≥ 3.11, PyTorch ≥ 2.10:
 
 ```bash
 pip install manyseg

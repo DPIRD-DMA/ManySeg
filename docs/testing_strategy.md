@@ -30,7 +30,7 @@ The `device` fixture parametrises over `cpu`, `cuda` and `mps`. A device counts 
 can actually allocate. An unavailable or unusable device is **skipped and reported**, never
 replaced by another device.
 
-* CI runs CPU on Linux (Python 3.10 and 3.14) on every run, and on macOS-arm64 and Windows
+* CI runs CPU on Linux (Python 3.11 and 3.14) on every run, and on macOS-arm64 and Windows
   (Python 3.12) on pull requests, nightly and on demand. The slow tier runs on Linux only.
 * GitHub's macOS VMs report MPS as available, but every allocation fails, so **MPS tests need
   a physical Apple Silicon machine** (`uv run pytest packages/manyseg -k mps`).
