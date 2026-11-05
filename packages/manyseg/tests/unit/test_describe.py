@@ -101,7 +101,8 @@ def test_late_fusion_per_input_decoders():
 
 def test_shared_encoder_and_projection_adapter():
     model = make(inputs={"optical": {"in_channels": 4, "backbone": "resnet18"},
-                         "sar": {"in_channels": 2, "backbone": "shared:optical"}},
+                         "sar": {"in_channels": 2, "backbone": "shared:optical",
+                                 "channel_adapter": "projection"}},
                  fusion={"type": "intermediate"}, num_classes=2)
     g = model_graph(model, {"optical": torch.randn(1, 4, H, W),
                             "sar": torch.randn(1, 2, H, W)})

@@ -7,7 +7,7 @@ the difference from :mod:`manyseg.points`, which returns ``(y, x)`` with pixel c
 integers. For a head with ``scale`` < 1, pass ``scale=`` and coordinates come back in input
 pixels (``x_input = x_head / scale``).
 
-The decoder is the E028 baseline: threshold, skeletonize, trace the pixel graph, merge junction
+The decoder is a plain mask baseline: threshold, skeletonize, trace the pixel graph, merge junction
 artefacts, prune spurs, join nearby dangling ends, simplify. It keeps no information about
 grade separation: two roads that cross on a bridge become a junction.
 """

@@ -43,6 +43,20 @@ class FiLM(nn.Module):
         return x * (1 + gamma[:, :, None, None]) + beta[:, :, None, None]
 
 
+def declared_levels(decoder: nn.Module):
+    """``decoder.read_levels``, or None when it says nothing about this decoder's reads: a subclass
+    that overrides ``forward`` but inherits the declaration may read something else."""
+    declared = getattr(decoder, "read_levels", None)
+    if declared is None or "read_levels" in vars(decoder):
+        return declared
+    for cls in type(decoder).__mro__:
+        if "read_levels" in vars(cls):
+            return declared
+        if "forward" in vars(cls):
+            return None
+    return declared
+
+
 def used_levels(decoder: nn.Module, specs: Sequence[FeatureSpec],
                 input_channels: int | None = None) -> list[int]:
     """Indices of the feature levels ``decoder`` actually reads (decoders such as DeepLabV3+ or
@@ -56,13 +70,19 @@ def used_levels(decoder: nn.Module, specs: Sequence[FeatureSpec],
     The probe is side-effect free: inputs come from a private generator (the global RNG is
     untouched), and every submodule's ``training`` flag and every buffer are restored.
     """
-    declared = getattr(decoder, "read_levels", None)
+    declared = declared_levels(decoder)
     if declared is not None:
         levels = sorted({int(i) for i in declared})
         if not all(0 <= i < len(specs) for i in levels):
             raise ValueError(f"read_levels {list(declared)} out of range for {len(specs)} "
                              "feature levels")
         return levels
+    return probe_levels(decoder, specs, input_channels)
+
+
+def probe_levels(decoder: nn.Module, specs: Sequence[FeatureSpec],
+                 input_channels: int | None = None) -> list[int]:
+    """The gradient probe of :func:`used_levels`, whatever ``decoder`` declares."""
     m = max(s.stride for s in specs)
     p = next(iter(decoder.parameters()), None)
     dev = p.device if p is not None else torch.device("cpu")

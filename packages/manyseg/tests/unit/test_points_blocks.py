@@ -317,3 +317,19 @@ def test_block_decoder_registry_points_and_density():
 def test_density_decoder_rejects_a_bad_value_scale(scale):
     with pytest.raises(ValueError, match="value_scale"):
         DensityBlockDecoder(value_scale=scale)
+
+
+def test_density_counts_nan_pixels_as_zero():
+    """ManyPred's stitched outputs hold NaN at nodata: the total must stay a number."""
+    from manyseg.vectors import block_decoder, decode_scene
+
+    density = np.ones((1, 32, 32), np.float32)
+    density[0, :8, :8] = np.nan
+    dec = block_decoder("density")
+    assert decode_scene({"density": density}, dec, 16, 0).total == 32 * 32 - 64
+    mask = np.ones((1, 32, 32), np.float32)
+    mask[0, :8, :8] = np.nan
+    mask[0, 16:, :] = 0
+    dec = block_decoder("density", mask="valid")
+    got = decode_scene({"density": density, "valid": mask}, dec, 16, 0)
+    assert got.total == 32 * 16 - 64

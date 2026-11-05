@@ -72,36 +72,6 @@ logits = model(x)             # x: (N, 4, H, W) -> (N, 3, H, W); returns a Tenso
 `model(x)` returns logits at the input resolution `(H, W)` for any `H, W` the backbone supports,
 including odd and non-square sizes (see "Spatial policy").
 
-### Presets
-
-`manyseg.presets` names the configs on the measured accuracy/latency Pareto front (E018). They
-are keyword sets for `create_model` and are opt-in; the defaults above keep SMP parity.
-
-```python
-from manyseg.presets import PRESETS, preset
-
-model = create_model(**preset("balanced"), in_channels=4, num_classes=3)
-PRESETS["balanced"].measured   # GPU and CPU latency, GFLOPs, params, val mIoU per dataset
-```
-
-| preset | config | 4090 compiled bf16 b8 512², 15 ch | Pet val | Sen1Floods11 val |
-|---|---|---|---|---|
-| `fast` | PVTv2-b0 + SegFormer head | 4.5 ms | 0.820 | 0.901 |
-| `compact` | PVTv2-b0 + U-Net (64…8) | 4.9 ms | 0.823 | 0.901 |
-| `balanced` | PVTv2-b0 + U-Net (128…8) | 5.3 ms | 0.825 | 0.902 |
-| `accurate` | PVTv2-b0 + U-Net (256…16) | 7.3 ms | 0.827 | 0.901 |
-| (default) | ResNet-34 + U-Net (256…16) | 10.9 ms | 0.823 | 0.890 |
-
-Two datasets and one GPU; validate on your own data. On CPU the GPU ordering does not carry
-over. With fp32, one 3×1024² tile, batch 1 and 16 threads (Ryzen 9 5950X, light background
-load), the presets took 0.58–0.84 s eager and 0.48–0.60 s compiled, against 0.62 s and 0.58 s
-for the default (`measured["cpu_s"]`; a separate timing run with no record under `experiments/`,
-and not the setup of E018's CPU section). In OmniCloudMask's architecture screen
-([#2](https://github.com/DPIRD-DMA/ManySeg/issues/2)), PVTv2 encoders were slow on CPU for
-their FLOPs, ResNet-34 and EdgeNeXt U-Nets were fast, and compiling changed the ranking, so
-time CPU candidates eager and compiled on the target machine. The ResNet-34 default stays
-because it is the familiar SMP baseline, not because it is on the front.
-
 ### Multiple outputs
 
 Passing `heads=` instead of `num_classes=` makes the model return a `dict[str, Tensor]` keyed by
@@ -322,6 +292,16 @@ out = model({"optical": o, "sar": s})
   shared-encoder model from 0.90 to 0.50–0.65 val mIoU. `"share_norm": True` shares BN too (the
   old behaviour); use it only for inputs with matching statistics (e.g. two dates of the same
   sensor).
+* **Shared encoder, different channels**: an input with another channel count than the encoder it
+  shares must say how to reach it: `{"backbone": "shared:optical", "channel_adapter":
+  "projection"}` puts a learned 1×1 conv in front. Without it `create_model` refuses, so no
+  learned layer appears unasked, and giving the input its own encoder is often the better answer.
+  Only this input's own setting counts, not the top-level `channel_adapter`. Other adapters are
+  refused, as the stem is already built, and so is `"projection"` with equal channels. `"channels"`
+  metadata widens its target raster first, which can make a shared input differ.
+  E004's verdict on `projection` doesn't settle this case: there the projection was inside the
+  encoder's training group, frozen for epoch 1 and then at 0.1× learning rate. A shared input's
+  projection is outside `backbone.encoders`, so the benchmark trains it with the decoder.
 
 #### Time series
 
@@ -702,7 +682,8 @@ create_model(backbone="resnet34", pretrained=True, in_channels=13, channel_adapt
 `in_channels=3` with a pretrained backbone leaves the weights untouched for every adapter.
 
 > **Evidence (E004, 13-band Sentinel-2):** no adapter beat `repeat`, which stays the default;
-> `projection` was harmful.
+> `projection` was harmful, in a run that froze it for epoch 1 and then trained it at 0.1×
+> learning rate, so a normally trained projection may do better.
 
 **Channels that are not image bands.** `repeat` and `mean` treat every input channel as a
 band. Take RGB plus three 0/1 validity masks (`in_channels=6`): `repeat` gives each mask a copy
@@ -783,7 +764,11 @@ and conditioning are configured by dicts only.
 > thresholds differed between folds and did not beat a fixed 0.3. A softplus density output
 > brought the density head's count MAE there to 2.9, from 7.5 for the raw head summed as
 > `count_from_density` does (10.1 clamped at 0); a floor of about +1.75 objects per image remains.
-> A ReLU output died (map at 0) and was removed. Softplus is the default since E011c found it no
+> Details of that run: the raw head had a mean signed error of +10.1 and correlation 0.80;
+> softplus had correlation 0.72, a floor of 2.4 on an empty tile, and starts at about 12 objects per
+> tile from its -4 bias. A ReLU output died: its bias drifted to -0.005, the largest count on any
+> image was 0.06 against true counts up to 27 (MAE 3.5, correlation 0.37), and it was removed.
+> Softplus is the default since E011c found it no
 > worse on OAM-TCD (test MAE 19.8 vs 19.3 raw, within the margin); `density_head(activation=None)`
 > keeps the raw head.
 
@@ -865,8 +850,8 @@ model, so export and inference stay plain tensors. The workflow per task is the 
 
 1. **Targets.** Your vector labels in any CRS → `to_pixels` (cut to a tile, reprojected) → the
    task's target encoder → one numpy array per head.
-2. **Model.** `create_model(heads=...)` with the task's head preset, trained with the losses in
-   `manyseg-bench` (`CornerLineTask`, `RoadGraphTask`, `InstanceTask`).
+2. **Model.** `create_model(heads=...)` with the task's head preset, trained with the task's
+   loss terms: `corner_line_losses`, `road_losses` or `manyseg.instances.instance_losses`.
 3. **Decoding.** The predicted rasters (sigmoid applied to logit heads, or `logits=True`) →
    `decode_scene(fields, block_decoder(task), scene=scene)` → `SceneRecords`, a `VectorGraph`
    or `ScenePoints` in scene pixels, block by block for scenes of any size.
@@ -890,9 +875,13 @@ the sigmoid to `extent`, `boundary` and `corner`, roads to `mask` and `keypoints
 
 Why these decoders (pre-registered experiments in [`experiments/`](../experiments/)):
 
-* **Footprints, E038** (WHU aerial, 2 seeds): corners and walls (B3) beat pixel outlines on
+Experiment write-ups name decoders by their arm: **B0** instance outlines, **B3** corners and
+walls, **R0** mask skeleton, **R4** unified road heads, **F0** / **F3** roof faces from outlines /
+from corners and walls, **J1** / **J2** the `mean_height` / `plane_intersection` mesh joins.
+
+* **Footprints, E038** (WHU aerial, 2 seeds): corners and walls beat pixel outlines on
   boundary F (+0.02) and C-IoU × F1 (0.63 vs 0.46-0.47), at 0.01-0.02 lower detection F1.
-* **Fields, E046** (Fields of The World, Netherlands, 1 seed): pixel outlines (B0) beat corners
+* **Fields, E046** (Fields of The World, Netherlands, 1 seed): pixel outlines beat corners
   and walls on boundary F (0.59 vs 0.57), as in the E045 oracle (touching fields snapped to
   each other's corners, curved edges were straightened). **E052** (2 seeds): an absolute
   distance target (px) is as good as the normalised one (boundary F +0.008, detection F1
@@ -902,7 +891,7 @@ Why these decoders (pre-registered experiments in [`experiments/`](../experiment
 * **Seed fragments, E053** (fixed decoder settings, trained models): dropping seed components
   under 8 px (`min_seed`) raised roof face F1 by 0.041, footprint detection F1 by 0.024 and
   field detection F1 by 0.008 with boundary F unchanged or better; default in `block_decoder`.
-* **Roads, E044 / E044b** (City-Scale, 3 seeds): `graph_from_road_heads` (R4) matched a mask
+* **Roads, E044 / E044b** (City-Scale, 3 seeds): `graph_from_road_heads` matched a mask
   skeleton (APLS +0.003 to +0.005, junction F1 +0.02 to +0.03) and kept 22-25 points more of
   the overpasses (0.54-0.59 vs 0.32-0.34).
 * **Roof faces, E047b + E048b** (3D BAG, Netherlands, 1 seed): trained faces on RGB + nDSM
@@ -910,10 +899,10 @@ Why these decoders (pre-registered experiments in [`experiments/`](../experiment
   height error (1.3-1.4 m vs 1.8-2.1 m RMSE). The shipped corner decoder gives straight outlines
   (C-IoU 0.64 vs 0.15-0.21 for pixel outlines) at 0.01-0.04 lower face F1, so E047b's rule did
   not prefer it over pixel outlines; it ships because E048b's face joining and meshes were built
-  and tested on it (straight shared edges; 2,957-3,353 shared mesh vertices after planar joining and J2, about 4x
-  fewer than pixel outlines' 10,690-13,075). Joining F3 faces into a planar partition raised
+  and tested on it (straight shared edges; 2,957-3,353 shared mesh vertices after planar joining and the `plane_intersection` mesh, about 4x
+  fewer than pixel outlines' 10,690-13,075). Joining faces decoded with corners and walls into a planar partition raised
   their seam closure from 0.38 to 0.71-0.73 (3D BAG's own faces: 0.79). That catches up with pixel
-  outlines rather than beating them: those reach 0.68-0.73 with J2 alone, with lower vertex
+  outlines rather than beating them: those reach 0.68-0.73 with the mesh join alone, with lower vertex
   height error (0.40-0.52 m vs 0.48-0.61 m).
   **E049:** from RGB alone, with predicted heights, face F1 fell by 0.28-0.38 and height RMSE
   rose by 1.8-2.9 m: not viable.
@@ -963,8 +952,8 @@ may be cut). Roof records hold `id`, `part` (pieces a join split off), `geometry
 versions of each task: [`examples/14_vector_footprints.py`](../examples/14_vector_footprints.py)
 to [`18_vector_points.py`](../examples/18_vector_points.py).
 
-**Large scenes with ManyPred** (*requires the ManyPred release that adds `merge="cut"` and
-`BlockPostprocess`; not released yet*). ManyPred stitches the tiles' outputs and calls the
+**Large scenes with ManyPred** (*needs ManyPred's first release, or its GitHub main, for
+`merge="cut"` and `BlockPostprocess`*). ManyPred stitches the tiles' outputs and calls the
 decoder on each block of the stitched rasters while it predicts, so one call writes the
 vectors. Memory stays bounded when `load_func` returns a lazy reader, as here, with the default
 GeoTIFF writer and no `postprocess=`: it then holds a strip of block rows plus `2 * halo` rows per
@@ -1071,16 +1060,18 @@ polys = polygons_from_labels(labels, simplify=1.0)   # shapely Polygons, holes k
 ```
 
 Metrics (APLS, GEO precision / recall, junction F1, grade-separated crossings, C-IoU, PoLiS,
-N-ratio) are in `manyseg_bench.evaluation.vectors`.
+N-ratio) are in `manyseg.vectors.metrics`: `graph_metrics(gt, pred, gsd)` and
+`polygon_metrics(gt, pred, gsd)` return them together.
 
-**Training presets.** Two trained models have head presets, target encoders and bench tasks with
-the experiments' losses. Both use built-in head types; the focal-loss heatmap heads start at
+**Training presets.** Two trained models have head presets, target encoders and the experiments'
+losses, as plain functions that return the unweighted terms (`sum(parts.values())` is the trained
+models' loss). `manyseg-bench` has training tasks that call them. Both use built-in head types; the focal-loss heatmap heads start at
 `p = 0.1` (`bias_init = logit(0.1)`).
 
-| Preset | Heads | Targets | Bench task (`manyseg_bench.tasks`) | Decoding |
+| Preset | Heads | Targets | Losses, and the bench task (`manyseg_bench.tasks`) | Decoding |
 | --- | --- | --- | --- | --- |
-| `corner_line_heads()`: footprints, roof faces (B3; E036, E038, E047) | `extent`, `boundary`, `distance` (as `instance_heads`), `corner` (1), `direction` (2: `cos 2t`, `sin 2t`) | `instance_targets(ids, boundary_width=2)` + `corner_targets(polygons, shape)` | `CornerLineTask` (`"corner_lines"`): instance loss + CenterNet focal (corner) + masked L1 (direction on outlines); PQ | `instances_from_outputs` → `polygons_from_corners` |
-| `road_heads()`: roads (R4; E039, E044) | `mask` (1), `line` (1), `keypoints` (3: junction, end, crossing), `direction` (4: two modes) | `road_targets(graph, shape, crossings=, width=6)` | `RoadGraphTask` (`"roads"`): Dice + BCE (mask, line) + focal over the keypoints (positives floored at 16) + L1 (mode 1 on roads, mode 2 at crossings); mask IoU | `graph_from_road_heads` |
+| `corner_line_heads()`: footprints, roof faces (E036, E038, E047) | `extent`, `boundary`, `distance` (as `instance_heads`), `corner` (1), `direction` (2: `cos 2t`, `sin 2t`) | `instance_targets(ids, boundary_width=2)` + `corner_targets(polygons, shape)` | `corner_line_losses`; `CornerLineTask` (`"corner_lines"`): instance loss + CenterNet focal (corner) + masked L1 (direction on outlines); PQ | `instances_from_outputs` → `polygons_from_corners` |
+| `road_heads()`: roads (E039, E044) | `mask` (1), `line` (1), `keypoints` (3: junction, end, crossing), `direction` (4: two modes) | `road_targets(graph, shape, crossings=, width=6)` | `road_losses`; `RoadGraphTask` (`"roads"`): Dice + BCE (mask, line) + focal over the keypoints (positives floored at 16) + L1 (mode 1 on roads, mode 2 at crossings); mask IoU | `graph_from_road_heads` |
 
 Targets carry pixel widths, sigmas and angles, so augment them only with the 8 exact dihedral
 transforms (`manyseg.vectors.dihedral(a, d, direction=True)` for the direction fields: a quarter
@@ -1114,10 +1105,10 @@ t = road_targets(g, shape, crossings=crossings)     # mask, line, keypoints, dir
 
 | Task | Encoder | Returns | Trained with |
 | --- | --- | --- | --- |
-| Footprints (B3; E036, E038) | `footprint_targets(polygons, shape)` | `instances`, `corner`, `direction`, `direction_mask` (what `CornerLineTask` reads) + `extent`, `boundary`, `distance` (`instance_targets`, `boundary_width=2`; `instance_heads=False` drops them, the task derives them itself) | `CornerLineTask` |
+| Footprints (E036, E038) | `footprint_targets(polygons, shape)` | `instances`, `corner`, `direction`, `direction_mask` (what `CornerLineTask` reads) + `extent`, `boundary`, `distance` (`instance_targets`, `boundary_width=2`; `instance_heads=False` drops them, the task derives them itself) | `CornerLineTask` |
 | Roof faces (E047) | `roof_face_targets(faces, shape)` | as footprints; faces sharing an edge stay separate instances. Heights are not a target: the nDSM is an input channel and planes are fitted after decoding | `CornerLineTask` |
-| Fields (B0; E046, E052) | `field_targets(polygons, shape)` | `instances`, `extent`, `boundary`, `distance`: 4-connected pieces as instances, pieces < 16 px dropped, background holes filled | `InstanceTask(boundary_width=2, distance="absolute")` |
-| Roads (R4; E044) | `road_graph(lines)` → `road_targets(graph, shape, crossings=)` | `mask`, `line`, `keypoints`, `direction` | `RoadGraphTask` |
+| Fields (E046, E052) | `field_targets(polygons, shape)` | `instances`, `extent`, `boundary`, `distance`: 4-connected pieces as instances, pieces < 16 px dropped, background holes filled | `InstanceTask(boundary_width=2, distance="absolute")` |
+| Roads (E044) | `road_graph(lines)` → `road_targets(graph, shape, crossings=)` | `mask`, `line`, `keypoints`, `direction` | `RoadGraphTask` |
 
 Pixel coordinates are `(x, y)` with pixel corners at integers, the inverse of `to_geojson`'s
 transform (`pixel_to_world` / `world_to_pixel` convert arrays and geometries). `to_pixels` makes
@@ -1272,11 +1263,9 @@ parameter gets a gradient (no `find_unused_parameters=True` needed): modules for
 levels nothing reads (fusers, learned temporal aggregations, ViT neck levels, and the timm
 EfficientNet / MobileNetV3 blocks past the last requested level) are not built, and the random
 configuration fuzzer checks this. Heads you leave out of the loss still need it, or
-`select_heads` (which prunes again what only the dropped heads read). For FSDP2,
-`manyseg.distributed.shard_model(model, mp_policy=..., mesh=...)` applies `fully_shard` per
-stage (each encoder, the shared decoder, each task decoder, each head, the conditioner), then
-the root. It is tested against DDP on CPU (gloo): parameters after a step match. BatchNorm
-statistics stay per rank, as with DDP.
+`select_heads` (which prunes again what only the dropped heads read). DDP needs nothing from
+ManySeg: wrap the model as usual. BatchNorm statistics stay per rank, unless you convert to
+`SyncBatchNorm`.
 
 ### Small batches
 

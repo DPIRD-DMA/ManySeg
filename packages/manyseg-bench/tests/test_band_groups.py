@@ -2,6 +2,7 @@
 tensor into 10/20/60 m inputs, block-averages the coarse groups, and feeds a multi-input model
 with same_extent alignment."""
 
+import pytest
 import torch
 from manyseg_bench.providers import ModelSpec, get_provider
 
@@ -44,6 +45,16 @@ def test_band_groups_block_average_is_exact():
     assert torch.equal(split["s2_10m"], x[:, [1, 2, 3, 7]])
     assert torch.allclose(split["s2_20m"][0, 0, 0, 0], x[0, 4, :2, :2].mean())
     assert torch.allclose(split["s2_60m"][0, 1, 1, 1], x[0, 9, 6:12, 6:12].mean())
+
+
+@pytest.mark.parametrize(("c_bands", "projected"), [([5, 6], {"b", "c"}),  # same as b, not a
+                                                    ([5, 6, 7], {"b"})])  # same as a, not b
+def test_band_groups_compare_a_chain_with_the_encoder_it_reaches(c_bands, projected):
+    groups = {"a": {"bands": [0, 1, 2], "factor": 1}, "b": {"bands": [3, 4], "factor": 1},
+              "c": {"bands": c_bands, "factor": 1}}
+    b = _build(band_groups=groups, band_group_inputs={"b": {"backbone": "shared:a"},
+                                                      "c": {"backbone": "shared:b"}})
+    assert set(b.model.model.backbone.adapters) == projected
 
 
 def test_band_groups_shared_encoder():

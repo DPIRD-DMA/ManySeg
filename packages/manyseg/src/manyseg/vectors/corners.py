@@ -1,5 +1,5 @@
-"""Corner-trusting polygons (experimental; E035b oracle): instance outlines straightened between
-predicted corners.
+"""Corner-trusting polygons (experimental): instance outlines straightened between predicted
+corners.
 
 Closure comes from an instance label map (e.g. :func:`manyseg.instances.instances_from_outputs`),
 so a missed corner never loses a building; geometry comes from a corner heatmap and a wall
@@ -146,10 +146,10 @@ def polygons_from_corners(labels, corner, direction, *, corner_threshold: float 
     ``simplify`` px: only exterior walls are straightened, as :func:`corner_targets` puts corners
     and directions only there.
 
-    A low-level building block with generic defaults (E035b's oracle level-1/2 tuning). The
-    settings tuned on trained models are in ``block_decoder("footprints")`` (E038 B3:
-    ``corner_threshold=0.5``, ``big_dev=4``, ``merge_deg=8``) and ``block_decoder("roofs")``
-    (E047b); use those with :func:`decode_scene` unless you need this step on its own."""
+    A low-level building block with generic defaults. The settings tuned on trained models are
+    in ``block_decoder("footprints")`` (E038: ``corner_threshold=0.5``, ``big_dev=4``,
+    ``merge_deg=8``) and ``block_decoder("roofs")`` (E047b); use those with
+    :func:`decode_scene` unless you need this step on its own."""
     def _np(a):
         if hasattr(a, "detach"):
             return a.detach().float().cpu().numpy()

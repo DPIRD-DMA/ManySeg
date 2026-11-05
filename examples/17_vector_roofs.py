@@ -109,7 +109,7 @@ def main():
     fields = {k: t[k] for k in ("extent", "boundary", "distance", "corner", "direction")}
     fields["height"] = height  # the input nDSM, not a prediction
 
-    # 3. Block by block: faces, planar join, a robust plane per face, a J2 mesh.
+    # 3. Block by block: faces, planar join, a robust plane per face, a mesh.
     scene = Scene(*SHAPE, transform=TRANSFORM, crs=CRS)
     dec = block_decoder("roofs")  # halo >= dec.min_halo
     records = decode_scene(fields, dec, block=192, halo=64, scene=scene)

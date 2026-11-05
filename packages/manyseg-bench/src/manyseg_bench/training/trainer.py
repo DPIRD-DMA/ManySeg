@@ -161,7 +161,7 @@ def train(
     run = torch.compile(model) if recipe.compile else model
     # Evaluation gets its own static compile, fed one shape (the short last batch padded): the
     # shared callable recompiles for the eval batch size and then runs dynamic-shape kernels
-    # (E027: +13-25% evaluation throughput for the PVTv2-b0 presets).
+    # (E027: +13-25% evaluation throughput for PVTv2-b0 models).
     eval_run = torch.compile(model, dynamic=False) if recipe.compile else model
     opt = build_optimizer(enc_params, dec_params, recipe)
     accum = max(1, int(recipe.grad_accum_steps))

@@ -21,8 +21,8 @@ is no point training a model to predict it.
    dedicated footprint pipelines?
 
 ## Data
-OpenStreetMap (© OpenStreetMap contributors, ODbL), fetched 2026-10-26 by `fetch_osm.py`, stored
-outside the repo and not redistributed. Three ~3 × 3 km areas in Western Australia, in GDA2020 /
+OpenStreetMap (© OpenStreetMap contributors, ODbL), fetched 2026-10-26 by `fetch_osm.py`. The
+extracts are stored outside the repo; the committed figures draw parts of them. Three ~3 × 3 km areas in Western Australia, in GDA2020 /
 MGA 50:
 
 | area | role | roads (ways) | buildings |

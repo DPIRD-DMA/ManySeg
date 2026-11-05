@@ -95,6 +95,11 @@ class UNetPlusPlusDecoder(nn.Module):
         self.out_spec = FeatureSpec(c, out_stride, "unetplusplus")
         init_decoder_(self)
 
+    @property
+    def read_levels(self) -> list[int]:
+        """Indices of the encoder levels this decoder reads."""
+        return sorted(self._order)
+
     def _set_input_divisor(self, divisor: int) -> None:
         """Inputs padded to a multiple of the deepest stride: every level is exactly twice the
         next, so the upsampling needs no gather (E025)."""

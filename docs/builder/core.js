@@ -34,8 +34,8 @@ const EXAMPLES = {
     },
   },
   fast: {
-    label: "Fast preset",
-    blurb: "The measured 'balanced' preset: PVTv2-b0 with a half-width U-Net, about 2x faster.",
+    label: "Small and fast",
+    blurb: "PVTv2-b0 with a half-width U-Net: about 2x faster than the default on a GPU. Time it on your own hardware.",
     state: {
       inputs: [{ name: "image", channels: 4, backbone: "pvt_v2_b0.in1k" }],
       decoder: { type: "unet", width: "half" },
@@ -540,11 +540,17 @@ function derive(s) {
   // time series
   if (ftype === "early" && series.length)
     issues.push({ level: "error", text: "Early fusion cannot stack a time series (it has a date axis); use intermediate or late fusion." });
+  rasters.forEach((r, i) => {
+    if (r.backbone.startsWith("shared:") && !rasters.slice(0, i).some((x) => x.name === r.backbone.slice(7)))
+      issues.push({ level: "error", text: `input '${r.name}' shares '${r.backbone.slice(7)}', which must be an input defined before it.` });
+  });
   for (const r of rasters) {
     if (!r.backbone.startsWith("shared:")) continue;
     const target = rasters.find((x) => x.name === r.backbone.slice(7));
     if (r.kind === "timeseries" || (target && target.kind === "timeseries"))
       issues.push({ level: "error", text: `input '${r.name}': a shared encoder cannot involve a time series yet; give each input its own encoder.` });
+    else if (needsProjection(r, s))
+      issues.push({ level: "tip", text: `input '${r.name}' has a different channel count from the encoder it shares, so it reaches it through a learned 1x1 projection (channel_adapter: "projection"). Give it its own encoder to avoid that.` });
   }
   for (const r of series) {
     const taken = [...rasters.map((x) => x.name), ...(s.meta ? [s.meta.name] : [])];
@@ -633,6 +639,23 @@ function temporalParams(r, info) {   // per-level aggregation modules of a time-
   }, 0);
 }
 
+// A shared input with another channel count than the encoder it reaches ("channels" metadata
+// widens the first raster) must ask for the learned projection itself.
+// Returns its channels [in, out], or null.
+function needsProjection(r, s) {
+  const rasters = s.inputs;
+  const channels = (x) => x.channels + (s.meta && s.meta.mode === "channels" && x === rasters[0] ? metaWidth(s.meta) : 0);
+  let root = r;
+  const seen = new Set();
+  while (root.backbone.startsWith("shared:")) {
+    const next = rasters.find((x) => x.name === root.backbone.slice(7));
+    if (!next || seen.has(next)) return null;  // an unknown or circular target: reported elsewhere
+    seen.add(root);
+    root = next;
+  }
+  return channels(r) !== channels(root) ? [channels(r), channels(root)] : null;
+}
+
 function metaWidth(m) {
   return m.fields.reduce((a, f) => a + ({ cyclic: 2, coords: 3, categorical: 8 }[f.type] ?? 1), 0);
 }
@@ -640,6 +663,10 @@ function metaWidth(m) {
 function estimate(s, D) {
   const parts = { encoders: 0, fusion: 0, decoders: 0, heads: 0, metadata: 0 };
   for (const e of D.encoders) if (!e.shared) parts.encoders += e.info.params_m * 1e6;
+  for (const r of s.inputs) {  // a shared input's learned 1x1 projection
+    const proj = r.backbone.startsWith("shared:") ? needsProjection(r, s) : null;
+    if (proj) parts.encoders += proj[0] * proj[1] + proj[1];
+  }
   for (const e of D.encoders) if (e.inputs.length === 1 && e.inputs[0].kind === "timeseries") parts.encoders += temporalParams(e.inputs[0], e.info);
   if (D.ftype === "intermediate") {
     const p = D.primary;
@@ -747,17 +774,6 @@ function pyBlock(obj, indent) {   // one entry per line; nested dicts expand whe
   return `{\n${lines.join("\n")}\n${" ".repeat(indent)}}`;
 }
 
-function matchingPreset(s, D) {
-  if (D.multi || s.meta || !D.needsShared || Object.keys(D.task).length) return null;
-  if (s.inputs[0].backbone !== "pvt_v2_b0.in1k" || s.decoder.out_stride !== 1 || s.decoder.input_cross) return null;
-  for (const [name, p] of Object.entries(DATA.presets)) {
-    const kw = p.kwargs;
-    const width = kw.decoder_kwargs ? Object.entries(DATA.unet_widths).find(([, v]) => v && v.join() === kw.decoder_kwargs.channels.join())?.[0] : "full";
-    if (kw.decoder === s.decoder.type && (kw.decoder !== "unet" || width === s.decoder.width)) return name;
-  }
-  return null;
-}
-
 function decoderKwargs(d, deepest) {
   const kw = {};
   if (UNET_FAMILY.includes(d.type) && d.out_stride !== 1) kw.out_stride = d.out_stride;
@@ -792,16 +808,12 @@ function metaColumns(m) {
 function generateCode(s, D) {
   const args = [];
   const imports = ["import torch", "from manyseg import create_model"];
-  const preset = matchingPreset(s, D);
   const useInputs = D.useInputs;
   const single = isSingleOutput(s);
   const pretrainedValue = (r) => r.weights === "none" ? false : r.weights === "imagenet" ? true : r.weights;
   const perInputWeights = D.multi && D.ftype !== "early";
 
-  if (preset) {
-    imports.push("from manyseg.presets import preset");
-    args.push(`**preset(${py(preset)})`);
-  } else if (!useInputs || D.ftype === "early" || !D.multi) {
+  if (!useInputs || D.ftype === "early" || !D.multi) {
     if (s.inputs[0].backbone !== "resnet34" || !useInputs) args.push(`backbone=${py(s.inputs[0].backbone)}`);
   }
   if (!perInputWeights && pretrainedValue(s.inputs[0]) !== true) args.push(`pretrained=${py(pretrainedValue(s.inputs[0]))}`);
@@ -821,7 +833,10 @@ function generateCode(s, D) {
       c.in_channels = r.channels;
       if (perInputWeights) {
         c.backbone = r.backbone;
-        if (r.backbone.startsWith("shared:")) { if (r.share_norm) c.share_norm = true; }
+        if (r.backbone.startsWith("shared:")) {
+          if (r.share_norm) c.share_norm = true;
+          if (needsProjection(r, s)) c.channel_adapter = "projection";
+        }
         else if (pretrainedValue(r) !== true) c.pretrained = pretrainedValue(r);
       }
       if (i > 0 && r.alignment === "same_extent") c.alignment = "same_extent";
@@ -839,7 +854,7 @@ function generateCode(s, D) {
     }
   }
 
-  if (D.needsShared && !preset) {
+  if (D.needsShared) {
     if (s.decoder.type !== "unet") args.push(`decoder=${py(s.decoder.type)}`);
     const kw = decoderKwargs(s.decoder, Math.max(...D.primary.strides));
     if (Object.keys(kw).length) args.push(`decoder_kwargs=${py(kw)}`);
@@ -905,7 +920,7 @@ function generateCode(s, D) {
   const rsWeights = rs.length && rs.every((r) => !["imagenet", "none"].includes(r.weights));
   lines.push("");
   lines.push("# After training: one file with the weights and what inference needs.");
-  if (!rsWeights) lines.push("# Add normalize=[...] (the normalisation you trained with); see help(manyseg.save).");
+  if (!rsWeights) lines.push("# Add normalize= (the normalisation you trained with: a list of steps, or {input: steps} with inputs=); see help(manyseg.save).");
   lines.push("# import manyseg");
   const saveArgs = [`"model.safetensors"`];
   if (Object.keys(acts).length) saveArgs.push(`activations=${py(acts)}`);

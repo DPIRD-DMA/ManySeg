@@ -166,6 +166,11 @@ class FastaiUNetDecoder(nn.Module):
             self.res = _ResBlock(c)
         self.out_spec = FeatureSpec(c, out_stride, "fastai_unet")
 
+    @property
+    def read_levels(self) -> list[int]:
+        """Indices of the encoder levels this decoder reads."""
+        return sorted({self.deep - 1, *(i - 1 for i in self.skips)})
+
     def _set_input_divisor(self, divisor: int) -> None:
         """Inputs padded to a multiple of the deepest stride: each shuffled map matches its skip
         and the output the input, so the nearest resizes are crops (E025)."""

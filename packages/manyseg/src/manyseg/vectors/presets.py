@@ -5,36 +5,21 @@ loss (``corner``, ``keypoints``) start at the prior ``p = 0.1`` (``bias_init = l
 the loss is not swamped by negatives at initialisation (E036: about 200 at ``p = 0.5``; the
 experiments set the bias to -2.19, ``p = 0.1007``). Head
 names are those the vector decoders read (``polygons_from_corners``, ``graph_from_road_heads``).
-Losses are in :mod:`manyseg.losses`; metrics and training tasks live in ``manyseg-bench``
-(``CornerLineTask``, ``RoadGraphTask``).
+Losses are in :mod:`manyseg.vectors.losses` and metrics in :mod:`manyseg.vectors.metrics`;
+``manyseg-bench`` has training tasks that use them (``CornerLineTask``, ``RoadGraphTask``).
 """
 
 from __future__ import annotations
 
-import math
 from collections.abc import Mapping
 from typing import Any
 
-#: Bias of a focal-loss heatmap head: ``logit(0.1)`` (CenterNet; also ``point_heads``).
-HEATMAP_PRIOR = math.log(0.1 / 0.9)
-
-
-def _attach(heads: dict, decoders) -> dict:
-    if decoders is None:
-        return heads
-    if isinstance(decoders, str):
-        decoders = {k: ("unet" if decoders == "separate" else decoders) for k in heads}
-    unknown = set(decoders) - set(heads)
-    if unknown:
-        raise ValueError(f"unknown heads in decoders: {sorted(unknown)}")
-    for k, d in decoders.items():
-        heads[k]["decoder"] = d
-    return heads
+from ..heads._presets import HEATMAP_PRIOR, attach_decoders
 
 
 def corner_line_heads(decoders: None | str | Mapping[str, Any] = None) -> dict[str, dict]:
-    """Head configs for ``create_model(heads=...)`` of the corner-line instance model (B3:
-    footprints and roof faces; E036, E038, E047. Fields use ``instance_heads``, E046, E052): the
+    """Head configs for ``create_model(heads=...)`` of the corner-line instance model, for
+    footprints and roof faces (E036, E038, E047; fields use ``instance_heads``, E046, E052): the
     instance heads of :func:`manyseg.instances.instance_heads` (``extent``, ``boundary``,
     ``distance``) plus ``corner`` (1 channel, logits of a Gaussian corner heatmap, bias
     ``logit(0.1)``) and ``direction`` (2 channels, regression of the wall direction as ``(cos 2t,
@@ -49,11 +34,11 @@ def corner_line_heads(decoders: None | str | Mapping[str, Any] = None) -> dict[s
     heads = {**instance_heads(),
              "corner": {"type": "segmentation", "out_channels": 1, "bias_init": HEATMAP_PRIOR},
              "direction": {"type": "regression", "out_channels": 2}}
-    return _attach(heads, decoders)
+    return attach_decoders(heads, decoders)
 
 
 def road_heads(decoders: None | str | Mapping[str, Any] = None) -> dict[str, dict]:
-    """Head configs for the unified road model (R4; E039, E044): ``mask`` (1, road-surface
+    """Head configs for the unified road model (E039, E044): ``mask`` (1, road-surface
     logits), ``line`` (1, logits of a 3 px centreline band), ``keypoints`` (3, logits of the
     junction / end / crossing heatmaps, bias ``logit(0.1)``) and ``direction`` (4, regression
     of two ``(cos 2t, sin 2t)`` modes; the second is set where roads cross).
@@ -66,4 +51,4 @@ def road_heads(decoders: None | str | Mapping[str, Any] = None) -> dict[str, dic
              "line": {"type": "segmentation", "out_channels": 1},
              "keypoints": {"type": "segmentation", "out_channels": 3, "bias_init": HEATMAP_PRIOR},
              "direction": {"type": "regression", "out_channels": 4}}
-    return _attach(heads, decoders)
+    return attach_decoders(heads, decoders)

@@ -2,8 +2,10 @@
 outputs, metadata for inference (normalisation, activations, classes, bands)."""
 
 import json
+import random
 
 import manyseg
+import numpy as np
 import pytest
 import torch
 from manyseg import create_model
@@ -23,9 +25,18 @@ def activations(model):
     return {n: "softmax" for n, h in model.heads.items() if h.kind != "regression"}
 
 
+def normalize_for(model):
+    """The tests' default spec, per raster input for a model built with inputs=."""
+    step = [{"type": "scale", "value": 10000}]
+    inputs = model.build_config.get("inputs")
+    if not inputs:
+        return step
+    return {n: step for n, c in inputs.items() if c.get("kind") != "vector"}
+
+
 def roundtrip(model, x, tmp_path, **kw):
     kw.setdefault("activations", activations(model))
-    kw.setdefault("normalize", [{"type": "scale", "value": 10000}])
+    kw.setdefault("normalize", normalize_for(model))
     path = manyseg.save(model.eval(), tmp_path / "m.safetensors", **kw)
     loaded = manyseg.load(path)
     a, b = outputs(model, x), outputs(loaded, x)
@@ -63,7 +74,7 @@ CASES = {
                      lambda: {"t1": torch.randn(2, 3, 64, 64), "t2": torch.randn(2, 3, 64, 64)}),
     "shared_norms": (dict(inputs={"a": {"in_channels": 1, "backbone": "efficientnet_b0"},
                                   "b": {"in_channels": 2, "backbone": "shared:a",
-                                        "share_norm": True}},
+                                        "share_norm": True, "channel_adapter": "projection"}},
                           num_classes=2, decoder="unetplusplus"),
                      lambda: {"a": torch.randn(2, 1, 64, 64), "b": torch.randn(2, 2, 64, 64)}),
     "time_series": (dict(inputs={"ts": {"kind": "timeseries", "in_channels": 3,
@@ -216,29 +227,33 @@ def test_errors(tmp_path):
             manyseg.read_metadata(tmp_path / "bad.safetensors")
 
 
-def test_format_1_files_with_the_old_channels_keys_still_load(tmp_path):
-    """Files saved before 0.1.0 (format 1) said "channels" for input bands, head outputs and
-    vector widths; load() migrates their stored config."""
+def test_files_from_before_the_first_release_are_refused_clearly(tmp_path):
+    """Format 1 never shipped, so nothing migrates it; the error says what to do."""
     from safetensors.torch import load_file, save_file
 
-    model = create_model(backbone="resnet18", pretrained=False,
-                         inputs={"img": {"in_channels": 3},
-                                 "meta": {"kind": "vector", "num_features": 2}},
-                         heads={"seg": {"type": "segmentation", "out_channels": 2}})
-    path = manyseg.save(model.eval(), tmp_path / "new.safetensors",
-                        activations={"seg": "softmax"})
+    model = create_model(backbone="resnet18", pretrained=False, num_classes=2)
+    path = manyseg.save(model, tmp_path / "new.safetensors", activations={"logits": "softmax"},
+                        normalize=[])
     with safe_open(str(path), framework="pt") as f:
         stored = dict(f.metadata())
     meta = json.loads(stored["manyseg"])
     meta["format"] = 1
-    cfg = meta["create_model"]
-    cfg["inputs"] = {"img": {"channels": 3}, "meta": {"kind": "vector", "channels": 2}}
-    cfg["heads"] = {"seg": {"type": "segmentation", "channels": 2}}
     old = tmp_path / "old.safetensors"
     save_file(load_file(str(path)), str(old), metadata={**stored, "manyseg": json.dumps(meta)})
-    x = {"img": torch.randn(1, 3, 64, 64), "meta": torch.randn(1, 2)}
-    loaded = manyseg.load(old)
-    assert torch.equal(outputs(model, x)["seg"], outputs(loaded, x)["seg"])
+    with pytest.raises(ValueError, match="predates ManySeg 0.1.0"):
+        manyseg.load(old)
+    with pytest.raises(ValueError, match="predates ManySeg 0.1.0"):
+        manyseg.read_metadata(old)
+
+
+@pytest.mark.parametrize("config", [
+    {"inputs": {"a": {"channels": 3}}, "num_classes": 2},
+    {"inputs": {"a": {"in_channels": 3}, "m": {"kind": "vector", "channels": 2}}, "num_classes": 2},
+    {"heads": {"h": {"type": "segmentation", "channels": 2}}},
+], ids=["input", "vector", "head"])
+def test_the_old_channels_key_is_an_ordinary_config_error(config):
+    with pytest.raises(ValueError, match="channels|unknown"):
+        create_model("resnet18", pretrained=False, **config)
 
 
 def test_save_names_the_model_inside_a_wrapper(tmp_path):
@@ -249,3 +264,178 @@ def test_save_names_the_model_inside_a_wrapper(tmp_path):
         "b": {"type": "regression", "out_channels": 1}})
     with pytest.raises(TypeError, match=r"It wraps one as \.model: save that"):
         manyseg.save(concat_heads(model, ["a", "b"]), tmp_path / "a.safetensors")
+
+
+def _rng_state():
+    return torch.get_rng_state(), random.getstate(), np.random.get_state()
+
+
+def _assert_same_rng(before, after):
+    assert torch.equal(before[0], after[0]), "torch RNG moved"
+    assert before[1] == after[1], "random RNG moved"
+    assert before[2][0] == after[2][0] and np.array_equal(before[2][1], after[2][1]) \
+        and before[2][2:] == after[2][2:], "numpy RNG moved"
+
+
+RNG_MODELS = {
+    "plain": {"in_channels": 4, "num_classes": 2},
+    "metadata": {"inputs": {"image": {"in_channels": 3},
+                            "meta": {"kind": "vector", "fields": FIELDS, "dropout": 0.5}},
+                 "num_classes": 2},
+    "shared_encoder": {"inputs": {"a": {"in_channels": 3},
+                                  "b": {"in_channels": 3, "backbone": "shared:a"}},
+                       "num_classes": 2},
+}
+
+
+@pytest.mark.parametrize("config", RNG_MODELS.values(), ids=RNG_MODELS)
+def test_save_and_load_leave_the_rng_alone(config, tmp_path):
+    """Regression: both rebuild the model, and its weight init used the caller's random stream,
+    so a checkpoint changed all later dropout, augmentation and sampling."""
+    model = create_model("resnet18", pretrained=False, **config)
+    before = _rng_state()
+    path = manyseg.save(model, tmp_path / "m.safetensors", **{
+        "activations": activations(model), "normalize": normalize_for(model)})
+    _assert_same_rng(before, _rng_state())
+    manyseg.load(path)
+    _assert_same_rng(before, _rng_state())
+
+
+def test_save_and_load_keep_the_rng_of_a_quantized_model(tmp_path):
+    pytest.importorskip("torchao")
+    from manyseg.quantize import quantize_weights
+
+    model = quantize_weights(create_model("resnet18", pretrained=False, num_classes=2))
+    before = _rng_state()
+    path = manyseg.save(model, tmp_path / "q.safetensors", activations={"logits": "softmax"},
+                        normalize=[{"type": "scale", "value": 1}])
+    _assert_same_rng(before, _rng_state())
+    manyseg.load(path)
+    _assert_same_rng(before, _rng_state())
+
+
+def test_a_checkpoint_does_not_change_a_seeded_training_run(tmp_path):
+    def run(checkpoint):
+        torch.manual_seed(0)
+        model = create_model("resnet18", pretrained=False, num_classes=2)
+        opt = torch.optim.SGD(model.parameters(), 0.01)
+        for step in range(3):
+            x, y = torch.randn(2, 3, 64, 64), torch.randint(0, 2, (2, 64, 64))
+            loss = torch.nn.functional.cross_entropy(model(x), y)
+            opt.zero_grad()
+            loss.backward()
+            opt.step()
+            if checkpoint and step == 0:
+                path = manyseg.save(model, tmp_path / "c.safetensors",
+                                    activations={"logits": "softmax"},
+                                    normalize=[{"type": "scale", "value": 1}])
+                manyseg.load(path)
+        return loss.item()
+
+    assert run(False) == run(True)
+
+
+def test_syncbatchnorm_models_save_and_load_as_batchnorm(tmp_path):
+    """Multi-GPU training converts BatchNorm to SyncBatchNorm: same weights and, outside
+    training, the same computation, so the file rebuilds the model it holds."""
+    plain = create_model("resnet18", pretrained=False, num_classes=2)
+    model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(plain)
+    assert any(isinstance(m, torch.nn.SyncBatchNorm) for m in model.modules())
+    loaded = roundtrip(model, torch.randn(2, 3, 64, 64), tmp_path)
+    assert not any(isinstance(m, torch.nn.SyncBatchNorm) for m in loaded.modules())
+
+
+def test_timm_syncbatchnorm_models_save(tmp_path):
+    """timm's own conversion keeps the activation inside BatchNormAct2d."""
+    from timm.layers import convert_sync_batchnorm
+
+    model = convert_sync_batchnorm(
+        create_model("efficientnet_b0", pretrained=False, num_classes=2))
+    roundtrip(model, torch.randn(2, 3, 64, 64), tmp_path)
+
+
+def test_torch_syncbatchnorm_conversion_that_drops_an_activation_is_refused(tmp_path):
+    """torch's conversion turns timm's BatchNormAct2d into a bare SyncBatchNorm, losing its
+    activation: the model computes something the file would not rebuild."""
+    model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(
+        create_model("efficientnet_b0", pretrained=False, num_classes=2))
+    with pytest.raises(ValueError, match="differs from what its create_model"):
+        manyseg.save(model, tmp_path / "m.safetensors", activations={"logits": "softmax"},
+                     normalize=[{"type": "scale", "value": 1}])
+
+
+def test_a_lookalike_class_named_syncbatchnorm_is_refused(tmp_path):
+    """The exception is for the real classes: this one would not be rebuilt by the file."""
+
+    class SyncBatchNorm(torch.nn.BatchNorm2d):
+        def forward(self, x):
+            return super().forward(x) * 0
+
+    model = create_model("resnet18", pretrained=False, num_classes=2)
+    name = next(n for n, m in model.named_modules() if isinstance(m, torch.nn.BatchNorm2d))
+    parent, _, child = name.rpartition(".")
+    original = getattr(model.get_submodule(parent), child)
+    setattr(model.get_submodule(parent), child, SyncBatchNorm(original.num_features))
+    SyncBatchNorm.__qualname__ = "SyncBatchNorm"  # as a class defined at module level would be
+    with pytest.raises(ValueError, match="differs from what its create_model"):
+        manyseg.save(model, tmp_path / "m.safetensors", activations={"logits": "softmax"},
+                     normalize=[{"type": "scale", "value": 1}])
+
+
+BAD_NORMALIZE = [
+    {"type": "zscor", "mean": [0], "std": [1]},
+    [{"type": "scale"}],
+    {"type": "scale", "value": 0},
+    {"type": "scale", "value": 1, "scope": "tile"},
+    {"type": "zscore"},
+    {"type": "zscore", "mean": [0]},
+    {"type": "zscore", "mean": [0], "std": [0]},
+    {"type": "zscore", "mean": [0], "std": [1], "scope": "tile"},
+    {"type": "zscore", "scope": "image"},
+    {"type": "minmax", "min": 1},
+    {"type": "minmax", "min": 1, "max": 1},
+    {"type": "minmax", "min": 0, "max": 1, "clip": "yes"},
+    {"type": "percentile", "low": 90, "high": 10},
+    {"type": "db", "eps": 0},
+    {"type": "clip"},
+    {"type": "clip", "min": 2, "max": 1},
+    [{"type": "zscore", "scope": "tile"}, {"type": "zscore", "scope": "scene"}],
+    ["scale"],
+]
+
+
+@pytest.mark.parametrize("bad", BAD_NORMALIZE, ids=str)
+def test_save_refuses_a_normalize_that_could_not_run(tmp_path, bad):
+    model = create_model(backbone="resnet18", pretrained=False, in_channels=3, num_classes=2)
+    with pytest.raises(ValueError):
+        manyseg.save(model, tmp_path / "m.safetensors", normalize=bad,
+                     activations={"logits": "softmax"})
+
+
+def test_save_checks_normalize_against_the_inputs(tmp_path):
+    def save(model, normalize):
+        return manyseg.save(model, tmp_path / "m.safetensors", normalize=normalize,
+                            activations={"logits": "softmax"})
+
+    two = create_model(backbone="resnet18", pretrained=False, num_classes=2, inputs={
+        "a": {"in_channels": 3}, "b": {"in_channels": 2}},
+        fusion={"type": "intermediate", "op": "concat"})
+    one = {"type": "scale", "value": 10000}
+    with pytest.raises(ValueError, match="input_name"):
+        save(two, one)
+    with pytest.raises(ValueError, match="unknown inputs"):
+        save(two, {"a": one, "b": one, "typo": one})
+    with pytest.raises(ValueError, match="doesn't cover"):
+        save(two, {"a": one})
+    save(two, {"a": one, "b": [one]})
+    save(two, [])  # no steps: nothing to confuse
+    save(two, {"type": "none"})
+    with_vector = create_model(backbone="resnet18", pretrained=False, num_classes=2, inputs={
+        "img": {"in_channels": 3},
+        "meta": {"kind": "vector", "fields": {"e": {"type": "continuous", "mean": 0., "std": 1.}}}})
+    save(with_vector, one)  # one image input: nothing to confuse it with
+    with pytest.raises(ValueError, match="unknown inputs"):
+        save(with_vector, {"img": one, "meta": one})
+    single = create_model(backbone="resnet18", pretrained=False, in_channels=3, num_classes=2)
+    with pytest.raises(ValueError, match="one unnamed input"):
+        save(single, {"x": one})

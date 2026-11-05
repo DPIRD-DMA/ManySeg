@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from ..heads._presets import attach_decoders
+
 
 def instance_heads(
     num_classes: int = 1,
@@ -33,13 +35,4 @@ def instance_heads(
         "boundary": {"type": "segmentation", "out_channels": 1},
         "distance": {"type": "regression", "out_channels": 1},
     }
-    if decoders is None:
-        return heads
-    if isinstance(decoders, str):
-        decoders = {k: ("unet" if decoders == "separate" else decoders) for k in heads}
-    unknown = set(decoders) - set(heads)
-    if unknown:
-        raise ValueError(f"unknown heads in decoders: {sorted(unknown)}")
-    for k, d in decoders.items():
-        heads[k]["decoder"] = d
-    return heads
+    return attach_decoders(heads, decoders)

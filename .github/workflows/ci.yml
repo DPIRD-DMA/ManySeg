@@ -26,7 +26,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest]
-        python: ["3.10", "3.14"]  # oldest and newest supported (3.15rc1 passes locally)
+        python: ["3.11", "3.14"]  # oldest and newest supported (3.15rc1 passes locally)
         # macos-latest (arm64) covers macOS (its VMs can't allocate on MPS, so the MPS device
         # tests skip there, see conftest.py); windows-latest the paths and
         # process handling. macOS bills at 10x and Windows at 2x, so both run on PRs, nightly
@@ -83,9 +83,11 @@ jobs:
           else
             echo "::warning::ManyPred is not public yet: the vector pipeline test skips"
           fi
-      - name: Vector pipeline test, fast cases
+      - name: ManyPred contract tests, fast cases (vector pipeline, normalisation rules)
         if: env.MANYSEG_REQUIRE_MANYPRED == '1'  # without ManyPred pytest collects nothing (exit 5)
-        run: uv run --no-sync pytest packages/manyseg/tests/integration/test_vector_pipeline.py -n 2 -q -m "not slow"
+        run: >-
+          uv run --no-sync pytest packages/manyseg/tests/integration/test_vector_pipeline.py
+          packages/manyseg/tests/unit/test_normalize_spec.py -n 2 -q -m "not slow"
       # heavy tests (Swin compile and export probes, minutes each) run nightly and on demand
       - run: >-
           uv run --no-sync pytest packages/manyseg -n 2 -q --durations=15

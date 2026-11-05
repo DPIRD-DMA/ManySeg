@@ -124,10 +124,69 @@ def test_shared_encoder_reuses_weights():
 
 def test_shared_encoder_different_channels_uses_projection():
     inputs = {"a": {"in_channels": 3, "backbone": "resnet18"},
-              "b": {"in_channels": 5, "backbone": "shared:a"}}
+              "b": {"in_channels": 5, "backbone": "shared:a", "channel_adapter": "projection"}}
     model = make(inputs=inputs).eval()
     assert model({"a": torch.randn(1, 3, 64, 64), "b": torch.randn(1, 5, 64, 64)}).shape == \
         (1, 3, 64, 64)
+
+
+SHARED_A = {"in_channels": 3, "backbone": "resnet18"}
+
+
+@pytest.mark.parametrize("top_level", ["repeat", "projection"])
+def test_a_shared_input_with_other_channels_must_ask_for_the_projection(top_level):
+    """Regression: a learned layer used to appear silently. Only the input's own setting counts."""
+    inputs = {"a": SHARED_A, "b": {"in_channels": 5, "backbone": "shared:a"}}
+    with pytest.raises(ValueError, match=r"'channel_adapter': 'projection'"):
+        make(inputs=inputs, channel_adapter=top_level)
+
+
+@pytest.mark.parametrize("adapter", ["repeat", "mean", "rgb_plus_zero", "rgb_plus_random"])
+@pytest.mark.parametrize("channels", [3, 5])
+def test_a_shared_input_refuses_other_adapters(adapter, channels):
+    """Regression: these were silently ignored ("mean" still gave a projection)."""
+    inputs = {"a": SHARED_A,
+              "b": {"in_channels": channels, "backbone": "shared:a", "channel_adapter": adapter}}
+    with pytest.raises(ValueError, match="only 'projection'"):
+        make(inputs=inputs)
+
+
+def test_a_shared_input_with_equal_channels_refuses_the_projection():
+    inputs = {"a": SHARED_A,
+              "b": {"in_channels": 3, "backbone": "shared:a", "channel_adapter": "projection"}}
+    with pytest.raises(ValueError, match="nothing to adapt"):
+        make(inputs=inputs)
+
+
+def test_a_shared_input_with_equal_channels_needs_no_setting_whatever_the_top_level():
+    inputs = {"a": SHARED_A, "b": {"in_channels": 3, "backbone": "shared:a"}}
+    for top_level in ("repeat", "mean", "projection"):
+        assert len(make(inputs=inputs, channel_adapter=top_level).backbone.adapters) == 0
+
+
+def test_a_chain_of_shared_inputs_compares_with_the_encoders_own_channels():
+    inputs = {"a": SHARED_A,
+              "b": {"in_channels": 5, "backbone": "shared:a", "channel_adapter": "projection"},
+              "c": {"in_channels": 3, "backbone": "shared:b"}}  # same as the encoder, not as b
+    assert set(make(inputs=inputs).backbone.adapters) == {"b"}
+
+
+def test_share_norm_with_other_channels_needs_the_projection_too():
+    inputs = {"a": SHARED_A, "b": {"in_channels": 5, "backbone": "shared:a", "share_norm": True}}
+    with pytest.raises(ValueError, match=r"'channel_adapter': 'projection'"):
+        make(inputs=inputs)
+    inputs["b"]["channel_adapter"] = "projection"
+    make(inputs=inputs)
+
+
+def test_metadata_channels_can_make_a_shared_input_differ():
+    """'channels' metadata widens its target before create_model compares the two."""
+    meta = {"kind": "vector", "num_features": 2, "conditioning": "channels"}
+    inputs = {"a": SHARED_A, "b": {"in_channels": 3, "backbone": "shared:a"}, "meta": meta}
+    with pytest.raises(ValueError, match=r"'channel_adapter': 'projection'"):
+        make(inputs=inputs)
+    inputs["b"]["channel_adapter"] = "projection"
+    assert set(make(inputs=inputs).backbone.adapters) == {"b"}
 
 
 def test_gradients_reach_both_encoders():

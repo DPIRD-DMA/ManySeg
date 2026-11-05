@@ -6,7 +6,53 @@ API, and every such change is listed here.
 
 ## 0.1.0 (unreleased)
 
-First release. Python 3.10–3.14 (`manyseg-bench` lists 3.10–3.12), PyTorch ≥ 2.10, timm ≥ 1.0.20.
+First release. Python 3.11–3.14 (`manyseg-bench` lists 3.11–3.12), PyTorch ≥ 2.10, timm ≥ 1.0.20.
+
+### Saving and loading
+
+* `manyseg.save` and `manyseg.load` leave the global random state alone. Both rebuild the model,
+  and its discarded weight init used to shift all later dropout, augmentation and sampling, so
+  the same seed gave a different run with and without a checkpoint.
+* `manyseg.save` checks `normalize`: unknown steps, misspelt options and invalid values are
+  refused at save time, with ManyPred's rules. `push_to_hub` checks too. Several raster inputs need
+  `{input_name: steps}` covering every one, as a forgotten input would run on raw values
+  (`{"type": "none"}` says that's intended); a plain spec is fine for one raster, or when it has no
+  steps. `False` is refused. `manyseg.load` doesn't check, so existing files still open.
+* `manyseg.save` accepts models converted to `SyncBatchNorm` (with torch's conversion, or timm's
+  for timm's `BatchNormAct2d` layers). They load with plain BatchNorm; convert again to resume
+  multi-GPU training.
+
+### Vector outputs: training and metrics in the library
+
+* `manyseg.vectors.corner_line_losses`, `manyseg.vectors.road_losses` and
+  `manyseg.instances.instance_losses` are the trained models' losses, as plain functions returning
+  their unweighted terms. `manyseg-bench`'s tasks call them.
+* The vector metrics moved to `manyseg.vectors.metrics`, from `manyseg_bench.evaluation.vectors`,
+  which re-exports them.
+
+### Vector outputs: names
+
+* `roof_mesh(join=)` and the `mesh=` setting of `roof_faces`, `roof_records` and
+  `block_decoder("roofs")` take `"plane_intersection"` (default) or `"mean_height"`, replacing the
+  experiment names `"J2"` and `"J1"`.
+
+### Shared encoders
+
+* A `shared:` input with another channel count than the encoder must set `"channel_adapter":
+  "projection"`. A learned projection used to be added silently. Saved models that relied on that
+  no longer load: there's no migration, as this is the first release.
+* Any other `channel_adapter` on a `shared:` input is refused, as is `"projection"` with equal
+  channels. They used to be ignored.
+
+### Working with ManyPred
+
+* `block_decoder("density")` counts NaN pixels as 0. ManyPred marks nodata with NaN, so one nodata
+  pixel made the scene's total NaN.
+* `"attention"` time-series models run in `float16` and `bfloat16`, as ManyPred's GPU default
+  needs.
+* `tiling_spec()` reports the saved names: `classes` on each returned head and a top-level `bands`.
+  `.pt2` files keep them. `manyseg.save` now refuses names that aren't strings. An ensemble's
+  members must have the same names, or ManyPred asks for `spec=`.
 
 ### Saving quantised models
 
@@ -54,9 +100,6 @@ First release. Python 3.10–3.14 (`manyseg-bench` lists 3.10–3.12), PyTorch �
   (ResNet-50) and SatlasPretrain Sentinel-2 (ResNet-50/152). Fed their own pretraining
   normalisation, SSL4EO weights beat ImageNet weights on three Sentinel-2 datasets with a
   ResNet-50 (E024); cite the authors (`WEIGHTS[key].citation`).
-* **Presets** (`manyseg.presets`): four measured speed / accuracy configurations, with GPU
-  and CPU (eager and compiled) latency; on CPU they run at about the default's speed, except
-  `accurate`, 35% slower eager (one run on one machine, not recorded in `experiments/`).
 * **Features and embeddings:** `features()`, `embed()`, an exportable `embedder()`;
   `select_heads()` for deployment.
 * Every parameter gets a gradient (DDP needs no `find_unused_parameters`): modules for
@@ -151,12 +194,12 @@ First release. Python 3.10–3.14 (`manyseg-bench` lists 3.10–3.12), PyTorch �
   (every head's target as numpy arrays), `road_graph` (lines → road graph + grade-separated
   crossings) → `road_targets` (identical to E044's encoder), and `rasterize_instances`. The
   `vectors` extra now includes `rasterio`.
-* **Decoders:** footprints `polygons_from_corners` (B3, straight walls; E038), fields
-  `polygons_from_labels` (B0, pixel outlines; E046), roads `graph_from_road_heads` (R4: junctions
+* **Decoders:** footprints `polygons_from_corners` (straight walls; E038), fields
+  `polygons_from_labels` (pixel outlines; E046), roads `graph_from_road_heads` (junctions
   and overpasses; E044b). LoD2 roofs (E047b, E048b; they need an nDSM input, RGB alone was not
   viable in E049): `planar_faces` joins the faces into a planar partition; in
   `manyseg.vectors.roofs` (not re-exported at the top level), `face_plane` / `roof_planes` fit a
-  robust plane per face, `roof_mesh` (J1 / J2) lifts the rings, and `roof_records` /
+  robust plane per face, `roof_mesh` (`join="plane_intersection"` or `"mean_height"`) lifts the rings, and `roof_records` /
   `roof_faces` do all three. `planar_faces` joins each cluster of faces (gaps up to the
   tolerance) on its own, so a face no longer depends on the noding of unrelated outlines. These
   functions are building blocks with generic defaults; `block_decoder(task)` holds the tuned
@@ -239,6 +282,8 @@ First release. Python 3.10–3.14 (`manyseg-bench` lists 3.10–3.12), PyTorch �
   `manyseg_bench.losses` re-exports them.
 * New: `multiclass_dice` (softmax, integer targets, `ignore_index`) and `multi_head_loss`
   (weighted sum of a loss per head, with each head's loss for logging).
+* `masked_regression` and `heatmap_focal` compute in float32. With a float64 target, `heatmap_focal`
+  and `masked_regression(kind="mse")` used to return float64, while `kind="l1"` returned float32.
 
 ### Performance (E026; values unchanged up to rounding)
 
@@ -263,8 +308,7 @@ First release. Python 3.10–3.14 (`manyseg-bench` lists 3.10–3.12), PyTorch �
 ### Deployment
 
 * `manyseg.save` / `manyseg.load` (safetensors plus the stored configuration, normalisation,
-  activations and class names). Save format 2; format-1 files (development versions, which
-  said `"channels"` for all three) are migrated on load. Compatibility policy (`manyseg.io`):
+  activations and class names). Save format 2, the first released one. Compatibility policy (`manyseg.io`):
   renamed or reinterpreted config keys, modules or parameters bump the format and get a
   migration; a committed golden file
   (`packages/manyseg/tests/data/golden_format2.safetensors`) must keep
@@ -283,8 +327,7 @@ First release. Python 3.10–3.14 (`manyseg-bench` lists 3.10–3.12), PyTorch �
   keys that name no head / input, instead of storing them unchecked.
 * `torch.compile(dynamic=True)`, `manyseg.export.export_model` (dynamic size; dynamic batch
   with `dynamic_batch=True`; dynamic date count except for `concat` / `diff` aggregation) and
-  ONNX; int8 quantisation (`manyseg.quantize`, extra `quant`); FSDP2
-  (`manyseg.distributed.shard_model`).
+  ONNX; int8 quantisation (`manyseg.quantize`, extra `quant`).
 * Saved models carry the licence and citation of the pretrained weights they started from
   (`pretrained_weights` in the file metadata, `manyseg.weights.attribution(model)`), through
   load and re-save; `describe()` lists them. Fine-tuned weights stay under those licences
@@ -356,7 +399,7 @@ First release. Python 3.10–3.14 (`manyseg-bench` lists 3.10–3.12), PyTorch �
 * Training loop without per-step host syncs on CUDA: fused AdamW, a non-finite loss skips the
   update on the device (as before, without waiting for the GPU), losses summed on the device,
   one gradient-scaling kernel; the loader copies the epoch order to the GPU once and normalises
-  in place. 24–26% faster steps for the PVTv2-b0 presets (E026).
+  in place. 24–26% faster steps for PVTv2-b0 models (E026).
 * With `compile`, evaluation uses its own static compiled model and pads the short last batch
   (+12–27% evaluation throughput, E027); device-resident datasets free their host arrays
   once on the GPU (−2.8 GB host RAM on Sen1Floods11).

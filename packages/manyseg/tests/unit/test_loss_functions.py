@@ -142,3 +142,25 @@ def test_multiclass_dice_all_pixels_ignored():
     v.backward()
     assert v.item() == 0
     assert x.grad.abs().max() == 0
+
+
+@pytest.mark.parametrize("kind", ["l1", "mse"])
+def test_masked_regression_loss_is_float32_for_a_float64_target(kind):
+    """Regression: MSE skipped target.float(), so a NumPy-derived target promoted it to float64
+    while L1 stayed float32."""
+    pred = torch.zeros(1, 1, 4, 4, requires_grad=True)
+    target = torch.full((1, 1, 4, 4), 0.5, dtype=torch.float64)
+    mask = torch.ones(1, 1, 4, 4, dtype=torch.bool)
+    assert losses.masked_regression(pred, target, kind=kind).dtype == torch.float32
+    assert losses.masked_regression(pred, target, mask, kind=kind).dtype == torch.float32
+
+
+def test_heatmap_focal_loss_is_float32_for_a_float64_target():
+    """Regression: the raw target promoted the negative term, and the loss, to float64."""
+    logits = torch.zeros(1, 1, 8, 8, requires_grad=True)
+    target = torch.zeros(1, 1, 8, 8, dtype=torch.float32)
+    target[0, 0, 4, 4] = 1
+    single = losses.heatmap_focal(logits, target)
+    double = losses.heatmap_focal(logits, target.double())
+    assert single.dtype == double.dtype == torch.float32
+    assert torch.equal(single, double)

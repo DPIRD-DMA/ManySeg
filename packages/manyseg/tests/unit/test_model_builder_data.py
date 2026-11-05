@@ -11,7 +11,6 @@ import pytest
 from manyseg.conditioning import FIELD_TYPES
 from manyseg.decoders import DECODERS
 from manyseg.fusion.ops import FUSION_OPS
-from manyseg.presets import PRESETS
 from manyseg.registry import reserved_names
 from manyseg.temporal import AGGREGATIONS
 from manyseg.weights import WEIGHTS
@@ -42,13 +41,8 @@ def test_weights(data):
                                                       len(WEIGHTS[key].bands))
 
 
-def test_presets(data):
-    assert {k: v["kwargs"] for k, v in data["presets"].items()} == \
-        {k: p.kwargs for k, p in PRESETS.items()}
-
-
 def test_backbones_cover_defaults(data):
     names = {b["name"] for b in data["backbones"]}
     assert "resnet34" in names  # create_model's default
-    assert {p.kwargs["backbone"] for p in PRESETS.values()} <= names
+    assert "pvt_v2_b0.in1k" in names  # the "small and fast" example
     assert {w.model for w in WEIGHTS.values()} <= names

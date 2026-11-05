@@ -1,4 +1,4 @@
-"""Road graphs from the unified road heads (E039 R4, adopted as the road default in E044b).
+"""Road graphs from the unified road heads (the road default since E044b).
 
 Heads: road surface probability, keypoint heatmaps (junction, end, crossing) and a two-mode
 ``(cos 2t, sin 2t)`` direction field. Decoding: the surface skeleton graph (as

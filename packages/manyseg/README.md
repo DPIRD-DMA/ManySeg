@@ -25,15 +25,17 @@ Any number of bands, several inputs at different resolutions, metadata, and many
 
 ## Install
 
-ManySeg is not on PyPI yet. Install it from GitHub (Python ≥ 3.10, PyTorch ≥ 2.10):
+Python ≥ 3.11, PyTorch ≥ 2.10:
 
 ```bash
-pip install "manyseg @ git+https://github.com/DPIRD-DMA/ManySeg#subdirectory=packages/manyseg"
+pip install manyseg
+# or
+uv add manyseg
 ```
 
 Optional extras: `[quant]` (int8 quantisation), `[onnx]` (ONNX export), `[instances]`
-(instance post-processing), `[vectors]` (polygons, road graphs and points as GIS layers).
-After the first release this becomes `pip install manyseg`.
+(instance post-processing), `[vectors]` (polygons, road graphs and points as GIS layers), e.g.
+`pip install "manyseg[vectors]"` or `uv add "manyseg[vectors]"`.
 
 ## Quick start
 
@@ -78,29 +80,9 @@ flags), use `channel_adapter="rgb_plus_zero"`. If bands can be missing at infere
 the way you did in training and drop bands at random while training
 ([missing bands](https://github.com/DPIRD-DMA/ManySeg/blob/main/docs/api_design.md#missing-bands)).
 
-**Pick a speed/accuracy trade-off.** Presets are measured configurations:
-
-```python
-from manyseg.presets import preset
-
-model = create_model(**preset("balanced"), in_channels=4, num_classes=2)
-```
-
-| preset | encoder + decoder | relative speed | accuracy |
-|---|---|---|---|
-| `fast` | PVTv2-b0 + SegFormer head | 2.4× | slightly below the default on Pet |
-| `compact` | PVTv2-b0 + quarter-width U-Net | 2.2× | matches or beats the default |
-| `balanced` | PVTv2-b0 + half-width U-Net | 2.1× | matches or beats the default |
-| `accurate` | PVTv2-b0 + U-Net | 1.5× | matches or beats the default |
-
-Relative to the default ResNet-34 U-Net, on an RTX 4090 with bf16 + `torch.compile`; accuracy
-on two datasets. Validate on your own data. On CPU the speed-up disappears: with fp32, one
-1024² tile and 16 threads, the presets ran at 0.48–0.60 s compiled against the default's 0.58 s,
-and 0.58–0.84 s eager against 0.62 s (`PRESETS[name].measured["cpu_s"]`; one run on one machine,
-not recorded in `experiments/`), although the default has 2.5–6.5× their FLOPs. For CPU
-inference, time your candidates on the target machine, eager and compiled separately.
-
-**Several inputs, possibly at different resolutions**, e.g. optical + radar:
+**Several inputs, possibly at different resolutions**, e.g. optical + radar. If your bands share
+a grid, stack them into one input first: that matched separate encoders on Sen1Floods11 (E005).
+Separate encoders are for inputs at different resolutions, or for when stacking falls short:
 
 ```python
 model = create_model(
@@ -235,14 +217,15 @@ reproduced in this repository. Validate on your data.
 predictions into GIS layers: building footprints with straight walls, field boundaries,
 road graphs with junctions and overpasses, LoD2 roof faces with a plane and 3-D mesh each
 (heights from an nDSM input), and points. Each task has a head preset, target encoders that
-work in pixel coordinates (`to_pixels` brings your vector labels there from any CRS), and a
-decoder tested in experiments (`docs/api_design.md` gives each one's evidence). One call decodes
+work in pixel coordinates (`to_pixels` brings your vector labels there from any CRS), its
+training losses and metrics (`manyseg.vectors.losses`, `manyseg.vectors.metrics`), and a decoder
+tested on one dataset each (`docs/api_design.md` gives the evidence). One call decodes
 a scene of any size: large scenes block by block, with the default 256 px halo. `min_halo` is
 only the smallest halo a decoder accepts and doesn't guarantee the same result as a whole-scene
 decode: on noise-like field predictions, halos up to 64 px gave different objects. An instance
 reaching much further than the halo can split at a block seam, and for roads the halo must also
 cover the skeleton's data-dependent reach (the decoder warns). With ManyPred this happens while
-it predicts (needs ManyPred's next release).
+it predicts (needs ManyPred's first release).
 
 ```python
 from manyseg.vectors import Scene, block_decoder, decode_scene
@@ -295,8 +278,8 @@ can be loaded (`@<tag>`, `@<sha>`) but not pushed to.
 Don't save the whole model with `torch.save(model)`: that pickle refers to ManySeg's internal
 module paths, so it breaks when a later version moves or renames a class, and loading it
 needs `torch.load(weights_only=False)`, which can run arbitrary code. A `manyseg.save` file holds
-plain data: the `create_model` arguments, a save-format number and the weights. Files from an
-older format are migrated on load, and a file from a newer ManySeg fails with both versions
+plain data: the `create_model` arguments, a save-format number and the weights. When the format
+changes, older files are migrated on load, and a file from a newer ManySeg fails with both versions
 named. A library that keeps its own table of models (architecture names plus weights) should
 store one `manyseg.save` file per model and call `manyseg.load`; take
 `manyseg.load(path).state_dict()` if it needs a state dict.
@@ -334,8 +317,8 @@ and a fixed-size backbone refuses anything larger than its size. For larger scen
 [ManyPred](https://github.com/DPIRD-DMA/ManyPred), our tiled inference library: it predicts
 overlapping patches in batches, stitches them, skips nodata, and reads and writes GeoTIFFs
 larger than memory. It is a separate library so it can run any PyTorch model that returns a
-tensor or a dict of tensors; ManySeg does not import it. Like ManySeg, it is not on PyPI yet
-(`[geo]` adds rasterio for GeoTIFFs):
+tensor or a dict of tensors; ManySeg does not import it. It is not on PyPI yet, so install it
+from GitHub (`[geo]` adds rasterio for GeoTIFFs):
 
 ```bash
 pip install "manypred[geo] @ git+https://github.com/DPIRD-DMA/ManyPred"
@@ -343,7 +326,8 @@ pip install "manypred[geo] @ git+https://github.com/DPIRD-DMA/ManyPred"
 
 ManyPred reads the model's `tiling_spec()` (padding multiple, fixed input size, each head's
 resolution) and the normalisation and activations stored by `manyseg.save`, so with a model
-saved as in "Save and load" above neither is repeated:
+saved as in "Save and load" above neither is repeated. The class and band names you saved are in
+the spec too, and `predict_files` writes them into its output files:
 
 ```python
 import numpy as np
@@ -381,7 +365,13 @@ The vector decoders (**Vector outputs** above) run on large scenes through `many
 `postprocess_blocks` decodes saved rasters block by block, and
 `predict_files(..., merge="cut", block_postprocess=BlockPostprocess(...))` decodes while it
 predicts ([guide](https://github.com/DPIRD-DMA/ManySeg/blob/main/docs/api_design.md#vector-outputs-line-graphs-polygons)). `merge` and
-`manypred.blocks` are on ManyPred's GitHub main since 2026-11-02.
+`manypred.blocks` are on ManyPred's GitHub main since 2026-11-02, and will be in its first
+release.
+
+ManyPred moves a model to its device and `dtype` in place and sets it to eval mode, and on GPUs
+the default `dtype` is usually float16. So after a preview during training, reload the model or
+restore your checkpoint before training further or calling `manyseg.save`, or run the preview on
+a copy: otherwise the weights go on, and are saved, in the lower precision.
 
 ## Tips from our benchmarks
 
@@ -393,24 +383,50 @@ predicts ([guide](https://github.com/DPIRD-DMA/ManySeg/blob/main/docs/api_design
   the backward pass: same values, −22% memory for +5% step time on the ResNet-34 U-Net,
   −61% for +18% on ConvNeXt-T (E026).
 * **Batch-1 inference:** `torch.compile(model, mode="reduce-overhead")` (CUDA graphs, fixed
-  input size) is up to 1.8× faster than the default compile for the PVTv2-b0 presets (E026).
+  input size) is up to 1.8× faster than the default compile for PVTv2-b0 models (E026).
 * **Water and other per-pixel spectral targets:** `decoder_kwargs={"input_cross": True}`
   feeds the raw bands to the last decoder stage. It did not help pet or cloud segmentation.
 * **Mixed precision is safe:** bf16, fp16 and int8 weight-only showed no accuracy loss.
 * **Training speed:** the default U-Net trains as fast as SMP's `Unet` on the same timm
   encoder: compiled steps match it, and eager steps are 18–25% faster (bf16, E025).
-* **Fusion:** stacking all bands (optical and SAR) into one input matched the fancier fusion
-  options on Sen1Floods11 (E005); start there. Splitting Sentinel-2 bands into resolution groups
-  helped on one of the four datasets we tried (E015; not E016, E017 or E020).
-* **Several dates** beat one by a wide margin. Stacking dates as channels is a strong baseline;
-  the time-series input (`"kind": "timeseries"`) with `"temporal": "attention"` beat it on field
-  delineation (the default masked mean fell just short) but not on crop types, so try both (E021).
-* **Change detection:** a Siamese encoder (shared weights per date) with a difference fusion
-  (`"op": "diff"` or `"concat_diff"`) beat stacking the two dates on both datasets we tried.
 
 These come from experiments in [`experiments/`](https://github.com/DPIRD-DMA/ManySeg/blob/main/experiments/), where negative results are kept
 too. Most are pre-registered and multi-seed; the speed and memory figures (E025, E026) are timing
 runs without seeds.
+
+## What the evidence says
+
+ManySeg has more options than we have evidence for. An option that showed no gain here may still
+help on your data, and an untested one is simply unknown.
+
+| Option | Result | Evidence |
+|---|---|---|
+| Separate encoders with `concat` or `gated` fusion, vs stacking bands | no gain | E005, Sen1Floods11; late fusion was worse on test |
+| Fusion ops `add`, `attention`, `cross_attention` | not tested for accuracy | none |
+| Siamese encoder with `diff` or `concat_diff`, for change detection | helped | E022, OSCD and LEVIR-CD |
+| Per-input land-cover heads, for semantic change | helped | E023, SECOND only |
+| Splitting Sentinel-2 bands into resolution groups | mixed | helped in E015; not in E016, E017 or E020 |
+| Metadata (FiLM, head bias or channels) | no clear gain | E009, E013, E016, E020 |
+| Time-series input, vs stacking dates as channels | mixed | E021: `attention` won on field delineation, not on crop types; several dates beat one by a wide margin either way |
+| `fastai_unet`, vs the default U-Net | small gain at high cost | E003 Pet +0.4 test mIoU at 4× FLOPs; E006 Sen1Floods11 +1.7 test mIoU at 4–5× latency |
+| `input_cross` | mixed | E012 helped on Sen1Floods11, not Pet; E013 no gain on clouds |
+| UPerNet | tied with the U-Net at more cost | E003, Pet only |
+| SegFormer head, FPN, DeepLabV3+ | lower accuracy, on Pet | E003 |
+| U-Net++ | not tested for accuracy | E025 measured training speed only |
+| Boundary + distance heads, for touching objects | helped | E010, AI4Boundaries: doubled panoptic quality against extent alone |
+| An auxiliary segmentation head on an image classifier | helped | E020, BigEarthNet only; looks like regularisation |
+| SSL4EO DINO weights with their own normalisation | helped | E024, three Sentinel-2 datasets, ResNet-50 |
+| Footprint decoder (corners and walls) | helped on boundary quality, slightly lower detection | E038, WHU aerial only, 2 seeds |
+| Field decoder (instance outlines) | chosen over corners and walls | E046 and E052, Fields of The World Netherlands only, 1–2 seeds |
+| Road decoder (unified heads) | kept more overpasses, no loss on APLS | E044 and E044b, City-Scale only, 3 seeds |
+| Roof decoder (faces, planes, mesh) | viable with an nDSM input, not from RGB alone | E047b, E048b and E049, 3D BAG Netherlands only, 1 seed |
+
+The vector decoders are marked experimental partly for this reason: each rests on one dataset, so
+expect to tune them on yours.
+
+Experiments on Pawsey Setonix (such as E004, E006, E009, E010, E012 and E013) ran on torch 2.7.1
+and AMD MI250X GPUs, below ManySeg's torch floor, and weren't re-run on newer versions. Compare
+their numbers within an experiment.
 
 ## Documentation
 

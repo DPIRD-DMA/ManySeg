@@ -181,8 +181,6 @@ def create_head(spec_decoder: FeatureSpec, spec_encoder: FeatureSpec, cfg: dict)
     ``dropout``, ``init_std``). A ``type`` registered in :data:`HEADS` as a class builds that
     class (see the module docstring)."""
     cfg = dict(cfg)
-    if "channels" in cfg:
-        raise ValueError("head 'channels' was renamed 'out_channels'")
     if "out_channels" not in cfg:
         raise ValueError("a head needs 'out_channels'")
     kind_name = cfg.pop("type", "segmentation")

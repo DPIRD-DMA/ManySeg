@@ -46,9 +46,6 @@ def split_inputs(inputs: Mapping[str, Mapping]) -> tuple[dict, dict]:
 def parse_vector(name: str, cfg: Mapping) -> tuple[Callable[[], MetadataEncoder], str, dict]:
     """``(encoder factory, mode, mode options)``. Encoders are constructed only after the
     raster model, so the raster weights do not depend on the metadata configuration."""
-    if "channels" in cfg:
-        raise ValueError(f"vector input {name!r}: 'channels' was renamed 'num_features' (the "
-                         "number of raw values per sample)")
     unknown = set(cfg) - VECTOR_KEYS
     if unknown:
         raise ValueError(f"vector input {name!r}: unknown keys {sorted(unknown)}")

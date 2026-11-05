@@ -153,6 +153,11 @@ class UNetDecoder(nn.Module):
         self.out_spec = FeatureSpec(out_ch, out_stride, "unet")
         init_decoder_(self)
 
+    @property
+    def read_levels(self) -> list[int]:
+        """Indices of the encoder levels this decoder reads."""
+        return sorted({self._deepest_index, *(i for i in self._skip_index if i >= 0)})
+
     def _set_input_divisor(self, divisor: int) -> None:
         """Inputs arrive padded to a multiple of ``divisor``: when that covers the deepest
         stride, every level is exactly twice the next, and the upsampling needs no gather."""

@@ -14,8 +14,8 @@ Compatibility policy. The file stores a save ``format`` number and the ``manyseg
 wrote it, and holds only plain data (no pickled classes), so it survives refactors that move or
 rename modules. A change that renames or reinterprets ``create_model`` arguments, modules or
 parameters bumps ``FORMAT`` and adds a migration that :func:`read_metadata` applies to older
-files (format 1 -> 2 renamed ``channels``); the committed golden file in
-``tests/data`` checks that today's files keep loading to the same outputs. A file with a newer
+files. Format 2 is the first released one. The committed golden file in ``tests/data`` checks
+that today's files keep loading to the same outputs. A file with a newer
 format fails with an upgrade message. A newer ManySeg may also add options within a format (a
 new head option, say): an older ManySeg then cannot build the model, and :func:`load` names
 both versions. ``torch.save(model)`` pickles are not covered: they depend on internal module
@@ -49,13 +49,21 @@ from typing import Any
 import torch
 
 from . import __version__
+from ._normalize_spec import check_normalize
 from .models import DenseModel
 from .weights import attribution
 
-FORMAT = 2  # 2: in_channels / out_channels / num_features (1: "channels"; migrated on read)
+FORMAT = 2  # the first released format
 QUANTIZED_FORMAT = 3  # quantised files only: float files keep FORMAT
 _KEY = "manyseg"
 ACTIVATIONS = ("softmax", "sigmoid", "none")
+
+
+def _keep_rng():
+    """Isolate a rebuild from the caller's random stream. A rebuild's weight init is thrown away
+    (the checkpoint's weights replace it), so it must not change later dropout, augmentation or
+    sampling. Rebuilds run on the CPU, so only the CPU generator needs saving."""
+    return torch.random.fork_rng(devices=[])
 
 
 def _plain(value: Any) -> Any:
@@ -132,7 +140,11 @@ def save(model: DenseModel | torch.export.ExportedProgram, path: str | Path, *,
     Args:
         source: The float model an ``ExportedProgram`` came from; only for those.
         normalize: How inputs must be normalised for this model, as a ManyPred normalisation
-            spec: pass the normalisation you trained with. ``"weights"`` uses what the
+            spec: pass the normalisation you trained with, as steps. Several raster inputs take
+            ``{input_name: steps}`` with every one present (``{"type": "none"}`` for one left as
+            is); a plain spec with no steps suits any model. A spec with an unknown step, a
+            misspelt option or an invalid value is refused here, not at inference. ``"weights"``
+            uses what the
             remote-sensing pretrained weights the model was built with expect
             (``pretrained="ssl4eo_s2_moco"``), which is right only if you trained with it too.
             None stores nothing (with a warning): whoever runs the model must then know.
@@ -142,8 +154,9 @@ def save(model: DenseModel | torch.export.ExportedProgram, path: str | Path, *,
             classification head, as the head type can't tell softmax from sigmoid; regression
             heads default to "none", as do heads with a built-in output ``activation``
             (``"softplus"`` density heads: the model's output already is the prediction).
-        classes: Class names, per head (``{head: [...]}``) or for a single head.
-        bands: Band names, per input (``{input: [...]}``) or for a single input.
+        classes: Class names, per head (``{head: [...]}``) or for a single head. They reach
+            ``tiling_spec()``, and ManyPred writes them into its output files.
+        bands: Band names, per input (``{input: [...]}``) or for a single input. Likewise.
         extra: Any other JSON-compatible metadata, stored as is.
     """
     names = {"normalize": normalize, "activations": activations, "classes": classes,
@@ -233,6 +246,8 @@ def _metadata(model: DenseModel, *, normalize: Any, activations, classes, bands,
             "training. Pass normalize=<the spec you trained with>.",
             stacklevel=3,
         )
+    if normalize is not None:
+        check_normalize(normalize, None if image_inputs == [None] else image_inputs)
     _check_rebuildable(model, config)
     first = next(iter(model.parameters()))
     meta = {
@@ -349,18 +364,37 @@ def _dedup_state(model: torch.nn.Module) -> tuple[dict, dict]:
     return tensors, aliases
 
 
+def _rebuilt_type(module: torch.nn.Module) -> str:
+    """The name of the type a file rebuilds ``module`` as. Multi-GPU training swaps in the
+    SyncBatchNorm classes: outside training they compute the same as the type they replace and
+    hold the same weights. Exact types, as a class that only shares the name may do anything."""
+    from timm.layers import SyncBatchNormAct
+
+    kind = type(module)
+    if kind is torch.nn.SyncBatchNorm:
+        return "BatchNorm2d"
+    if kind is SyncBatchNormAct:
+        return "BatchNormAct2d"
+    return kind.__qualname__
+
+
 def _structure(model: torch.nn.Module) -> dict[str, tuple]:
     """Every parameter and buffer's shape, and every module's type and settings
     (``extra_repr``: kernel sizes, activation choices, ...)."""
     out: dict[str, tuple] = {k: ("tensor", tuple(v.shape)) for k, v in model.state_dict().items()}
     for name, module in model.named_modules():
-        out[f"module:{name}"] = (type(module).__qualname__, module.extra_repr())
+        out[f"module:{name}"] = (_rebuilt_type(module), module.extra_repr())
     return out
 
 
 def _check_names(model, config: dict, classes, bands) -> None:
     """One class name per head channel (a one-channel head may name both of its classes) and
-    one band name per input channel."""
+    one band name per input channel, all strings."""
+    for arg, value in (("classes", classes), ("bands", bands)):
+        for names in (value.values() if isinstance(value, Mapping) else [value]):
+            if names is not None and (isinstance(names, (str, bytes)) or not all(
+                    isinstance(n, str) for n in names)):
+                raise ValueError(f"{arg} must be lists of names (strings), got {names!r}.")
     if classes is not None:
         by_head = classes if isinstance(classes, Mapping) else {next(iter(model.heads)): classes}
         for head, names in by_head.items():
@@ -388,17 +422,18 @@ def _check_rebuildable(model: DenseModel, config: Mapping[str, Any]) -> None:
     the modules alone (a replaced ``forward``) can't be seen."""
     from .models import create_model
 
-    rebuilt = create_model(**_no_download(dict(config)))
     recipe = getattr(model, "quantization", None)
-    if model.single_output is not None and rebuilt.single_output is None:
-        rebuilt.select_heads([model.single_output])
-    elif list(rebuilt.heads) != list(model.heads):
-        rebuilt.select_heads(list(model.heads))
-    if recipe is not None:
-        from .quantize import quantize_weights
+    with _keep_rng():
+        rebuilt = create_model(**_no_download(dict(config)))
+        if model.single_output is not None and rebuilt.single_output is None:
+            rebuilt.select_heads([model.single_output])
+        elif list(rebuilt.heads) != list(model.heads):
+            rebuilt.select_heads(list(model.heads))
+        if recipe is not None:
+            from .quantize import quantize_weights
 
-        quantize_weights(rebuilt, recipe["mode"], conv=recipe["conv"], inplace=True)
-        rebuilt.to(next(model.parameters()).device)
+            quantize_weights(rebuilt, recipe["mode"], conv=recipe["conv"], inplace=True)
+            rebuilt.to(next(model.parameters()).device)
     want, have = _structure(model), _structure(rebuilt)
     if want != have:
         diff = sorted(set(want) ^ set(have)) or sorted(k for k in want if want[k] != have[k])
@@ -438,6 +473,9 @@ def read_metadata(path: str | Path, *, token: str | None = None) -> dict:
     fmt = meta.get("format")
     if not isinstance(fmt, int) or fmt < 1:
         raise ValueError(f"{path}: invalid save format {fmt!r}.")
+    if fmt < FORMAT:
+        raise ValueError(f"{path} uses save format {fmt}, which predates ManySeg 0.1.0 and can't "
+                         f"be read. Rebuild the model with create_model and load its weights.")
     if fmt > QUANTIZED_FORMAT:
         raise ValueError(f"{path} uses save format {fmt}; this ManySeg reads up to "
                          f"{QUANTIZED_FORMAT}. Upgrade ManySeg.")
@@ -446,8 +484,6 @@ def read_metadata(path: str | Path, *, token: str | None = None) -> dict:
     missing = {"create_model", "heads", "activations"} - set(meta)
     if missing:
         raise ValueError(f"{path}: metadata lacks {sorted(missing)}.")
-    if fmt < 2:
-        meta["create_model"] = _migrate_v1(meta["create_model"])
     return meta
 
 
@@ -466,32 +502,11 @@ def _read_archive_metadata(path: str | Path) -> str | None:
         return z.read(name).decode() if name is not None else None
 
 
-def _migrate_v1(config: dict) -> dict:
-    """Format 1 (before 0.1.0) used ``"channels"`` for input bands, head outputs and raw
-    vector widths; format 2 says ``in_channels`` / ``out_channels`` / ``num_features``."""
-    config = dict(config)
-
-    def rename(cfg, new):
-        cfg = dict(cfg)
-        if "channels" in cfg:
-            cfg[new] = cfg.pop("channels")
-        return cfg
-
-    if config.get("inputs"):
-        config["inputs"] = {n: rename(c, "num_features" if c.get("kind") == "vector"
-                                      else "in_channels") for n, c in config["inputs"].items()}
-    if config.get("heads"):
-        config["heads"] = {n: rename(c, "out_channels") for n, c in config["heads"].items()}
-    return config
-
-
 def _no_download(config: dict) -> dict:
     """The create_model arguments with every pretrained flag off (the weights come from the
     file)."""
     config = json.loads(json.dumps(config))
     config["pretrained"] = False
-    if config.get("inputs") is not None and config.get("in_channels") == 3:
-        config["in_channels"] = None  # files saved before in_channels defaulted to None
     for cfg in (config.get("inputs") or {}).values():
         if "pretrained" in cfg:
             cfg["pretrained"] = False
@@ -563,7 +578,8 @@ def load(path: str | Path, map_location: str | torch.device = "cpu", *,
             raise ValueError(f"{path}: unknown quantisation route {recipe.get('route')!r}. "
                              f"Upgrade ManySeg.")
     try:
-        model = create_model(**_no_download(meta["create_model"]))
+        with _keep_rng():
+            model = create_model(**_no_download(meta["create_model"]))
     except (TypeError, ValueError) as e:
         raise _version_error(path, meta, e) from e
     if meta.get("single_output") is not None and model.single_output is None:
@@ -583,7 +599,8 @@ def load(path: str | Path, map_location: str | torch.device = "cpu", *,
         if recipe is not None:
             from .quantize import quantize_weights
 
-            quantize_weights(model, recipe["mode"], conv=recipe["conv"], inplace=True)
+            with _keep_rng():
+                quantize_weights(model, recipe["mode"], conv=recipe["conv"], inplace=True)
             parts = json.loads(stored.get(_PARTS, "{}"))
             _fill_quantized(model, state, parts)
             quantised = {k for k, t in model.state_dict(keep_vars=True).items()

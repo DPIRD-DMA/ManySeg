@@ -1,11 +1,11 @@
 """Generate docs/builder/data.js, the data the model builder page reads.
 
-For every buildable backbone in docs/backbone_compatibility.json (plus the default, the presets'
+For every buildable backbone in docs/backbone_compatibility.json (plus the default, a small
 encoder and the remote-sensing weights' architectures) it records the feature levels and the
 encoder's parameter count, and for every decoder configuration the page offers it builds the
 real decoder class on those feature specs (meta device, no weights) to record its output spec and
 parameter count. Registries (decoders, fusion ops, metadata field types, temporal aggregations,
-remote-sensing weights, reserved names) and presets are copied from the package, so the page
+remote-sensing weights, reserved names) are copied from the package, so the page
 offers exactly what the installed ManySeg accepts.
 
     uv run python scripts/build_model_builder.py            # rewrite docs/builder/data.js
@@ -26,14 +26,13 @@ from manyseg.conditioning.inject import used_levels
 from manyseg.decoders import DECODERS
 from manyseg.features import FeatureSpec
 from manyseg.fusion.ops import FUSION_OPS
-from manyseg.presets import PRESETS
 from manyseg.registry import reserved_names
 from manyseg.temporal import AGGREGATIONS
 from manyseg.weights import WEIGHTS
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "docs" / "builder" / "data.js"
-# Not in the compatibility table but offered by the page: the create_model default, the presets'
+# Not in the compatibility table but offered by the page: the create_model default, a small
 # encoder and the remote-sensing weights' architectures.
 EXTRA = ["resnet34", "pvt_v2_b0.in1k", "resnet152"]
 WIDTHS = {"full": None, "half": [128, 64, 32, 16, 8], "quarter": [64, 32, 16, 8, 8]}
@@ -113,8 +112,6 @@ def build(only: set[str] | None = None) -> dict:
         "weights": {k: {"model": w.model, "tag": w.tag, "bands": len(w.bands),
                         "units": w.units, "license": w.license}
                     for k, w in sorted(WEIGHTS.items())},
-        "presets": {k: {"kwargs": p.kwargs, "description": p.description,
-                        "measured": p.measured} for k, p in PRESETS.items()},
     }
 
 

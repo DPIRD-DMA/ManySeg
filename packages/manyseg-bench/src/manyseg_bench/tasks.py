@@ -230,14 +230,14 @@ class InstanceTask(Task):
                 "distance_mask": downsample_max(fg, s)}
 
     def loss(self, out, t):
+        from manyseg.instances import instance_losses
+
         nt = self.head_targets(out, t)
         we, wb, wd = self.weights
         if self.mode == "extent_cc":
             return we * losses.dice_bce(out["extent"], nt["extent"])
-        return (we * losses.dice_bce(out["extent"], nt["extent"])
-                + wb * losses.dice_bce(out["boundary"], nt["boundary"], pos_weight=self.pos_weight)
-                + wd * losses.masked_regression(out["distance"], nt["distance"],
-                                                nt["distance_mask"]))
+        parts = instance_losses(out, nt, boundary_pos_weight=self.pos_weight)
+        return we * parts["extent"] + wb * parts["boundary"] + wd * parts["distance"]
 
     def evaluator(self):
         return _InstanceEval(self)
@@ -823,14 +823,11 @@ class CornerLineTask(Task):
 
     def losses(self, out, t) -> dict:
         """The loss terms (unweighted): ``instances``, ``corner``, ``direction``."""
+        from manyseg.vectors import corner_line_losses
+
         _full_resolution(out, t["instances"], self.name)
         inner = t["inner"] if "inner" in t else self.inner.targets(t["instances"])
-        tc = t["corner"].float()[:, None]
-        corner = losses.heatmap_focal(out["corner"], tc, pos=losses.heatmap_peaks(tc))
-        m = t["direction_mask"].bool()[:, None]
-        direction = losses.masked_regression(out["direction"], t["direction"], m)
-        return {"instances": self.inner.loss(out, inner), "corner": corner,
-                "direction": direction}
+        return corner_line_losses(out, {**t, **self.inner.head_targets(out, inner)})
 
     def loss(self, out, t):
         parts = self.losses(out, t)
@@ -886,18 +883,10 @@ class RoadGraphTask(Task):
 
     def losses(self, out, t) -> dict:
         """The loss terms (unweighted): ``mask``, ``line``, ``keypoints``, ``direction``."""
+        from manyseg.vectors import road_losses
+
         _full_resolution(out, t["mask"], self.name)
-        kp = t["keypoints"].float()
-        d, pd = t["direction"].float(), out["direction"]
-        on_road = (t["mask"] > 0.5)[:, None]
-        crossing = d[:, 2:].abs().sum(1, keepdim=True) > 0
-        return {"mask": losses.dice_bce(out["mask"], t["mask"].float()[:, None]),
-                "line": losses.dice_bce(out["line"], t["line"].float()[:, None]),
-                "keypoints": losses.heatmap_focal(out["keypoints"], kp,
-                                                  pos=losses.heatmap_peaks(kp),
-                                                  min_pos=self.min_keypoints),
-                "direction": (losses.masked_regression(pd[:, :2], d[:, :2], on_road)
-                              + losses.masked_regression(pd[:, 2:], d[:, 2:], crossing))}
+        return road_losses(out, t, min_keypoints=self.min_keypoints)
 
     def loss(self, out, t):
         parts = self.losses(out, t)

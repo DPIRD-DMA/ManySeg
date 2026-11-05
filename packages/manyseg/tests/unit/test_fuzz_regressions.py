@@ -336,7 +336,8 @@ def test_an_unread_input_with_its_own_channel_adapter_is_rejected():
     different band count): the adapter would get no gradient."""
     with pytest.raises(ValueError, match="never be read"):
         build(inputs={"a": {"in_channels": 3}, "b": {"in_channels": 4, "backbone": "shared:a",
-                                                  "share_norm": True}},
+                                                  "share_norm": True,
+                                                  "channel_adapter": "projection"}},
               fusion={"type": "late"},
               heads={"c": {"type": "classification", "out_channels": 3, "scope": "image"}})
 
@@ -432,16 +433,6 @@ def test_early_fusion_with_a_prunable_backbone():
 def test_head_type_must_match_its_scope(head, right):
     with pytest.raises(ValueError, match=right):
         build(heads={"h": head})
-
-
-def test_old_channels_keys_name_their_replacement():
-    with pytest.raises(ValueError, match="in_channels"):
-        build(inputs={"a": {"channels": 3}}, num_classes=2)
-    with pytest.raises(ValueError, match="out_channels"):
-        build(heads={"h": {"type": "segmentation", "channels": 2}})
-    with pytest.raises(ValueError, match="num_features"):
-        build(inputs={"a": {"in_channels": 3}, "m": {"kind": "vector", "channels": 2}},
-              num_classes=2)
 
 
 def test_decoder_as_a_dict():

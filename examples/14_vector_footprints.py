@@ -4,10 +4,10 @@ Building outlines in a CRS -> training targets for one tile -> the model's heads
 decoded block by block -> GeoJSON (and a GeoPackage with geopandas).
 
 The model is the corner-line preset (``corner_line_heads``: instance heads + a corner heatmap +
-wall directions), decoded with corners and walls (B3, E038). Training it needs a dataset and a
-GPU (losses: ``CornerLineTask`` in manyseg-bench, or the short versions in
-``vector_presets.py``), so here the targets of the whole scene stand in for a trained model's
-stitched predictions. Swap in your model's outputs: the decoding and writing are the same.
+wall directions), decoded with corners and walls (E038). Training it needs a dataset and a GPU
+(losses: ``corner_line_losses``; ``vector_presets.py`` trains a few steps), so here the targets of
+the whole scene stand in for a trained model's stitched predictions. Swap in your model's
+outputs: the decoding and writing are the same.
 """
 
 import tempfile
@@ -85,7 +85,7 @@ def main():
     # 3. Block by block (block 256 px + 64 px halo here; 4096 + 256 on real scenes), as
     #    ManyPred's BlockPostprocess runs it while predicting. Equal to a whole-scene decode.
     scene = Scene(*SHAPE, transform=TRANSFORM, crs=CRS)
-    dec = block_decoder("footprints")  # B3 defaults; halo must be >= dec.min_halo
+    dec = block_decoder("footprints")  # tuned defaults; halo must be >= dec.min_halo
     records = decode_scene(fields, dec, block=256, halo=64, scene=scene)
     whole = decode_scene(fields, dec, scene=scene)  # default block 4096 px: one block
     same = all(shapely.equals_exact(a["geometry"], b["geometry"], 0)

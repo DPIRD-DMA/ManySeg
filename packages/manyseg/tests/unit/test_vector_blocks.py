@@ -359,7 +359,7 @@ def test_fields_blocks_equal_whole_scene():
         assert _canon(r["geometry"] for r in out) == _canon(ref), (block, halo, off)
 
 
-def _roof_ref(f, mesh="J2"):
+def _roof_ref(f, mesh="plane_intersection"):
     lab = _labels(f, extent_threshold=0.4, boundary_threshold=0.3, seed_threshold=0.15)
     return roof_faces(lab, f["corner"][0], f["direction"], f["height"], corner_threshold=0.5,
                       big_dev=4.0, agree=0.6, merge_deg=8.0, mesh=mesh)
@@ -375,7 +375,7 @@ def _assert_same_roofs(out, ref, ctx):
 
 
 def test_roofs_blocks_equal_whole_scene():
-    """Planar join, planes and J2 mesh across seams: faces of the long terrace (a cluster
+    """Planar join, planes and mesh across seams: faces of the long terrace (a cluster
     larger than any halo) are joined in combine, the rest in their blocks."""
     f = _terraces(7)
     ref = _roof_ref(f)
@@ -677,3 +677,33 @@ def test_graph_blocks_small_blob_across_a_seam():
     for halo in (40, 99, 120):
         b = graph_from_mask_blocks(p, 0.5, block=128, halo=halo, gap=0, min_area=100)
         assert _edges(b) == _edges(g), halo
+
+
+@pytest.mark.parametrize("old", ["J1", "J2"])
+def test_mesh_joins_have_descriptive_names(old):
+    """The experiment names are gone, with no alias: nothing was released with them."""
+    from manyseg.vectors.roofs import MESH_JOINS, roof_mesh
+    from shapely.geometry import box
+
+    faces, planes = [box(0, 0, 4, 4)], np.zeros((1, 3))
+    for join in MESH_JOINS:
+        assert len(roof_mesh(faces, planes, join=join)) == 1
+    with pytest.raises(ValueError, match="plane_intersection"):
+        roof_mesh(faces, planes, join=old)
+
+
+def test_mesh_joins_differ_as_their_names_say():
+    """Two faces share the wall x = 40, but their planes meet at x = 42."""
+    faces = [shapely.box(0, 0, 40, 60), shapely.box(40, 0, 80, 60)]
+    planes = np.array([[0.1, 0, 5], [-0.1, 0, 13.4]])
+
+    def wall(join):  # the rings' vertices that start on the shared wall
+        rings = roof_mesh(faces, planes, join=join)
+        return [v for r, f in zip(rings, faces) for v, xy in zip(r, f.exterior.coords[:-1])
+                if xy[0] == 40]
+
+    still = wall("mean_height")
+    assert all(v[0] == 40 for v in still)
+    np.testing.assert_allclose([v[2] for v in still], 9.2)  # the mean of 9.0 and 9.4
+    moved = wall("plane_intersection")
+    assert all(40 < v[0] <= 42 for v in moved)

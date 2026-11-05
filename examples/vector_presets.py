@@ -5,35 +5,15 @@ encoded from vector data in world coordinates (building polygons and road lines 
 CRS, cut to one tile with ``to_pixels``) -> a random dihedral transform per step, with the
 direction fields transformed too -> a few training steps -> vector decoding.
 
-The losses here are short versions of manyseg-bench's ``CornerLineTask`` and ``RoadGraphTask``
-(``manyseg_bench.tasks``), the exact losses of the trained models (E036, E044). With the bench,
-a dataset whose cache holds these targets as a label dict trains either preset through
-``run_training`` (``TASK = "corner_lines"`` or ``"roads"``), which augments with the same exact
-dihedral transforms (``GPULoader(dihedral=True, directions=("direction",))``).
+The losses are the trained models' (E036, E044): ``corner_line_losses`` and ``road_losses``, whose
+terms are summed here. With manyseg-bench, a dataset whose cache holds these targets as a label
+dict trains either preset through ``run_training`` (``TASK = "corner_lines"`` or ``"roads"``), which
+augments with the same exact dihedral transforms (``GPULoader(dihedral=True,
+directions=("direction",))``).
 """
 
 import torch
-import torch.nn.functional as F
 from manyseg import create_model
-
-
-def focal(logits, target, min_pos=1):
-    """CenterNet focal loss on Gaussian heatmaps; positives are the 3 x 3 peaks above 0.5."""
-    pos = (target > 0.5) & (target == F.max_pool2d(target, 3, 1, 1))
-    p = logits.sigmoid().clamp(1e-6, 1 - 1e-6)
-    loss = -((1 - p) ** 2 * p.log() * pos + (1 - target) ** 4 * p ** 2 * (1 - p).log() * ~pos)
-    return loss.sum() / pos.sum().clamp(min=min_pos)
-
-
-def masked_l1(pred, target, mask):
-    m = mask.expand_as(pred).float()
-    return ((pred - target).abs() * m).sum() / m.sum().clamp(min=1)
-
-
-def dice_bce(logits, target):
-    p = logits.sigmoid()
-    dice = 1 - (2 * (p * target).sum((-2, -1)) + 1) / (p.sum((-2, -1)) + target.sum((-2, -1)) + 1)
-    return F.binary_cross_entropy_with_logits(logits, target) + dice.mean()
 
 
 def augment(d, image, targets, directions=("direction",)):
@@ -54,6 +34,7 @@ def corner_lines(size=64, steps=15):
     from manyseg.instances import instance_targets, instances_from_outputs
     from manyseg.vectors import (
         corner_line_heads,
+        corner_line_losses,
         footprint_targets,
         polygons_from_corners,
         to_pixels,
@@ -88,11 +69,7 @@ def corner_lines(size=64, steps=15):
         x = torch.stack([b[0] for b in batch])
         t = {k: torch.stack([b[1][k] for b in batch]) for k in targets}
         it = instance_targets(t["instances"], boundary_width=2)
-        out = model(x)
-        loss = (dice_bce(out["extent"], it["extent"]) + dice_bce(out["boundary"], it["boundary"])
-                + masked_l1(out["distance"], it["distance"], it["extent"] > 0)
-                + focal(out["corner"], t["corner"][:, None])
-                + masked_l1(out["direction"], t["direction"], t["direction_mask"][:, None]))
+        loss = sum(corner_line_losses(model(x), {**t, **it}).values())
         opt.zero_grad()
         loss.backward()
         opt.step()
@@ -114,6 +91,7 @@ def roads(size=64, steps=15):
         graph_from_road_heads,
         road_graph,
         road_heads,
+        road_losses,
         road_targets,
         to_pixels,
     )
@@ -143,13 +121,7 @@ def roads(size=64, steps=15):
                  for _ in range(2)]
         x = torch.stack([b[0] for b in batch])
         t = {k: torch.stack([b[1][k] for b in batch]) for k in targets}
-        out = model(x)
-        d = t["direction"]
-        loss = (dice_bce(out["mask"], t["mask"][:, None])
-                + dice_bce(out["line"], t["line"][:, None])
-                + focal(out["keypoints"], t["keypoints"], min_pos=16)  # floor: rare crossings
-                + masked_l1(out["direction"][:, :2], d[:, :2], t["mask"][:, None] > 0.5)
-                + masked_l1(out["direction"][:, 2:], d[:, 2:], d[:, 2:].abs().sum(1, True) > 0))
+        loss = sum(road_losses(model(x), t).values())
         opt.zero_grad()
         loss.backward()
         opt.step()

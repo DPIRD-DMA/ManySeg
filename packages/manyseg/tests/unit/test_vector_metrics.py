@@ -1,5 +1,5 @@
 """Vector metrics (APLS, GEO, junctions, crossings, polygons), including the regressions from
-the E028 Codex review."""
+the review of the E028 definitions."""
 
 import numpy as np
 import pytest
@@ -8,7 +8,7 @@ nx = pytest.importorskip("networkx")
 pytest.importorskip("shapely")
 pytest.importorskip("scipy")
 
-from manyseg_bench.evaluation.vectors import (  # noqa: E402
+from manyseg.vectors.metrics import (  # noqa: E402
     apls,
     crossing_score,
     geo_f1,

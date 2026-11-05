@@ -55,7 +55,8 @@ def masked_regression(pred: Tensor, target: Tensor, mask: Tensor | None = None,
     None; 0 if the mask is empty)."""
     if kind not in ("l1", "mse"):
         raise ValueError(f"kind must be 'l1' or 'mse', got {kind!r}")
-    err = (pred.float() - target.float()).abs() if kind == "l1" else (pred.float() - target) ** 2
+    diff = pred.float() - target.float()
+    err = diff.abs() if kind == "l1" else diff ** 2
     if mask is None:
         return err.mean()
     m = mask.expand_as(err).float()
@@ -71,7 +72,7 @@ def heatmap_focal(logits: Tensor, target: Tensor, alpha: float = 2.0, beta: floa
     p = logits.float().sigmoid().clamp(1e-6, 1 - 1e-6)
     pos = target >= 0.999 if pos is None else pos
     pos_loss = -((1 - p) ** alpha) * torch.log(p) * pos
-    neg_loss = -((1 - target) ** beta) * (p ** alpha) * torch.log(1 - p) * (~pos)
+    neg_loss = -((1 - target.float()) ** beta) * (p ** alpha) * torch.log(1 - p) * (~pos)
     return (pos_loss.sum() + neg_loss.sum()) / pos.sum().clamp(min=min_pos)
 
 
