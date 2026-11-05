@@ -44,7 +44,7 @@ REFERENCE = [
     ("Outputs", ["manyseg.losses", "manyseg.instances", "manyseg.points", "manyseg.vectors",
                  "manyseg.vectors.roofs", "manyseg.vectors.metrics", "manyseg.vectors.losses",
                  "manyseg.utils"]),
-    ("Deployment", ["manyseg.export", "manyseg.quantize", "manyseg.distributed",
+    ("Deployment", ["manyseg.export", "manyseg.quantize",
                     "manyseg.describe"]),
     ("Inputs", ["manyseg.conditioning", "manyseg.temporal"]),
     ("Building blocks", ["manyseg.backbones", "manyseg.decoders", "manyseg.heads",

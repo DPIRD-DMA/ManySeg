@@ -1263,11 +1263,9 @@ parameter gets a gradient (no `find_unused_parameters=True` needed): modules for
 levels nothing reads (fusers, learned temporal aggregations, ViT neck levels, and the timm
 EfficientNet / MobileNetV3 blocks past the last requested level) are not built, and the random
 configuration fuzzer checks this. Heads you leave out of the loss still need it, or
-`select_heads` (which prunes again what only the dropped heads read). For FSDP2,
-`manyseg.distributed.shard_model(model, mp_policy=..., mesh=...)` applies `fully_shard` per
-stage (each encoder, the shared decoder, each task decoder, each head, the conditioner), then
-the root. It is tested against DDP on CPU (gloo): parameters after a step match. BatchNorm
-statistics stay per rank, as with DDP.
+`select_heads` (which prunes again what only the dropped heads read). DDP needs nothing from
+ManySeg: wrap the model as usual. BatchNorm statistics stay per rank, unless you convert to
+`SyncBatchNorm`.
 
 ### Small batches
 

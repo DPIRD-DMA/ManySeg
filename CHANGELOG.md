@@ -318,8 +318,7 @@ First release. Python 3.10–3.14 (`manyseg-bench` lists 3.10–3.12), PyTorch �
   keys that name no head / input, instead of storing them unchecked.
 * `torch.compile(dynamic=True)`, `manyseg.export.export_model` (dynamic size; dynamic batch
   with `dynamic_batch=True`; dynamic date count except for `concat` / `diff` aggregation) and
-  ONNX; int8 quantisation (`manyseg.quantize`, extra `quant`); FSDP2
-  (`manyseg.distributed.shard_model`).
+  ONNX; int8 quantisation (`manyseg.quantize`, extra `quant`).
 * Saved models carry the licence and citation of the pretrained weights they started from
   (`pretrained_weights` in the file metadata, `manyseg.weights.attribution(model)`), through
   load and re-save; `describe()` lists them. Fine-tuned weights stay under those licences
