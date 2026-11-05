@@ -84,7 +84,7 @@ def test_attribution_is_saved_restored_and_described(monkeypatch, tmp_path):
     assert m.backbone.encoders["s2"].std == (10000.0,) * 13  # not timm's ImageNet values
     assert rec["module"] == "backbone.encoders.s2" and rec["license"] == "CC BY 4.0"
     assert rec["citation"].startswith("Wang") and rec["source"].startswith("https://")
-    path = manyseg.save(m, tmp_path / "m.safetensors", normalize=[],
+    path = manyseg.save(m, tmp_path / "m.safetensors", normalize={"s2": [], "dem": []},
                         activations={"logits": "softmax"})
     assert manyseg.read_metadata(path)["pretrained_weights"] == [rec]
     # load rebuilds without downloading: the record, not the backbones, says where it started
@@ -98,7 +98,7 @@ def test_attribution_is_saved_restored_and_described(monkeypatch, tmp_path):
                                     "units": WEIGHTS["resnet18.ssl4eo_s2_moco"].units}
     assert ("pretrained on: (x - 0) / 10000; x = Sentinel-2 L1C digital numbers "
             "(reflectance x 10000), clipped to [0, 1]") in text
-    again = manyseg.save(loaded, tmp_path / "again.safetensors", normalize=[],
+    again = manyseg.save(loaded, tmp_path / "again.safetensors", normalize={"s2": [], "dem": []},
                          activations={"logits": "softmax"})
     assert manyseg.read_metadata(again)["pretrained_weights"] == [rec]
     # a backbone swapped in after loading reports its own weights, not the restored record

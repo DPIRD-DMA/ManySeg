@@ -905,7 +905,7 @@ function generateCode(s, D) {
   const rsWeights = rs.length && rs.every((r) => !["imagenet", "none"].includes(r.weights));
   lines.push("");
   lines.push("# After training: one file with the weights and what inference needs.");
-  if (!rsWeights) lines.push("# Add normalize=[...] (the normalisation you trained with); see help(manyseg.save).");
+  if (!rsWeights) lines.push("# Add normalize= (the normalisation you trained with: a list of steps, or {input: steps} with inputs=); see help(manyseg.save).");
   lines.push("# import manyseg");
   const saveArgs = [`"model.safetensors"`];
   if (Object.keys(acts).length) saveArgs.push(`activations=${py(acts)}`);

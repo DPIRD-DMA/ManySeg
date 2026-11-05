@@ -49,6 +49,7 @@ from typing import Any
 import torch
 
 from . import __version__
+from ._normalize_spec import check_normalize
 from .models import DenseModel
 from .weights import attribution
 
@@ -139,7 +140,10 @@ def save(model: DenseModel | torch.export.ExportedProgram, path: str | Path, *,
     Args:
         source: The float model an ``ExportedProgram`` came from; only for those.
         normalize: How inputs must be normalised for this model, as a ManyPred normalisation
-            spec: pass the normalisation you trained with. ``"weights"`` uses what the
+            spec: pass the normalisation you trained with. A model built with ``inputs=`` takes
+            ``{input_name: steps}`` with every raster input present (``{"type": "none"}`` for
+            one left as is). A spec with an unknown step, a misspelt option or an invalid value
+            is refused here, not at inference. ``"weights"`` uses what the
             remote-sensing pretrained weights the model was built with expect
             (``pretrained="ssl4eo_s2_moco"``), which is right only if you trained with it too.
             None stores nothing (with a warning): whoever runs the model must then know.
@@ -240,6 +244,8 @@ def _metadata(model: DenseModel, *, normalize: Any, activations, classes, bands,
             "training. Pass normalize=<the spec you trained with>.",
             stacklevel=3,
         )
+    if normalize is not None:
+        check_normalize(normalize, None if image_inputs == [None] else image_inputs)
     _check_rebuildable(model, config)
     first = next(iter(model.parameters()))
     meta = {

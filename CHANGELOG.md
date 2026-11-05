@@ -13,6 +13,11 @@ First release. Python 3.10–3.14 (`manyseg-bench` lists 3.10–3.12), PyTorch �
 * `manyseg.save` and `manyseg.load` leave the global random state alone. Both rebuild the model,
   and its discarded weight init used to shift all later dropout, augmentation and sampling, so
   the same seed gave a different run with and without a checkpoint.
+* `manyseg.save` checks `normalize`: unknown steps, misspelt options and invalid values are
+  refused at save time, with ManyPred's rules. A model built with `inputs=` needs
+  `{input_name: steps}` covering every raster input, as a forgotten input would run on raw values
+  (`{"type": "none"}` says that's intended). `False` and a plain list for such a model are refused
+  too: ManyPred can't run them. `manyseg.load` doesn't check, so existing files still open.
 * `manyseg.save` accepts models converted to `SyncBatchNorm` (with torch's conversion, or timm's
   for timm's `BatchNormAct2d` layers). They load with plain BatchNorm; convert again to resume
   multi-GPU training.

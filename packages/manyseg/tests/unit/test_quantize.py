@@ -287,7 +287,10 @@ _NORM = [{"type": "scale", "value": 10000}]
 
 
 def _save_args(model):
-    return {"activations": {h: "softmax" for h in model.heads}, "normalize": _NORM}
+    inputs = model.build_config.get("inputs")
+    norm = ({n: _NORM for n, c in inputs.items() if c.get("kind") != "vector"} if inputs
+            else _NORM)
+    return {"activations": {h: "softmax" for h in model.heads}, "normalize": norm}
 
 
 def _same_outputs(a, b, x):

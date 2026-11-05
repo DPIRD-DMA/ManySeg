@@ -25,9 +25,18 @@ def activations(model):
     return {n: "softmax" for n, h in model.heads.items() if h.kind != "regression"}
 
 
+def normalize_for(model):
+    """The tests' default spec, per raster input for a model built with inputs=."""
+    step = [{"type": "scale", "value": 10000}]
+    inputs = model.build_config.get("inputs")
+    if not inputs:
+        return step
+    return {n: step for n, c in inputs.items() if c.get("kind") != "vector"}
+
+
 def roundtrip(model, x, tmp_path, **kw):
     kw.setdefault("activations", activations(model))
-    kw.setdefault("normalize", [{"type": "scale", "value": 10000}])
+    kw.setdefault("normalize", normalize_for(model))
     path = manyseg.save(model.eval(), tmp_path / "m.safetensors", **kw)
     loaded = manyseg.load(path)
     a, b = outputs(model, x), outputs(loaded, x)
@@ -282,7 +291,7 @@ def test_save_and_load_leave_the_rng_alone(config, tmp_path):
     model = create_model("resnet18", pretrained=False, **config)
     before = _rng_state()
     path = manyseg.save(model, tmp_path / "m.safetensors", **{
-        "activations": activations(model), "normalize": [{"type": "scale", "value": 1}]})
+        "activations": activations(model), "normalize": normalize_for(model)})
     _assert_same_rng(before, _rng_state())
     manyseg.load(path)
     _assert_same_rng(before, _rng_state())
