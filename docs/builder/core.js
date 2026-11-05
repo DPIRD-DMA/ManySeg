@@ -540,6 +540,10 @@ function derive(s) {
   // time series
   if (ftype === "early" && series.length)
     issues.push({ level: "error", text: "Early fusion cannot stack a time series (it has a date axis); use intermediate or late fusion." });
+  rasters.forEach((r, i) => {
+    if (r.backbone.startsWith("shared:") && !rasters.slice(0, i).some((x) => x.name === r.backbone.slice(7)))
+      issues.push({ level: "error", text: `input '${r.name}' shares '${r.backbone.slice(7)}', which must be an input defined before it.` });
+  });
   for (const r of rasters) {
     if (!r.backbone.startsWith("shared:")) continue;
     const target = rasters.find((x) => x.name === r.backbone.slice(7));
@@ -637,16 +641,19 @@ function temporalParams(r, info) {   // per-level aggregation modules of a time-
 
 // A shared input with another channel count than the encoder it reaches ("channels" metadata
 // widens the first raster) must ask for the learned projection itself.
+// Returns its channels [in, out], or null.
 function needsProjection(r, s) {
   const rasters = s.inputs;
   const channels = (x) => x.channels + (s.meta && s.meta.mode === "channels" && x === rasters[0] ? metaWidth(s.meta) : 0);
   let root = r;
+  const seen = new Set();
   while (root.backbone.startsWith("shared:")) {
     const next = rasters.find((x) => x.name === root.backbone.slice(7));
-    if (!next) return false;  // an unknown target is reported elsewhere
+    if (!next || seen.has(next)) return null;  // an unknown or circular target: reported elsewhere
+    seen.add(root);
     root = next;
   }
-  return channels(r) !== channels(root);
+  return channels(r) !== channels(root) ? [channels(r), channels(root)] : null;
 }
 
 function metaWidth(m) {
@@ -656,6 +663,10 @@ function metaWidth(m) {
 function estimate(s, D) {
   const parts = { encoders: 0, fusion: 0, decoders: 0, heads: 0, metadata: 0 };
   for (const e of D.encoders) if (!e.shared) parts.encoders += e.info.params_m * 1e6;
+  for (const r of s.inputs) {  // a shared input's learned 1x1 projection
+    const proj = r.backbone.startsWith("shared:") ? needsProjection(r, s) : null;
+    if (proj) parts.encoders += proj[0] * proj[1] + proj[1];
+  }
   for (const e of D.encoders) if (e.inputs.length === 1 && e.inputs[0].kind === "timeseries") parts.encoders += temporalParams(e.inputs[0], e.info);
   if (D.ftype === "intermediate") {
     const p = D.primary;

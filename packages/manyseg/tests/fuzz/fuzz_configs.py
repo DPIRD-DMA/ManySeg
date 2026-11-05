@@ -80,9 +80,10 @@ def sample_config(rng: random.Random) -> dict:
             if _maybe(rng, 0.08):
                 c["out_indices"] = _indices(rng)
             if c.get("backbone") == "shared:r0":
-                c.pop("channel_adapter", None)
-                if c["in_channels"] != inputs["r0"]["in_channels"]:
-                    c["channel_adapter"] = "projection"
+                if _maybe(rng, 0.9):  # otherwise leave it for create_model to refuse, or not
+                    c.pop("channel_adapter", None)
+                    if c["in_channels"] != inputs["r0"]["in_channels"]:
+                        c["channel_adapter"] = "projection"
                 if _maybe(rng, 0.5):
                     c["share_norm"] = rng.choice([True, False])
             inputs[name] = c

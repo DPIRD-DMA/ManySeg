@@ -138,8 +138,11 @@ class ManySegProvider(Provider):
             # A group sharing an encoder with another band count reaches it through a projection
             # (E015-E017, E020); create_model wants that stated.
             for cfg in inputs.values():
-                target = str(cfg.get("backbone", "")).removeprefix("shared:")
-                if target in inputs and cfg["in_channels"] != inputs[target]["in_channels"]:
+                root, seen = cfg, []  # follow a chain of shared inputs to the encoder's own input
+                while str(root.get("backbone", "")).startswith("shared:") and root not in seen:
+                    seen.append(root)
+                    root = inputs.get(root["backbone"][len("shared:"):], root)
+                if root is not cfg and cfg["in_channels"] != root["in_channels"]:
                     cfg.setdefault("channel_adapter", "projection")
             opts.setdefault("fusion", {"type": "intermediate"})
             inner = create_model(backbone=backbone, pretrained=pretrained,
