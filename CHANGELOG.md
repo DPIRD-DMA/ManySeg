@@ -22,6 +22,14 @@ First release. Python 3.10–3.14 (`manyseg-bench` lists 3.10–3.12), PyTorch �
   for timm's `BatchNormAct2d` layers). They load with plain BatchNorm; convert again to resume
   multi-GPU training.
 
+### Vector outputs: training and metrics in the library
+
+* `manyseg.vectors.corner_line_losses`, `manyseg.vectors.road_losses` and
+  `manyseg.instances.instance_losses` are the trained models' losses, as plain functions returning
+  their unweighted terms. `manyseg-bench`'s tasks call them.
+* The vector metrics moved to `manyseg.vectors.metrics`, from `manyseg_bench.evaluation.vectors`,
+  which re-exports them.
+
 ### Vector outputs: names
 
 * `roof_mesh(join=)` and the `mesh=` setting of `roof_faces`, `roof_records` and

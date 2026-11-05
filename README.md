@@ -216,8 +216,9 @@ reproduced in this repository. Validate on your data.
 predictions into GIS layers: building footprints with straight walls, field boundaries,
 road graphs with junctions and overpasses, LoD2 roof faces with a plane and 3-D mesh each
 (heights from an nDSM input), and points. Each task has a head preset, target encoders that
-work in pixel coordinates (`to_pixels` brings your vector labels there from any CRS), and a
-decoder tested on one dataset each (`docs/api_design.md` gives the evidence). One call decodes
+work in pixel coordinates (`to_pixels` brings your vector labels there from any CRS), its
+training losses and metrics (`manyseg.vectors.losses`, `manyseg.vectors.metrics`), and a decoder
+tested on one dataset each (`docs/api_design.md` gives the evidence). One call decodes
 a scene of any size: large scenes block by block, with the default 256 px halo. `min_halo` is
 only the smallest halo a decoder accepts and doesn't guarantee the same result as a whole-scene
 decode: on noise-like field predictions, halos up to 64 px gave different objects. An instance

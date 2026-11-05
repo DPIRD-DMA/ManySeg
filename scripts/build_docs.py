@@ -42,7 +42,8 @@ DOCS = [("API design", "api_design.md"), ("Benchmark design", "benchmark_design.
 REFERENCE = [
     ("Models", ["manyseg", "manyseg.weights", "manyseg.io", "manyseg.hub"]),
     ("Outputs", ["manyseg.losses", "manyseg.instances", "manyseg.points", "manyseg.vectors",
-                 "manyseg.vectors.roofs", "manyseg.utils"]),
+                 "manyseg.vectors.roofs", "manyseg.vectors.metrics", "manyseg.vectors.losses",
+                 "manyseg.utils"]),
     ("Deployment", ["manyseg.export", "manyseg.quantize", "manyseg.distributed",
                     "manyseg.describe"]),
     ("Inputs", ["manyseg.conditioning", "manyseg.temporal"]),

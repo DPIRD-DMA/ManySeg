@@ -4,10 +4,10 @@ Building outlines in a CRS -> training targets for one tile -> the model's heads
 decoded block by block -> GeoJSON (and a GeoPackage with geopandas).
 
 The model is the corner-line preset (``corner_line_heads``: instance heads + a corner heatmap +
-wall directions), decoded with corners and walls (E038). Training it needs a dataset and a
-GPU (losses: ``CornerLineTask`` in manyseg-bench, or the short versions in
-``vector_presets.py``), so here the targets of the whole scene stand in for a trained model's
-stitched predictions. Swap in your model's outputs: the decoding and writing are the same.
+wall directions), decoded with corners and walls (E038). Training it needs a dataset and a GPU
+(losses: ``corner_line_losses``; ``vector_presets.py`` trains a few steps), so here the targets of
+the whole scene stand in for a trained model's stitched predictions. Swap in your model's
+outputs: the decoding and writing are the same.
 """
 
 import tempfile

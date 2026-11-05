@@ -67,8 +67,8 @@ def main():
     print("targets:", {k: v.shape for k, v in t.items()})
 
     # 2. The model: the instance heads (13 Sentinel-2 bands). extent and boundary are logits.
-    #    field_targets' distance is absolute (px; E052): train with
-    #    InstanceTask(boundary_width=2, distance="absolute") from manyseg-bench.
+    #    field_targets' distance is absolute (px; E052): train on these targets with
+    #    manyseg.instances.instance_losses.
     model = create_model(backbone="resnet18", pretrained=False, in_channels=13,
                          heads=instance_heads()).eval()
     with torch.no_grad():

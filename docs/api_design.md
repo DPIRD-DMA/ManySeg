@@ -850,8 +850,8 @@ model, so export and inference stay plain tensors. The workflow per task is the 
 
 1. **Targets.** Your vector labels in any CRS → `to_pixels` (cut to a tile, reprojected) → the
    task's target encoder → one numpy array per head.
-2. **Model.** `create_model(heads=...)` with the task's head preset, trained with the losses in
-   `manyseg-bench` (`CornerLineTask`, `RoadGraphTask`, `InstanceTask`).
+2. **Model.** `create_model(heads=...)` with the task's head preset, trained with the task's
+   loss terms: `corner_line_losses`, `road_losses` or `manyseg.instances.instance_losses`.
 3. **Decoding.** The predicted rasters (sigmoid applied to logit heads, or `logits=True`) →
    `decode_scene(fields, block_decoder(task), scene=scene)` → `SceneRecords`, a `VectorGraph`
    or `ScenePoints` in scene pixels, block by block for scenes of any size.
@@ -1060,16 +1060,18 @@ polys = polygons_from_labels(labels, simplify=1.0)   # shapely Polygons, holes k
 ```
 
 Metrics (APLS, GEO precision / recall, junction F1, grade-separated crossings, C-IoU, PoLiS,
-N-ratio) are in `manyseg_bench.evaluation.vectors`.
+N-ratio) are in `manyseg.vectors.metrics`: `graph_metrics(gt, pred, gsd)` and
+`polygon_metrics(gt, pred, gsd)` return them together.
 
-**Training presets.** Two trained models have head presets, target encoders and bench tasks with
-the experiments' losses. Both use built-in head types; the focal-loss heatmap heads start at
+**Training presets.** Two trained models have head presets, target encoders and the experiments'
+losses, as plain functions that return the unweighted terms (`sum(parts.values())` is the trained
+models' loss). `manyseg-bench` has training tasks that call them. Both use built-in head types; the focal-loss heatmap heads start at
 `p = 0.1` (`bias_init = logit(0.1)`).
 
-| Preset | Heads | Targets | Bench task (`manyseg_bench.tasks`) | Decoding |
+| Preset | Heads | Targets | Losses, and the bench task (`manyseg_bench.tasks`) | Decoding |
 | --- | --- | --- | --- | --- |
-| `corner_line_heads()`: footprints, roof faces (E036, E038, E047) | `extent`, `boundary`, `distance` (as `instance_heads`), `corner` (1), `direction` (2: `cos 2t`, `sin 2t`) | `instance_targets(ids, boundary_width=2)` + `corner_targets(polygons, shape)` | `CornerLineTask` (`"corner_lines"`): instance loss + CenterNet focal (corner) + masked L1 (direction on outlines); PQ | `instances_from_outputs` → `polygons_from_corners` |
-| `road_heads()`: roads (E039, E044) | `mask` (1), `line` (1), `keypoints` (3: junction, end, crossing), `direction` (4: two modes) | `road_targets(graph, shape, crossings=, width=6)` | `RoadGraphTask` (`"roads"`): Dice + BCE (mask, line) + focal over the keypoints (positives floored at 16) + L1 (mode 1 on roads, mode 2 at crossings); mask IoU | `graph_from_road_heads` |
+| `corner_line_heads()`: footprints, roof faces (E036, E038, E047) | `extent`, `boundary`, `distance` (as `instance_heads`), `corner` (1), `direction` (2: `cos 2t`, `sin 2t`) | `instance_targets(ids, boundary_width=2)` + `corner_targets(polygons, shape)` | `corner_line_losses`; `CornerLineTask` (`"corner_lines"`): instance loss + CenterNet focal (corner) + masked L1 (direction on outlines); PQ | `instances_from_outputs` → `polygons_from_corners` |
+| `road_heads()`: roads (E039, E044) | `mask` (1), `line` (1), `keypoints` (3: junction, end, crossing), `direction` (4: two modes) | `road_targets(graph, shape, crossings=, width=6)` | `road_losses`; `RoadGraphTask` (`"roads"`): Dice + BCE (mask, line) + focal over the keypoints (positives floored at 16) + L1 (mode 1 on roads, mode 2 at crossings); mask IoU | `graph_from_road_heads` |
 
 Targets carry pixel widths, sigmas and angles, so augment them only with the 8 exact dihedral
 transforms (`manyseg.vectors.dihedral(a, d, direction=True)` for the direction fields: a quarter
