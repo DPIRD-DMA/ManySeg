@@ -2,22 +2,10 @@
 
 from __future__ import annotations
 
-import math
 from collections.abc import Mapping
 from typing import Any
 
-
-def _attach(heads: dict, decoders) -> dict:
-    if decoders is None:
-        return heads
-    if isinstance(decoders, str):
-        decoders = {k: ("unet" if decoders == "separate" else decoders) for k in heads}
-    unknown = set(decoders) - set(heads)
-    if unknown:
-        raise ValueError(f"unknown heads in decoders: {sorted(unknown)}")
-    for k, d in decoders.items():
-        heads[k]["decoder"] = d
-    return heads
+from ..heads._presets import HEATMAP_PRIOR, attach_decoders
 
 
 def point_heads(heatmap: str = "regression", offsets: bool = False,
@@ -33,10 +21,10 @@ def point_heads(heatmap: str = "regression", offsets: bool = False,
     heads = {"heatmap": {"type": heatmap, "out_channels": 1}}
     if heatmap == "segmentation":
         # CenterNet: start at prior p=0.1 so the focal loss is not swamped by negatives.
-        heads["heatmap"]["bias_init"] = math.log(0.1 / 0.9)
+        heads["heatmap"]["bias_init"] = HEATMAP_PRIOR
     if offsets:
         heads["offset"] = {"type": "regression", "out_channels": 2}
-    return _attach(heads, decoders)
+    return attach_decoders(heads, decoders)
 
 
 def density_head(decoder: Any = None, *, activation: str | None = "softplus") -> dict[str, dict]:
@@ -62,4 +50,4 @@ def density_head(decoder: Any = None, *, activation: str | None = "softplus") ->
         # start low (softplus(-4) = 0.018) while keeping a gradient (sigmoid(-4) = 0.018);
         # softplus(0) = 0.69 per pixel would start the count far too high
         heads["density"]["bias_init"] = -4.0
-    return _attach(heads, None if decoder is None else {"density": decoder})
+    return attach_decoders(heads, None if decoder is None else {"density": decoder})

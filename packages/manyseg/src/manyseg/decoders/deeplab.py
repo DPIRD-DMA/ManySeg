@@ -75,6 +75,11 @@ class DeepLabV3PlusDecoder(nn.Module):
         self.out_spec = FeatureSpec(channels, in_specs[self.low].stride, "deeplabv3plus")
         init_decoder_(self)
 
+    @property
+    def read_levels(self) -> list[int]:
+        """Indices of the encoder levels this decoder reads."""
+        return sorted({self.low, self.high})
+
     def forward(self, features: list[Tensor]) -> Tensor:
         low = features[self.low]
         x = self.aspp(features[self.high])

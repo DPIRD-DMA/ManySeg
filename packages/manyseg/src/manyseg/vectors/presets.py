@@ -11,25 +11,10 @@ Losses are in :mod:`manyseg.losses`; metrics and training tasks live in ``manyse
 
 from __future__ import annotations
 
-import math
 from collections.abc import Mapping
 from typing import Any
 
-#: Bias of a focal-loss heatmap head: ``logit(0.1)`` (CenterNet; also ``point_heads``).
-HEATMAP_PRIOR = math.log(0.1 / 0.9)
-
-
-def _attach(heads: dict, decoders) -> dict:
-    if decoders is None:
-        return heads
-    if isinstance(decoders, str):
-        decoders = {k: ("unet" if decoders == "separate" else decoders) for k in heads}
-    unknown = set(decoders) - set(heads)
-    if unknown:
-        raise ValueError(f"unknown heads in decoders: {sorted(unknown)}")
-    for k, d in decoders.items():
-        heads[k]["decoder"] = d
-    return heads
+from ..heads._presets import HEATMAP_PRIOR, attach_decoders
 
 
 def corner_line_heads(decoders: None | str | Mapping[str, Any] = None) -> dict[str, dict]:
@@ -49,7 +34,7 @@ def corner_line_heads(decoders: None | str | Mapping[str, Any] = None) -> dict[s
     heads = {**instance_heads(),
              "corner": {"type": "segmentation", "out_channels": 1, "bias_init": HEATMAP_PRIOR},
              "direction": {"type": "regression", "out_channels": 2}}
-    return _attach(heads, decoders)
+    return attach_decoders(heads, decoders)
 
 
 def road_heads(decoders: None | str | Mapping[str, Any] = None) -> dict[str, dict]:
@@ -66,4 +51,4 @@ def road_heads(decoders: None | str | Mapping[str, Any] = None) -> dict[str, dic
              "line": {"type": "segmentation", "out_channels": 1},
              "keypoints": {"type": "segmentation", "out_channels": 3, "bias_init": HEATMAP_PRIOR},
              "direction": {"type": "regression", "out_channels": 4}}
-    return _attach(heads, decoders)
+    return attach_decoders(heads, decoders)

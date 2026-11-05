@@ -175,24 +175,9 @@ def _strides(specs, idx) -> str:
 
 def _read_levels(dec: nn.Module) -> list[int] | None:
     """Encoder levels a decoder reads, from its own attributes (no probe)."""
-    from .decoders import (
-        DeepLabV3PlusDecoder,
-        FastaiUNetDecoder,
-        UNetDecoder,
-        UNetPlusPlusDecoder,
-    )
-
     declared = getattr(dec, "read_levels", None)
     if declared is not None:
         return sorted(int(i) for i in declared)
-    if isinstance(dec, UNetDecoder):
-        return sorted({dec._deepest_index, *(i for i in dec._skip_index if i >= 0)})
-    if isinstance(dec, UNetPlusPlusDecoder):
-        return sorted(dec._order)
-    if isinstance(dec, FastaiUNetDecoder):
-        return sorted({dec.deep - 1, *(i - 1 for i in dec.skips)})
-    if isinstance(dec, DeepLabV3PlusDecoder):
-        return sorted({dec.low, dec.high})
     levels = getattr(dec, "levels", None)
     return sorted(levels) if levels is not None else None
 

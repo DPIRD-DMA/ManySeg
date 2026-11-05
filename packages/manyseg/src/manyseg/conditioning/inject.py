@@ -63,6 +63,12 @@ def used_levels(decoder: nn.Module, specs: Sequence[FeatureSpec],
             raise ValueError(f"read_levels {list(declared)} out of range for {len(specs)} "
                              "feature levels")
         return levels
+    return probe_levels(decoder, specs, input_channels)
+
+
+def probe_levels(decoder: nn.Module, specs: Sequence[FeatureSpec],
+                 input_channels: int | None = None) -> list[int]:
+    """The gradient probe of :func:`used_levels`, whatever ``decoder`` declares."""
     m = max(s.stride for s in specs)
     p = next(iter(decoder.parameters()), None)
     dev = p.device if p is not None else torch.device("cpu")
