@@ -82,9 +82,6 @@ First release. Python 3.10–3.14 (`manyseg-bench` lists 3.10–3.12), PyTorch �
   (ResNet-50) and SatlasPretrain Sentinel-2 (ResNet-50/152). Fed their own pretraining
   normalisation, SSL4EO weights beat ImageNet weights on three Sentinel-2 datasets with a
   ResNet-50 (E024); cite the authors (`WEIGHTS[key].citation`).
-* **Presets** (`manyseg.presets`): four measured speed / accuracy configurations, with GPU
-  and CPU (eager and compiled) latency; on CPU they run at about the default's speed, except
-  `accurate`, 35% slower eager (one run on one machine, not recorded in `experiments/`).
 * **Features and embeddings:** `features()`, `embed()`, an exportable `embedder()`;
   `select_heads()` for deployment.
 * Every parameter gets a gradient (DDP needs no `find_unused_parameters`): modules for
@@ -386,7 +383,7 @@ First release. Python 3.10–3.14 (`manyseg-bench` lists 3.10–3.12), PyTorch �
 * Training loop without per-step host syncs on CUDA: fused AdamW, a non-finite loss skips the
   update on the device (as before, without waiting for the GPU), losses summed on the device,
   one gradient-scaling kernel; the loader copies the epoch order to the GPU once and normalises
-  in place. 24–26% faster steps for the PVTv2-b0 presets (E026).
+  in place. 24–26% faster steps for PVTv2-b0 models (E026).
 * With `compile`, evaluation uses its own static compiled model and pads the short last batch
   (+12–27% evaluation throughput, E027); device-resident datasets free their host arrays
   once on the GPU (−2.8 GB host RAM on Sen1Floods11).

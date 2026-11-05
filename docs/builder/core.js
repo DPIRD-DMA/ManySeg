@@ -34,8 +34,8 @@ const EXAMPLES = {
     },
   },
   fast: {
-    label: "Fast preset",
-    blurb: "The measured 'balanced' preset: PVTv2-b0 with a half-width U-Net, about 2x faster.",
+    label: "Small and fast",
+    blurb: "PVTv2-b0 with a half-width U-Net: about 2x faster than the default on a GPU. Time it on your own hardware.",
     state: {
       inputs: [{ name: "image", channels: 4, backbone: "pvt_v2_b0.in1k" }],
       decoder: { type: "unet", width: "half" },
@@ -774,17 +774,6 @@ function pyBlock(obj, indent) {   // one entry per line; nested dicts expand whe
   return `{\n${lines.join("\n")}\n${" ".repeat(indent)}}`;
 }
 
-function matchingPreset(s, D) {
-  if (D.multi || s.meta || !D.needsShared || Object.keys(D.task).length) return null;
-  if (s.inputs[0].backbone !== "pvt_v2_b0.in1k" || s.decoder.out_stride !== 1 || s.decoder.input_cross) return null;
-  for (const [name, p] of Object.entries(DATA.presets)) {
-    const kw = p.kwargs;
-    const width = kw.decoder_kwargs ? Object.entries(DATA.unet_widths).find(([, v]) => v && v.join() === kw.decoder_kwargs.channels.join())?.[0] : "full";
-    if (kw.decoder === s.decoder.type && (kw.decoder !== "unet" || width === s.decoder.width)) return name;
-  }
-  return null;
-}
-
 function decoderKwargs(d, deepest) {
   const kw = {};
   if (UNET_FAMILY.includes(d.type) && d.out_stride !== 1) kw.out_stride = d.out_stride;
@@ -819,16 +808,12 @@ function metaColumns(m) {
 function generateCode(s, D) {
   const args = [];
   const imports = ["import torch", "from manyseg import create_model"];
-  const preset = matchingPreset(s, D);
   const useInputs = D.useInputs;
   const single = isSingleOutput(s);
   const pretrainedValue = (r) => r.weights === "none" ? false : r.weights === "imagenet" ? true : r.weights;
   const perInputWeights = D.multi && D.ftype !== "early";
 
-  if (preset) {
-    imports.push("from manyseg.presets import preset");
-    args.push(`**preset(${py(preset)})`);
-  } else if (!useInputs || D.ftype === "early" || !D.multi) {
+  if (!useInputs || D.ftype === "early" || !D.multi) {
     if (s.inputs[0].backbone !== "resnet34" || !useInputs) args.push(`backbone=${py(s.inputs[0].backbone)}`);
   }
   if (!perInputWeights && pretrainedValue(s.inputs[0]) !== true) args.push(`pretrained=${py(pretrainedValue(s.inputs[0]))}`);
@@ -869,7 +854,7 @@ function generateCode(s, D) {
     }
   }
 
-  if (D.needsShared && !preset) {
+  if (D.needsShared) {
     if (s.decoder.type !== "unet") args.push(`decoder=${py(s.decoder.type)}`);
     const kw = decoderKwargs(s.decoder, Math.max(...D.primary.strides));
     if (Object.keys(kw).length) args.push(`decoder_kwargs=${py(kw)}`);

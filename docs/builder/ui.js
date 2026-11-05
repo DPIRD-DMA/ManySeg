@@ -29,7 +29,7 @@ function backboneOptions(sel, idx) {
   if (idx > 0 && state.fusion.type !== "early") {
     html += opt(`shared:${state.inputs[0].name}`, `share ${state.inputs[0].name}'s encoder weights`, sel);
   }
-  html += `<optgroup label="Default and preset encoders">`;
+  html += `<optgroup label="Default and small encoders">`;
   for (const b of DATA.backbones.slice(0, 2)) html += opt(b.name, `${b.name}  \u00b7  ${fmtParams(b.params_m * 1e6)}`, sel);
   html += `</optgroup><optgroup label="Tested timm encoders">`;
   for (const b of DATA.backbones.slice(2)) {
@@ -145,10 +145,8 @@ function renderForm() {
     h += `<p class="hint">${D.pixelHeads.length ? "Every pixel head has its own decoder, so no shared decoder is built." : "Only image-level heads: they pool the deepest encoder feature and no decoder is built."}</p>`;
   } else {
     const unetFam = ["unet", "unetplusplus", "fastai_unet"].includes(d.type);
-    const presetNow = (() => { const D2 = derive(s); return matchingPresetName(s, D2); })();
     h += `<div class="row">
         <label class="f">${lab("Type", "f.dtype")}<select class="mono" id="dec-type" data-path="decoder.type">${DATA.decoders.map((t) => opt(t, t, d.type)).join("")}</select></label>
-        <label class="f">${lab("Speed preset", "f.preset")}<select id="dec-preset" data-act-change="preset">${opt("", presetNow ? presetNow : "custom", "")}${Object.entries(DATA.presets).map(([k, p]) => opt(k, `${k} \u00b7 ${p.measured.latency_ms} ms`, "")).join("")}</select></label>
       </div>
       ${unetFam ? `<div class="row" style="--cols:1"><label class="f">${lab("Output stride (1 = full resolution)", "")}
         ${segmented("decoder.out_stride", d.out_stride, [[1, "1"], [2, "2"], [4, "4"]], () => false, "dec.os")}</label></div>` : ""}`;
@@ -244,10 +242,6 @@ function headLayers(hd, i) {
         <span></span>
       </div>
     </details>`;
-}
-
-function matchingPresetName(s, D) {
-  try { return (typeof matchingPreset === "function") ? matchingPreset(s, D) : null; } catch (e) { return null; }
 }
 
 function weightsSummary(s) {
@@ -354,16 +348,6 @@ function act(a, el) {
   }
 }
 
-function applyPreset(name) {
-  const kw = DATA.presets[name].kwargs;
-  state.inputs[0].backbone = kw.backbone;
-  if (state.fusion.type === "early") state.inputs.forEach((r) => { r.backbone = kw.backbone; });
-  state.decoder.type = kw.decoder;
-  state.decoder.out_stride = 1;
-  state.decoder.input_cross = false;
-  state.decoder.width = kw.decoder_kwargs ? Object.entries(DATA.unet_widths).find(([, v]) => v && v.join() === kw.decoder_kwargs.channels.join())[0] : "full";
-}
-
 function changed(rebuildForm) {
   activeExample = null;
   syncRes(state);
@@ -381,7 +365,6 @@ document.addEventListener("input", (e) => {
 });
 document.addEventListener("change", (e) => {
   const el = e.target;
-  if (el.dataset.actChange === "preset") { if (el.value) applyPreset(el.value); changed(true); return; }
   if (!el.dataset || !el.dataset.path) return;
   if (el.tagName === "SELECT" || el.type === "checkbox") {
     setPath(el.dataset.path, el.type === "checkbox" ? el.checked : el.value, el.dataset.type);
@@ -417,7 +400,7 @@ document.addEventListener("click", (e) => {
 // ---------- preview ----------
 
 function highlight(code) {
-  const re = /(#[^\n]*)|("(?:[^"\\]|\\.)*")|\b(import|from|True|False|None|print)\b|\b(\d+(?:\.\d+)?)\b|\b(create_model|preset)\b/g;
+  const re = /(#[^\n]*)|("(?:[^"\\]|\\.)*")|\b(import|from|True|False|None|print)\b|\b(\d+(?:\.\d+)?)\b|\b(create_model)\b/g;
   let out = "", last = 0, m;
   while ((m = re.exec(code))) {
     out += esc(code.slice(last, m.index));

@@ -79,28 +79,6 @@ flags), use `channel_adapter="rgb_plus_zero"`. If bands can be missing at infere
 the way you did in training and drop bands at random while training
 ([missing bands](docs/api_design.md#missing-bands)).
 
-**Pick a speed/accuracy trade-off.** Presets are measured configurations:
-
-```python
-from manyseg.presets import preset
-
-model = create_model(**preset("balanced"), in_channels=4, num_classes=2)
-```
-
-| preset | encoder + decoder | relative speed | accuracy |
-|---|---|---|---|
-| `fast` | PVTv2-b0 + SegFormer head | 2.4× | slightly below the default on Pet |
-| `compact` | PVTv2-b0 + quarter-width U-Net | 2.2× | matches or beats the default |
-| `balanced` | PVTv2-b0 + half-width U-Net | 2.1× | matches or beats the default |
-| `accurate` | PVTv2-b0 + U-Net | 1.5× | matches or beats the default |
-
-Relative to the default ResNet-34 U-Net, on an RTX 4090 with bf16 + `torch.compile`; accuracy
-on two datasets. Validate on your own data. On CPU the speed-up disappears: with fp32, one
-1024² tile and 16 threads, the presets ran at 0.48–0.60 s compiled against the default's 0.58 s,
-and 0.58–0.84 s eager against 0.62 s (`PRESETS[name].measured["cpu_s"]`; one run on one machine,
-not recorded in `experiments/`), although the default has 2.5–6.5× their FLOPs. For CPU
-inference, time your candidates on the target machine, eager and compiled separately.
-
 **Several inputs, possibly at different resolutions**, e.g. optical + radar:
 
 ```python
@@ -394,7 +372,7 @@ predicts ([guide](docs/api_design.md#vector-outputs-line-graphs-polygons)). `mer
   the backward pass: same values, −22% memory for +5% step time on the ResNet-34 U-Net,
   −61% for +18% on ConvNeXt-T (E026).
 * **Batch-1 inference:** `torch.compile(model, mode="reduce-overhead")` (CUDA graphs, fixed
-  input size) is up to 1.8× faster than the default compile for the PVTv2-b0 presets (E026).
+  input size) is up to 1.8× faster than the default compile for PVTv2-b0 models (E026).
 * **Water and other per-pixel spectral targets:** `decoder_kwargs={"input_cross": True}`
   feeds the raw bands to the last decoder stage. It did not help pet or cloud segmentation.
 * **Mixed precision is safe:** bf16, fp16 and int8 weight-only showed no accuracy loss.

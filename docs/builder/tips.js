@@ -31,14 +31,13 @@ const TIPS = {
   "f.fop": "<b>concat</b>: join the channels, then a 1\u00d71 conv back to the primary's width.<br><b>add</b>: project each input to the primary's width and sum.<br><b>gated</b>: learned per-pixel weights over the inputs; starts as an equal average.<br><b>attention</b>: channel attention (squeeze-and-excitation) over the joined channels.<br><b>cross attention</b>: primary features attend to the other inputs'. Costly, so only at /16 and /32.<br><b>diff</b>: |before \u2212 after| (Siamese change detection; exactly two inputs).<br><b>concat diff</b>: [before, after, |before \u2212 after|], then a 1\u00d71 conv.<br>With a Siamese encoder, diff and concat diff both beat stacking the two dates on two change datasets; neither won on both.",
 
   // ---- decoder ----
-  "f.dtype": "<b>unet</b>: the classic U-Net, identical to segmentation_models_pytorch's. The default.<br><b>unetplusplus</b>: nested skip connections; more compute.<br><b>fastai_unet</b>: port of fastai's DynamicUnet with pixel-shuffle upsampling; about 4\u00d7 the U-Net's compute; single raster input only.<br><b>fpn</b>, <b>deeplabv3plus</b>, <b>upernet</b>: classic pyramid decoders. They output at the encoder\u2019s finest level (/4 for most encoders).<br><b>segformer</b>: a light all-MLP head, also at the finest level; used by the <i>fast</i> preset.",
-  "f.preset": "Configurations on our measured speed/accuracy front (PVTv2-b0 encoder). Latency: RTX 4090, bf16 + torch.compile, batch 8 at 512\u00b2. All matched or beat the ResNet-34 U-Net default on two datasets, except <i>fast</i>, which was slightly below it on one. Picking one sets the primary encoder and the decoder.",
+  "f.dtype": "<b>unet</b>: the classic U-Net, identical to segmentation_models_pytorch's. The default.<br><b>unetplusplus</b>: nested skip connections; more compute.<br><b>fastai_unet</b>: port of fastai's DynamicUnet with pixel-shuffle upsampling; about 4\u00d7 the U-Net's compute; single raster input only.<br><b>fpn</b>, <b>deeplabv3plus</b>, <b>upernet</b>: classic pyramid decoders. They output at the encoder\u2019s finest level (/4 for most encoders).<br><b>segformer</b>: a light all-MLP head, also at the finest level.",
   "dec.os.1": "Full resolution: the decoder runs all the way to the input size.",
   "dec.os.2": "Stop at half resolution and let heads upsample. For the U-Net this saved 11\u201318% memory at no accuracy cost.",
   "dec.os.4": "Stop at quarter resolution. Pair with a head scale of \u00bc to skip full-resolution work entirely.",
   "dec.w.full": "Default U-Net widths (256, 128, 64, 32, 16).",
-  "dec.w.half": "Half-width U-Net (128 \u2026 8), as in the <i>balanced</i> preset: fewer parameters, same accuracy in our tests.",
-  "dec.w.quarter": "Quarter-width U-Net (64 \u2026 8), as in the <i>compact</i> preset: the fewest FLOPs.",
+  "dec.w.half": "Half-width U-Net (128 \u2026 8): fewer parameters, same accuracy in our tests.",
+  "dec.w.quarter": "Quarter-width U-Net (64 \u2026 8): the fewest FLOPs.",
   "dec.ic": "Feeds the raw input channels to one extra full-resolution stage. It helped water mapping, where a pixel's own values decide its label, but did nothing for pets or clouds. Single raster input, output stride 1.",
 
   // ---- heads ----

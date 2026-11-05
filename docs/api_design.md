@@ -72,36 +72,6 @@ logits = model(x)             # x: (N, 4, H, W) -> (N, 3, H, W); returns a Tenso
 `model(x)` returns logits at the input resolution `(H, W)` for any `H, W` the backbone supports,
 including odd and non-square sizes (see "Spatial policy").
 
-### Presets
-
-`manyseg.presets` names the configs on the measured accuracy/latency Pareto front (E018). They
-are keyword sets for `create_model` and are opt-in; the defaults above keep SMP parity.
-
-```python
-from manyseg.presets import PRESETS, preset
-
-model = create_model(**preset("balanced"), in_channels=4, num_classes=3)
-PRESETS["balanced"].measured   # GPU and CPU latency, GFLOPs, params, val mIoU per dataset
-```
-
-| preset | config | 4090 compiled bf16 b8 512², 15 ch | Pet val | Sen1Floods11 val |
-|---|---|---|---|---|
-| `fast` | PVTv2-b0 + SegFormer head | 4.5 ms | 0.820 | 0.901 |
-| `compact` | PVTv2-b0 + U-Net (64…8) | 4.9 ms | 0.823 | 0.901 |
-| `balanced` | PVTv2-b0 + U-Net (128…8) | 5.3 ms | 0.825 | 0.902 |
-| `accurate` | PVTv2-b0 + U-Net (256…16) | 7.3 ms | 0.827 | 0.901 |
-| (default) | ResNet-34 + U-Net (256…16) | 10.9 ms | 0.823 | 0.890 |
-
-Two datasets and one GPU; validate on your own data. On CPU the GPU ordering does not carry
-over. With fp32, one 3×1024² tile, batch 1 and 16 threads (Ryzen 9 5950X, light background
-load), the presets took 0.58–0.84 s eager and 0.48–0.60 s compiled, against 0.62 s and 0.58 s
-for the default (`measured["cpu_s"]`; a separate timing run with no record under `experiments/`,
-and not the setup of E018's CPU section). In OmniCloudMask's architecture screen
-([#2](https://github.com/DPIRD-DMA/ManySeg/issues/2)), PVTv2 encoders were slow on CPU for
-their FLOPs, ResNet-34 and EdgeNeXt U-Nets were fast, and compiling changed the ranking, so
-time CPU candidates eager and compiled on the target machine. The ResNet-34 default stays
-because it is the familiar SMP baseline, not because it is on the front.
-
 ### Multiple outputs
 
 Passing `heads=` instead of `num_classes=` makes the model return a `dict[str, Tensor]` keyed by

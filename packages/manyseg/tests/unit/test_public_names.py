@@ -1,9 +1,11 @@
 """What users read and call doesn't carry names from inside the experiments."""
 
+import importlib
 import re
 from pathlib import Path
 
 import manyseg
+import pytest
 
 SOURCE = Path(manyseg.__file__).parent
 # experiment arms; "PVT-v2-B0" names an architecture, and "B0" after it isn't an arm
@@ -23,3 +25,9 @@ def test_vector_public_names_are_all_importable_and_unique():
     vectors = __import__("manyseg.vectors", fromlist=["__all__"])
     assert len(vectors.__all__) == len(set(vectors.__all__))
     assert all(hasattr(vectors, name) for name in vectors.__all__)
+
+
+def test_model_presets_are_gone():
+    """Removed before 0.1.0; docs/roadmap.md has the plan to rebuild them around goals."""
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("manyseg.presets")

@@ -2,6 +2,8 @@
 
 Status: **done** (registered 2026-10-15 before any run; run 2026-10-15 at code `586716d`). Result: four PVTv2-b0 configs are on the front of both datasets and became `manyseg.presets`; the ResNet-34 U-Net default is dominated.
 
+**Amendment (2026-11-05):** `manyseg.presets` was removed before 0.1.0, to be rebuilt around goals in a later version. The results below stand.
+
 ## Question
 Which encoder and decoder combinations sit on the accuracy–latency Pareto front? Can a few
 evidence-backed presets replace "pick SMP's U-Net + ResNet-34"? FLOP breakdown at 512² (15 ch,

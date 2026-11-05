@@ -40,7 +40,7 @@ DOCS = [("API design", "api_design.md"), ("Benchmark design", "benchmark_design.
 # without one its public names defined there (imports left out). Every public subpackage
 # (an __init__ with __all__) is listed; tests/unit/test_docs_reference.py checks that.
 REFERENCE = [
-    ("Models", ["manyseg", "manyseg.presets", "manyseg.weights", "manyseg.io", "manyseg.hub"]),
+    ("Models", ["manyseg", "manyseg.weights", "manyseg.io", "manyseg.hub"]),
     ("Outputs", ["manyseg.losses", "manyseg.instances", "manyseg.points", "manyseg.vectors",
                  "manyseg.vectors.roofs", "manyseg.utils"]),
     ("Deployment", ["manyseg.export", "manyseg.quantize", "manyseg.distributed",
