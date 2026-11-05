@@ -1,14 +1,14 @@
 """Build the documentation site (MkDocs + Material) from the repo's existing Markdown.
 
-Assembles README.md (home), CHANGELOG.md, docs/*.md, the model builder page (docs/builder),
-examples/ (README and scripts), the notebooks (with their saved outputs; nothing is executed),
-every experiments/E*/README.md and an API reference generated from the docstrings (mkdocstrings,
-one page per public module in REFERENCE) into build/site_src
-(gitignored), writes a generated MkDocs config with the nav, and builds static HTML into
-build/site. The build is strict: a broken link, image or anchor fails it. No new runtime
-dependency: the docs tools are listed in docs/requirements.txt, and mkdocstrings reads the source
-statically (griffe), so the build needs neither torch nor the optional extras, a GPU or the
-network (once the tools are installed). Run with
+Assembles README.md (home), CHANGELOG.md, CONTRIBUTING.md, docs/*.md, the model builder page
+(docs/builder), examples/ (README and scripts), the notebooks (with their saved outputs; nothing
+is executed), every experiments/E*/README.md and an API reference generated from the docstrings
+(mkdocstrings, one page per public module in REFERENCE) into build/site_src (gitignored), writes
+a generated MkDocs config with the nav, and builds static HTML into build/site. The build is
+strict: a broken link, image or anchor fails it. No new runtime dependency: the docs tools are
+listed in docs/requirements.txt, and mkdocstrings reads the source statically (griffe), so the
+build needs neither torch nor the optional extras, a GPU or the network (once the tools are
+installed). Run with
     uv run python scripts/build_docs.py    # uvx runs mkdocs with docs/requirements.txt
     python scripts/build_docs.py           # with docs/requirements.txt pip-installed (RTD)
 Publishing (GitHub Pages or elsewhere) is a separate, deliberate step.
@@ -84,7 +84,8 @@ HANDLER = {
 def _title(md: Path) -> str:
     for line in md.read_text().splitlines():
         if line.startswith("# "):
-            return re.sub(r"\s*\(pre-registered\)\s*$", "", line[2:].strip())
+            title = re.sub(r"\s*\(pre-registered[^)]*\)\s*$", "", line[2:].strip())
+            return re.sub(r"; pre-registered\)\s*$", ")", title)
     return md.parent.name
 
 
@@ -155,7 +156,7 @@ def main() -> int:
         *[f"* [{t}]({p.removeprefix('experiments/')})" for t, p in exps], ""]))
     nav = ["  - Home: index.md", "  - Documentation:"]
     nav += [f"      - {t}: docs/{n}" for t, n in DOCS]
-    nav += ["      - Changelog: CHANGELOG.md"]
+    nav += ["      - Changelog: CHANGELOG.md", "      - Contributing: CONTRIBUTING.md"]
     nav += ["  - Model builder: docs/builder/index.html"]
     nav += ["  - Examples: examples/index.md"]
     nav += ["  - Notebooks:", "      - Overview: notebooks/index.md"]
