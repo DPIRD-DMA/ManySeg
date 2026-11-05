@@ -22,6 +22,12 @@ First release. Python 3.10–3.14 (`manyseg-bench` lists 3.10–3.12), PyTorch �
   for timm's `BatchNormAct2d` layers). They load with plain BatchNorm; convert again to resume
   multi-GPU training.
 
+### Vector outputs: names
+
+* `roof_mesh(join=)` and the `mesh=` setting of `roof_faces`, `roof_records` and
+  `block_decoder("roofs")` take `"plane_intersection"` (default) or `"mean_height"`, replacing the
+  experiment names `"J2"` and `"J1"`.
+
 ### Shared encoders
 
 * A `shared:` input with another channel count than the encoder must set `"channel_adapter":
@@ -173,12 +179,12 @@ First release. Python 3.10–3.14 (`manyseg-bench` lists 3.10–3.12), PyTorch �
   (every head's target as numpy arrays), `road_graph` (lines → road graph + grade-separated
   crossings) → `road_targets` (identical to E044's encoder), and `rasterize_instances`. The
   `vectors` extra now includes `rasterio`.
-* **Decoders:** footprints `polygons_from_corners` (B3, straight walls; E038), fields
-  `polygons_from_labels` (B0, pixel outlines; E046), roads `graph_from_road_heads` (R4: junctions
+* **Decoders:** footprints `polygons_from_corners` (straight walls; E038), fields
+  `polygons_from_labels` (pixel outlines; E046), roads `graph_from_road_heads` (junctions
   and overpasses; E044b). LoD2 roofs (E047b, E048b; they need an nDSM input, RGB alone was not
   viable in E049): `planar_faces` joins the faces into a planar partition; in
   `manyseg.vectors.roofs` (not re-exported at the top level), `face_plane` / `roof_planes` fit a
-  robust plane per face, `roof_mesh` (J1 / J2) lifts the rings, and `roof_records` /
+  robust plane per face, `roof_mesh` (`join="plane_intersection"` or `"mean_height"`) lifts the rings, and `roof_records` /
   `roof_faces` do all three. `planar_faces` joins each cluster of faces (gaps up to the
   tolerance) on its own, so a face no longer depends on the noding of unrelated outlines. These
   functions are building blocks with generic defaults; `block_decoder(task)` holds the tuned

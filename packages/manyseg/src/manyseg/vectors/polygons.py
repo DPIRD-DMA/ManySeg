@@ -27,13 +27,10 @@ def polygons_from_labels(labels, *, simplify: float = 1.0, min_area: float = 16,
     exactly (holes kept), then Douglas-Peucker ``simplify`` (px); polygons under ``min_area``
     px² are dropped. A disconnected instance keeps its largest part. Returned in label order.
 
-    (E028's mask baseline traced marching-squares contours instead, which cut each corner by
-    half a pixel.)
-
     A low-level building block with generic defaults. The settings tuned for fields are in
-    ``block_decoder("fields")`` (E046 B0, E052 absolute distance: instance thresholds
+    ``block_decoder("fields")`` (E046, E052 absolute distance: instance thresholds
     0.4 / 0.3 / 3 px, ``simplify=0.5``)
-    and for footprints outlines in ``block_decoder("footprints", method="outline")`` (E038 B0);
+    and for footprints outlines in ``block_decoder("footprints", method="outline")`` (E038);
     use those with :func:`decode_scene` unless you need this step on its own.
     """
     from scipy import ndimage

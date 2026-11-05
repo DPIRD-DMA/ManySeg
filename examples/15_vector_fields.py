@@ -4,7 +4,7 @@ Field parcels in a CRS -> training targets -> the instance heads -> a scene deco
 block -> GeoJSON (and a GeoPackage with geopandas).
 
 Fields use the instance heads only (``instance_heads``: extent, boundary, distance), decoded with
-the outline of each instance (B0; E046 on Fields of The World, where corners and walls lost to
+the outline of each instance (E046 on Fields of The World, where corners and walls lost to
 it). Here the targets of the whole scene stand in for a trained model's stitched predictions;
 ``instance_fields.py`` trains the heads briefly.
 """

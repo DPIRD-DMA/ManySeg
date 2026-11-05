@@ -33,8 +33,8 @@ def _attach(heads: dict, decoders) -> dict:
 
 
 def corner_line_heads(decoders: None | str | Mapping[str, Any] = None) -> dict[str, dict]:
-    """Head configs for ``create_model(heads=...)`` of the corner-line instance model (B3:
-    footprints and roof faces; E036, E038, E047. Fields use ``instance_heads``, E046, E052): the
+    """Head configs for ``create_model(heads=...)`` of the corner-line instance model, for
+    footprints and roof faces (E036, E038, E047; fields use ``instance_heads``, E046, E052): the
     instance heads of :func:`manyseg.instances.instance_heads` (``extent``, ``boundary``,
     ``distance``) plus ``corner`` (1 channel, logits of a Gaussian corner heatmap, bias
     ``logit(0.1)``) and ``direction`` (2 channels, regression of the wall direction as ``(cos 2t,
@@ -53,7 +53,7 @@ def corner_line_heads(decoders: None | str | Mapping[str, Any] = None) -> dict[s
 
 
 def road_heads(decoders: None | str | Mapping[str, Any] = None) -> dict[str, dict]:
-    """Head configs for the unified road model (R4; E039, E044): ``mask`` (1, road-surface
+    """Head configs for the unified road model (E039, E044): ``mask`` (1, road-surface
     logits), ``line`` (1, logits of a 3 px centreline band), ``keypoints`` (3, logits of the
     junction / end / crossing heatmaps, bias ``logit(0.1)``) and ``direction`` (4, regression
     of two ``(cos 2t, sin 2t)`` modes; the second is set where roads cross).

@@ -366,8 +366,9 @@ def _merge_pieces(pieces: list, min_iou: float) -> list[tuple[Box, np.ndarray, l
 class InstanceBlockDecoder:
     """Instances (boundary + distance heads) -> polygons, block by block.
 
-    ``method="corners"``: :func:`polygons_from_corners` (B3, needs ``corner`` and
-    ``direction``); ``"outline"``: :func:`polygons_from_labels` (B0). Instance thresholds as
+    ``method="corners"``: :func:`polygons_from_corners`, straight walls between predicted corners
+    (needs ``corner`` and ``direction``); ``"outline"``: :func:`polygons_from_labels`, the
+    simplified instance outlines. Instance thresholds as
     :func:`manyseg.instances.instances_from_outputs`; polygon parameters as the decoders'.
     ``logits``: ``False`` (default), stitched ``extent``, ``boundary`` and ``corner`` are
     probabilities; ``True``, they are logits and a sigmoid is applied to them (``distance``,
@@ -397,7 +398,7 @@ class InstanceBlockDecoder:
     min_area: float = 16
     min_iou: float = 0.5
     names: dict = field(default_factory=dict)
-    holes: bool = True  # method="corners": keep courtyards, as polygons_from_corners (E054)
+    holes: bool = True  # method="corners": keep courtyards, as polygons_from_corners
 
     def __post_init__(self):
         if self.method not in ("corners", "outline"):
@@ -643,7 +644,7 @@ class RoofBlockDecoder(InstanceBlockDecoder):
     tolerance: float = 2.5
     erode: int = 2
     trim: float = 0.2
-    mesh: str | None = "J2"
+    mesh: str | None = "plane_intersection"
     holes: bool = False  # faces join and mesh on their outer walls
 
     def __post_init__(self):
@@ -797,10 +798,12 @@ class RoofBlockDecoder(InstanceBlockDecoder):
 # ---------------------------------------------------------------- registry and output
 
 _DEFAULTS = {
-    # E038 B3 (corner 0.5 / big_dev 4 / agree 0.4 / merge 8) on E030's B0 thresholds
+    # corner decoding tuned in E038 (corner 0.5 / big_dev 4 / agree 0.4 / merge 8), on the
+    # instance thresholds tuned for outlines in E030
     "footprints": {"method": "corners", "extent_threshold": 0.6, "boundary_threshold": 0.5,
                    "seed_threshold": 0.15},
-    # E052 B0 on FTW with absolute distance: thresholds 0.4 / 0.3 / 3 px, Douglas-Peucker 0.5 px
+    # outlines on Fields of The World with absolute distance (E052): thresholds 0.4 / 0.3 / 3 px,
+    # Douglas-Peucker 0.5 px
     "fields": {"method": "outline", "extent_threshold": 0.4, "boundary_threshold": 0.3,
                "seed_threshold": 3.0, "simplify": 0.5},
 }
@@ -812,14 +815,17 @@ def block_decoder(task: str, **params) -> BlockDecoder:
     post-processing. The low-level functions (:func:`polygons_from_corners`,
     :func:`polygons_from_labels`, ...) keep generic defaults; the tuned settings live here.
 
-    * ``"footprints"``: extent, boundary, distance + corner, direction; ``method="corners"``
-      (B3, E038; courtyards kept as traced outlines, E054, ``holes=False`` fills them) or
-      ``"outline"`` (B0, ``simplify`` 1 px unless given).
-    * ``"fields"``: extent, boundary, distance; outline decoding (B0, E046), absolute distance
+    * ``"footprints"``: extent, boundary, distance + corner, direction; ``method="corners"``,
+      straight walls between corners (E038; courtyards kept as traced outlines, E054,
+      ``holes=False`` fills them) or ``"outline"``, instance outlines (``simplify`` 1 px unless
+      given).
+    * ``"fields"``: extent, boundary, distance; instance outlines (E046), absolute distance
       (``seed_threshold`` in px, E052; for a model trained on normalised distance pass
-      ``seed_threshold=0.3, extent_threshold=0.6``, E046's).
-    * ``"roofs"``: as footprints + ``height`` (nDSM, metres); E047 F3 thresholds and corners,
-      :func:`planar_faces` (2.5 px), E043b robust planes, J2 mesh (``mesh=None`` skips it).
+      ``seed_threshold=0.3, extent_threshold=0.6``, from E046).
+    * ``"roofs"``: as footprints + ``height`` (nDSM, metres); thresholds tuned on trained roof
+      models (E047), :func:`planar_faces` (2.5 px), robust planes and a
+      ``"plane_intersection"`` mesh (E043b; ``mesh="mean_height"`` is the alternative,
+      ``mesh=None`` skips it).
     * ``"roads"``: mask, keypoints, direction; :class:`manyseg.vectors.roads.RoadBlockDecoder`.
     * ``"points"``: a point heatmap; :class:`manyseg.points.blocks.PointBlockDecoder`.
     * ``"density"``: a density head's count; :class:`manyseg.points.blocks.DensityBlockDecoder`.
@@ -838,7 +844,7 @@ def block_decoder(task: str, **params) -> BlockDecoder:
         raise ValueError(f"unknown task {task!r}: footprints|fields|roofs|roads|points|density")
     kw = dict(_DEFAULTS[task])
     if task == "footprints" and params.get("method") == "outline":
-        kw["simplify"] = 1.0  # E038 B0
+        kw["simplify"] = 1.0  # tuned in E038
     kw.update(params)
     return InstanceBlockDecoder(**kw)
 

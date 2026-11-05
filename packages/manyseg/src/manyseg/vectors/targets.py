@@ -5,7 +5,7 @@ and shape), then:
 
 * footprints: :func:`footprint_targets` (corner-line preset, ``CornerLineTask``; E036, E038);
 * roof faces: :func:`roof_face_targets` (the same preset, touching faces kept apart; E047);
-* fields: :func:`field_targets` (instance heads only, B0 decoding; E046);
+* fields: :func:`field_targets` (instance heads only, decoded as outlines; E046);
 * roads: :func:`road_graph`, then :func:`manyseg.vectors.road_targets` (E044).
 
 Every function returns float32 / int32 / bool numpy arrays per tile, keyed by the names the
@@ -138,7 +138,7 @@ def roof_face_targets(faces, shape: tuple[int, int], **kwargs) -> dict[str, np.n
 def field_targets(polygons, shape: tuple[int, int], *, boundary_width: float = 2.0,
                   distance: str = "absolute", min_area: int = 16,
                   fill_holes: bool = True) -> dict[str, np.ndarray]:
-    """Targets for field boundaries with the instance heads only (B0: outline decoding with
+    """Targets for field boundaries with the instance heads only (outline decoding with
     :func:`polygons_from_labels`; E046 on Fields of The World), from pixel-coordinate polygons:
     ``instances`` ``(H, W)`` int32 and ``extent``, ``boundary``, ``distance`` ``(H, W)``
     float32 (``InstanceTask(boundary_width=2, distance="absolute")`` in ``manyseg-bench``).
@@ -148,7 +148,7 @@ def field_targets(polygons, shape: tuple[int, int], *, boundary_width: float = 2
     stitch without seam errors); train with the same setting and decode with a
     ``seed_threshold`` in pixels (``block_decoder("fields")`` does).
 
-    E046's single accepted set of fields: every 4-connected piece of a field is its own
+    Which fields count: every 4-connected piece of a field is its own
     instance, pieces under ``min_area`` pixels are dropped, and holes holding only background
     are filled (a field is trained as one solid parcel; a hole around another field stays).
     For the reference polygons that match the targets, decode the instances themselves
@@ -168,9 +168,9 @@ def road_graph(lines, *, widths=None, width: float = 6.0, node: bool = False,
 
     Each line vertex is a node; vertices within ``snap`` px are one node, so lines meeting at a
     shared vertex form a junction (OSM ways share their junction nodes). Two edges that cross
-    without a shared node are a grade-separated crossing (a bridge or tunnel; E028's rule), and
+    without a shared node are a grade-separated crossing (a bridge or tunnel), and
     their intersection points are returned for the crossing heatmap; points closer than
-    ``cross_merge`` px are merged (E028's scoring merged at 5 px). ``node=True`` is for line
+    ``cross_merge`` px are merged. ``node=True`` is for line
     data without that topology: all intersections become junctions and there are no crossings.
 
     Args:

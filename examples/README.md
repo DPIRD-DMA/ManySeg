@@ -33,9 +33,9 @@ for large scenes with ManyPred.
 
 | Script | Shows |
 | --- | --- |
-| [`14_vector_footprints.py`](14_vector_footprints.py) | Building outlines (EPSG:28350) → `footprint_targets` → `corner_line_heads` → `block_decoder("footprints")` (corners and walls, B3) → `buildings.geojson` / `.gpkg` |
-| [`15_vector_fields.py`](15_vector_fields.py) | Field parcels (Sentinel-2 grid) → `field_targets` → `instance_heads` → `block_decoder("fields")` (instance outlines, B0) → `fields.geojson` / `.gpkg` |
-| [`16_vector_roads.py`](16_vector_roads.py) | OSM-style ways with widths → `road_graph` (junctions, overpasses) → `road_targets` → `road_heads` → `block_decoder("roads")` (R4) → road LineStrings |
+| [`14_vector_footprints.py`](14_vector_footprints.py) | Building outlines (EPSG:28350) → `footprint_targets` → `corner_line_heads` → `block_decoder("footprints")` (corners and walls) → `buildings.geojson` / `.gpkg` |
+| [`15_vector_fields.py`](15_vector_fields.py) | Field parcels (Sentinel-2 grid) → `field_targets` → `instance_heads` → `block_decoder("fields")` (instance outlines) → `fields.geojson` / `.gpkg` |
+| [`16_vector_roads.py`](16_vector_roads.py) | OSM-style ways with widths → `road_graph` (junctions, overpasses) → `road_targets` → `road_heads` → `block_decoder("roads")` → road LineStrings |
 | [`17_vector_roofs.py`](17_vector_roofs.py) | LoD2 roof faces → `roof_face_targets`; RGB + nDSM input → `block_decoder("roofs")`: planar faces, a plane per face from the nDSM, a 3-D mesh → 2-D and 3-D GeoJSON |
 | [`18_vector_points.py`](18_vector_points.py) | Tree points → heatmap and density targets (`points_from_xy`) → `PointBlockDecoder` / `DensityBlockDecoder` over a scene → GeoJSON points with scores, a count |
 

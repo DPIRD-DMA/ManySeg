@@ -5,7 +5,7 @@ targets -> the unified road heads -> a scene decoded block by block -> GeoJSON L
 a GeoPackage with geopandas).
 
 The model is the unified road preset (``road_heads``: surface, centreline, junction / end /
-crossing heatmaps, two direction modes), decoded with ``graph_from_road_heads`` (R4; E044b:
+crossing heatmaps, two direction modes), decoded with ``graph_from_road_heads`` (E044b:
 same APLS and junction F1 as a mask skeleton, about 23 points more of the overpasses kept).
 Here the targets of the whole scene stand in for a trained model's stitched predictions;
 ``vector_presets.py`` shows the training losses.
@@ -86,7 +86,7 @@ def main():
     #    for blobs with holes, such as car parks); combine warns when a block's skeleton
     #    depended on its halo. (logits=True would apply the sigmoid to mask and keypoints.)
     scene = Scene(*SHAPE, transform=TRANSFORM, crs=CRS)
-    dec = block_decoder("roads")  # R4 with E044's City-Scale tuning (1 m pixels)
+    dec = block_decoder("roads")  # E044's City-Scale tuning (1 m pixels)
     g = decode_scene(fields, dec, block=256, halo=64, scene=scene)
     whole = decode_scene(fields, dec, scene=scene)  # default block 4096 px: one block
     same = np.array_equal(g.xy, whole.xy) and np.array_equal(g.edges, whole.edges)

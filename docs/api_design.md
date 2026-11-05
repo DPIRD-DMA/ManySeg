@@ -901,9 +901,13 @@ the sigmoid to `extent`, `boundary` and `corner`, roads to `mask` and `keypoints
 
 Why these decoders (pre-registered experiments in [`experiments/`](../experiments/)):
 
-* **Footprints, E038** (WHU aerial, 2 seeds): corners and walls (B3) beat pixel outlines on
+Experiment write-ups name decoders by their arm: **B0** instance outlines, **B3** corners and
+walls, **R0** mask skeleton, **R4** unified road heads, **F0** / **F3** roof faces from outlines /
+from corners and walls, **J1** / **J2** the `mean_height` / `plane_intersection` mesh joins.
+
+* **Footprints, E038** (WHU aerial, 2 seeds): corners and walls beat pixel outlines on
   boundary F (+0.02) and C-IoU × F1 (0.63 vs 0.46-0.47), at 0.01-0.02 lower detection F1.
-* **Fields, E046** (Fields of The World, Netherlands, 1 seed): pixel outlines (B0) beat corners
+* **Fields, E046** (Fields of The World, Netherlands, 1 seed): pixel outlines beat corners
   and walls on boundary F (0.59 vs 0.57), as in the E045 oracle (touching fields snapped to
   each other's corners, curved edges were straightened). **E052** (2 seeds): an absolute
   distance target (px) is as good as the normalised one (boundary F +0.008, detection F1
@@ -913,7 +917,7 @@ Why these decoders (pre-registered experiments in [`experiments/`](../experiment
 * **Seed fragments, E053** (fixed decoder settings, trained models): dropping seed components
   under 8 px (`min_seed`) raised roof face F1 by 0.041, footprint detection F1 by 0.024 and
   field detection F1 by 0.008 with boundary F unchanged or better; default in `block_decoder`.
-* **Roads, E044 / E044b** (City-Scale, 3 seeds): `graph_from_road_heads` (R4) matched a mask
+* **Roads, E044 / E044b** (City-Scale, 3 seeds): `graph_from_road_heads` matched a mask
   skeleton (APLS +0.003 to +0.005, junction F1 +0.02 to +0.03) and kept 22-25 points more of
   the overpasses (0.54-0.59 vs 0.32-0.34).
 * **Roof faces, E047b + E048b** (3D BAG, Netherlands, 1 seed): trained faces on RGB + nDSM
@@ -921,10 +925,10 @@ Why these decoders (pre-registered experiments in [`experiments/`](../experiment
   height error (1.3-1.4 m vs 1.8-2.1 m RMSE). The shipped corner decoder gives straight outlines
   (C-IoU 0.64 vs 0.15-0.21 for pixel outlines) at 0.01-0.04 lower face F1, so E047b's rule did
   not prefer it over pixel outlines; it ships because E048b's face joining and meshes were built
-  and tested on it (straight shared edges; 2,957-3,353 shared mesh vertices after planar joining and J2, about 4x
-  fewer than pixel outlines' 10,690-13,075). Joining F3 faces into a planar partition raised
+  and tested on it (straight shared edges; 2,957-3,353 shared mesh vertices after planar joining and the `plane_intersection` mesh, about 4x
+  fewer than pixel outlines' 10,690-13,075). Joining faces decoded with corners and walls into a planar partition raised
   their seam closure from 0.38 to 0.71-0.73 (3D BAG's own faces: 0.79). That catches up with pixel
-  outlines rather than beating them: those reach 0.68-0.73 with J2 alone, with lower vertex
+  outlines rather than beating them: those reach 0.68-0.73 with the mesh join alone, with lower vertex
   height error (0.40-0.52 m vs 0.48-0.61 m).
   **E049:** from RGB alone, with predicted heights, face F1 fell by 0.28-0.38 and height RMSE
   rose by 1.8-2.9 m: not viable.
@@ -1090,8 +1094,8 @@ the experiments' losses. Both use built-in head types; the focal-loss heatmap he
 
 | Preset | Heads | Targets | Bench task (`manyseg_bench.tasks`) | Decoding |
 | --- | --- | --- | --- | --- |
-| `corner_line_heads()`: footprints, roof faces (B3; E036, E038, E047) | `extent`, `boundary`, `distance` (as `instance_heads`), `corner` (1), `direction` (2: `cos 2t`, `sin 2t`) | `instance_targets(ids, boundary_width=2)` + `corner_targets(polygons, shape)` | `CornerLineTask` (`"corner_lines"`): instance loss + CenterNet focal (corner) + masked L1 (direction on outlines); PQ | `instances_from_outputs` → `polygons_from_corners` |
-| `road_heads()`: roads (R4; E039, E044) | `mask` (1), `line` (1), `keypoints` (3: junction, end, crossing), `direction` (4: two modes) | `road_targets(graph, shape, crossings=, width=6)` | `RoadGraphTask` (`"roads"`): Dice + BCE (mask, line) + focal over the keypoints (positives floored at 16) + L1 (mode 1 on roads, mode 2 at crossings); mask IoU | `graph_from_road_heads` |
+| `corner_line_heads()`: footprints, roof faces (E036, E038, E047) | `extent`, `boundary`, `distance` (as `instance_heads`), `corner` (1), `direction` (2: `cos 2t`, `sin 2t`) | `instance_targets(ids, boundary_width=2)` + `corner_targets(polygons, shape)` | `CornerLineTask` (`"corner_lines"`): instance loss + CenterNet focal (corner) + masked L1 (direction on outlines); PQ | `instances_from_outputs` → `polygons_from_corners` |
+| `road_heads()`: roads (E039, E044) | `mask` (1), `line` (1), `keypoints` (3: junction, end, crossing), `direction` (4: two modes) | `road_targets(graph, shape, crossings=, width=6)` | `RoadGraphTask` (`"roads"`): Dice + BCE (mask, line) + focal over the keypoints (positives floored at 16) + L1 (mode 1 on roads, mode 2 at crossings); mask IoU | `graph_from_road_heads` |
 
 Targets carry pixel widths, sigmas and angles, so augment them only with the 8 exact dihedral
 transforms (`manyseg.vectors.dihedral(a, d, direction=True)` for the direction fields: a quarter
@@ -1125,10 +1129,10 @@ t = road_targets(g, shape, crossings=crossings)     # mask, line, keypoints, dir
 
 | Task | Encoder | Returns | Trained with |
 | --- | --- | --- | --- |
-| Footprints (B3; E036, E038) | `footprint_targets(polygons, shape)` | `instances`, `corner`, `direction`, `direction_mask` (what `CornerLineTask` reads) + `extent`, `boundary`, `distance` (`instance_targets`, `boundary_width=2`; `instance_heads=False` drops them, the task derives them itself) | `CornerLineTask` |
+| Footprints (E036, E038) | `footprint_targets(polygons, shape)` | `instances`, `corner`, `direction`, `direction_mask` (what `CornerLineTask` reads) + `extent`, `boundary`, `distance` (`instance_targets`, `boundary_width=2`; `instance_heads=False` drops them, the task derives them itself) | `CornerLineTask` |
 | Roof faces (E047) | `roof_face_targets(faces, shape)` | as footprints; faces sharing an edge stay separate instances. Heights are not a target: the nDSM is an input channel and planes are fitted after decoding | `CornerLineTask` |
-| Fields (B0; E046, E052) | `field_targets(polygons, shape)` | `instances`, `extent`, `boundary`, `distance`: 4-connected pieces as instances, pieces < 16 px dropped, background holes filled | `InstanceTask(boundary_width=2, distance="absolute")` |
-| Roads (R4; E044) | `road_graph(lines)` → `road_targets(graph, shape, crossings=)` | `mask`, `line`, `keypoints`, `direction` | `RoadGraphTask` |
+| Fields (E046, E052) | `field_targets(polygons, shape)` | `instances`, `extent`, `boundary`, `distance`: 4-connected pieces as instances, pieces < 16 px dropped, background holes filled | `InstanceTask(boundary_width=2, distance="absolute")` |
+| Roads (E044) | `road_graph(lines)` → `road_targets(graph, shape, crossings=)` | `mask`, `line`, `keypoints`, `direction` | `RoadGraphTask` |
 
 Pixel coordinates are `(x, y)` with pixel corners at integers, the inverse of `to_geojson`'s
 transform (`pixel_to_world` / `world_to_pixel` convert arrays and geometries). `to_pixels` makes

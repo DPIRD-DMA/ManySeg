@@ -1,5 +1,5 @@
 """Training targets for the unified road heads (:func:`manyseg.vectors.road_heads`) from a road
-graph: the E039 R4 encoding as trained in E044 (``encode_fast``). Coordinates follow
+graph, the encoding of E039 as trained in E044. Coordinates follow
 :mod:`manyseg.vectors.graph` (``(x, y)``, pixel corners at integers).
 """
 
