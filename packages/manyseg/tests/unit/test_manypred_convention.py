@@ -118,3 +118,107 @@ def test_points_and_density_under_manypred():
     cnt, _ = _check("density", {"density": d}, 24, 0,
                     lambda a, b: a.total == pytest.approx(b.total), value_scale=2.0)
     assert cnt.total == pytest.approx(float(d.sum(dtype=np.float64)) / 2.0, rel=1e-6)
+
+
+# --- against ManyPred itself, where it is installed: the copies above can't see it change --------
+
+
+def _real_blocks():
+    return pytest.importorskip("manypred.blocks")
+
+
+def test_block_contract_matches_real_manypred():
+    from dataclasses import asdict, fields
+
+    blocks = _real_blocks()
+    for (h, w, size, halo) in [(300, 410, 128, 40), (64, 64, 128, 8), (257, 129, 64, 0)]:
+        real = blocks.block_grid(h, w, size, halo)
+        assert [asdict(b) for b in real] == [asdict(b) for b in mp_block_grid(h, w, size, halo)]
+    assert {f.name for f in fields(blocks.Scene)} >= {"height", "width", "transform", "crs"}
+
+
+@pytest.mark.parametrize("task", ["footprints", "fields"])
+def test_instance_decoders_under_real_manypred_with_nodata(task):
+    from test_vector_blocks import _terraces
+
+    blocks = _real_blocks()
+    f = {k: (v[None] if v.ndim == 2 else v).astype(np.float32).copy()
+         for k, v in _terraces(3).items()}
+    for v in f.values():  # as ManyPred's window_fields: NaN at nodata pixels
+        v[:, :40, :40] = np.nan
+    norm = {"seed_threshold": 0.3, "extent_threshold": 0.6} if task == "fields" else {}
+    dec = block_decoder(task, **norm)
+    got = blocks.postprocess_blocks(f, dec, block=150, halo=48, combine=dec.combine)
+    want = decode_scene(f, block_decoder(task, **norm), 150, 48)
+    assert _canon(got) == _canon(want) and len(got) > 5
+
+
+def test_density_under_real_manypred_with_nodata():
+    blocks = _real_blocks()
+    d = np.ones((1, 64, 64), np.float32)
+    d[0, :10, :10] = np.nan
+    dec = block_decoder("density")
+    got = blocks.postprocess_blocks({"density": d}, dec, block=24, halo=0, combine=dec.combine)
+    assert got.total == 64 * 64 - 100
+
+
+def test_save_and_real_manypred_agree_on_normalize():
+    """Every spec ManySeg refuses at save, ManyPred refuses too, and the reverse on valid ones."""
+    from test_save_load import BAD_NORMALIZE
+
+    validate = pytest.importorskip("manypred.normalize").validate_spec
+    from manyseg.io import _check_steps
+
+    for bad in BAD_NORMALIZE:
+        with pytest.raises(ValueError):
+            validate(bad)
+    good = [{"type": "none"}, {"type": "scale", "value": [1, 2]}, [],
+            {"type": "zscore", "mean": 0, "std": 1}, {"type": "zscore", "scope": "scene"},
+            {"type": "minmax", "min": 0, "max": 1, "clip": False}, {"type": "percentile"},
+            {"type": "percentile", "low": 1, "high": 99, "scope": "tile", "clip": True},
+            {"type": "db"}, {"type": "db", "eps": 1e-3}, {"type": "clip", "max": 5},
+            [{"type": "zscore", "scope": "scene"}, {"type": "zscore", "scope": "tile"}]]
+    for spec in good:
+        validate(spec)
+        _check_steps(spec)
+
+
+@pytest.mark.parametrize("stored", [[], {"type": "none"}])
+def test_no_normalisation_on_two_rasters_runs_under_real_manypred(tmp_path, stored):
+    """``manyseg.save`` accepts a flat spec with no steps on any model: ManyPred must run it."""
+    import manyseg
+
+    predict_array = pytest.importorskip("manypred").predict_array
+    model = manyseg.create_model(backbone="resnet18", pretrained=False, num_classes=2, inputs={
+        "a": {"in_channels": 3}, "b": {"in_channels": 2}},
+        fusion={"type": "intermediate", "op": "concat"})
+    path = manyseg.save(model, tmp_path / "m.safetensors", normalize=stored,
+                        activations={"logits": "softmax"})
+    scene = {"a": np.ones((3, 64, 64), np.float32), "b": np.ones((2, 64, 64), np.float32)}
+    out = predict_array(manyseg.load(path), scene, patch_size=64, overlap=0, device="cpu",
+                        progress=False)
+    assert out.shape == (2, 64, 64)
+
+
+def test_dates_survive_a_half_dtype_under_real_manypred():
+    """Days since a reference date don't fit in bfloat16: ManyPred must hand them over intact."""
+    import manyseg
+    import torch
+
+    predict_array = pytest.importorskip("manypred").predict_array
+    torch.manual_seed(0)
+    model = manyseg.create_model(backbone="resnet18", pretrained=False, num_classes=2, inputs={
+        "ts": {"kind": "timeseries", "in_channels": 3, "temporal": "attention"}}).eval()
+    with torch.no_grad():
+        for name, p in model.named_parameters():
+            if "query" in name:
+                p.normal_(0, 0.5)
+    series = np.random.default_rng(0).random((3, 3, 64, 64), dtype=np.float32)
+
+    def run(dates):
+        return predict_array(model, {"ts": series, "ts_dates": np.array(dates, np.float32)},
+                             patch_size=64, overlap=0, device="cpu", progress=False,
+                             dtype="bfloat16", normalize=False, activation="none",
+                             output="logits")
+
+    assert np.abs(run([18000, 18010, 18020]) - run([18000, 18040, 18080])).max() > 1e-3

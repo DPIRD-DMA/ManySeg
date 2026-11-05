@@ -25,7 +25,10 @@ def activations(model):
 
 def roundtrip(model, x, tmp_path, **kw):
     kw.setdefault("activations", activations(model))
-    kw.setdefault("normalize", [{"type": "scale", "value": 10000}])
+    steps = [{"type": "scale", "value": 10000}]
+    images = [n for n, c in (getattr(model, "build_config", {}).get("inputs") or {}).items()
+              if c.get("kind") != "vector"]
+    kw.setdefault("normalize", {n: steps for n in images} if len(images) > 1 else steps)
     path = manyseg.save(model.eval(), tmp_path / "m.safetensors", **kw)
     loaded = manyseg.load(path)
     a, b = outputs(model, x), outputs(loaded, x)
@@ -249,3 +252,60 @@ def test_save_names_the_model_inside_a_wrapper(tmp_path):
         "b": {"type": "regression", "out_channels": 1}})
     with pytest.raises(TypeError, match=r"It wraps one as \.model: save that"):
         manyseg.save(concat_heads(model, ["a", "b"]), tmp_path / "a.safetensors")
+
+
+BAD_NORMALIZE = [
+    {"type": "zscor", "mean": [0], "std": [1]},
+    [{"type": "scale"}],
+    {"type": "scale", "value": 0},
+    {"type": "scale", "value": 1, "scope": "tile"},
+    {"type": "zscore"},
+    {"type": "zscore", "mean": [0]},
+    {"type": "zscore", "mean": [0], "std": [0]},
+    {"type": "zscore", "mean": [0], "std": [1], "scope": "tile"},
+    {"type": "zscore", "scope": "image"},
+    {"type": "minmax", "min": 1},
+    {"type": "minmax", "min": 1, "max": 1},
+    {"type": "minmax", "min": 0, "max": 1, "clip": "yes"},
+    {"type": "percentile", "low": 90, "high": 10},
+    {"type": "db", "eps": 0},
+    {"type": "clip"},
+    {"type": "clip", "min": 2, "max": 1},
+    [{"type": "zscore", "scope": "tile"}, {"type": "zscore", "scope": "scene"}],
+    ["scale"],
+]
+
+
+@pytest.mark.parametrize("bad", BAD_NORMALIZE, ids=str)
+def test_save_refuses_a_normalize_that_could_not_run(tmp_path, bad):
+    model = create_model(backbone="resnet18", pretrained=False, in_channels=3, num_classes=2)
+    with pytest.raises(ValueError, match="normalize"):
+        manyseg.save(model, tmp_path / "m.safetensors", normalize=bad,
+                     activations={"logits": "softmax"})
+
+
+def test_save_checks_normalize_against_the_inputs(tmp_path):
+    def save(model, normalize):
+        return manyseg.save(model, tmp_path / "m.safetensors", normalize=normalize,
+                            activations={"logits": "softmax"})
+
+    two = create_model(backbone="resnet18", pretrained=False, num_classes=2, inputs={
+        "a": {"in_channels": 3}, "b": {"in_channels": 2}},
+        fusion={"type": "intermediate", "op": "concat"})
+    one = {"type": "scale", "value": 10000}
+    with pytest.raises(ValueError, match="several image inputs"):
+        save(two, one)
+    with pytest.raises(ValueError, match="not image inputs"):
+        save(two, {"a": one, "typo": one})
+    save(two, {"a": one, "b": [one]})
+    save(two, [])  # no steps: nothing to confuse
+    save(two, {"type": "none"})
+    with_vector = create_model(backbone="resnet18", pretrained=False, num_classes=2, inputs={
+        "img": {"in_channels": 3},
+        "meta": {"kind": "vector", "fields": {"e": {"type": "continuous", "mean": 0., "std": 1.}}}})
+    save(with_vector, one)  # one image input: nothing to confuse it with
+    with pytest.raises(ValueError, match="not image inputs"):
+        save(with_vector, {"img": one, "meta": one})
+    single = create_model(backbone="resnet18", pretrained=False, in_channels=3, num_classes=2)
+    with pytest.raises(ValueError, match="one unnamed input"):
+        save(single, {"x": one})

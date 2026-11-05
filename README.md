@@ -241,7 +241,7 @@ only the smallest halo a decoder accepts and doesn't guarantee the same result a
 decode: on noise-like field predictions, halos up to 64 px gave different objects. An instance
 reaching much further than the halo can split at a block seam, and for roads the halo must also
 cover the skeleton's data-dependent reach (the decoder warns). With ManyPred this happens while
-it predicts (needs ManyPred's next release).
+it predicts (needs ManyPred's first release).
 
 ```python
 from manyseg.vectors import Scene, block_decoder, decode_scene
@@ -380,7 +380,13 @@ The vector decoders (**Vector outputs** above) run on large scenes through `many
 `postprocess_blocks` decodes saved rasters block by block, and
 `predict_files(..., merge="cut", block_postprocess=BlockPostprocess(...))` decodes while it
 predicts ([guide](docs/api_design.md#vector-outputs-line-graphs-polygons)). `merge` and
-`manypred.blocks` are on ManyPred's GitHub main since 2026-11-02.
+`manypred.blocks` are on ManyPred's GitHub main since 2026-11-02, and will be in its first
+release.
+
+ManyPred moves a model to its device and `dtype` in place and sets it to eval mode, and on GPUs
+the default `dtype` is usually float16. So after a preview during training, reload the model or
+restore your checkpoint before training further or calling `manyseg.save`, or run the preview on
+a copy: otherwise the weights go on, and are saved, in the lower precision.
 
 ## Tips from our benchmarks
 

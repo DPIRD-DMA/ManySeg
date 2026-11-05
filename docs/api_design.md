@@ -963,8 +963,8 @@ may be cut). Roof records hold `id`, `part` (pieces a join split off), `geometry
 versions of each task: [`examples/14_vector_footprints.py`](../examples/14_vector_footprints.py)
 to [`18_vector_points.py`](../examples/18_vector_points.py).
 
-**Large scenes with ManyPred** (*requires the ManyPred release that adds `merge="cut"` and
-`BlockPostprocess`; not released yet*). ManyPred stitches the tiles' outputs and calls the
+**Large scenes with ManyPred** (*needs ManyPred's first release, or its GitHub main, for
+`merge="cut"` and `BlockPostprocess`*). ManyPred stitches the tiles' outputs and calls the
 decoder on each block of the stitched rasters while it predicts, so one call writes the
 vectors. Memory stays bounded when `load_func` returns a lazy reader, as here, with the default
 GeoTIFF writer and no `postprocess=`: it then holds a strip of block rows plus `2 * halo` rows per

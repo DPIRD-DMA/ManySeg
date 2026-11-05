@@ -204,3 +204,16 @@ def test_entirely_masked_training_batch(agg):
 def test_series_extra_name_reserved_without_vectors():
     with pytest.raises(ValueError, match="reserved"):
         build(extra={"s2_dates": {"kind": "timeseries", "in_channels": 4}})
+
+
+@pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16])
+@pytest.mark.parametrize("with_dates", [False, True])
+def test_attention_runs_in_half_dtypes(dtype, with_dates):
+    """ManyPred casts the model and its float inputs to the inference dtype (float16 on GPUs)."""
+    model = build("attention").to(dtype)
+    inputs = {"s2": series(h=32, w=32).to(dtype)}
+    if with_dates:
+        inputs["s2_dates"] = torch.tensor([[1.0, 30, 60, 90, 120]]).expand(2, -1).to(dtype)
+    with torch.no_grad():
+        out = model(inputs)
+    assert out.dtype == dtype and out.shape == (2, 3, 32, 32)

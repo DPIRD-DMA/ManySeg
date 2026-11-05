@@ -237,7 +237,10 @@ class DensityBlockDecoder:
 
     ``mask``: a field (1 channel); only pixels where it exceeds ``mask_threshold`` count, as
     ``count_from_density(density, mask=field > mask_threshold)``. Result: :class:`SceneCount`
-    (equal to the whole-scene count up to float rounding; the sum is in float64)."""
+    (equal to the whole-scene count up to float rounding; the sum is in float64).
+
+    NaN pixels count as 0, so a scene with nodata (NaN in ManyPred's stitched outputs) still has
+    a total. A model that returns NaN where there is data is not detected here."""
 
     field: str = "density"
     value_scale: float = 1.0
@@ -256,10 +259,10 @@ class DensityBlockDecoder:
         a = np.asarray(fields[self.field])
         a = a[None] if a.ndim == 2 else a
         d = _field(fields, self.field, a.shape[0], win)[:, it:ib, il:ir].astype(np.float64)
-        if self.mask is not None:
-            d = d * (np.asarray(_field(fields, self.mask, 1, win))[:, it:ib, il:ir]
-                     > self.mask_threshold)
-        return core, float(d.sum()) / self.value_scale
+        if self.mask is not None:  # NaN in the mask compares False
+            d = np.where(np.asarray(_field(fields, self.mask, 1, win))[:, it:ib, il:ir]
+                         > self.mask_threshold, d, 0.0)
+        return core, float(np.nansum(d)) / self.value_scale
 
     def combine(self, results: list, scene) -> SceneCount:
         """The scene total and per-block counts: :class:`SceneCount`."""

@@ -108,7 +108,9 @@ class AttentionAggregation(nn.Module):
         if dates is None:
             dates = torch.arange(t, device=f.device, dtype=torch.float32).expand(b, t)
         k = self.key(f.flatten(0, 1)).view(b, t, self.heads, self.key_dim, h, w)
-        pe = self.date_key(date_encoding(dates, self.date_dim, self.max_period))
+        # computed in float32 whatever the model's dtype: half dtypes can't hold dates in days
+        pe = self.date_key(date_encoding(dates, self.date_dim, self.max_period)
+                           .to(self.date_key.weight.dtype))
         k = k + pe.view(b, t, self.heads, self.key_dim, 1, 1).to(k.dtype)
         scores = (k * self.query.to(k.dtype)[None, None, :, :, None, None]).sum(3)
         scores = scores / math.sqrt(self.key_dim)  # B T heads h w

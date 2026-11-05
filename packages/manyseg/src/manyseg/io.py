@@ -97,6 +97,119 @@ def _weights_normalize(config: Mapping[str, Any]) -> Any:
     return per_input or None
 
 
+# ManyPred's normalisation steps (manypred.normalize, which ManySeg does not import):
+# {type: allowed options}. test_manypred_convention checks these rules against the real validator.
+_STEPS = {"none": set(), "scale": {"value"}, "zscore": {"mean", "std", "scope"},
+          "minmax": {"min", "max", "clip"}, "percentile": {"low", "high", "scope", "clip"},
+          "db": {"eps"}, "clip": {"min", "max"}}
+
+
+def _numbers(step: Mapping, key: str, *, nonzero: bool = False, positive: bool = False):
+    """``step[key]``, a number or a list of numbers, as a flat float array."""
+    value = step[key]
+    try:
+        array = torch.as_tensor(value, dtype=torch.float64).reshape(-1)
+    except (TypeError, ValueError, RuntimeError):
+        raise ValueError(f"normalize {step['type']!r} step: {key} must be a number or a list of "
+                         f"numbers, got {value!r}.") from None
+    if array.numel() == 0 or not torch.isfinite(array).all():
+        raise ValueError(f"normalize {step['type']!r} step: {key} must be finite numbers, got "
+                         f"{value!r}.")
+    if (nonzero and (array == 0).any()) or (positive and (array <= 0).any()):
+        raise ValueError(f"normalize {step['type']!r} step: {key} must be "
+                         f"{'positive' if positive else 'nonzero'}, got {value!r}.")
+    return array
+
+
+def _check_step(step: Any) -> None:
+    if not isinstance(step, Mapping):
+        raise ValueError(f"A normalize step must be a dict like {{'type': 'scale', 'value': "
+                         f"10000}}, got {step!r}.")
+    kind = step.get("type")
+    if kind not in _STEPS:
+        raise ValueError(f"Unknown normalize step type {kind!r}; use one of {sorted(_STEPS)}.")
+    extra = sorted(set(step) - _STEPS[kind] - {"type"})
+    if extra:
+        raise ValueError(f"normalize {kind!r} step has unexpected keys {extra}; allowed: "
+                         f"{sorted(_STEPS[kind])}.")
+    scope = step.get("scope")
+    if scope not in (None, "tile", "scene"):
+        raise ValueError(f"normalize {kind!r} step: scope must be 'tile' or 'scene', got "
+                         f"{scope!r}.")
+    if "clip" in step and kind != "clip" and not isinstance(step["clip"], bool):
+        raise ValueError(f"normalize {kind!r} step: clip must be True or False.")
+    if kind == "scale":
+        if "value" not in step:
+            raise ValueError("normalize 'scale' step needs 'value' (a number or one per band).")
+        _numbers(step, "value", nonzero=True)
+    elif kind == "zscore":
+        stats = "mean" in step and "std" in step
+        if stats == (scope is not None) or ("mean" in step) != ("std" in step):
+            raise ValueError("normalize 'zscore' step needs dataset mean and std, or "
+                             "scope='tile' / 'scene' (not both).")
+        if stats:
+            _numbers(step, "mean")
+            _numbers(step, "std", positive=True)
+    elif kind in ("minmax", "clip"):
+        if kind == "minmax" and not {"min", "max"} <= set(step):
+            raise ValueError("normalize 'minmax' step needs 'min' and 'max'.")
+        if kind == "clip" and not {"min", "max"} & set(step):
+            raise ValueError("normalize 'clip' step needs 'min', 'max' or both.")
+        low = _numbers(step, "min") if "min" in step else None
+        high = _numbers(step, "max") if "max" in step else None
+        if low is not None and high is not None:
+            if low.numel() != high.numel() and 1 not in (low.numel(), high.numel()):
+                raise ValueError(f"normalize {kind!r} step: min and max need the same number "
+                                 "of values.")
+            if not (low < high if kind == "minmax" else low <= high).all():
+                raise ValueError(f"normalize {kind!r} step needs min "
+                                 f"{'<' if kind == 'minmax' else '<='} max.")
+    elif kind == "percentile":
+        low, high = step.get("low", 2), step.get("high", 98)
+        if not 0 <= low < high <= 100:
+            raise ValueError("normalize 'percentile' step needs 0 <= low < high <= 100, got "
+                             f"low={low}, high={high}.")
+    elif kind == "db" and not step.get("eps", 1e-10) > 0:
+        raise ValueError(f"normalize 'db' step needs eps > 0, got {step.get('eps')}.")
+
+
+def _check_steps(steps: Any) -> None:
+    steps = list(steps) if isinstance(steps, Sequence) and not isinstance(steps, str) else [steps]
+    for step in steps:
+        _check_step(step)
+    per_tile = False
+    for step in steps:
+        if step.get("scope") == "scene" and per_tile:
+            raise ValueError("A normalize step with scope='scene' can't follow one with "
+                             "scope='tile': put scene steps first.")
+        per_tile |= step.get("scope") == "tile"
+
+
+def _check_normalize(normalize: Any, config: Mapping[str, Any]) -> None:
+    """Fail at save, not when the model is run: ``normalize`` must be a spec ManyPred accepts,
+    for this model's inputs. Steps are checked as ``manypred.normalize.validate_spec`` does."""
+    if normalize is None:
+        return
+    inputs = config.get("inputs") or {}
+    rasters = [n for n, c in inputs.items() if c.get("kind") != "vector"]
+    if not (isinstance(normalize, Mapping) and "type" not in normalize):
+        _check_steps(normalize)
+        steps = [normalize] if isinstance(normalize, Mapping) else normalize
+        if len(rasters) > 1 and any(step["type"] != "none" for step in steps):
+            raise ValueError(f"This model has several image inputs {rasters}: pass normalize as "
+                             "{input_name: steps}.")
+        return
+    if not inputs:
+        raise ValueError("This model has one unnamed input: pass normalize as steps (a dict with "
+                         f"'type' or a list of them), not per input {sorted(normalize)}.")
+    unknown = sorted(set(normalize) - set(rasters))
+    if unknown:
+        raise ValueError(f"normalize given for {unknown}, which are not image inputs of this "
+                         f"model; image inputs: {rasters}.")
+    for steps in normalize.values():
+        _check_steps(steps)
+
+
 def _require_dense(model: Any) -> None:
     if isinstance(model, DenseModel):
         return
@@ -132,7 +245,9 @@ def save(model: DenseModel | torch.export.ExportedProgram, path: str | Path, *,
     Args:
         source: The float model an ``ExportedProgram`` came from; only for those.
         normalize: How inputs must be normalised for this model, as a ManyPred normalisation
-            spec: pass the normalisation you trained with. ``"weights"`` uses what the
+            spec: pass the normalisation you trained with, as steps, or as
+            ``{input_name: steps}`` when the model has several image inputs (``[]`` means none,
+            for any model; a spec ManyPred would refuse raises here). ``"weights"`` uses what the
             remote-sensing pretrained weights the model was built with expect
             (``pretrained="ssl4eo_s2_moco"``), which is right only if you trained with it too.
             None stores nothing (with a warning): whoever runs the model must then know.
@@ -233,6 +348,7 @@ def _metadata(model: DenseModel, *, normalize: Any, activations, classes, bands,
             "training. Pass normalize=<the spec you trained with>.",
             stacklevel=3,
         )
+    _check_normalize(normalize, config)
     _check_rebuildable(model, config)
     first = next(iter(model.parameters()))
     meta = {

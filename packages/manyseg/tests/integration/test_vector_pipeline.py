@@ -30,8 +30,7 @@ default to normalised); ``seam_study`` (run by hand) measures the seam errors of
 Thresholds are the oracle numbers of the experiments (perfect targets through the shipped
 decoders): see ``THRESHOLDS``.
 
-Needs ManyPred with ``merge=`` (``feature/vector-blocks``); run locally with
-``PYTHONPATH=".../ManyPred-wt/blocks/src"``.
+Needs ManyPred with ``merge=`` (its GitHub main).
 """
 
 from __future__ import annotations
@@ -58,7 +57,7 @@ else:
 if "merge" not in inspect.signature(manypred.predict_array).parameters or not hasattr(
         manypred, "postprocess_blocks"):
     pytest.skip("the installed manypred has no merge= / postprocess_blocks "
-                "(needs ManyPred's feature/vector-blocks)", allow_module_level=True)
+                "(needs ManyPred's GitHub main)", allow_module_level=True)
 
 import shapely  # noqa: E402
 from manypred.windows import plan_windows  # noqa: E402

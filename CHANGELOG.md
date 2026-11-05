@@ -8,6 +8,16 @@ API, and every such change is listed here.
 
 First release. Python 3.10–3.14 (`manyseg-bench` lists 3.10–3.12), PyTorch ≥ 2.10, timm ≥ 1.0.20.
 
+### Working with ManyPred
+
+* `manyseg.save` and `push_to_hub` check `normalize` when saving, by ManyPred's rules, instead of
+  writing a file that fails when it is run: step types, keys and values, and for several image
+  inputs a `{input_name: steps}` dict naming only image inputs. Files already saved still load.
+* `block_decoder("density")` counts NaN pixels as 0. ManyPred marks nodata with NaN, so one nodata
+  pixel made the scene's total NaN.
+* `"attention"` time-series models run in `float16` and `bfloat16`, as ManyPred's GPU default
+  needs.
+
 ### Saving quantised models
 
 * `manyseg.save` and `manyseg.load` take `quantize_weights` models (`.safetensors`, about 0.26x
