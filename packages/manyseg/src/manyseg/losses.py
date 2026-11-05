@@ -55,7 +55,8 @@ def masked_regression(pred: Tensor, target: Tensor, mask: Tensor | None = None,
     None; 0 if the mask is empty)."""
     if kind not in ("l1", "mse"):
         raise ValueError(f"kind must be 'l1' or 'mse', got {kind!r}")
-    err = (pred.float() - target.float()).abs() if kind == "l1" else (pred.float() - target) ** 2
+    diff = pred.float() - target.float()
+    err = diff.abs() if kind == "l1" else diff ** 2
     if mask is None:
         return err.mean()
     m = mask.expand_as(err).float()
