@@ -231,7 +231,8 @@ def test_saved_multi_input(tmp_path):
         return {"a": torch.randn(1, 4, h, w), "b": torch.randn(1, 2, h, w)}
 
     ep = quantize_pt2e(model, mk(64, 96), [mk(64, 96) for _ in range(2)])
-    loaded = manyseg.load(manyseg.save(ep, tmp_path / "q.pt2", source=model, **_args(model)))
+    args = {**_args(model), "normalize": {"a": _NORM, "b": _NORM}}
+    loaded = manyseg.load(manyseg.save(ep, tmp_path / "q.pt2", source=model, **args))
     x = mk(97, 131)
     assert torch.equal(ep.module()(x), loaded(x))
     assert loaded.input_shapes == {"a": [1, 4, None, None], "b": [1, 2, None, None]}
