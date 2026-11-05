@@ -110,9 +110,22 @@ Status as of 2026-11-05. ✅ done · 🔄 in progress · ⏳ planned.
 Done (see Phase 3 for results and `experiments/` for write-ups): E024 (remote-sensing weights with their own normalisation, ResNet-50: SSL4EO DINO and MoCo beat ImageNet on Sen1Floods11, BigEarthNet and PASTIS, DINO by +2.1 / +4.1 / +2.1; recommended. Satlas only on Sen1Floods11, not recommended). E001b, E002–E006, E009–E012,
 E011b, E014, E007 (mixed: frozen encoder BN +2.6 val on Sen1Floods11 at batch 2, GroupNorm decoder +0.5 on Pet; neither passes on both). E013 (negative), E008 (all variants safe; found and fixed an int8 bug on CPUs without VNNI). E007b (frozen encoder BN is a real small-batch fix on both datasets; accumulation alone is not). E015 (native resolution adds nothing but halves grouped-model FLOPs; splitting bands into groups helps +0.9 to +1.3; found the shared-encoder BN bug, fixed). E016 (PASTIS: day of year adds nothing even for crop phenology; band grouping does not replicate). E017 (CloudSEN12+: band groups +0.37 val, under the 0.76 bar; grouping stays a single-dataset result). E023 (semantic change on SECOND: per-input land-cover heads beat fused (+1.5 Score); shared = separate, so share; Siamese +7.0 over early fusion). E021 (time series: several dates help a lot; stacking dates as channels beat the time-series input on PASTIS; on AI4Boundaries attention beat stacking and mean fell just short of the bar; attention ≈ mean). E022 (binary change: Siamese with diff / concat_diff beats early fusion on OSCD and LEVIR-CD, Siamese concat on LEVIR-CD only; no single op wins on both). E020 (BigEarthNet v2: parity with timm for classification and regression; band groups, S1 and metadata do not help; a segmentation head on the reference maps helps the classifier, +2.1 val / +2.3 test macro mAP; post hoc it looks like regularisation). E019/E019b (ManySeg image heads at val parity with timm classifiers in 6/6 cells; test −0.43, largest on ConvNeXt). E018 (Pareto front: four PVTv2-b0 configs are on the front of both datasets (they shipped as presets until removed before 0.1.0); three of them (all but the SegFormer-head `fast`, which is 0.34 lower on Pet) dominate the ResNet-34 U-Net default). E025 (training speed against SMP, from a downstream report: the nearest-upsampling gather's scatter-add backward made U-Net steps 2–5% slower eager and up to 98% slower compiled; replaced where the values are the same, now at parity compiled and 18–25% faster eager; FPN / fastai U-Net 6–14% faster compiled). E026 (performance audit, values unchanged: float32 activations under bf16 autocast removed from fastai_unet, `input_cross`, GroupNorm, UPerNet and DeepLab decoders (−7 to −27% memory); SegFormer fuse per level (−26 to −38% memory); contiguous cross-attention tokens (−50% time, −77% memory); opt-in encoder gradient checkpointing; sync-free bench training loop (−24% step time for the PVTv2 presets); CloudSEN12+ training is disk-bound). E027 (round 2: static compiled evaluation with a padded last batch +12–27%; host arrays of device-resident datasets freed, −2.8 GB RAM; bilinear U-Net and concat-fusion resize dtype −4% time; evaluator syncs, object-metric copies and the ViT neck: no gain). E011c (softplus density head no worse than the raw head on OAM-TCD; now the default). E028–E054: vector outputs, below. No candidates remain open: making `input_cross` the default is closed, since E013 Q3 did not replicate it and SMP parity is a design commitment. A budget is set before any new one starts.
 
-Stopping rule: an idea is kept only if it beats its baseline by more than 2 seed standard
-deviations on at least two datasets, at no more than a small, stated cost in latency or memory.
-Negative results are written up in `experiments/` like positive ones.
+Stopping rule: changing a default, or recommending an option over it, needs a gain of more than
+2 seed standard deviations on at least two datasets, at no more than a small, stated cost in
+latency or memory. An opt-in option needs a test or an experiment behind it, and the README's
+"What the evidence says" table states how strong its evidence is, including "none". Negative
+results are written up in `experiments/` like positive ones.
+
+### Future work: stronger evidence
+
+* **Find datasets where fancier options help.** Stacking bands and the plain U-Net have matched or
+  nearly matched the alternatives so far, on few datasets. Look for tasks where fancier decoders
+  and fusion should matter: thin or fine structures, boundaries, inputs at very different
+  resolutions, or a sensor that's missing in part of the data. Include what has never been tested
+  for accuracy: U-Net++ and the `add`, `attention` and `cross_attention` fusion ops.
+* **Test the vector target encoders and decoders further.** Each decoder rests on one dataset and
+  1-3 seeds. Run them on more datasets and regions, with more seeds, and check how far the tuned
+  defaults carry over. The stopping rule above isn't met for any of them yet.
 
 ### Vector outputs (roads, lines, footprints, fields, 3D buildings) 🔄
 

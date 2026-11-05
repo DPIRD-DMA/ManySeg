@@ -80,7 +80,9 @@ flags), use `channel_adapter="rgb_plus_zero"`. If bands can be missing at infere
 the way you did in training and drop bands at random while training
 ([missing bands](https://github.com/DPIRD-DMA/ManySeg/blob/main/docs/api_design.md#missing-bands)).
 
-**Several inputs, possibly at different resolutions**, e.g. optical + radar:
+**Several inputs, possibly at different resolutions**, e.g. optical + radar. If your bands share
+a grid, stack them into one input first: that matched separate encoders on Sen1Floods11 (E005).
+Separate encoders are for inputs at different resolutions, or for when stacking falls short:
 
 ```python
 model = create_model(
@@ -216,7 +218,7 @@ predictions into GIS layers: building footprints with straight walls, field boun
 road graphs with junctions and overpasses, LoD2 roof faces with a plane and 3-D mesh each
 (heights from an nDSM input), and points. Each task has a head preset, target encoders that
 work in pixel coordinates (`to_pixels` brings your vector labels there from any CRS), and a
-decoder tested in experiments (`docs/api_design.md` gives each one's evidence). One call decodes
+decoder tested on one dataset each (`docs/api_design.md` gives the evidence). One call decodes
 a scene of any size: large scenes block by block, with the default 256 px halo. `min_halo` is
 only the smallest halo a decoder accepts and doesn't guarantee the same result as a whole-scene
 decode: on noise-like field predictions, halos up to 64 px gave different objects. An instance
@@ -379,18 +381,40 @@ predicts ([guide](https://github.com/DPIRD-DMA/ManySeg/blob/main/docs/api_design
 * **Mixed precision is safe:** bf16, fp16 and int8 weight-only showed no accuracy loss.
 * **Training speed:** the default U-Net trains as fast as SMP's `Unet` on the same timm
   encoder: compiled steps match it, and eager steps are 18–25% faster (bf16, E025).
-* **Fusion:** stacking all bands (optical and SAR) into one input matched the fancier fusion
-  options on Sen1Floods11 (E005); start there. Splitting Sentinel-2 bands into resolution groups
-  helped on one of the four datasets we tried (E015; not E016, E017 or E020).
-* **Several dates** beat one by a wide margin. Stacking dates as channels is a strong baseline;
-  the time-series input (`"kind": "timeseries"`) with `"temporal": "attention"` beat it on field
-  delineation (the default masked mean fell just short) but not on crop types, so try both (E021).
-* **Change detection:** a Siamese encoder (shared weights per date) with a difference fusion
-  (`"op": "diff"` or `"concat_diff"`) beat stacking the two dates on both datasets we tried.
 
 These come from experiments in [`experiments/`](https://github.com/DPIRD-DMA/ManySeg/blob/main/experiments/), where negative results are kept
 too. Most are pre-registered and multi-seed; the speed and memory figures (E025, E026) are timing
 runs without seeds.
+
+## What the evidence says
+
+ManySeg has more options than we have evidence for. An option that showed no gain here may still
+help on your data, and an untested one is simply unknown.
+
+| Option | Result | Evidence |
+|---|---|---|
+| Separate encoders with `concat` or `gated` fusion, vs stacking bands | no gain | E005, Sen1Floods11; late fusion was worse on test |
+| Fusion ops `add`, `attention`, `cross_attention` | not tested for accuracy | none |
+| Siamese encoder with `diff` or `concat_diff`, for change detection | helped | E022, OSCD and LEVIR-CD |
+| Per-input land-cover heads, for semantic change | helped | E023, SECOND only |
+| Splitting Sentinel-2 bands into resolution groups | mixed | helped in E015; not in E016, E017 or E020 |
+| Metadata (FiLM, head bias or channels) | no clear gain | E009, E013, E016, E020 |
+| Time-series input, vs stacking dates as channels | mixed | E021: `attention` won on field delineation, not on crop types; several dates beat one by a wide margin either way |
+| `fastai_unet`, vs the default U-Net | small gain at high cost | E003 Pet +0.4 test mIoU at 4× FLOPs; E006 Sen1Floods11 +1.7 test mIoU at 4–5× latency |
+| `input_cross` | mixed | E012 helped on Sen1Floods11, not Pet; E013 no gain on clouds |
+| UPerNet | tied with the U-Net at more cost | E003, Pet only |
+| SegFormer head, FPN, DeepLabV3+ | lower accuracy, on Pet | E003 |
+| U-Net++ | not tested for accuracy | E025 measured training speed only |
+| Boundary + distance heads, for touching objects | helped | E010, AI4Boundaries: doubled panoptic quality against extent alone |
+| An auxiliary segmentation head on an image classifier | helped | E020, BigEarthNet only; looks like regularisation |
+| SSL4EO DINO weights with their own normalisation | helped | E024, three Sentinel-2 datasets, ResNet-50 |
+| Footprint decoder (corners and walls) | helped on boundary quality, slightly lower detection | E038, WHU aerial only, 2 seeds |
+| Field decoder (instance outlines) | chosen over corners and walls | E046 and E052, Fields of The World Netherlands only, 1–2 seeds |
+| Road decoder (unified heads) | kept more overpasses, no loss on APLS | E044 and E044b, City-Scale only, 3 seeds |
+| Roof decoder (faces, planes, mesh) | viable with an nDSM input, not from RGB alone | E047b, E048b and E049, 3D BAG Netherlands only, 1 seed |
+
+The vector decoders are marked experimental partly for this reason: each rests on one dataset, so
+expect to tune them on yours.
 
 ## Documentation
 
