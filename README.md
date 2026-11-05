@@ -415,6 +415,10 @@ help on your data, and an untested one is simply unknown.
 The vector decoders are marked experimental partly for this reason: each rests on one dataset, so
 expect to tune them on yours.
 
+Experiments on Pawsey Setonix (such as E004, E006, E009, E010, E012 and E013) ran on torch 2.7.1
+and AMD MI250X GPUs, below ManySeg's torch floor, and weren't re-run on newer versions. Compare
+their numbers within an experiment.
+
 ## Documentation
 
 * [`docs/builder/`](docs/builder/): the model builder, a page where you pick inputs, encoders,

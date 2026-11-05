@@ -22,7 +22,9 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    "torch>=2.10",  # 2.9 has an MPS view/stride bug (timm EdgeNeXt); dynamic export needs >= 2.9
+    # 2.10: dynamic export needs >= 2.9 (deferred runtime asserts); Swin's dynamic fullgraph compile
+    # fails on 2.9; and 2.5-2.9 have an MPS view/stride bug (timm EdgeNeXt)
+    "torch>=2.10",
     "timm>=1.0.20",  # CAFormer dynamic export fails on 1.0.12; floor tested nightly in CI
     "safetensors>=0.4",  # manyseg.save / load (also a timm dependency; imported directly)
     "huggingface_hub>=0.23",  # manyseg.hub (also a timm dependency; imported directly)
