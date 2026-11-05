@@ -545,6 +545,8 @@ function derive(s) {
     const target = rasters.find((x) => x.name === r.backbone.slice(7));
     if (r.kind === "timeseries" || (target && target.kind === "timeseries"))
       issues.push({ level: "error", text: `input '${r.name}': a shared encoder cannot involve a time series yet; give each input its own encoder.` });
+    else if (needsProjection(r, s))
+      issues.push({ level: "tip", text: `input '${r.name}' has a different channel count from the encoder it shares, so it reaches it through a learned 1x1 projection (channel_adapter: "projection"). Give it its own encoder to avoid that.` });
   }
   for (const r of series) {
     const taken = [...rasters.map((x) => x.name), ...(s.meta ? [s.meta.name] : [])];
@@ -631,6 +633,20 @@ function temporalParams(r, info) {   // per-level aggregation modules of a time-
     if (r.temporal === "concat") return a + r.dates * c * c + 2 * c;
     return a;
   }, 0);
+}
+
+// A shared input with another channel count than the encoder it reaches ("channels" metadata
+// widens the first raster) must ask for the learned projection itself.
+function needsProjection(r, s) {
+  const rasters = s.inputs;
+  const channels = (x) => x.channels + (s.meta && s.meta.mode === "channels" && x === rasters[0] ? metaWidth(s.meta) : 0);
+  let root = r;
+  while (root.backbone.startsWith("shared:")) {
+    const next = rasters.find((x) => x.name === root.backbone.slice(7));
+    if (!next) return false;  // an unknown target is reported elsewhere
+    root = next;
+  }
+  return channels(r) !== channels(root);
 }
 
 function metaWidth(m) {
@@ -821,7 +837,10 @@ function generateCode(s, D) {
       c.in_channels = r.channels;
       if (perInputWeights) {
         c.backbone = r.backbone;
-        if (r.backbone.startsWith("shared:")) { if (r.share_norm) c.share_norm = true; }
+        if (r.backbone.startsWith("shared:")) {
+          if (r.share_norm) c.share_norm = true;
+          if (needsProjection(r, s)) c.channel_adapter = "projection";
+        }
         else if (pretrainedValue(r) !== true) c.pretrained = pretrainedValue(r);
       }
       if (i > 0 && r.alignment === "same_extent") c.alignment = "same_extent";

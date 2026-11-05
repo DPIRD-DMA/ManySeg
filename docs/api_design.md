@@ -322,6 +322,16 @@ out = model({"optical": o, "sar": s})
   shared-encoder model from 0.90 to 0.50–0.65 val mIoU. `"share_norm": True` shares BN too (the
   old behaviour); use it only for inputs with matching statistics (e.g. two dates of the same
   sensor).
+* **Shared encoder, different channels**: an input with another channel count than the encoder it
+  shares must say how to reach it: `{"backbone": "shared:optical", "channel_adapter":
+  "projection"}` puts a learned 1×1 conv in front. Without it `create_model` refuses, so no
+  learned layer appears unasked, and giving the input its own encoder is often the better answer.
+  Only this input's own setting counts, not the top-level `channel_adapter`. Other adapters are
+  refused, as the stem is already built, and so is `"projection"` with equal channels. `"channels"`
+  metadata widens its target raster first, which can make a shared input differ.
+  E004's verdict on `projection` doesn't settle this case: there the projection was inside the
+  encoder's training group, frozen for epoch 1 and then at 0.1× learning rate. A shared input's
+  projection is outside `backbone.encoders`, so the benchmark trains it with the decoder.
 
 #### Time series
 
@@ -702,7 +712,8 @@ create_model(backbone="resnet34", pretrained=True, in_channels=13, channel_adapt
 `in_channels=3` with a pretrained backbone leaves the weights untouched for every adapter.
 
 > **Evidence (E004, 13-band Sentinel-2):** no adapter beat `repeat`, which stays the default;
-> `projection` was harmful.
+> `projection` was harmful, in a run that froze it for epoch 1 and then trained it at 0.1×
+> learning rate, so a normally trained projection may do better.
 
 **Channels that are not image bands.** `repeat` and `mean` treat every input channel as a
 band. Take RGB plus three 0/1 validity masks (`in_channels=6`): `repeat` gives each mask a copy

@@ -79,8 +79,12 @@ def sample_config(rng: random.Random) -> dict:
                 c["backbone"] = "shared:r0"
             if _maybe(rng, 0.08):
                 c["out_indices"] = _indices(rng)
-            if c.get("backbone") == "shared:r0" and _maybe(rng, 0.5):
-                c["share_norm"] = rng.choice([True, False])
+            if c.get("backbone") == "shared:r0":
+                c.pop("channel_adapter", None)
+                if c["in_channels"] != inputs["r0"]["in_channels"]:
+                    c["channel_adapter"] = "projection"
+                if _maybe(rng, 0.5):
+                    c["share_norm"] = rng.choice([True, False])
             inputs[name] = c
         if _maybe(rng, 0.35):
             mode = rng.choice(["film", "head", "channels", {"mode": "head", "pixel": True},

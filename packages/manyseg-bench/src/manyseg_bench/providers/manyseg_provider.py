@@ -135,6 +135,12 @@ class ManySegProvider(Provider):
             inputs = {n: {"in_channels": len(g["bands"]),
                           "alignment": "same_extent" if g.get("factor", 1) > 1 else "same_grid",
                           **group_inputs.get(n, {})} for n, g in groups.items()}
+            # A group sharing an encoder with another band count reaches it through a projection
+            # (E015-E017, E020); create_model wants that stated.
+            for cfg in inputs.values():
+                target = str(cfg.get("backbone", "")).removeprefix("shared:")
+                if target in inputs and cfg["in_channels"] != inputs[target]["in_channels"]:
+                    cfg.setdefault("channel_adapter", "projection")
             opts.setdefault("fusion", {"type": "intermediate"})
             inner = create_model(backbone=backbone, pretrained=pretrained,
                                  inputs=inputs, decoder=_decoder(spec), num_classes=n_cls, **opts)

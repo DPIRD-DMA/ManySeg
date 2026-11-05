@@ -49,6 +49,25 @@ def share_weights(encoder: nn.Module) -> nn.Module:
     return clone
 
 
+def _check_shared_adapter(name: str, cfg: Mapping, encoder_channels: int) -> None:
+    """A shared input reaches the encoder unchanged, or through a learned projection it asks for
+    itself. Only its own setting counts: the top-level ``channel_adapter`` adapts a backbone's
+    stem, and a shared input has no stem of its own."""
+    channels, adapter = cfg["in_channels"], cfg.get("channel_adapter")
+    if adapter not in (None, "projection"):
+        raise ValueError(f"input {name!r}: a shared encoder's stem is already built, so "
+                         f"channel_adapter {adapter!r} can't apply; only 'projection' can")
+    if adapter is None and channels != encoder_channels:
+        raise ValueError(
+            f"input {name!r} has {channels} channels (metadata in 'channels' mode included) and "
+            f"the encoder it shares expects {encoder_channels}. Either give it its own encoder, "
+            f"or add a learned 1x1 projection in front of the shared one with "
+            f"{{'channel_adapter': 'projection'}} on this input.")
+    if adapter == "projection" and channels == encoder_channels:
+        raise ValueError(f"input {name!r}: channel_adapter 'projection' has nothing to adapt: it "
+                         f"has the {channels} channels the encoder it shares expects")
+
+
 def _build_inputs(inputs, fusion, *, backbone, pretrained, channel_adapter, out_indices,
                   backbone_kwargs):
     if isinstance(fusion, str):
@@ -126,12 +145,13 @@ def _build_inputs(inputs, fusion, *, backbone, pretrained, channel_adapter, out_
                                  "yet; give each input its own encoder")
             if target not in encoders:
                 raise ValueError(f"input {n!r} shares {target!r}, which must be defined earlier")
+            _check_shared_adapter(n, cfg, encoders[target].in_channels)
             # Weights shared, BatchNorm per input by default: one BN shared by inputs with
             # different statistics blends its running statistics, and evaluation then applies
             # the blend to every input (E015: val 0.50-0.65 vs 0.89).
             encoders[n] = (encoders[target] if cfg.get("share_norm", False)
                            else share_weights(encoders[target]))
-            if cfg["in_channels"] != encoders[target].in_channels:
+            if cfg.get("channel_adapter") == "projection":
                 adapters[n] = ProjectionAdapter(cfg["in_channels"], encoders[target].in_channels)
         else:
             if "share_norm" in cfg:

@@ -26,7 +26,8 @@ def _build(kind):
     return create_model(
         backbone="resnet18", pretrained=False, decoder="unet", heads=HEADS,
         fusion={"type": "intermediate", "op": "gated"},
-        inputs={"a": {"in_channels": 3}, "b": {"in_channels": 2, "backbone": "shared:a"},
+        inputs={"a": {"in_channels": 3},
+                "b": {"in_channels": 2, "backbone": "shared:a", "channel_adapter": "projection"},
                 "meta": {"kind": "vector", "conditioning": "film",
                          "fields": {"doy": {"type": "cyclic", "period": 365.25}}},
                 "meta2": {"kind": "vector", "conditioning": {"mode": "head", "pixel": True},

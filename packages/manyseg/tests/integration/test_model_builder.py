@@ -98,6 +98,16 @@ def test_save_snippet(case, tmp_path, monkeypatch):
 
 
 @pytest.mark.skipif(not CASES, reason="needs node and docs/builder (a repo checkout)")
+@pytest.mark.parametrize(("name", "projects"), [("shared", True), ("shared-norm", True),
+                                                ("shared-late", True),
+                                                ("shared-equal-channels", False),
+                                                ("shared-metadata-channels", True)])
+def test_shared_inputs_ask_for_the_projection_only_when_they_need_it(name, projects):
+    code = next(c for c in CASES if c["name"] == name)["code"]
+    assert ('"channel_adapter": "projection"' in code) == projects
+
+
+@pytest.mark.skipif(not CASES, reason="needs node and docs/builder (a repo checkout)")
 @pytest.mark.parametrize(("name", "expected"), [("example-roads", '"keypoints": "sigmoid"'),
                                                 ("example-classifier", '"labels": "sigmoid"')])
 def test_independent_channels_save_with_sigmoid(name, expected):

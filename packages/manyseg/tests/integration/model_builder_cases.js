@@ -47,6 +47,8 @@ for (const [rel, H] of [[6, 600], [6, 512], [0.5, 256], [3, 255]]) {
   const st = state(ex("fusion")); st.inputs[1].gsd = rel; ok(`gsd-${rel}-${H}`, small(st, [H, H]));
 }
 { const st = state(ex("fusion")); st.inputs[1].backbone = "shared:optical"; ok("shared", small(st)); }
+{ const st = state(ex("fusion")); st.inputs[1].backbone = "shared:optical"; st.inputs[1].channels = st.inputs[0].channels; ok("shared-equal-channels", small(st)); }
+{ const st = state({ ...ex("fusion"), meta: { ...ex("metadata").meta, mode: "channels" } }); st.inputs[1].backbone = "shared:optical"; st.inputs[1].channels = st.inputs[0].channels; ok("shared-metadata-channels", small(st)); }
 { const st = state(ex("fusion")); st.inputs[1].backbone = "shared:optical"; st.inputs[1].share_norm = true; ok("shared-norm", small(st)); }
 { const st = state({ ...ex("fusion"), fusion: { type: "late", op: "concat" } }); st.inputs[1].backbone = "shared:optical"; ok("shared-late", small(st)); }
 

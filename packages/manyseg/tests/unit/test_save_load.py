@@ -74,7 +74,7 @@ CASES = {
                      lambda: {"t1": torch.randn(2, 3, 64, 64), "t2": torch.randn(2, 3, 64, 64)}),
     "shared_norms": (dict(inputs={"a": {"in_channels": 1, "backbone": "efficientnet_b0"},
                                   "b": {"in_channels": 2, "backbone": "shared:a",
-                                        "share_norm": True}},
+                                        "share_norm": True, "channel_adapter": "projection"}},
                           num_classes=2, decoder="unetplusplus"),
                      lambda: {"a": torch.randn(2, 1, 64, 64), "b": torch.randn(2, 2, 64, 64)}),
     "time_series": (dict(inputs={"ts": {"kind": "timeseries", "in_channels": 3,

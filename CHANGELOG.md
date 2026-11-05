@@ -22,6 +22,14 @@ First release. Python 3.10–3.14 (`manyseg-bench` lists 3.10–3.12), PyTorch �
   for timm's `BatchNormAct2d` layers). They load with plain BatchNorm; convert again to resume
   multi-GPU training.
 
+### Shared encoders
+
+* A `shared:` input with another channel count than the encoder must set `"channel_adapter":
+  "projection"`. A learned projection used to be added silently. Saved models that relied on that
+  no longer load: there's no migration, as this is the first release.
+* Any other `channel_adapter` on a `shared:` input is refused, as is `"projection"` with equal
+  channels. They used to be ignored.
+
 ### Saving quantised models
 
 * `manyseg.save` and `manyseg.load` take `quantize_weights` models (`.safetensors`, about 0.26x
