@@ -175,7 +175,9 @@ def _strides(specs, idx) -> str:
 
 def _read_levels(dec: nn.Module) -> list[int] | None:
     """Encoder levels a decoder reads, from its own attributes (no probe)."""
-    declared = getattr(dec, "read_levels", None)
+    from .conditioning.inject import declared_levels
+
+    declared = declared_levels(dec)
     if declared is not None:
         return sorted(int(i) for i in declared)
     levels = getattr(dec, "levels", None)

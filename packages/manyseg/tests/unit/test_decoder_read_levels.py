@@ -31,3 +31,30 @@ def test_declared_read_levels_match_the_probe(backbone, decoder, kwargs):
         pytest.skip(str(e))
     dec = model.decoder
     assert sorted(dec.read_levels) == probe_levels(dec, tuple(model.feature_specs), 3)
+
+
+def test_a_subclass_that_overrides_forward_is_probed_not_trusted():
+    """Its reads may differ from the parent's, whose read_levels describe the parent's forward."""
+    from manyseg.conditioning.inject import used_levels
+    from manyseg.decoders import UNetDecoder
+
+    class LastLevelOnly(UNetDecoder):
+        def forward(self, features):
+            return super().forward([f.detach() * 0 for f in features[:-1]] + [features[-1]])
+
+    model = create_model("resnet18", pretrained=False, num_classes=2)
+    specs = tuple(model.feature_specs)
+    dec = LastLevelOnly(specs)
+    assert used_levels(dec, specs) == [len(specs) - 1]
+    assert dec.read_levels != [len(specs) - 1]  # the inherited answer, which would be wrong
+
+
+def test_a_subclass_that_only_adds_options_keeps_the_declaration():
+    from manyseg.conditioning.inject import declared_levels
+    from manyseg.decoders import UNetDecoder
+
+    class Renamed(UNetDecoder):
+        pass
+
+    model = create_model("resnet18", pretrained=False, num_classes=2)
+    assert declared_levels(Renamed(tuple(model.feature_specs))) is not None
