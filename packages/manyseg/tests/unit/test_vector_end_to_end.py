@@ -280,7 +280,7 @@ def test_roofs_blocks_equal_whole_and_input(tmp_path):
               "distance": noisy(t["distance"], 2), "corner": noisy(t["corner"], 3),
               "direction": noisy(t["direction"], 4, 0.05, clip=False),
               "height": noisy(ndsm, 5, 0.05, clip=False)}
-    dec = block_decoder("roofs")  # corners decoder, planar_faces join, robust planes, J2 mesh
+    dec = block_decoder("roofs")  # corners decoder, planar_faces join, robust planes, mesh
     recs = decode_scene(fields, dec, BLOCK, HALO, scene=SCENE)
     whole = decode_scene(fields, dec, block=max(H, W), scene=SCENE)
     assert recs.stats["joined_in_combine"] > 0  # some clusters were joined across blocks

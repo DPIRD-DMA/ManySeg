@@ -794,7 +794,11 @@ and conditioning are configured by dicts only.
 > thresholds differed between folds and did not beat a fixed 0.3. A softplus density output
 > brought the density head's count MAE there to 2.9, from 7.5 for the raw head summed as
 > `count_from_density` does (10.1 clamped at 0); a floor of about +1.75 objects per image remains.
-> A ReLU output died (map at 0) and was removed. Softplus is the default since E011c found it no
+> Details of that run: the raw head had a mean signed error of +10.1 and correlation 0.80;
+> softplus had correlation 0.72, a floor of 2.4 on an empty tile, and starts at about 12 objects per
+> tile from its -4 bias. A ReLU output died: its bias drifted to -0.005, the largest count on any
+> image was 0.06 against true counts up to 27 (MAE 3.5, correlation 0.37), and it was removed.
+> Softplus is the default since E011c found it no
 > worse on OAM-TCD (test MAE 19.8 vs 19.3 raw, within the margin); `density_head(activation=None)`
 > keeps the raw head.
 

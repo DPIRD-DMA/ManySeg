@@ -690,3 +690,20 @@ def test_mesh_joins_have_descriptive_names(old):
         assert len(roof_mesh(faces, planes, join=join)) == 1
     with pytest.raises(ValueError, match="plane_intersection"):
         roof_mesh(faces, planes, join=old)
+
+
+def test_mesh_joins_differ_as_their_names_say():
+    """Two faces share the wall x = 40, but their planes meet at x = 42."""
+    faces = [shapely.box(0, 0, 40, 60), shapely.box(40, 0, 80, 60)]
+    planes = np.array([[0.1, 0, 5], [-0.1, 0, 13.4]])
+
+    def wall(join):  # the rings' vertices that start on the shared wall
+        rings = roof_mesh(faces, planes, join=join)
+        return [v for r, f in zip(rings, faces) for v, xy in zip(r, f.exterior.coords[:-1])
+                if xy[0] == 40]
+
+    still = wall("mean_height")
+    assert all(v[0] == 40 for v in still)
+    np.testing.assert_allclose([v[2] for v in still], 9.2)  # the mean of 9.0 and 9.4
+    moved = wall("plane_intersection")
+    assert all(40 < v[0] <= 42 for v in moved)
