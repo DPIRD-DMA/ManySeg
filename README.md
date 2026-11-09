@@ -400,7 +400,7 @@ help on your data, and an untested one is simply unknown.
 
 | Option | Result | Evidence |
 |---|---|---|
-| Separate encoders with `concat` or `gated` fusion, vs stacking bands | no demonstrated gain in the tested shared-grid cases; helped across a 25× resolution gap (one dataset) | Shared grid: E005, Sen1Floods11 (late fusion was worse on test); E056, MFNet RGB + thermal, +0.3 mIoU (1 seed, did not clear the screen). Different scales: E059, FLAIR #2 aerial 0.4 m + Sentinel-2 10 m, +2.9 test mIoU over stacking, mostly because stacking the upsampled S2 was 2.3 below aerial alone; the S2 encoder added little over aerial alone, and a monthly time series showed no demonstrated improvement over a median |
+| Separate encoders with `concat` or `gated` fusion, vs stacking bands | no demonstrated gain in the tested shared-grid cases; helped across a 25× resolution gap (one dataset) | Shared grid: E005, Sen1Floods11 (late fusion was worse on test); E056, MFNet RGB + thermal, +0.3 mIoU (1 seed, did not clear the screen). Different scales: E059, FLAIR #2 aerial 0.4 m + Sentinel-2 10 m, +2.9 test mIoU over stacking, mostly because stacking the upsampled S2 was 2.3 below aerial alone; the S2 encoder added little over aerial alone, and a monthly time series showed no demonstrated improvement over a median. E061: a wider S2 window (200 or 400 m instead of the 100 m footprint) did not pass its one-seed screen (−0.001 val mIoU for the better arm, 400 m) |
 | Fusion ops `add`, `attention`, `cross_attention` | not tested for accuracy | none |
 | Siamese encoder with `diff` or `concat_diff`, for change detection | helped | E022, OSCD and LEVIR-CD |
 | Per-input land-cover heads, for semantic change | helped | E023, SECOND only |
