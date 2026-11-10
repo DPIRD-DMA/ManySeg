@@ -1,7 +1,8 @@
 """Losses for dense heads, as plain functions on logits and targets (no state, no modules).
 
-* Segmentation: :func:`soft_dice` and :func:`dice_bce` (binary or one channel per label, on
-  logits), :func:`multiclass_dice` (softmax over classes, integer targets).
+* Segmentation: :func:`soft_dice` and :func:`dice_bce` (sigmoid, on logits; for several
+  channels the Dice pools all of them into one score per sample), :func:`multiclass_dice`
+  (softmax over classes, integer targets, one Dice per class).
 * Regression: :func:`masked_regression` (L1 / MSE over valid pixels).
 * Heatmaps for points, corners and keypoints: :func:`heatmap_focal` (CenterNet focal loss)
   with :func:`heatmap_peaks` for its positives, and :func:`distance_weighted_bce`, whose false
@@ -23,31 +24,18 @@ import torch.nn.functional as F
 from torch import Tensor
 
 from .points.losses import density_loss
-
-
-def _mask_for(mask: Tensor, ref: Tensor) -> Tensor:
-    """``mask`` shaped to broadcast against ``ref`` (B, C, H, W, or any shape): a (B, H, W) mask
-    of a 4-D ``ref`` gains a channel axis; otherwise it must have ``ref``'s rank, its batch size,
-    and each other dimension equal to ``ref``'s or 1. Anything else is a ValueError (silent
-    broadcasting would mix samples, e.g. a (B, H, W) mask read as (C, H, W))."""
-    m = mask
-    if ref.dim() == 4 and m.dim() == 3:
-        m = m.unsqueeze(1)
-    ok = (m.dim() == ref.dim() and m.shape[0] == ref.shape[0]
-          and all(a in (b, 1) for a, b in zip(m.shape[1:], ref.shape[1:])))
-    if not ok:
-        allowed = ("(B, H, W), (B, 1, H, W) or (B, C, H, W)" if ref.dim() == 4
-                   else "the prediction's shape (or 1 in non-batch dimensions)")
-        raise ValueError(f"mask must be {allowed}; got {tuple(mask.shape)} for prediction "
-                         f"{tuple(ref.shape)}")
-    return m
+from .utils.spatial import mask_for as _mask_for
 
 
 def soft_dice(logits: Tensor, target: Tensor, mask: Tensor | None = None,
               eps: float = 1.0) -> Tensor:
     """1 - Dice on sigmoid probabilities, per sample then averaged. Shapes (B, 1, H, W) (or
     (B, C, H, W)); ``mask`` (B, H, W), (B, 1, H, W) or like ``logits`` restricts the Dice to
-    valid pixels, whose values (even NaN) are ignored elsewhere; an empty mask gives 0."""
+    valid pixels, whose values (even NaN) are ignored elsewhere; an empty mask gives 0.
+
+    With several channels, the Dice is pooled over them: each sample's channels and pixels form
+    one set, giving one score per sample, so channels with many positive pixels dominate. For a
+    Dice per class, use :func:`multiclass_dice` (softmax classes) or call this per channel."""
     x, t = logits.float(), target.float()
     if mask is not None:
         w = _mask_for(mask, x)
@@ -72,7 +60,8 @@ def dice_bce(logits: Tensor, target: Tensor, pos_weight: float | None = None,
              bce_weight: float = 1.0) -> Tensor:
     """Binary Dice + BCE on logits. ``pos_weight`` up-weights positive pixels in the BCE term
     (useful for thin boundary classes); ``mask`` ((B, H, W), (B, 1, H, W) or like ``logits``)
-    restricts both terms to valid pixels."""
+    restricts both terms to valid pixels. The Dice term is :func:`soft_dice`: with several
+    channels it is pooled over them, one score per sample."""
     pw = None if pos_weight is None else torch.tensor(pos_weight, device=logits.device)
     x, t = logits.float(), target.float()
     if mask is None:
@@ -169,9 +158,12 @@ def distance_weighted_bce(logits: Tensor, target: Tensor, distance: Tensor, *,
     * outside it (``y == 0``) the negative term is weighted ``w(D) = 1 - exp(-D^2 /
       (2 tolerance^2))``: a false positive just next to the truth is cheap, one far away costs
       full BCE (CenterNet's penalty reduction, generalised to any geometry by the distance map);
-    * plus ``far_weight * p * D / max_distance`` outside the target: an extra penalty that grows
-      with distance (capped at ``max_distance``). At ``D = max_distance`` it adds ``far_weight``
-      times the BCE gradient of a confident false positive; the default 1 doubles it there.
+    * plus ``far_weight * p * D / max_distance`` outside the target: a penalty on the predicted
+      probability ``p`` that grows linearly with distance (capped at ``max_distance``), at most
+      ``far_weight`` per pixel. Its gradient with respect to the logit,
+      ``far_weight * (D / max_distance) * p * (1 - p)``, is largest at ``p = 0.5`` and vanishes
+      as ``p`` nears 0 or 1: it mostly pushes down uncertain far-away pixels, while a confident
+      false positive is pushed down by the weighted BCE term (logit gradient ``w(D) * p``).
 
     Both terms are averaged over pixels, like BCE, so the scale does not depend on image size or
     on how much geometry there is, and an empty image costs what BCE would charge for its

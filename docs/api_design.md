@@ -2,13 +2,16 @@
 
 Status: API for the first release, 0.1.0 (unreleased). Everything below is implemented and
 tested, with two exceptions stated where they appear: the `token` conditioning mode raises
-`NotImplementedError`, and the large-scene flow through ManyPred needs a ManyPred release that
-is not out yet.
+`NotImplementedError`, and the large-scene flow through ManyPred needs ManyPred's GitHub main
+(not yet in a PyPI release).
 
 ## Goals
 
 1. One function, `create_model`, covers the common case, and the objects it builds are ordinary
-   `nn.Module`s that can also be composed directly.
+   `nn.Module`s that can also be composed directly. A `backbone=` given as a module is used
+   as is: timm options (`channel_adapter`, `out_indices`, `backbone_kwargs`, a weights tag)
+   are errors, `in_channels` must match the module's, and with `inputs=` the one module object
+   is shared by every input that doesn't set its own `backbone`.
 2. A model's behaviour (inputs, outputs, shapes) is predictable from its construction arguments.
    Nothing about the return type depends on runtime values.
 3. Every module in a forward pass is compile- and export-friendly: no tensor-dependent Python
@@ -96,9 +99,10 @@ out["water_area"]    # (N, 1)
 
 Heads return raw logits or values: activations and losses live outside the model. Config keys
 name directions: an input's bands are `in_channels`, a head's outputs `out_channels`, and a
-raw metadata vector's width `num_features`. `scope` is `"pixel"` (default) or `"image"`;
-`"segmentation"` heads are pixel heads and `"classification"` heads image heads (the other
-pairing is an error), while `"regression"` works for either. Image heads pool the deepest encoder feature by default
+raw metadata vector's width `num_features`. `scope` is `"pixel"` or `"image"`; it defaults to
+`"image"` for `"classification"` heads and `"pixel"` otherwise. `"segmentation"` heads are pixel
+heads and `"classification"` heads image heads (the other pairing is an error), while
+`"regression"` works for either. Image heads pool the deepest encoder feature by default
 (`"source": "decoder"` selects the decoder output). `{"type": "regression", "uncertainty": True}`
 returns `2·C` channels, `[mean, log_variance]`, for heteroscedastic losses such as Gaussian NLL.
 
@@ -106,7 +110,8 @@ returns `2·C` channels, `[mean, log_variance]`, for heteroscedastic losses such
 
 A model whose heads are all `"scope": "image"` builds **no decoder** (unless a head sets
 `"source": "decoder"`): it is an encoder, a
-global average pool of the deepest feature and a linear layer per head, i.e. a classifier or
+global average pool of the deepest feature (over the unpadded region only, when the input was
+padded) and a linear layer per head, i.e. a classifier or
 regressor. Everything else composes as for dense models: multiple inputs at different
 resolutions, fusion, metadata conditioning (`film` modulates the pooled feature; `head` and
 `channels` as usual), uncertainty heads, export and quantisation.
@@ -267,7 +272,8 @@ out = model({"optical": o, "sar": s})
   in front of one shared backbone. Inputs must share spatial size (`same_grid`). Per-input
   encoder keys (`backbone`, `pretrained`, `channel_adapter`, `out_indices`,
   `backbone_kwargs`) must agree across inputs, and they then override the top-level arguments.
-  Conflicting values, and a per-input `rgb_indices`, are errors.
+  Conflicting values, and a per-input `rgb_indices`, are errors. A fixed-size backbone pads
+  the stacked input up to its size and the outputs are cropped back.
 * **Intermediate fusion**: each input has its own backbone. Features with the same stride
   are fused by an op (`concat`, `add`, `gated`, `attention`, `cross_attention`, and for
   change detection `diff`, `concat_diff`) whose output has the primary input's channels. Strides that are not selected, or that exist only in the
@@ -365,7 +371,9 @@ the order-keeping temporal aggregations are `{"type": "concat", "dates": T}` and
 **Semantic change** (what changed into what) adds a land-cover head per date. A head with
 `"input": "<name>"` reads that input's own (unfused) features through its own decoder
 (default: the model's decoder type); `"share": "<head>"` reuses another per-input head's
-decoder and head, so both dates are mapped by the same weights:
+decoder and head, so both dates are mapped by the same weights. With one raster input plus
+vector (metadata) inputs, `"input": "<the raster>"` likewise gives the head its own decoder;
+naming a vector input is an error.
 
 ```python
 model = create_model(
@@ -432,9 +440,10 @@ out = model({"s2": s2, "meta": meta})                   # optional: "meta_mask":
 **Input convention.** A vector input is **one packed float tensor `(B, N)`**. Its columns are
 the fields in declaration order: `coords` takes two columns (lat, then lon), `categorical`
 takes one column holding the id, and every other type takes one column. A dict of per-field
-tensors is rejected with a `TypeError` that points to `MetadataEncoder.pack`. One tensor per
-vector input keeps the model input a flat `dict[str, Tensor]`: a single ONNX input whose only
-dynamic dimension is the batch, and a single array per sample in a data loader.
+tensors is rejected with a `TypeError`: build the tensor with
+`model.pack_metadata(name, {field: values})`, which calls that input's `MetadataEncoder.pack`.
+One tensor per vector input keeps the model input a flat `dict[str, Tensor]`: a single ONNX
+input whose only dynamic dimension is the batch, and a single array per sample in a data loader.
 
 **Field encodings** (`manyseg.conditioning.FIELD_TYPES`):
 
@@ -531,14 +540,15 @@ line up exactly. ManySeg handles this explicitly:
   the padded output would stretch the padding into the prediction), and `tiling_spec()`
   reports the padding multiple either way.
   (One raster plus vector inputs builds the ordinary single-input model, where
-  `pad_to_stride=False` turns padding off.)
+  `pad_to_stride=False` turns padding off, except for a fixed-size backbone; see below.)
 * Decoders resize the upsampled feature to each skip's exact size rather than assuming
   `2×`, so they also work when padding is disabled and a backbone rounds feature sizes up.
 * Backbones that only run at one size (MaxViT, CoAtNet, LeViT, EfficientFormerV2, Hiera:
   window partitions or positional tables baked in) are detected at construction by a
   meta-device probe and marked `fixed_size` at their native size, or at `img_size` when
   `backbone_kwargs={"img_size": ...}` is given. Smaller inputs are padded up to it and the
-  output is cropped back (also for one input of a multi-input model). Larger inputs raise a `ValueError` that names the backbone and the
+  output is cropped back, whatever `pad_to_stride` says (also for early fusion and for one
+  input of a multi-input model). Larger inputs raise a `ValueError` that names the backbone and the
   `img_size` fix. Nothing is ever silently resized.
 
 ### Reduced output resolution
@@ -599,7 +609,8 @@ They accept `out_stride` only if it equals that stride; anything else is a `Valu
 
 **`input_cross`** (`unet` only: `decoder_kwargs={"input_cross": True}`, default off). It adds
 fastai's full-resolution stage to the SMP-style U-Net: the raw input image is concatenated after
-the last block, followed by fastai's residual block (about +7k parameters). It requires
+the last block, followed by fastai's residual block (about +7k parameters). It is the stage the
+`fastai_unet` decoder calls `last_cross`. It requires
 `out_stride=1` and a single raster input.
 
 > **Evidence (E012, Sen1Floods11):** it recovered 83% (ResNet-34) and 81% (PVTv2-b2) of
@@ -644,7 +655,7 @@ bias (about 6 px at init) at every stride.
 | helper | for | rule |
 | --- | --- | --- |
 | `downsample_labels(y, s, ignore_index, mode="mode")` | class ids | majority per block; ignored pixels and padding never vote; all-ignored block → `ignore_index`; ties → lowest id. `mode="nearest"` takes the block-centre pixel. Pass `num_classes` to avoid device syncs. |
-| `downsample_mean(x, s, valid=None)` | continuous targets | mean over each block's in-image (and `valid`) pixels |
+| `downsample_mean(x, s, valid=None)` | continuous targets | mean over each block's in-image (and `valid`) pixels; `valid` is `(B, H, W)`, `(B, 1, H, W)` or `(B, C, H, W)` |
 | `downsample_sum(x, s)` | density targets | block sums, so the count is preserved |
 | `downsample_max(x, s)` | heatmaps, thin boundaries | block maximum: keeps peaks; "any" for boolean maps |
 | `upsample_output(y, (H, W), s, mode)` | predictions | bilinear (logits, values) or nearest (labels, any dtype), cropped to `H × W` |
@@ -694,8 +705,10 @@ band. Take RGB plus three 0/1 validity masks (`in_channels=6`): `repeat` gives e
 of an RGB filter and halves the filters on the image channels. Masks are 1 almost everywhere,
 so at init they add a near-constant offset to the stem output, and the image signal is halved.
 For masks, quality flags and other channels that are not image bands, `rgb_plus_zero` starts
-as the exact RGB model and the extra channels learn from zero weights. Pass `rgb_indices` if
-the RGB bands are not channels 0–2. `describe()` lists which pretrained filter each input
+as the exact RGB model and the extra channels learn from zero weights. If the RGB bands are not
+channels 0–2, pass `rgb_indices` in that input's config (`inputs={"s2": {..., "rgb_indices":
+[3, 2, 1]}}`; not with early fusion) or in `backbone_kwargs` (top-level or per input; a
+per-input `rgb_indices` wins over a top-level one); it is not a `create_model` argument. `describe()` lists which pretrained filter each input
 channel starts from. Training does recover from the perturbation: in the OmniCloudMask runs
 (see [Missing bands](#missing-bands)), mask channels under `repeat` ended within noise of no
 mask channels. `rgb_plus_zero` was not compared there, so treat it as the safer start, not a
@@ -802,7 +815,7 @@ count = count_from_density(out["density"])
 
 | Preset | Heads | Targets (`manyseg.*.targets`) | Post-processing |
 | --- | --- | --- | --- |
-| `instance_heads(num_classes=1, distance="normalized", decoders=None)` | `extent` (1 ch, or C+1 with background), `boundary` (1), `distance` (1, regression) | `instance_targets(ids, boundary_width=1, boundary_mode="inner"/"outer"/"both")`: exact EDT; distance is 1 + distance to the instance's edge, normalised per instance; tile borders are not boundaries | seeds = extent ∧ ¬boundary ∧ distance > t; every component gets at least one seed; `backend="auto"` (default): skimage watershed when scikit-image is installed (`manyseg[instances]`), else seeded growth in torch |
+| `instance_heads(num_classes=1, decoders=None)` | `extent` (1 ch, or C+1 with background; `instance_losses` trains C+1 with cross-entropy + multiclass Dice against `instance_targets(semantic=...)`), `boundary` (1), `distance` (1, regression) | `instance_targets(ids, boundary_width=1, boundary_mode="inner"/"outer"/"both")`: exact EDT; distance is 1 + distance to the instance's edge, normalised per instance; tile borders are not boundaries | seeds = extent ∧ ¬boundary ∧ distance > t; every component gets at least one seed; `backend="auto"` (default): skimage watershed when scikit-image is installed (`manyseg[instances]`), else seeded growth in torch |
 | `point_heads(heatmap="regression"/"segmentation", offsets=False)` | `heatmap` (1), `offset` (2: dy, dx) | `gaussian_heatmap(points, size, sigma)`, `heatmap_from_instances` (centroids rounded to pixels; fixed or size-scaled σ), `offset_targets` (to exact centroids), `points_from_boxes` (YOLO / `xyxy` / COCO `xywh` → `(y, x)`, optional σ from box size) | `find_peaks` (max-pool NMS; optional `smooth_sigma` blur and `mask`), `calibrate_threshold`, `group_by_offsets` → instance ids, `panoptic_labels` |
 | `density_head(activation="softplus"/None)` | `density` (1; > 0 with softplus, the default since E011c) | `density_map(points, size, sigma)`: each point's Gaussian sums to exactly 1 inside the image; `density_loss` (target × 2πσ², valid mask, optional count L1) | `count_from_density(value_scale=, mask=)` |
 
@@ -956,10 +969,10 @@ may be cut). Roof records hold `id`, `part` (pieces a join split off), `geometry
 versions of each task: [`examples/14_vector_footprints.py`](../examples/14_vector_footprints.py)
 to [`18_vector_points.py`](../examples/18_vector_points.py).
 
-**Large scenes with ManyPred** (*needs ManyPred's first release, or its GitHub main, for
-`merge="cut"` and `BlockPostprocess`*). ManyPred stitches the tiles' outputs and calls the
-decoder on each block of the stitched rasters while it predicts, so one call writes the
-vectors. Memory stays bounded when `load_func` returns a lazy reader, as here, with the default
+**Large scenes with ManyPred** (*needs ManyPred's GitHub main for `merge="cut"` and
+`BlockPostprocess`; they are not yet in a PyPI release*). ManyPred stitches the tiles' outputs
+and calls the decoder on each block of the stitched rasters while it predicts, so one call
+writes the vectors. Memory stays bounded when `load_func` returns a lazy reader, as here, with the default
 GeoTIFF writer and no `postprocess=`: it then holds a strip of block rows plus `2 * halo` rows per
 field. `load_raster` reads the whole scene, and such scenes are stitched in memory. Return
 `(reader, reader.profile)`, not the reader alone, or the outputs lose their transform and CRS.
@@ -1075,7 +1088,7 @@ models' loss). `manyseg-bench` has training tasks that call them. Both use built
 | Preset | Heads | Targets | Losses, and the bench task (`manyseg_bench.tasks`) | Decoding |
 | --- | --- | --- | --- | --- |
 | `corner_line_heads()`: footprints, roof faces (E036, E038, E047) | `extent`, `boundary`, `distance` (as `instance_heads`), `corner` (1), `direction` (2: `cos 2t`, `sin 2t`) | `instance_targets(ids, boundary_width=2)` + `corner_targets(polygons, shape)` | `corner_line_losses`; `CornerLineTask` (`"corner_lines"`): instance loss + CenterNet focal (corner) + masked L1 (direction on outlines); PQ | `instances_from_outputs` → `polygons_from_corners` |
-| `road_heads()`: roads (E039, E044) | `mask` (1), `line` (1), `keypoints` (3: junction, end, crossing), `direction` (4: two modes) | `road_targets(graph, shape, crossings=, width=6)` | `road_losses`; `RoadGraphTask` (`"roads"`): Dice + BCE (mask, line) + focal over the keypoints (positives floored at 16) + L1 (mode 1 on roads, mode 2 at crossings); mask IoU | `graph_from_road_heads` |
+| `road_heads()`: roads (E039, E044) | `mask` (1), `line` (1), `keypoints` (3: junction, end, crossing), `direction` (4: two modes) | `road_targets(graph, shape, crossings=, width=6)` | `road_losses`; `RoadGraphTask` (`"roads"`): Dice + BCE (mask, line) + focal over the keypoints (positives floored at 16) + L1 (mode 1 on roads, mode 2 where two road chains overlap at an angle: crossings and junctions); mask IoU | `graph_from_road_heads` |
 
 Targets carry pixel widths, sigmas and angles, so augment them only with the 8 exact dihedral
 transforms (`manyseg.vectors.dihedral(a, d, direction=True)` for the direction fields: a quarter
@@ -1352,7 +1365,8 @@ compare_outputs(model, ep, test_batches)
 ```
 
 `quantize_pt2e` returns an `ExportedProgram`, like `export_model`. H/W stay dynamic, and the
-batch too with `dynamic_batch=True`. The default quantizer is torchao's
+batch too with `dynamic_batch=True`; with `dynamic=False`, `dynamic_batch=True` gives a dynamic
+batch at the example's fixed H/W. The default quantizer is torchao's
 `X86InductorQuantizer`, with per-channel int8 weights and per-tensor uint8 activations. Pass
 `quantizer=` to target another backend. Calling `ep.module()` eagerly runs the int8 graph as
 quantise/dequantise pairs in float. That shows the accuracy cost, but it is about twice as
@@ -1371,8 +1385,10 @@ slow as float. The speedup only appears after `torch.compile` with inductor free
 A full-range program (`reduce_range=False`, the default on VNNI CPUs) warns when it is made, and
 records the choice in the program (it survives `torch.export.save` / `load`). In the deployment
 script, `manyseg.quantize.check_deployment(ep)` raises if this CPU cannot run that program
-correctly. Window-attention backbones are rejected before export, because their
-dynamic export hangs rather than fails.
+correctly. Window-attention backbones (Swin, Swin V2, DaViT) are rejected before a dynamic
+export (`dynamic=False` quantises at the example's fixed size; add `dynamic_batch=True` to keep
+the batch dynamic), because their dynamic export
+fails inside timm (it used to hang).
 
 **Saved files.** `manyseg.save` keeps the metadata and `tiling_spec()` for both routes, and
 loading needs `manyseg[quant]`. Quantised files use save format 2 like float files; a
@@ -1383,7 +1399,8 @@ loading needs `manyseg[quant]`. Quantised files use save format 2 like float fil
   and puts those tensors back.
 * A `quantize_pt2e` file is a `.pt2` archive with the metadata inside and no sample inputs, the one
   part `torch.export.save` always pickles. `save` needs `source=`, the float model, and refuses a
-  program it can't write, such as a dynamic-size ViT (use `dynamic=False`).
+  program it can't write, such as a dynamic-size ViT (use `dynamic=False`). A program loaded
+  back (the `QuantizedProgram` or its `.program`) can be saved again, also with `source=`.
 * `load` on a `.pt2` returns a `QuantizedProgram`, not an `nn.Module`, because `ep.module()` raises
   on `.eval()`. It has `__call__`, `tiling_spec()`, `program`, `module`, `device`, `batch_size`
   (None if dynamic), `fixed_size` (None if dynamic) and `input_shapes`. `map_location` sets its

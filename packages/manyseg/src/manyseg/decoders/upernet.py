@@ -37,7 +37,8 @@ class UPerNetDecoder(nn.Module):
         in_specs: The encoder features' specs.
         channels: Width of the PPM, FPN and fusion convolutions.
         pool_scales: Output sizes of the pyramid pooling branches.
-        out_stride: Output stride (default: stride 4, the fusion's).
+        out_stride: May only restate the native output stride (4, the fusion's; any other
+            value is an error, see ``check_out_stride``).
     """
 
     def __init__(self, in_specs: Sequence[FeatureSpec], channels: int = 256,

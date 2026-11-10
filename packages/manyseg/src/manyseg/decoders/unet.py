@@ -88,7 +88,9 @@ class UNetDecoder(nn.Module):
         norm: ``"batch"``, ``"group"`` or ``None``.
         upsample: ``"nearest"`` (SMP-equivalent default), ``"bilinear"`` or ``"aligned"``.
         input_cross: Add fastai's full-resolution stage: the raw input image is concatenated
-            to the stride-1 output, followed by a residual block (needs ``out_stride=1``).
+            to the stride-1 output, followed by a residual block (needs ``out_stride=1``). The
+            same stage is ``last_cross`` of :class:`~manyseg.decoders.FastaiUNetDecoder`
+            (there on by default at ``out_stride=1``; here off by default).
     """
 
     def __init__(

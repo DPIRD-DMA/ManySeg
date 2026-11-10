@@ -29,7 +29,7 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor
 
-from .spatial import crop_to
+from .spatial import crop_to, mask_for
 
 SCALES = (1, 0.5, 0.25, 0.125)
 """Allowed per-head ``"scale"`` values (output resolution relative to the input)."""
@@ -108,11 +108,17 @@ def downsample_labels(labels: Tensor, scale, ignore_index: int | None = None,
 @torch.no_grad()
 def downsample_mean(x: Tensor, scale, valid: Tensor | None = None) -> Tensor:
     """Area average ``(..., H, W)`` over each block's in-image pixels (and ``valid`` pixels if
-    given); a block without any such pixel is 0."""
+    given); a block without any such pixel is 0.
+
+    ``valid`` (bool) is per pixel: for a ``(B, C, H, W)`` ``x`` it is
+    ``(B, H, W)`` or ``(B, 1, H, W)`` (shared by all channels) or ``(B, C, H, W)``; otherwise it
+    has ``x``'s shape, with 1 allowed in any dimension but the first. Other shapes raise
+    ValueError. Pixels outside ``valid`` are ignored even if they hold NaN."""
     f = scale_factor(scale)
     if f == 1 and valid is None:
         return x
-    w8 = torch.ones_like(x) if valid is None else valid.to(x.dtype).expand_as(x)
+    w8 = (torch.ones_like(x) if valid is None
+          else mask_for(valid, x, "valid").to(x.dtype).expand_as(x))
     if valid is not None:  # invalid pixels may hold NaN (nodata): drop them, don't multiply
         x = torch.where(w8 != 0, x, torch.zeros_like(x))
     s = _blocks(x * w8, f).sum(-1)

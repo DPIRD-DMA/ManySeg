@@ -183,8 +183,10 @@ def heatmap_from_instances(instance_mask: Tensor, sigma: float | None = 2.0,
     """Centre heatmap from an instance mask (centres = centroids rounded to pixels).
 
     Use ``sigma`` for a fixed width or ``sigma_scale`` for ``max(min_sigma, sigma_scale *
-    sqrt(area))``.
+    sqrt(area))`` (``sigma_scale`` takes precedence); one of them is required.
     """
+    if sigma is None and sigma_scale is None:
+        raise ValueError("heatmap_from_instances needs a fixed sigma or a sigma_scale")
     m = instance_mask.long()
     if m.dim() == 2:
         m = m[None]

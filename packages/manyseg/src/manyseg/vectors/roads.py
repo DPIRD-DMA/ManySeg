@@ -116,7 +116,8 @@ def graph_from_road_heads(
         keypoints (np.ndarray | torch.Tensor): ``(3, H, W)`` junction, end and crossing
             heatmaps (probabilities; logits with ``logits=True``).
         direction (np.ndarray | torch.Tensor): ``(4, H, W)`` two ``(cos 2t, sin 2t)`` modes (the
-            second only at crossings).
+            second where two road chains overlap at an angle: crossings and junctions, as
+            :func:`road_targets` sets it).
         threshold: Road-surface threshold, as :func:`graph_from_mask`.
         spur: Dangling branches shorter than this (px) are removed, as :func:`graph_from_mask`.
         gap: Mutually-nearest dangling ends closer than this (px) are joined (0 disables), as

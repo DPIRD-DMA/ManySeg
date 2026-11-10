@@ -20,6 +20,7 @@ import numpy as np
 from ..utils._peaks import peak_pixels, refine
 from .graph import _deps
 from .polygons import _outline
+from .road_targets import _gaussians
 
 
 def _trimmed_line(pts: np.ndarray, keep_px: float = 1.5):
@@ -257,17 +258,6 @@ def corner_targets(polygons, shape: tuple[int, int], *, tolerance: float = 1.5,
             direction[0][m] = math.cos(2 * th)
             direction[1][m] = math.sin(2 * th)
             mask |= m
-    corner = np.zeros((H, W), np.float32)
     pts = np.concatenate(pts) if pts else np.zeros((0, 2))
-    rr = int(math.ceil(3 * sigma))
-    for x, y in pts:
-        c0, r0 = int(math.floor(x)) - rr, int(math.floor(y)) - rr
-        cs, rs = max(c0, 0), max(r0, 0)
-        ce, re = min(c0 + 2 * rr + 1, W), min(r0 + 2 * rr + 1, H)
-        if cs >= ce or rs >= re:
-            continue
-        yy, xx = np.mgrid[rs:re, cs:ce]
-        d2 = (xx + 0.5 - x) ** 2 + (yy + 0.5 - y) ** 2
-        g = np.exp(-d2 / (2 * sigma ** 2)).astype(np.float32)
-        np.maximum(corner[rs:re, cs:ce], g, out=corner[rs:re, cs:ce])
+    corner = _gaussians(pts, sigma, (H, W))  # symmetric window: exact under augment.dihedral
     return {"corner": corner, "direction": direction, "direction_mask": mask}

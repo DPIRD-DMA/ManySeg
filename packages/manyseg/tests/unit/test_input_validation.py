@@ -71,7 +71,7 @@ def test_head_config_errors():
         return create_model(backbone="resnet18", pretrained=False, heads={"h": head})
 
     with pytest.raises(ValueError, match="'scope': 'image'"):
-        build({"type": "classification", "out_channels": 5})
+        build({"type": "classification", "out_channels": 5, "scope": "pixel"})
     with pytest.raises(ValueError, match="True or False"):
         build({"type": "regression", "out_channels": 1, "uncertainty": "no"})
     with pytest.raises(ValueError, match="needs a 'type'"):

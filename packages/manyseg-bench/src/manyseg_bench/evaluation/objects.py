@@ -7,8 +7,8 @@ Conventions:
 * Over-/under-segmentation (per ground-truth object, partner = predicted object with the largest
   overlap): ``over_seg = 1 - |G ∩ P| / |G|`` and ``under_seg = 1 - |G ∩ P| / |P|``, averaged over
   ground-truth objects (field-delineation convention, e.g. Persello et al. 2019).
-* Points: one-to-one matching within ``radius`` pixels (optimal via scipy if installed,
-  otherwise greedy by distance).
+* Points: one-to-one matching within ``radius`` pixels; TP = size of a maximum matching
+  (exact, no scipy needed, so results do not depend on what is installed).
 """
 
 from __future__ import annotations
@@ -106,27 +106,69 @@ class ObjectMetrics:
                 "under_seg": self.us_sum / n}
 
 
+def _max_matching(adj: list[list[int]], n_right: int) -> int:
+    """Size of a maximum-cardinality matching of a bipartite graph (Hopcroft-Karp). ``adj[u]``
+    lists the right vertices of left vertex ``u``. Iterative: long chains of points cannot hit
+    the recursion limit."""
+    from collections import deque
+
+    n_left, inf = len(adj), len(adj) + n_right + 1
+    match_l, match_r = [-1] * n_left, [-1] * n_right
+    while True:
+        dist = [inf] * n_left
+        q = deque(u for u in range(n_left) if match_l[u] == -1)
+        for u in q:
+            dist[u] = 0
+        found = False
+        while q:  # BFS layers from the free left vertices
+            u = q.popleft()
+            for v in adj[u]:
+                w = match_r[v]
+                if w == -1:
+                    found = True
+                elif dist[w] == inf:
+                    dist[w] = dist[u] + 1
+                    q.append(w)
+        if not found:
+            return sum(m != -1 for m in match_l)
+        nxt = [0] * n_left
+        for s in range(n_left):  # DFS along the layers, with an explicit stack
+            if match_l[s] != -1:
+                continue
+            stack = [s]
+            while stack:
+                u = stack[-1]
+                if nxt[u] == len(adj[u]):
+                    dist[u] = inf  # dead end for this phase
+                    stack.pop()
+                    continue
+                v = adj[u][nxt[u]]
+                nxt[u] += 1
+                w = match_r[v]
+                if w == -1:  # augmenting path: flip it (each u used edge adj[u][nxt[u] - 1])
+                    for x in stack:
+                        y = adj[x][nxt[x] - 1]
+                        match_l[x], match_r[y] = y, x
+                    break
+                if dist[w] == dist[u] + 1:
+                    stack.append(w)
+
+
 def match_points(pred: Tensor, gt: Tensor, radius: float) -> tuple[int, int, int]:
-    """One-to-one matching of ``(N, 2)`` point sets within ``radius``: (tp, fp, fn)."""
+    """One-to-one matching of ``(N, 2)`` point sets within ``radius``: (tp, fp, fn).
+
+    ``tp`` is the size of a maximum one-to-one matching of pairs at distance <= ``radius`` (the
+    count a minimum-distance assignment such as scipy's ``linear_sum_assignment`` with
+    out-of-radius pairs forbidden gives), computed exactly without scipy. Which pairs match
+    when several maximum matchings exist does not change the counts.
+    """
     if len(pred) == 0 or len(gt) == 0:
         return 0, len(pred), len(gt)
     d = torch.cdist(pred.double().cpu(), gt.double().cpu())
-    try:
-        from scipy.optimize import linear_sum_assignment
-
-        cost = torch.where(d <= radius, d, torch.full_like(d, 1e9)).numpy()
-        r, c = linear_sum_assignment(cost)
-        tp = int(sum(cost[i, j] < 1e9 for i, j in zip(r, c)))
-    except ImportError:
-        tp, used_p, used_g = 0, set(), set()
-        for flat in torch.argsort(d.reshape(-1)).tolist():
-            i, j = divmod(flat, d.shape[1])
-            if d[i, j] > radius:
-                break
-            if i not in used_p and j not in used_g:
-                used_p.add(i)
-                used_g.add(j)
-                tp += 1
+    adj: list[list[int]] = [[] for _ in range(len(pred))]
+    for i, j in (d <= radius).nonzero().tolist():
+        adj[i].append(j)
+    tp = _max_matching(adj, len(gt))
     return tp, len(pred) - tp, len(gt) - tp
 
 

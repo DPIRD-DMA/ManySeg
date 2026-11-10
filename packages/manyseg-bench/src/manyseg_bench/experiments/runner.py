@@ -104,6 +104,23 @@ def weights_normalisation(w, band_names, dn_per_unit: float) -> tuple[list, list
     return mean, std
 
 
+def split_train_stats(images) -> tuple:
+    """Per-channel ``(mean, std)`` of a training split's images (dict inputs: per input).
+
+    Pooled split schemes (``events:K:F``) normalise with these instead of ``meta.json`` so no
+    held-out chip enters the statistics. Not used when remote-sensing weights fix the
+    normalisation: that comes from pretraining, not from the data, so it cannot leak, and the
+    weights' input handling (e.g. clipping to [0, 1]) expects it.
+    """
+    stats = ({k: channel_stats(v) for k, v in images.items()} if isinstance(images, dict)
+             else {None: channel_stats(images)})
+    mean = {k: m for k, (m, _) in stats.items()}
+    std = {k: sd for k, (_, sd) in stats.items()}
+    if None in mean:
+        return mean[None], std[None]
+    return mean, std
+
+
 def resolution_info(model) -> dict | None:
     """Output-resolution settings of a ManySeg model (None for other providers): the shared
     decoder's ``out_stride``, per-task-decoder strides and each pixel head's ``scale``."""
@@ -216,14 +233,8 @@ def run_training(
         mean, std = ({inp: m}, {inp: s}) if isinstance(mean, dict) else (m, s)
         norm_source = f"weights {rw.key} (pretraining normalisation)"
         spec = ModelSpec(**{**spec.to_dict(), "band_names": list(bands)})
-    if split != "official":  # pooled splits: never let held-out chips into the statistics
-        imgs = train_split.images
-        stats = ({k: channel_stats(v) for k, v in imgs.items()} if isinstance(imgs, dict)
-                 else {None: channel_stats(imgs)})
-        mean = {k: m for k, (m, _) in stats.items()}
-        std = {k: sd for k, (_, sd) in stats.items()}
-        if None in mean:
-            mean, std = mean[None], std[None]
+    if split != "official" and rw is None:
+        mean, std = split_train_stats(train_split.images)
         norm_source = f"train split of {split}"
     imgs = train_split.images
     img_size = tuple((next(iter(imgs.values())) if isinstance(imgs, dict) else imgs).shape[-3:-1])

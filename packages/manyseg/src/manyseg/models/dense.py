@@ -36,7 +36,11 @@ class DenseModel(nn.Module):
         pad_to_stride: Zero-pad bottom/right to ``backbone.input_divisor`` and crop outputs
             back, which keeps outputs pixel-aligned with inputs. If False, pixel outputs are
             resized to the input size instead. A multi-input encoder (one taking a dict) always
-            pads its inputs itself, so its outputs are always cropped and this has no effect.
+            pads its inputs itself, and a fixed-size backbone always gets its input padded to
+            that size, so their outputs are always cropped and this has no effect.
+
+    Image-scope heads pool over the valid (unpadded) region only: when the input was padded,
+    their feature map is first cropped to ``ceil(H / s) x ceil(W / s)`` (``s`` its stride).
 
     Pixel heads return the primary input's ``H x W``, or ``ceil(H / f) x ceil(W / f)`` for a head
     with ``scale = 1/f`` (output pixel ``(i, j)`` covers input pixels ``[i*f, (i+1)*f) x
@@ -84,7 +88,10 @@ class DenseModel(nn.Module):
         # a multi-input encoder pads each input itself (whatever pad_to_stride says), so its
         # outputs are cropped to the unpadded region, never resized (that would stretch the
         # padding into the prediction)
-        self._crops = pad_to_stride or getattr(backbone, "primary", None) is not None
+        # (likewise a fixed-size backbone: _pad pads up to its size whatever pad_to_stride says)
+        self._pads_itself = getattr(backbone, "primary", None) is not None
+        self._crops = (pad_to_stride or self._pads_itself
+                       or getattr(backbone, "fixed_size", None) is not None)
         self.divisor = int(getattr(backbone, "input_divisor", 1)) if pad_to_stride else 1
         # Image heads read the deepest encoder level; with late fusion the specs are every
         # input's levels concatenated, and the heads are built for the primary input's group.
@@ -246,7 +253,7 @@ class DenseModel(nn.Module):
             "outputs": outputs,
             "pad_multiple": (int(getattr(backbone, "grid_divisor",
                                          getattr(backbone, "input_divisor", 1)))
-                             if self._crops else 1),
+                             if self.pad_to_stride or self._pads_itself else 1),
             "max_size": tuple(fixed) if fixed is not None else None,
             "normalize": saved.get("normalize"),
             "bands": self._band_names(saved.get("bands")),
@@ -318,6 +325,11 @@ class DenseModel(nn.Module):
             inp = self._decode_cond(f"task_{name}", self.task_decoders[name], x, feats, cond,
                                     valid)
         head = self.heads[name]
+        if name not in self._pixel_heads and self._crops:
+            # image heads pool: crop the padding away first so it does not dilute the mean
+            # (floor division keeps the sizes symbolic for torch.export)
+            s = self._source_stride(name, src)
+            inp = crop_to(inp, (h + s - 1) // s, (w + s - 1) // s)
         # a head bias goes before a built-in output activation, so softplus heads stay > 0
         late = (cond is not None and getattr(head, "activation", None) is not None
                 and name in self.conditioner.head_bias)
@@ -332,6 +344,14 @@ class DenseModel(nn.Module):
         if cond is not None:
             y = self.conditioner.head(name, y, cond)
         return head.activate(y) if late else y
+
+    def _source_stride(self, name: str, src: str) -> int:
+        """Stride of the feature map head ``name`` reads."""
+        if src == "decoder":
+            return self.decoder.out_spec.stride
+        if src == "encoder":
+            return self.backbone.feature_specs[self._deepest].stride
+        return self.task_decoders[name].out_spec.stride
 
     def _pad(self, x: Tensor) -> Tensor:
         fixed = getattr(self.backbone, "fixed_size", None)

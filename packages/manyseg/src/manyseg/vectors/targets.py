@@ -12,7 +12,7 @@ Every function returns float32 / int32 / bool numpy arrays per tile, keyed by th
 presets and bench tasks use (``manyseg.vectors.presets`` and the tasks in ``manyseg-bench``,
 the benchmark package in the GitHub repository, not on PyPI).
 Rasterising follows rasterio (pixel centres inside; where polygons overlap, the later one wins),
-as the experiments' encoders did.
+as the trained models' targets were made.
 """
 
 from __future__ import annotations
@@ -145,9 +145,15 @@ def field_targets(polygons, shape: tuple[int, int], *, boundary_width: float = 2
     float32 (``InstanceTask(boundary_width=2, distance="absolute")`` in ``manyseg-bench``).
 
     ``distance`` is ``"absolute"`` (px) by default (as good as normalised on trained FTW
-    models, and an instance cut by a tile edge keeps its whole-scene values, so large scenes
-    stitch without seam errors); train with the same setting and decode with a
-    ``seed_threshold`` in pixels (``block_decoder("fields")`` does).
+    models); train with the same setting and decode with a ``seed_threshold`` in pixels
+    (``block_decoder("fields")`` does). Absolute distances do not depend on how much of an
+    instance the tile holds, as normalised ones do, but they can still differ from the
+    whole scene's near the tile border: replicate padding removes the false edge along the
+    border, yet where an instance's nearest true edge lies outside the tile, its pixels near
+    the border measure to a farther edge inside the tile (an instance on scene rows 10-25 cut
+    by a tile of rows 0-19 has 10 px at row 19 where the scene has 7). Encode tiles with a
+    halo (crop the targets after encoding a larger window) when the values must match the
+    scene's.
 
     Which fields count: every 4-connected piece of a field is its own
     instance, pieces under ``min_area`` pixels are dropped, and holes holding only background

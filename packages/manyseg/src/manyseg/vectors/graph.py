@@ -307,7 +307,8 @@ def _join_degree2(nodes, chains):
 
 # A road cut by the image border ends its skeleton about half a road width inside (3.25 px for
 # 6 px roads); within this margin an end counts as "at the border": spur pruning keeps it and
-# bridge_ends does not join it to another cut end (E2E test, 2026-10-29; was 3 px).
+# bridge_ends does not join it to another cut end. The margin must exceed that inset (a 3 px
+# margin is below the 3.25 px of a cut 6 px road); 5 px leaves room for skeleton jitter.
 BORDER_MARGIN = 5.0
 
 
@@ -446,7 +447,7 @@ def graph_from_mask_blocks(prob, threshold: float = 0.5, *, block: int = 2048, h
     skeletonize = _deps()[3]
     from scipy import ndimage
 
-    if hasattr(prob, "detach"):  # as graph_from_mask (Codex 10-28 #2)
+    if hasattr(prob, "detach"):  # torch input (any device, autograd or not), as graph_from_mask
         prob = prob.detach().float().cpu().numpy()
     H, W = prob.shape[-2:]
     if H == 0 or W == 0:

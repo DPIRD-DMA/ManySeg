@@ -140,10 +140,13 @@ def check_steps(spec: Any) -> None:
     for step in steps:
         _check_step(step)
         if step.get("scope") == "scene" and per_tile:
-            raise ValueError("A scope='scene' step can't follow a scope='tile' step: scene "
-                             "statistics are computed once over the whole scene, before tiling. "
-                             "Put scene steps first.")
-        per_tile |= step.get("scope") == "tile"
+            raise ValueError("A scope='scene' step can't follow a per-tile step (scope='tile', "
+                             "or a 'percentile' step without a scope): scene statistics are "
+                             "computed once over the whole scene, before tiling. Put scene "
+                             "steps first.")
+        # an unscoped percentile step is per tile, as in ManyPred
+        per_tile |= step.get("scope") == "tile" or (step.get("type") == "percentile"
+                                                    and step.get("scope") is None)
     _manypred_check(steps)
 
 

@@ -76,9 +76,9 @@ def _x86_quantizer(reduce_range: bool | None = None):
     return xiq.X86InductorQuantizer().set_global(cfg)
 
 
-# timm's window-attention classes, by (module, class): their dynamic-size export hangs rather
-# than fails. Matched exactly so that an unrelated module with a
-# ``window_size`` attribute is not rejected.
+# timm's window-attention classes, by (module, class): their dynamic-size export fails inside
+# timm (older torch versions hung instead), so they are refused up front with a clear message.
+# Matched exactly so that an unrelated module with a ``window_size`` attribute is not rejected.
 _WINDOW_ATTENTION = {
     ("timm.models.swin_transformer", "WindowAttention"),
     ("timm.models.swin_transformer_v2", "WindowAttention"),
@@ -94,17 +94,19 @@ def _windowed(model: nn.Module) -> str | None:
 
 
 def _shapes(model: nn.Module, example, dynamic: bool, max_size: int, dynamic_batch: bool):
-    """``export_model``'s dynamic-shape spec, or None (fixed size). Computed once from the float
-    model: the quantised graph is re-exported with the same spec."""
+    """``export_model``'s dynamic-shape spec, or None (fixed size). With ``dynamic=False`` and
+    ``dynamic_batch``, only the batch is dynamic. Computed once from the float model: the
+    quantised graph is re-exported with the same spec."""
     if not dynamic:
-        return None
+        return dynamic_shapes(model, example, max_size, dynamic_batch, dynamic_hw=False)
     if (block := _windowed(model)) is not None:
         raise ValueError(f"window-attention backbones ({block}) cannot be exported with dynamic "
                          "H/W; pass dynamic=False to quantise at the example's fixed size")
     return dynamic_shapes(model, example, max_size, dynamic_batch)
 
 
-def _export(module: nn.Module, example, shapes) -> torch.export.ExportedProgram:
+def _export(module: nn.Module, example, shapes, dynamic: bool = True
+            ) -> torch.export.ExportedProgram:
     """``torch.export`` as ``export_model`` does it, for the float model and the int8 graph."""
     try:
         return torch.export.export(module, (example,), dynamic_shapes=shapes,
@@ -112,9 +114,12 @@ def _export(module: nn.Module, example, shapes) -> torch.export.ExportedProgram:
     except Exception as e:  # torch.export raises several types (UserError, RuntimeError, ...)
         if shapes is None:
             raise
-        raise ValueError(
-            "could not export this model with dynamic H/W; pass dynamic=False to quantise at "
-            f"the example's fixed size. Export error: {type(e).__name__}: {e}") from e
+        what, fix = (("dynamic H/W", "pass dynamic=False to quantise at the example's fixed size")
+                     if dynamic else
+                     ("a dynamic batch", "pass dynamic_batch=False to quantise at the "
+                      "example's batch size"))
+        raise ValueError(f"could not export this model with {what}; {fix}. Export error: "
+                         f"{type(e).__name__}: {e}") from e
 
 
 def _drop_unused_attrs(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
@@ -154,8 +159,10 @@ def quantize_pt2e(model: nn.Module, example, calibration: Iterable, *, quantizer
     H/W stay dynamic as in ``export_model`` (and the batch too with ``dynamic_batch``, which
     needs an example with batch size >= 2). ``model`` is exported in eval mode and then
     returned to its previous mode.
-    Window-attention backbones (Swin, DaViT) cannot export dynamically and need
-    ``dynamic=False``: the result then only accepts the example's size.
+    Window-attention backbones (Swin, DaViT) cannot export dynamic H/W and need
+    ``dynamic=False``: the result then only accepts the example's H/W, and its batch size
+    too unless ``dynamic_batch=True`` (which works with ``dynamic=False``: dynamic batch,
+    fixed H/W). Without ``dynamic_batch``, calibration batches must match the example's.
 
     Returns an ``ExportedProgram``, like ``export_model``: save it with its metadata by
     ``manyseg.save(ep, "model.pt2", source=model, ...)``, or run ``ep.module()``. Eager calls
@@ -170,7 +177,7 @@ def quantize_pt2e(model: nn.Module, example, calibration: Iterable, *, quantizer
 
     shapes = _shapes(model, example, dynamic, max_size, dynamic_batch)
     with eval_mode(model):
-        gm = _export(model, example, shapes).module()
+        gm = _export(model, example, shapes, dynamic).module()
     rr = None  # unknown with a custom quantizer
     if quantizer is None:
         rr = (not _has_vnni()) if reduce_range is None else bool(reduce_range)
@@ -197,7 +204,7 @@ def quantize_pt2e(model: nn.Module, example, calibration: Iterable, *, quantizer
     converted = _drop_unused_attrs(convert_pt2e(prepared))
     if rr is not None:  # survives torch.export.save / load; read by check_deployment
         converted.register_buffer(_RR_KEY, torch.tensor(rr))
-    return _export(converted, example, shapes)
+    return _export(converted, example, shapes, dynamic)
 
 
 _RR_KEY = "manyseg_int8_reduce_range"
@@ -296,16 +303,49 @@ class QuantizedProgram:
                 f"device={self.device})")
 
 
+def _user_placeholders(ep: torch.export.ExportedProgram) -> list:
+    wanted = {s.arg.name for s in ep.graph_signature.input_specs
+              if s.kind == torch.export.graph_signature.InputKind.USER_INPUT}
+    return [n for n in ep.graph.nodes if n.op == "placeholder" and n.name in wanted]
+
+
+def _example_inputs(ep: torch.export.ExportedProgram) -> tuple:
+    """``ep.example_inputs``, or, for a program saved without them (as :func:`manyseg.save`
+    writes it, so one loaded back from a ``.pt2`` file), inputs of the shapes and dtypes its
+    graph takes, with each dynamic dimension at the lower bound of its range (at least 2)."""
+    if ep.example_inputs is not None:
+        return ep.example_inputs
+    from torch.utils._pytree import tree_unflatten
+
+    ranges = {str(k): v for k, v in ep.range_constraints.items()}
+    gen = torch.Generator().manual_seed(0)
+
+    def size(d) -> int:
+        if isinstance(d, int):
+            return d
+        r = ranges.get(str(d.node.expr))
+        if r is None:
+            raise ValueError(f"cannot pick a size for the program's dimension {d}; save the "
+                             "program returned by quantize_pt2e instead.")
+        return max(int(r.lower), 2)
+
+    leaves = []
+    for n in _user_placeholders(ep):
+        val = n.meta["val"]
+        shape = [size(d) for d in val.shape]
+        leaves.append(torch.randn(shape, generator=gen).to(val.dtype) if val.is_floating_point()
+                      else torch.zeros(shape, dtype=val.dtype))
+    return tree_unflatten(leaves, ep.call_spec.in_spec)
+
+
 def _input_shapes(ep: torch.export.ExportedProgram) -> dict[str, list]:
     """``{input: shape}`` of the program's inputs, None for its dynamic dimensions, read from
     the graph. Dict inputs by key; a single tensor is ``"x"``."""
     from torch.utils._pytree import tree_flatten_with_path
 
-    paths, _ = tree_flatten_with_path(ep.example_inputs)
+    paths, _ = tree_flatten_with_path(_example_inputs(ep))
     names = [str(getattr(path[-1], "key", "x")) if len(path) > 2 else "x" for path, _ in paths]
-    wanted = {s.arg.name for s in ep.graph_signature.input_specs
-              if s.kind == torch.export.graph_signature.InputKind.USER_INPUT}
-    nodes = [n for n in ep.graph.nodes if n.op == "placeholder" and n.name in wanted]
+    nodes = _user_placeholders(ep)
     return {name: [d if isinstance(d, int) else None for d in n.meta["val"].shape]
             for name, n in zip(names, nodes, strict=True)}
 
@@ -333,7 +373,7 @@ def _check_source(ep: torch.export.ExportedProgram, source: nn.Module) -> None:
         raise ValueError(f"source= does not look like the model this program came from: it has "
                          f"no weights of shape {sorted(other)[:3]}.")
     device = next(source.parameters()).device
-    args = ep.example_inputs[0]
+    args = _example_inputs(ep)[0]
     moved = torch.utils._pytree.tree_map(lambda t: t.to(device), args)
 
     def shape_of(out):

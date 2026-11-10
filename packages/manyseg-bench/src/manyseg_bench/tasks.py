@@ -57,11 +57,11 @@ def head_factor(out, y) -> int:
 
 def to_label_grid(out, y):
     """Bilinearly upsample (scaled) pixel outputs to the label grid; full-res outputs pass."""
+    f = head_factor(out, y)
+    if f == 1:  # (ManySeg is needed only for scaled heads, which only ManySeg models have)
+        return out
     from manyseg.utils import upsample_output
 
-    f = head_factor(out, y)
-    if f == 1:
-        return out
     size = tuple(y.shape[-2:])
     if isinstance(out, dict):
         return {k: upsample_output(v.float(), size, 1 / f) if v.ndim == 4 else v
@@ -113,11 +113,11 @@ class SemanticTask(Task):
 
     def head_targets(self, out, y):
         """Labels on the output's grid (mode downsampling, ignore_index respected)."""
-        from manyseg.utils import downsample_labels
-
         f = head_factor(out, y)
         if f == 1:
             return y
+        from manyseg.utils import downsample_labels
+
         return downsample_labels(y, 1 / f, self.ignore_index, num_classes=self.num_classes)
 
     def loss(self, out, y):
@@ -138,7 +138,7 @@ class _SemanticEval:
         self.t = task
         self.cm = self.native = None
         self.bf1 = self.loss = self.native_bf1 = 0.0
-        self.n = self.px = 0
+        self.n_bf1 = self.px = self.native_n = 0
         self.factor = None
 
     def update(self, out, y) -> None:
@@ -151,7 +151,9 @@ class _SemanticEval:
                                               device=y.device)
             ys, ps = self.t.head_targets(out, y), out.float().argmax(1)
             self.native.update(ps, ys)
-            self.native_bf1 += float(boundary_f1(ps, ys, ignore_index=self.t.ignore_index).sum())
+            b = boundary_f1(ps, ys, ignore_index=self.t.ignore_index)
+            self.native_bf1 += float(b.nan_to_num(0.0).sum())
+            self.native_n += int((~b.isnan()).sum())
         logits = to_label_grid(out, y).float()
         if self.cm is None:
             self.cm = ConfusionMatrix(self.t.num_classes, self.t.ignore_index, device=y.device)
@@ -159,19 +161,24 @@ class _SemanticEval:
         self.loss += float(F.cross_entropy(logits, y, ignore_index=ignore, reduction="sum"))
         pred = logits.argmax(1)
         self.cm.update(pred, y)
-        self.bf1 += float(boundary_f1(pred, y, ignore_index=self.t.ignore_index).sum())
-        self.n += y.shape[0]
-        self.px += y.numel()
+        b = boundary_f1(pred, y, ignore_index=self.t.ignore_index)
+        self.bf1 += float(b.nan_to_num(0.0).sum())  # images without any edge: NaN, skipped
+        self.n_bf1 += int((~b.isnan()).sum())
+        self.px += int((y != ignore).sum())  # the summed CE skips ignored pixels
 
     def compute(self) -> dict:
+        """``miou`` etc.: see :class:`ConfusionMatrix` (classes absent from the ground truth
+        are NaN and excluded). ``boundary_f1``: mean over images with a boundary in the
+        prediction or the target (NaN if there is none). ``loss``: CE per non-ignored pixel."""
         out = self.cm.compute()
-        out["boundary_f1"] = self.bf1 / max(1, self.n)
+        out["boundary_f1"] = self.bf1 / self.n_bf1 if self.n_bf1 else float("nan")
         out["loss"] = self.loss / max(1, self.px)
         out["head_factor"] = self.factor or 1
         if self.native is not None:
             nat = self.native.compute()
             out["native"] = {"miou": nat["miou"], "iou": nat["iou"],
-                             "boundary_f1": self.native_bf1 / max(1, self.n)}
+                             "boundary_f1": (self.native_bf1 / self.native_n
+                                             if self.native_n else float("nan"))}
         return out
 
 
@@ -204,7 +211,7 @@ class InstanceTask(Task):
     def heads(self):
         from manyseg.instances import instance_heads
 
-        heads = instance_heads(self.num_classes, distance=self.distance, decoders=self.decoders)
+        heads = instance_heads(self.num_classes, decoders=self.decoders)
         heads = {"extent": heads["extent"]} if self.mode == "extent_cc" else heads
         return _with_scale(heads, self.head_scale)
 
@@ -465,13 +472,16 @@ class _ClassEval:
         self.n += y.shape[0]
 
     def compute(self) -> dict:
+        """Per-class F1 / macro F1 / balanced accuracy over the classes present in the ground
+        truth; absent classes are NaN in ``f1`` (the convention of
+        :class:`~manyseg_bench.evaluation.ConfusionMatrix`)."""
         cm = self.cm.double()  # rows: truth, columns: prediction
         tp, support, predicted = cm.diag(), cm.sum(1), cm.sum(0)
-        f1 = (2 * tp / (support + predicted).clamp(min=1)).tolist()
-        recall = tp / support.clamp(min=1)
         present = support > 0
+        f1 = torch.where(present, 2 * tp / (support + predicted).clamp(min=1), torch.nan)
+        recall = tp / support.clamp(min=1)
         return {"accuracy": float(tp.sum() / cm.sum().clamp(min=1)),
-                "macro_f1": sum(f1) / len(f1), "f1": f1,
+                "macro_f1": float(f1[present].mean()), "f1": f1.tolist(),
                 "balanced_accuracy": float(recall[present].mean()),
                 "confusion": self.cm.tolist(), "loss": self.loss / max(1, self.n)}
 
@@ -488,6 +498,9 @@ def average_precision(scores: torch.Tensor, labels: torch.Tensor) -> float:
 
 
 class _MultiLabelEval:
+    """``map_macro`` / ``f1_macro``: over the classes with at least one positive; the others
+    are NaN in ``ap`` and ``f1``."""
+
     def __init__(self, task: ClassificationTask) -> None:
         self.t, self.scores, self.labels, self.loss, self.n = task, [], [], 0.0, 0
 
@@ -506,12 +519,14 @@ class _MultiLabelEval:
         pred, pos = s > 0, y > 0
         tp, fp, fn = (pred & pos).sum(0).double(), (pred & ~pos).sum(0).double(), \
             (~pred & pos).sum(0).double()
-        f1 = (2 * tp / (2 * tp + fp + fn).clamp(min=1)).tolist()
+        has_pos = (tp + fn) > 0  # classes without positives: NaN, as their AP
+        f1 = torch.where(has_pos, 2 * tp / (2 * tp + fp + fn).clamp(min=1), torch.nan)
         return {"map_macro": sum(valid) / max(1, len(valid)),
                 "map_micro": average_precision(s.flatten(), y.flatten()), "ap": ap,
                 "classes_without_positives": len(ap) - len(valid),
                 "f1_micro": float(2 * tp.sum() / (2 * tp + fp + fn).sum().clamp(min=1)),
-                "f1_macro": sum(f1) / len(f1), "f1": f1, "loss": self.loss / max(1, self.n)}
+                "f1_macro": float(f1[has_pos].mean()), "f1": f1.tolist(),
+                "loss": self.loss / max(1, self.n)}
 
 
 class RegressionTask(Task):
@@ -613,7 +628,8 @@ class MultiLabelSegTask(Task):
     Labels ``(B, K, H, W)``: 1 / 0 per class, 255 = ignored for that class. The model's
     segmentation head returns ``K`` logits; the loss is masked BCE (sigmoid per class, not a
     softmax over classes) and predictions are ``sigmoid(logit) > threshold``. Primary: mean
-    IoU over classes (F1, precision and recall per class are reported)."""
+    IoU over the classes with positives in the evaluated split (F1, precision and recall per
+    class are reported; classes without positives are NaN)."""
 
     name = "multilabel_seg"
     primary_metric = "miou"
@@ -654,12 +670,18 @@ class _MultiLabelSegEval:
         self.tp, self.fp, self.fn = self.tp + tp, self.fp + fp, self.fn + fn
 
     def compute(self) -> dict:
+        """``miou`` over the classes with a positive (valid) pixel in the ground truth; the
+        others are NaN in ``iou`` / ``f1`` / ``recall`` (and ``precision`` is NaN for classes
+        never predicted), the convention of :class:`~manyseg_bench.evaluation.ConfusionMatrix`.
+        """
         tp, fp, fn = self.tp, self.fp, self.fn
-        iou = (tp / (tp + fp + fn).clamp(min=1)).tolist()
-        f1 = (2 * tp / (2 * tp + fp + fn).clamp(min=1)).tolist()
-        return {"miou": sum(iou) / len(iou), "iou": iou, "f1": f1,
-                "precision": (tp / (tp + fp).clamp(min=1)).tolist(),
-                "recall": (tp / (tp + fn).clamp(min=1)).tolist(),
+        has_pos = (tp + fn) > 0
+        nan = torch.tensor(float("nan"), dtype=tp.dtype)
+        iou = torch.where(has_pos, tp / (tp + fp + fn).clamp(min=1), nan)
+        f1 = torch.where(has_pos, 2 * tp / (2 * tp + fp + fn).clamp(min=1), nan)
+        return {"miou": float(iou[has_pos].mean()), "iou": iou.tolist(), "f1": f1.tolist(),
+                "precision": torch.where(tp + fp > 0, tp / (tp + fp).clamp(min=1), nan).tolist(),
+                "recall": torch.where(has_pos, tp / (tp + fn).clamp(min=1), nan).tolist(),
                 "loss": self.loss / max(1, self.n), "threshold": self.t.threshold}
 
 

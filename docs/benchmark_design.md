@@ -96,8 +96,11 @@ task option, `calibrate`, below):
   `trainval` by name hash). `--evaluate-test` is an
   explicit flag, recorded in the result, for final comparisons of fixed configurations.
   It is never used during architecture search.
-* Remote-sensing datasets must use spatially disjoint splits: official geographic splits
-  where they exist, otherwise grid-cell or region assignment.
+* Remote-sensing datasets use their official splits as published, which are not always
+  spatially disjoint: AI4Boundaries' official split is random, not spatially blocked, and
+  Sen1Floods11's train/val/test share flood events (Bolivia is held out; `--split events:K:F`
+  gives leave-events-out folds). Input normalisation comes from the training split, or from
+  the pretraining normalisation for remote-sensing weights (also under event splits).
 
 ## Metrics
 
@@ -107,6 +110,14 @@ task option, `calibrate`, below):
   as a target edge. That biased absolute bF1 on Sen1Floods11, CloudSEN12+ and PASTIS, equally
   for every arm; no pre-registered decision used bF1), validation loss, training-loss curve,
   non-finite step count (a stability signal).
+* Per-class scores and macro means cover only classes present in the ground truth: an absent
+  class is NaN in per-class lists and left out of the mean (prediction-only classes are listed
+  in `pred_only_classes`). This holds for mIoU/Dice, classification macro F1, multi-label F1
+  and multi-label segmentation mIoU. Boundary F1 is NaN for an image with no edge in either
+  prediction or target, and the mean skips such images. Validation loss is cross-entropy per
+  non-ignored pixel. Point F1 uses an exact maximum one-to-one matching (no scipy needed).
+  Boundary F1 and validation loss in run records written before 2026-11-10 used the older
+  rules (edge-free images scored 0; loss divided by all pixels) and are not comparable.
 * Efficiency: parameters, serialised `state_dict` bytes, forward FLOPs (`FlopCounterMode`,
   2×MAC).
 * Inference: median, p10 and p90 latency at batch sizes 1, 8 and 32; images/s;
@@ -181,8 +192,9 @@ Implemented (`manyseg-bench prepare <name>`; variants such as `sen1floods11_s2` 
 | LEVIR-CD, SECOND, OSCD (`levircd`, `second`, `oscd`) | Binary and semantic change | Siamese encoders and difference fusion. |
 
 Installing the `geo` extra (`pip install -e "packages/manyseg-bench[geo]"` from a clone; the
-benchmark is not on PyPI) adds the readers (tifffile, pyarrow, ...) that the remote-sensing
-datasets need. Considered but not implemented: CamVid, WHU Building, MADOS, LoveDA and ISPRS
+benchmark is not on PyPI) adds the readers (tifffile, pyarrow, pandas, ...) that the remote-sensing
+datasets need. The `manyseg`, `smp`, `fastai` and `timm` extras add the model providers; the
+bench core and the SMP / fastai / timm providers' semantic and image tasks run without ManySeg. Considered but not implemented: CamVid, WHU Building, MADOS, LoveDA and ISPRS
 Vaihingen.
 
 Licenses and access details are in `datasets/*.py` docstrings and in

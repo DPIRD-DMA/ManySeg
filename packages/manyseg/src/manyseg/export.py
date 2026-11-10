@@ -44,12 +44,18 @@ def eval_mode(model: nn.Module):
 
 
 def dynamic_shapes(model: nn.Module, example, max_size: int = 4096,
-                   dynamic_batch: bool = False):
+                   dynamic_batch: bool = False, dynamic_hw: bool = True):
     """``dynamic_shapes`` for ``torch.export``: H and W dynamic in [min, max_size] (all inputs
     of a multi-input model share the H/W symbols only if they are on the same grid).
 
     Vector (metadata) inputs and their masks, ``(B, N)``, have no spatial dimensions: only the
-    batch dimension is dynamic (with ``dynamic_batch``); ``N`` is fixed by the model."""
+    batch dimension is dynamic (with ``dynamic_batch``); ``N`` is fixed by the model.
+
+    ``dynamic_hw=False`` keeps H/W (and a time series' number of dates) at the example's, for
+    models that cannot export dynamic sizes; with ``dynamic_batch`` only the batch is then
+    dynamic, else the result is None (everything fixed)."""
+    if not dynamic_hw and not dynamic_batch:
+        return None
     lo = _min_size(model)
     batch = torch.export.Dim("batch", min=1, max=1024) if dynamic_batch else None
     if batch is not None:
@@ -59,6 +65,8 @@ def dynamic_shapes(model: nn.Module, example, max_size: int = 4096,
                              "(torch.export specialises size-1 dimensions); got batch 1")
 
     def hw(t: Tensor, prefix: str):
+        if not dynamic_hw:
+            return None, None
         if min(t.shape[-2:]) < lo:
             raise ValueError(f"example input must be at least {lo}x{lo} so no feature map is "
                              f"1x1; got {tuple(t.shape[-2:])}")
@@ -66,7 +74,7 @@ def dynamic_shapes(model: nn.Module, example, max_size: int = 4096,
                 torch.export.Dim(f"{prefix}w", min=lo, max=max_size))
 
     def dims(t: Tensor, h, w, time=None):
-        d = {t.ndim - 2: h, t.ndim - 1: w}
+        d = {t.ndim - 2: h, t.ndim - 1: w} if h is not None else {}
         if time is not None:
             d[1] = time
         if batch is not None:
@@ -82,7 +90,7 @@ def dynamic_shapes(model: nn.Module, example, max_size: int = 4096,
     # unless the aggregation needs an exact number of dates ("concat", "diff").
     times = {}
     for k, t in example.items():
-        if t.ndim == 5:
+        if t.ndim == 5 and dynamic_hw:
             fixed = getattr(encoders[k], "fixed_dates", None) if k in encoders else None
             if fixed is not None:
                 continue

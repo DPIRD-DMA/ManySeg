@@ -114,8 +114,10 @@ class FastaiUNetDecoder(nn.Module):
     Args:
         in_specs: The input image's spec followed by the encoder features' specs.
         last_cross: Add fastai's last cross stage (the input image concatenated, then a
-            residual block) at input resolution; default: when ``out_stride`` is 1.
-        out_stride: Output stride (a power of two up to the deepest encoder stride); stages
+            residual block) at input resolution; default: when ``out_stride`` is 1. The same
+            stage is ``input_cross`` of :class:`~manyseg.decoders.UNetDecoder` (off by default
+            there); the names differ for compatibility with saved configs.
+        out_stride: Output stride (a power of two below the deepest encoder stride); stages
             below it are dropped.
     """
 

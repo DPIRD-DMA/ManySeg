@@ -56,7 +56,8 @@ and they are adapted to your band count. Pass `pretrained=False` to skip the dow
 
 The model does not normalise its input: scale or standardise your bands as you would for any
 timm model. Each pretrained weights saw RGB as `(x - mean) / std` with its own statistics:
-ImageNet's for most, 0.5 / 0.5 for ViT AugReg and SigLIP, CLIP's for EVA-02. `describe()` and
+ImageNet's for most; of the tested backbones, 0.5 / 0.5 for ViT AugReg, SigLIP,
+`tf_efficientnetv2_s` and `coatnet_0_rw_224`, and CLIP's for EVA-02. `describe()` and
 `manyseg.weights.attribution(model)` show the values. With `num_classes=` the output is one
 tensor of raw logits; with `heads=` it is a dict of raw logits keyed by head name.
 
@@ -225,7 +226,7 @@ only the smallest halo a decoder accepts and doesn't guarantee the same result a
 decode: on noise-like field predictions, halos up to 64 px gave different objects. An instance
 reaching much further than the halo can split at a block seam, and for roads the halo must also
 cover the skeleton's data-dependent reach (the decoder warns). With ManyPred this happens while
-it predicts (needs ManyPred's first release).
+it predicts (needs ManyPred's GitHub main; not yet in a PyPI release).
 
 ```python
 from manyseg.vectors import Scene, block_decoder, decode_scene
@@ -242,7 +243,10 @@ evidence and limits.
 
 **Save and load.** `manyseg.save` stores the weights with the configuration and, as metadata
 for inference code, the input normalisation, output activations and class names; `manyseg.load`
-rebuilds the model without downloading anything:
+rebuilds the model without downloading anything. `activations` is required for every
+segmentation and classification head (the head type can't tell softmax from sigmoid), and
+`save` raises a `ValueError` naming the heads without one; regression heads and `"softplus"`
+density heads default to `"none"`. Without `normalize`, `save` stores none and warns:
 
 ```python
 import manyseg
@@ -260,9 +264,11 @@ The loaded model still takes the raw-scale input you trained on and returns logi
 the stored normalisation and activations is up to the inference code. The default head of a
 `num_classes=` model is named `"logits"`.
 
-**Share on the Hugging Face Hub.** `manyseg.push_to_hub` takes the same arguments as `save`,
-uploads the file to a model repository (private by default) and writes a model card listing
-the inputs, heads and the licences of the pretrained weights. `load` and `read_metadata` take
+**Share on the Hugging Face Hub.** `manyseg.push_to_hub` takes `save`'s metadata arguments
+(`normalize`, `activations`, `classes`, `bands`, `extra`), saves the model as
+`model.safetensors`, uploads it to a model repository (private by default) and writes a model
+card listing the inputs, heads and the licences of the pretrained weights. It has no `source=`,
+so a `quantize_pt2e` program (a `.pt2` file) can't be pushed. `load` and `read_metadata` take
 Hub names as timm does:
 
 ```python

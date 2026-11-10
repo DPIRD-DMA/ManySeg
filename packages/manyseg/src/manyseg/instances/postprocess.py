@@ -239,7 +239,8 @@ def instances_from_outputs(
         distance: ``(B, 1, H, W)`` predicted (normalised) distance.
         logits: ``True`` if ``extent`` / ``boundary`` are raw model outputs (logits, as heads
             return them), ``False`` if they are already probabilities.
-        extent_threshold: Foreground threshold on the extent probability.
+        extent_threshold: Foreground threshold on the extent probability (1-channel extent
+            only; a multi-class extent is foreground where its argmax is not 0).
         boundary_threshold: Pixels with a boundary probability at or above this are not seeds.
         seed_threshold: Seeds need a predicted distance above this.
         min_seed: Seed fragments (4-connected) of fewer pixels are dropped, so they do not

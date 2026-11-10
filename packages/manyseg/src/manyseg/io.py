@@ -136,7 +136,8 @@ def save(model: DenseModel | torch.export.ExportedProgram, path: str | Path, *,
     * A :func:`~manyseg.quantize.quantize_weights` model: as above, to a ``.safetensors`` file.
     * A :func:`~manyseg.quantize.quantize_pt2e` program: to a ``.pt2`` file, with
       ``source=`` the float model it was quantised from (an ``ExportedProgram`` doesn't know
-      its heads, scales or padding).
+      its heads, scales or padding). A program loaded back by :func:`load` (the
+      :class:`~manyseg.quantize.QuantizedProgram` or its ``.program``) saves the same way.
 
     Args:
         source: The float model an ``ExportedProgram`` came from; only for those.
@@ -158,10 +159,16 @@ def save(model: DenseModel | torch.export.ExportedProgram, path: str | Path, *,
         classes: Class names, per head (``{head: [...]}``) or for a single head. They reach
             ``tiling_spec()``, and ManyPred writes them into its output files.
         bands: Band names, per input (``{input: [...]}``) or for a single input. Likewise.
-        extra: Any other JSON-compatible metadata, stored as is.
+        extra: Any other metadata, as plain JSON data (dicts with string keys, lists,
+            strings, numbers, booleans, None), stored as is. Anything JSON would change, such
+            as int keys or tuples, is refused rather than read back different.
     """
     names = {"normalize": normalize, "activations": activations, "classes": classes,
              "bands": bands, "extra": extra}
+    from .quantize import QuantizedProgram
+
+    if isinstance(model, QuantizedProgram):  # loaded from a .pt2 file: save its program
+        model = model.program
     if isinstance(model, torch.export.ExportedProgram):
         if source is None:
             raise TypeError("save(ExportedProgram) needs source=<the float DenseModel it was "
@@ -249,6 +256,8 @@ def _metadata(model: DenseModel, *, normalize: Any, activations, classes, bands,
     if normalize is not None:
         check_normalize(normalize, None if image_inputs == [None] else image_inputs)
     _check_rebuildable(model, config)
+    _check_extra(extra)
+    # the model's main dtype; load casts to it, then gives each tensor its own saved dtype
     first = next(iter(model.parameters()))
     meta = {
         "format": FORMAT,
@@ -268,6 +277,33 @@ def _metadata(model: DenseModel, *, normalize: Any, activations, classes, bands,
         return _plain(meta)
     except TypeError as e:
         raise ValueError(f"save metadata must be plain JSON-compatible data: {e}") from None
+
+
+def _check_extra(extra: Any) -> None:
+    """``extra`` must come back from JSON unchanged (no int keys, tuples, NaN, ...)."""
+    if extra is None:
+        return
+    if not isinstance(extra, Mapping):
+        raise ValueError(f"extra must be a dict, got {type(extra).__name__}.")
+    try:
+        back = json.loads(json.dumps(dict(extra), allow_nan=False))
+    except (TypeError, ValueError) as e:
+        raise ValueError(f"extra must be plain JSON data: {e}") from None
+    if not _same_json(back, dict(extra)):
+        raise ValueError("extra would not load back as given: JSON turns tuples into lists and "
+                         "non-string keys into strings. Use lists and string keys.")
+
+
+def _same_json(back: Any, given: Any) -> bool:
+    """``back == given``, but a list is not a tuple and ``True``, ``1`` and ``1.0`` differ."""
+    if isinstance(given, Mapping):
+        return (isinstance(back, dict) and list(back) == list(given)
+                and all(_same_json(back[k], given[k]) for k in back))
+    if isinstance(given, list):
+        return (isinstance(back, list) and len(back) == len(given)
+                and all(map(_same_json, back, given)))
+    return (back == given and isinstance(back, bool) == isinstance(given, bool)
+            and isinstance(back, float) == isinstance(given, float))
 
 
 _ALIASES = "manyseg_aliases"
@@ -565,11 +601,39 @@ def _version_error(path, meta: dict, err: Exception, *, quantizing: bool = False
                       f"report it.")
 
 
+def _match_dtypes(model: torch.nn.Module, state: Mapping[str, torch.Tensor]) -> None:
+    """Give each floating-point parameter and buffer the dtype of its tensor in ``state`` (the
+    file), before the values are copied in, so a model saved with mixed dtypes (half precision
+    with float32 BatchNorm, say) loads as saved, without a lossy round trip through the model's
+    main dtype. Parameters keep their identity (``.data`` is replaced) and a buffer shared by
+    several modules stays shared."""
+    cast: dict[int, torch.Tensor] = {}
+    for prefix, owner in model.named_modules(remove_duplicate=False):
+        for kind in ("_parameters", "_buffers"):
+            for leaf, t in list(getattr(owner, kind).items()):
+                if t is None or _is_quantized(t):
+                    continue
+                if id(t) in cast:
+                    if kind == "_buffers":
+                        owner._buffers[leaf] = cast[id(t)]
+                    continue
+                saved = state.get(f"{prefix}.{leaf}" if prefix else leaf)
+                if (saved is None or not (t.is_floating_point() and saved.is_floating_point())
+                        or t.dtype == saved.dtype):
+                    continue
+                if kind == "_parameters":
+                    t.data = t.data.to(saved.dtype)
+                    cast[id(t)] = t
+                else:
+                    cast[id(t)] = owner._buffers[leaf] = t.to(saved.dtype)
+
+
 def load(path: str | Path, map_location: str | torch.device = "cpu", *,
          token: str | None = None) -> Any:
     """Rebuild and load a model saved with :func:`save`, in eval mode, on ``map_location`` and
-    in the dtype it was saved in. Its metadata is on ``model.saved_metadata`` and its
-    ``tiling_spec()`` includes the stored normalisation and activations. ``path`` may name a
+    with each parameter and buffer in the dtype it was saved in (half precision with float32
+    BatchNorm stays so). Its metadata is on ``model.saved_metadata`` and its ``tiling_spec()``
+    includes the stored normalisation and activations. ``path`` may name a
     Hub model, ``"hf-hub:org/name[@revision]"``, downloaded once and cached (see
     :mod:`manyseg.hub`; ``token`` for a private one, default ``HF_TOKEN`` or the stored
     login).
@@ -626,12 +690,14 @@ def load(path: str | Path, map_location: str | torch.device = "cpu", *,
                          if _is_quantized(t)}
             state = {k: v for k, v in state.items() if k.rpartition(":")[0] not in parts}
             state.update({a: state[n] for a, n in aliases.items() if a not in quantised})
+            _match_dtypes(model, state)
             result = model.load_state_dict(state, strict=False)
             bad = [*result.unexpected_keys, *(set(result.missing_keys) - quantised)]
             if bad:
                 raise RuntimeError(f"state dict mismatch: {sorted(bad)[:3]}")
         else:
             state.update({alias: state[name] for alias, name in aliases.items()})
+            _match_dtypes(model, state)
             model.load_state_dict(state, strict=True)
     except (RuntimeError, KeyError) as e:
         raise _version_error(path, meta, e, quantizing=recipe is not None) from e

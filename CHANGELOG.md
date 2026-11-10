@@ -58,8 +58,9 @@ Names and defaults may change before 1.0, and each decoder was tuned on one data
 * Building footprints (straight walls), field boundaries, road graphs (junctions and overpasses),
   LoD2 roof faces (with an nDSM input) and points, each with a head preset, target encoders from
   vector data in a CRS, losses and a decoder.
-* `decode_scene(fields, block_decoder(task))` decodes a scene of any size block by block, giving
-  the same result as a whole-scene decode; results write to GeoJSON or GeoPackage in the scene's
+* `decode_scene(fields, block_decoder(task))` decodes a scene of any size block by block; with
+  a halo that also covers the decoder's reach it gives the same result as a whole-scene decode
+  (see `manyseg.vectors.blocks`). Results write to GeoJSON or GeoPackage in the scene's
   CRS.
 * Building blocks: `graph_from_mask`, `polygons_from_labels`, `to_pixels`, `to_geojson`,
   `pixel_to_world` / `world_to_pixel`, dihedral augmentation, and metrics (APLS, junction F1,
@@ -101,5 +102,9 @@ Names and defaults may change before 1.0, and each decoder was tuned on one data
   data loading; recipes; JSON run records with provenance.
 * Datasets: Oxford Pet, Sen1Floods11, CloudSEN12+, AI4Boundaries, OAM-TCD, PASTIS, EuroSAT,
   BigEarthNet v2, OSCD, LEVIR-CD, SECOND.
+* Metrics: per-class scores and macro means cover only classes present in the ground truth;
+  boundary F1 skips images with no edge in either prediction or target; validation loss is
+  per non-ignored pixel. Run records in `experiments/` written before 2026-11-10 used the older
+  boundary-F1 and validation-loss rules.
 * The experiments in `experiments/` that the defaults and the README's evidence table rest on,
   negative results included.

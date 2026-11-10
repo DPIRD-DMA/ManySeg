@@ -17,6 +17,12 @@ def _spec(a):
                      options=json.loads(a.options))
 
 
+def _r4(v):
+    """A metric rounded for printing; "n/a" when it was not computed (e.g. ``agreement`` with
+    no comparable pixels is ``None``)."""
+    return "n/a" if v is None else round(v, 4)
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser("manyseg-bench")
     p.add_argument("--data", default=None, help="data root (default $MANYSEG_BENCH_DATA)")
@@ -141,7 +147,7 @@ def main(argv=None) -> int:
                            data=a.data, out_dir=a.out, calib_batches=a.calib_batches,
                            threads=a.threads)
         for v, r in rec["variants"].items():
-            print(v, {s: {k: round(r[s][k], 4) for k in ("miou", "agreement")}
+            print(v, {s: {k: _r4(r[s].get(k)) for k in ("miou", "agreement")}
                       for s in r if isinstance(r[s], dict) and "miou" in r[s]})
         print(rec["path"])
     elif a.cmd == "report":

@@ -191,7 +191,8 @@ def _image_use(dec: nn.Module) -> str:
 
     if isinstance(dec, FastaiUNetDecoder) and not dec.last_cross:
         return "size only"
-    return "concatenated at stride 1"
+    # unet's input_cross and fastai_unet's last_cross are the same stage under two names
+    return "concatenated at stride 1 (cross stage: unet input_cross = fastai_unet last_cross)"
 
 
 def _decoder_options(dec: nn.Module) -> list[tuple[str, str, bool]]:
@@ -792,7 +793,7 @@ class _Builder:
         fixed = getattr(self.bb, "fixed_size", None)
         if fixed is not None:
             s.append(("input", f"fixed size {fixed}, zero-padded"))
-        elif m.pad_to_stride:
+        elif m.pad_to_stride or getattr(m, "_pads_itself", False):  # multi-input: always
             s.append(("input", f"pad to multiple of {getattr(self.bb, 'input_divisor', 1)}"
                       if not self.multi else "padded per input to each encoder's divisor"))
         else:

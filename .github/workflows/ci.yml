@@ -39,11 +39,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
+      # geo: the dataset reader tests skip without it (all its packages ship wheels for every
+      # OS / Python of the matrix); timm: the timm provider
       - name: Install (CPU torch wheels on Linux)
         run: |
           uv venv --python ${{ matrix.python }}
           uv pip install --torch-backend auto \
-            -e "packages/manyseg[test]" -e "packages/manyseg-bench[smp,fastai,test]"
+            -e "packages/manyseg[test]" -e "packages/manyseg-bench[manyseg,smp,fastai,timm,geo,test]"
       - name: Library must install and import without the benchmark
         run: |
           uv venv --python ${{ matrix.python }} /tmp/libonly

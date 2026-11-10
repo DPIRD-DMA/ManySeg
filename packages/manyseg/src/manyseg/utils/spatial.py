@@ -103,3 +103,21 @@ def resize_nearest(x: Tensor, size) -> Tensor:
     h, w = x.shape[-2], x.shape[-1]
     x = x.index_select(-2, _nearest_index(h, size[0], x.device))
     return x.index_select(-1, _nearest_index(w, size[1], x.device))
+
+
+def mask_for(mask: Tensor, ref: Tensor, name: str = "mask") -> Tensor:
+    """``mask`` shaped to broadcast against ``ref`` (B, C, H, W, or any shape): a (B, H, W) mask
+    of a 4-D ``ref`` gains a channel axis; otherwise it must have ``ref``'s rank, its batch size,
+    and each other dimension equal to ``ref``'s or 1. Anything else is a ValueError (silent
+    broadcasting would mix samples, e.g. a (B, H, W) mask read as (C, H, W))."""
+    m = mask
+    if ref.dim() == 4 and m.dim() == 3:
+        m = m.unsqueeze(1)
+    ok = (m.dim() == ref.dim() and m.shape[0] == ref.shape[0]
+          and all(a in (b, 1) for a, b in zip(m.shape[1:], ref.shape[1:])))
+    if not ok:
+        allowed = ("(B, H, W), (B, 1, H, W) or (B, C, H, W)" if ref.dim() == 4
+                   else "the input's shape (or 1 in non-batch dimensions)")
+        raise ValueError(f"{name} must be {allowed}; got {tuple(mask.shape)} for input "
+                         f"{tuple(ref.shape)}")
+    return m

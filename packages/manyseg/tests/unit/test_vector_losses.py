@@ -51,7 +51,7 @@ def test_footprints_train_from_the_encoder_output():
 
 def test_fields_train_from_the_encoder_output():
     t = _batch(field_targets([shapely.box(5, 5, 30, 50), shapely.box(30, 5, 60, 50)], (SIZE, SIZE)))
-    parts = _trains(_model(instance_heads(distance="absolute")),
+    parts = _trains(_model(instance_heads()),
                     lambda out: instance_losses(out, t))
     assert set(parts) == {"extent", "boundary", "distance"}
 

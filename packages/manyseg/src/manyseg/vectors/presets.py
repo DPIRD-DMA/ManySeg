@@ -3,7 +3,7 @@
 Both presets use the built-in head types only. The heatmap heads trained with the CenterNet focal
 loss (``corner``, ``keypoints``) start at the prior ``p = 0.1`` (``bias_init = logit(0.1)``), so
 the loss is not swamped by negatives at initialisation (initial loss about 200 at ``p = 0.5``; the
-experiments set the bias to -2.19, ``p = 0.1007``). Head
+trained models used a bias of -2.19, ``p = 0.1007``). Head
 names are those the vector decoders read (``polygons_from_corners``, ``graph_from_road_heads``).
 Losses are in :mod:`manyseg.vectors.losses` and metrics in :mod:`manyseg.vectors.metrics`;
 ``manyseg-bench`` (the benchmark package in the GitHub repository, not on PyPI) has training
@@ -42,7 +42,9 @@ def road_heads(decoders: None | str | Mapping[str, Any] = None) -> dict[str, dic
     """Head configs for the unified road model: ``mask`` (1, road-surface
     logits), ``line`` (1, logits of a 3 px centreline band), ``keypoints`` (3, logits of the
     junction / end / crossing heatmaps, bias ``logit(0.1)``) and ``direction`` (4, regression
-    of two ``(cos 2t, sin 2t)`` modes; the second is set where roads cross).
+    of two ``(cos 2t, sin 2t)`` modes; the second is set where two different degree-2 chains
+    overlap at an angle, at crossings and at junctions alike; see
+    :func:`manyseg.vectors.road_targets`).
 
     Targets: :func:`manyseg.vectors.road_targets`; decoding:
     :func:`manyseg.vectors.graph_from_road_heads` (reads ``mask``, ``keypoints``, ``direction``;
