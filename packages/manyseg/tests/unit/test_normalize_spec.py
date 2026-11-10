@@ -32,7 +32,6 @@ BAD_STEPS = [
     [{"value": 1}],  # no type
     {},
     "scale",
-    False,
     [None],
     [{"type": ["scale"], "value": 1}],
     {"type": "scale", "valeu": 1},  # unknown option
@@ -62,6 +61,10 @@ BAD_STEPS = [
     {"type": "percentile", "low": 98, "high": 2},
     {"type": "percentile", "high": 101},
     {"type": "db", "eps": 0},
+    {"type": "db", "eps": True},  # bools are not numbers
+    {"type": "percentile", "low": False, "high": 98},
+    {"type": "percentile", "low": 2, "high": "98"},
+    {"type": "clip", "min": [0, 0], "max": [1, 1, 1]},
     {"type": "clip"},
     {"type": "clip", "min": 2, "max": 1},
     {"type": "none", "value": 1},
@@ -80,11 +83,13 @@ def test_bad_steps_fail(spec):
         check_steps(spec)
 
 
-@pytest.mark.parametrize("spec", GOOD_STEPS + BAD_STEPS, ids=repr)
-def test_agrees_with_manypred(spec):
-    """ManySeg can't import ManyPred, so it keeps its own copy of the rules. A change on either
-    side that alters the verdict on any spec listed here fails."""
+@pytest.mark.parametrize("spec", [*GOOD_STEPS, *BAD_STEPS, False], ids=repr)
+def test_agrees_with_manypred(spec, monkeypatch):
+    """ManySeg keeps its own copy of the rules for when ManyPred isn't installed. A change on
+    either side that alters the verdict on any spec listed here fails. (check_steps also calls
+    ManyPred when it can: switched off here, so this compares the copy.)"""
     validate_spec = pytest.importorskip("manypred.normalize").validate_spec
+    monkeypatch.setattr("manyseg._normalize_spec._manypred_check", lambda steps: None)
 
     def accepted(check):
         try:
@@ -169,3 +174,25 @@ def test_load_stays_lenient_about_a_stored_spec(tmp_path, monkeypatch):
     monkeypatch.undo()
     assert manyseg.load(path).tiling_spec()["normalize"] == bad
     assert isinstance(manyseg.load(path)(torch.zeros(1, 3, 32, 32)), torch.Tensor)
+
+
+def test_false_is_refused_at_save_time():
+    """ManyPred reads False as no steps; a saved model says that explicitly instead."""
+    with pytest.raises(ValueError, match="normalize=False"):
+        check_normalize(False, None)
+    with pytest.raises(ValueError, match="normalize=False"):
+        check_normalize({"a": False, "b": []}, ["a", "b"])
+    check_steps(False)  # the step rules themselves follow ManyPred
+
+
+def test_installed_manypred_rules_apply(monkeypatch):
+    """A newer ManyPred's stricter rule refuses a spec at save time, not at inference."""
+    import sys
+    import types
+
+    def validate_spec(steps):
+        raise ValueError("newer rule")
+
+    monkeypatch.setitem(sys.modules, "manypred", types.SimpleNamespace(validate_spec=validate_spec))
+    with pytest.raises(ValueError, match="ManyPred refuses this spec: newer rule"):
+        check_steps({"type": "scale", "value": 2})
