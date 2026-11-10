@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 import torch.nn.functional as F
 from torch import Tensor, nn
 
+from ..decoders.base import deepest_index
 from ..utils.spatial import crop_to, pad_to_multiple
 
 if TYPE_CHECKING:
@@ -97,7 +98,7 @@ class DenseModel(nn.Module):
         # input's levels concatenated, and the heads are built for the primary input's group.
         late = getattr(backbone, "mode", None) == "late"
         levels = range(*backbone.groups[0]) if late else range(len(backbone.feature_specs))
-        self._deepest = max(levels, key=lambda i: backbone.feature_specs[i].stride)
+        self._deepest = deepest_index(backbone.feature_specs, levels)
         # padded inputs: decoders can skip size checks in their upsampling
         if pad_to_stride and getattr(backbone, "fixed_size", None) is None:
             for dec in [self.decoder, *self.task_decoders.values()]:

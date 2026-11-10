@@ -192,15 +192,18 @@ def _ensure_seed_per_component(fg: Tensor, seeds: Tensor, dist: Tensor) -> Tenso
 
 
 def _drop_small_seeds(seeds: Tensor, min_seed: int) -> Tensor:
-    """Seeds without their 4-connected components of fewer than ``min_seed`` pixels.
+    """Seeds without their 4-connected components of fewer than ``min_seed`` pixels (counted
+    per image, so the result does not depend on the rest of the batch).
 
     Such fragments sit where boundary bands meet (the tip of an acute corner, a pixel on the
     seed threshold's edge) and would each grow into an extra instance; the instance around them
     floods their pixels instead. A foreground component left without any seed gets one back
     from :func:`_ensure_seed_per_component`, so small objects are kept.
     """
-    comp = connected_components(seeds)
-    _, inv, counts = torch.unique(comp, return_inverse=True, return_counts=True)
+    comp = connected_components(seeds)  # labels restart in every image: offset them per image
+    n = int(comp.max()) + 1
+    flat = comp + torch.arange(comp.shape[0], device=comp.device)[:, None, None] * n
+    _, inv, counts = torch.unique(flat, return_inverse=True, return_counts=True)
     return seeds & (counts[inv] >= min_seed)
 
 

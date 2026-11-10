@@ -20,8 +20,8 @@ class Recipe:
     no_decay_norm_bias: bool = True
     betas: tuple[float, float] = (0.9, 0.999)
     eps: float = 1e-8
-    warmup_epochs: float = 1.0
-    schedule: str = "cosine"  # cosine | onecycle | constant
+    warmup_epochs: float = 1.0  # linear warmup (cosine / constant); must be 0 for onecycle
+    schedule: str = "cosine"  # cosine | onecycle (own fixed 30% warmup) | constant
     freeze_encoder_epochs: int = 0
     # Keep the encoder's BatchNorm layers in eval mode (running statistics fixed at their
     # pretrained values; affine weights still train). For small batches (E007).
@@ -36,10 +36,21 @@ class Recipe:
     label_smoothing: float = 0.0
     eval_every: int = 1
 
+    def __post_init__(self) -> None:
+        if self.schedule == "onecycle" and self.warmup_epochs > 0:
+            raise ValueError(
+                f"schedule='onecycle' has its own fixed warmup (LR/25 rising to LR over the "
+                f"first 30% of steps) and ignores warmup_epochs; got warmup_epochs="
+                f"{self.warmup_epochs}, set warmup_epochs=0")
+
     def to_dict(self) -> dict:
         return asdict(self)
 
     def with_(self, **kw) -> Recipe:
+        # Switching to onecycle drops the inherited warmup (onecycle has its own); an explicit
+        # warmup_epochs > 0 alongside it is still refused by __post_init__.
+        if kw.get("schedule") == "onecycle" and "warmup_epochs" not in kw:
+            kw["warmup_epochs"] = 0.0
         return replace(self, **kw)
 
 

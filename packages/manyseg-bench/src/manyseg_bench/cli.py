@@ -31,9 +31,11 @@ def main(argv=None) -> int:
     pp = sub.add_parser("prepare")
     pp.add_argument("dataset")
     pp.add_argument("--size", type=int, default=None,
-                    help="tile / resize size in px for datasets that tile or resize (dataset "
-                    "default if omitted); fixed-size datasets (bigearthnet, ai4boundaries_s2, "
-                    "pastis_ts, second) reject a different size")
+                    help="tile / resize size in px for datasets that tile or resize "
+                    "(oxford_pet[_breeds], oam_tcd, cloudsen12, levircd, oscd; dataset default "
+                    "if omitted); fixed-size "
+                    "datasets (sen1floods11, eurosat, ai4boundaries, ai4boundaries_s2, pastis, "
+                    "pastis_ts, bigearthnet, second) reject a different size")
 
     for name in ("train", "profile"):
         sp = sub.add_parser(name)
@@ -66,6 +68,9 @@ def main(argv=None) -> int:
     pr.add_argument("--size", default="512,512")
     pr.add_argument("--in-channels", type=int, default=3)
     pr.add_argument("--num-classes", type=int, default=3)
+    pr.add_argument("--output", choices=["pixel", "image"], default=None,
+                    help="pixel logits (segmentation) or one prediction per image "
+                    "(classifiers); default image for --provider timm, else pixel")
     pr.add_argument("--batch-sizes", default="1,8,32")
     pr.add_argument("--precision", default="bf16")
     pr.add_argument("--compile", action="store_true")
@@ -114,6 +119,8 @@ def main(argv=None) -> int:
         import time
         import uuid
 
+        import torch
+
         from .env import environment, gpu_contention
         from .experiments.runner import resolution_info
         from .profiling import profile_model
@@ -121,8 +128,9 @@ def main(argv=None) -> int:
 
         h, w = (int(v) for v in a.size.split(","))
         spec = _spec(a)
+        output = a.output or ("image" if a.provider == "timm" else "pixel")
         spec = ModelSpec(**{**spec.to_dict(), "in_channels": a.in_channels,
-                            "num_classes": a.num_classes})
+                            "num_classes": a.num_classes, "output": output})
         prov = get_provider(a.provider)
         built = prov.build(spec, img_size=(h, w))
         env = environment(a.device)
@@ -136,7 +144,8 @@ def main(argv=None) -> int:
                "provider_version": prov.version(), "spec": spec.to_dict(),
                "weights_fingerprint": built.weights_fingerprint, "env": env,
                "resolution": resolution_info(built.model),
-               "gpu_contention_at_end": gpu_contention(), **res}
+               "gpu_contention_at_end": (gpu_contention(a.device) if torch.device(a.device).type
+                                         == "cuda" else None), **res}
         out = Path(a.out)
         out.mkdir(parents=True, exist_ok=True)
         path = out / f"{rec['run_id']}_profile_{a.provider}_{spec.arch}_{spec.encoder}.json"
@@ -149,9 +158,13 @@ def main(argv=None) -> int:
         rec = evaluate_run(a.run, variants=tuple(a.variants.split(",")), device=a.device,
                            data=a.data, out_dir=a.out, calib_batches=a.calib_batches,
                            threads=a.threads)
+        pm = rec["primary_metric"]
         for v, r in rec["variants"].items():
-            print(v, {s: {k: _r4(r[s].get(k)) for k in ("miou", "agreement")}
-                      for s in r if isinstance(r[s], dict) and "miou" in r[s]})
+            if "error" in r:
+                print(v, "error:", r["error"])
+                continue
+            print(v, {s: {k: _r4(r[s].get(k)) for k in (pm, "agreement")}
+                      for s in rec["splits"] if isinstance(r.get(s), dict)})
         print(rec["path"])
     elif a.cmd == "report":
         from .reporting import load_runs, training_table

@@ -988,7 +988,7 @@
   ],
   "sizes_failed": [],
   "params_m": 31.63,
-  "export_dynamic": "fail: UserError",
+  "export_dynamic": "fixed size only",
   "probe_seconds": 160.9
  },
  {
@@ -1026,7 +1026,7 @@
   ],
   "sizes_failed": [],
   "params_m": 31.69,
-  "export_dynamic": "fail: UserError",
+  "export_dynamic": "fixed size only",
   "probe_seconds": 40.8
  },
  {
@@ -1522,7 +1522,7 @@
   ],
   "sizes_failed": [],
   "params_m": 31.7,
-  "export_dynamic": "fail: UserError",
+  "export_dynamic": "fixed size only",
   "probe_seconds": 73.9
  },
  {

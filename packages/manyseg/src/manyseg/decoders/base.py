@@ -30,6 +30,14 @@ def pyramid_levels(specs: Sequence[FeatureSpec], min_stride: int = 4,
     return idx[-max_levels:]
 
 
+def deepest_index(specs: Sequence[FeatureSpec], levels: Sequence[int] | None = None) -> int:
+    """Index of the deepest feature among ``levels`` (default: all of ``specs``): the largest
+    stride, and the last such level when several share it (a dilated encoder, e.g. timm
+    ``output_stride=16``, repeats its deepest stride; the last level is the deepest one)."""
+    levels = range(len(specs)) if levels is None else levels
+    return max(reversed(list(levels)), key=lambda i: specs[i].stride)
+
+
 def check_out_stride(name: str, native: int, out_stride: int | None) -> None:
     """Fixed-stride decoders (``fpn``, ``deeplabv3plus``, ``upernet``, ``segformer``) accept
     ``out_stride`` only to state their stride; any other value is an error, never a silent

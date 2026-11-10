@@ -756,27 +756,28 @@ class _Builder:
 
     def _stage_params(self) -> dict[str, int]:
         m, bb = self.model, self.bb
-        enc = adapters = fusion = 0
-        decs = [m.decoder, *m.task_decoders.values()]
-        dec = heads = 0
+        enc = adapters = 0
+        fusers: list[nn.Module] = []
+        decs: list[nn.Module] = []
         if self.early:
             enc = _nparams(bb.backbone)
         elif self.multi:
             enc = _nparams(*bb.encoders.values())
             adapters = _nparams(*bb.adapters.values())
-            fusion = _nparams(*getattr(bb, "fusers", {}).values())
+            fusers += getattr(bb, "fusers", {}).values()
         else:
             enc = _nparams(bb)
-        for d in decs:
+        # one count per stage: a decoder shared by several heads (per-input heads with
+        # "share") is counted once
+        for d in [m.decoder, *m.task_decoders.values()]:
             if isinstance(d, self.LateFusionDecoder):
-                fusion += _nparams(d.fuse)
-                dec += _nparams(*d.decoders)
+                fusers.append(d.fuse)
+                decs += d.decoders
             elif d is not None:
-                dec += _nparams(d)
-        heads = _nparams(*m.heads.values())
-        out = {"adapters": adapters, "encoders": enc, "fusion": fusion,
-               "conditioning": _nparams(self.cond), "decoders": dec, "heads": heads}
-        return out
+                decs.append(d)
+        return {"adapters": adapters, "encoders": enc, "fusion": _nparams(*fusers),
+                "conditioning": _nparams(self.cond), "decoders": _nparams(*decs),
+                "heads": _nparams(*m.heads.values())}
 
     def _summary(self) -> list[tuple[str, str]]:
         m = self.model

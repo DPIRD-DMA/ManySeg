@@ -22,7 +22,8 @@ def density_loss(pred: Tensor, points: Sequence[Tensor], sigma=3.0, *,
     on ``pred``'s grid (for a head with ``scale`` < 1, ``(p + 0.5) * scale - 0.5``).
     ``sigma`` as in :func:`density_map` (a float, or per-image per-point tensors).
 
-    The target is :func:`density_map` (it sums to the point count) times ``value_scale``.
+    The target is :func:`density_map` (it sums to the number of points inside the image;
+    points outside add nothing) times ``value_scale``.
     The default, ``2 pi sigma^2``, makes an isolated object's peak about 1. Unscaled, a peak
     is ``1 / (2 pi sigma^2)`` (0.001 for sigma 12), so the pixel loss is tiny and the model
     can get away with a near-constant map. Predicted counts are then

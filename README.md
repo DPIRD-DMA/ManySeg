@@ -269,7 +269,9 @@ the stored normalisation and activations is up to the inference code. The defaul
 **Share on the Hugging Face Hub.** `manyseg.push_to_hub` takes `save`'s metadata arguments
 (`normalize`, `activations`, `classes`, `bands`, `extra`), saves the model as
 `model.safetensors`, uploads it to a model repository (private by default) and writes a model
-card listing the inputs, heads and the licences of the pretrained weights. It has no `source=`,
+card listing the inputs, heads and the licences of the pretrained weights (and, for a quantised
+model, that loading needs `manyseg[quant]`). The repository is a plain `org/name`; a branch goes
+in `revision=`. It has no `source=`,
 so a `quantize_pt2e` program (a `.pt2` file) can't be pushed. `load` and `read_metadata` take
 Hub names as timm does:
 
@@ -302,6 +304,10 @@ autocast plus `torch.compile`.
 `tiling_spec()`, so ManyPred can run them from a file (both need `manyseg[quant]` to load):
 
 ```python
+from manyseg.quantize import quantize_pt2e, quantize_weights
+
+# spec: the normalisation steps the model was trained with, e.g. [{"type": "scale", "value": 10000}]
+# example: one input batch; batches: a few representative batches for calibration
 q = quantize_weights(model)                 # CPU or GPU: an nn.Module with int8 weights
 manyseg.save(q, "model_int8.safetensors", normalize=spec, activations={"logits": "softmax"})
 

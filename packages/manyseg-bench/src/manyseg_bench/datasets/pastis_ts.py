@@ -57,8 +57,8 @@ def group_by_patch(names: list[str]) -> list[tuple[str, list[int]]]:
 
 
 def prepare(raw: Path, cache: Path, size: int | None = None) -> dict:
-    """Group the prepared ``pastis`` cache's dates into series. The tile size is that cache's
-    (``prepare pastis --size``); another ``size`` raises."""
+    """Group the prepared ``pastis`` cache's dates into series. Patches keep PASTIS's fixed
+    ``pastis.SIZE`` (128) px, the size of that cache; another ``size`` raises."""
     from numpy.lib.format import open_memmap
 
     cache = Path(cache)

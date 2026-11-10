@@ -119,12 +119,13 @@ def quantize_pt2e(model: nn.Module, example, calibration: Iterable, *, quantizer
     configures the default quantizer only: passing it with ``quantizer`` raises.
 
     H/W stay dynamic as in ``export_model`` (and the batch too with ``dynamic_batch``, which
-    needs an example with batch size >= 2). ``model`` is exported in eval mode and then
-    returned to its previous mode.
+    needs an example with batch size >= 2), within ``[min, max_size]``. ``model`` itself is not
+    changed: a copy of it is exported, in eval mode, so the result shares no tensors with it.
     Window-attention backbones (Swin, DaViT) cannot export dynamic H/W and need
     ``dynamic=False``: the result then only accepts the example's H/W, and its batch size
     too unless ``dynamic_batch=True`` (which works with ``dynamic=False``: dynamic batch,
-    fixed H/W). Without ``dynamic_batch``, calibration batches must match the example's.
+    fixed H/W). Without ``dynamic_batch``, calibration batches must match the example's. A
+    calibration input of another shape than the export allows raises a ValueError.
 
     Returns an ``ExportedProgram``, like ``export_model``: save it with its metadata by
     ``manyseg.save(ep, "model.pt2", source=model, ...)``, or run ``ep.module()``. Eager calls
@@ -141,8 +142,11 @@ def quantize_pt2e(model: nn.Module, example, calibration: Iterable, *, quantizer
     from torchao.quantization.pt2e.quantize_pt2e import convert_pt2e, prepare_pt2e
 
     shapes = _checked_shapes(model, example, dynamic, max_size, dynamic_batch)
+    # a private copy: the program shares its unquantised tensors (biases, norms) with what was
+    # exported, so the float model must stay free to change or move
     with eval_mode(model):
-        gm = _export(model, example, shapes, dynamic).module()
+        own = copy.deepcopy(model)
+    gm = _export(own, example, shapes, dynamic).module()
     rr = None  # unknown with a custom quantizer
     if quantizer is None:
         rr = (not _has_vnni()) if reduce_range is None else bool(reduce_range)
@@ -162,7 +166,15 @@ def quantize_pt2e(model: nn.Module, example, calibration: Iterable, *, quantizer
                 raise ValueError(f"calibration batch size {_batch_of(x)} differs from the "
                                  f"example's {bs}; the export fixes the batch dimension unless "
                                  "dynamic_batch=True")
-            prepared(x)
+            _check_calibration(x, example, shapes)
+            try:
+                prepared(x)
+            except AssertionError as e:  # a shape guard the check above can't foresee
+                if not str(e).startswith("Guard failed"):
+                    raise
+                raise ValueError(f"calibration input {n} has a shape this export does not take "
+                                 f"({e}). Calibrate at sizes the export allows (dynamic=, "
+                                 f"max_size=).") from e
             n += 1
     if n == 0:
         raise ValueError("calibration must yield at least one input")
@@ -173,6 +185,42 @@ def quantize_pt2e(model: nn.Module, example, calibration: Iterable, *, quantizer
 
 
 _RR_KEY = "manyseg_int8_reduce_range"
+
+
+def _check_calibration(x: Any, example: Any, shapes: Any) -> None:
+    """Raise a ValueError if calibration input ``x`` has a shape the export of ``example`` with
+    ``shapes`` (:func:`manyseg.export.dynamic_shapes`) does not take: every dimension without a
+    ``Dim`` is fixed at the example's, every other one is within the ``Dim``'s bounds."""
+    spec = shapes.get("x") if isinstance(shapes, Mapping) else None
+    if isinstance(example, Mapping):
+        if not isinstance(x, Mapping) or set(x) != set(example):
+            got = sorted(x) if isinstance(x, Mapping) else type(x).__name__
+            raise ValueError(f"calibration inputs must have the example's keys "
+                             f"{sorted(example)}, got {got}")
+        items = [(k, x[k], example[k], (spec or {}).get(k)) for k in example]
+    else:
+        items = [("x", x, example, spec)]
+    for name, t, ref, dims in items:
+        if not (torch.is_tensor(t) and torch.is_tensor(ref)):
+            continue
+        if t.ndim != ref.ndim:
+            raise ValueError(f"calibration input {name!r} has {t.ndim} dimensions, the "
+                             f"example {ref.ndim}")
+        for i, (have, want) in enumerate(zip(t.shape, ref.shape, strict=True)):
+            dim = (dims or {}).get(i)
+            if dim is None and have != want:
+                spatial = t.ndim >= 4 and i >= t.ndim - 2
+                raise ValueError(
+                    f"calibration input {name!r} has size {have} in dimension {i}, but the "
+                    f"export fixes it at the example's {want}: calibrate at that size"
+                    + (", or quantise with dynamic=True where the backbone allows it"
+                       if spatial else ""))
+            if dim is not None and not dim.min <= have <= dim.max:
+                raise ValueError(
+                    f"calibration input {name!r} has size {have} in dimension {i}, outside "
+                    f"the export's range [{dim.min}, {dim.max}]: calibrate within it"
+                    + (", or raise max_size= (the upper bound of dynamic H/W)"
+                       if have > dim.max else ""))
 
 
 def check_deployment(ep: torch.export.ExportedProgram) -> None:
@@ -202,11 +250,14 @@ class QuantizedProgram:
 
     Deliberately not an ``nn.Module``: a module from ``ep.module()`` raises on ``.eval()``, also
     when nested, and callers such as ManyPred call ``.to(device, dtype).eval()`` on every module.
-    Call it like the model; its device is the ``map_location`` it was loaded on.
+    Call it like the model; its device is the ``map_location`` it was loaded on, and an input on
+    another device (or another GPU) is refused.
 
     Attributes:
-        program: The ``ExportedProgram``.
-        module: Its ``ep.module()``, e.g. to ``torch.compile`` with freezing.
+        program: The ``ExportedProgram`` as given (:func:`manyseg.load` loads it on the CPU),
+            which :func:`manyseg.save` saves.
+        module: An ``ep.module()`` of a copy of it, on ``device``, which runs the calls, e.g. to
+            ``torch.compile`` with freezing. Moving or changing it leaves ``program`` alone.
         saved_metadata: What :func:`manyseg.save` stored.
         batch_size: The only batch size the program takes, or None if it is dynamic
             (``quantize_pt2e(..., dynamic_batch=True)``).
@@ -221,8 +272,11 @@ class QuantizedProgram:
         recipe = metadata["quantization"]
         self.program = program
         self.saved_metadata = metadata
-        self.device = torch.device(device)
-        self.module = program.module().to(self.device)
+        # resolved, with its index ("cuda" -> "cuda:0"), as the inputs' devices are
+        self.device = torch.empty(0, device=device).device
+        # ep.module() shares the program's tensors, so moving it would move part of the program
+        # (and break saving it): run a copy (one deepcopy keeps the tensors it shares internally)
+        self.module = copy.deepcopy(program).module().to(self.device)
         self.batch_size: int | None = recipe["batch_size"]
         self.fixed_size: tuple[int, int] | None = (tuple(recipe["fixed_size"])
                                                    if recipe["fixed_size"] else None)
@@ -237,7 +291,7 @@ class QuantizedProgram:
         return spec
 
     def _check(self, name: str, t: Tensor) -> None:
-        if t.device.type != self.device.type:
+        if t.device != self.device:
             raise ValueError(f"This program is on {self.device} but input {name!r} is on "
                              f"{t.device}: load it with map_location={str(t.device)!r}, or run "
                              f"it on {self.device} (with ManyPred, device={str(self.device)!r}).")

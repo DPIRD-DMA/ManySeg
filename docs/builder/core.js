@@ -595,14 +595,14 @@ function derive(s) {
   for (const e of encoders) {
     const b = e.info;
     if (b.size === "fixed") issues.push({ level: "warn", text: `${b.name} only runs at one size (${FIXED_NATIVE} px): smaller inputs are padded, larger ones are an error. Pass backbone_kwargs={"img_size": ...} for another size.${(() => { const [h, w] = clampForFixed(s, encoders); return h !== s.size[0] || w !== s.size[1] ? ` The example uses ${h}\u00d7${w} px for ${rasters[0].name} instead of ${s.size[0]}\u00d7${s.size[1]}.` : ""; })()}` });
-    if (b.export === "fail") issues.push({ level: "warn", text: `${b.name}: torch.export and ONNX need a fixed input size (window attention, a timm limitation). torch.compile and eager work at any size.` });
+    if (b.export === "fail" || b.export === "fixed size only") issues.push({ level: "warn", text: `${b.name}: torch.export and ONNX need a fixed input size (window attention, a timm limitation): export with export_model(model, x, dynamic=False). torch.compile and eager work at any size.` });
     if (b.vit) issues.push({ level: "tip", text: `${b.name} is a plain ViT: a neck turns its single-scale tokens into a /4 to /32 pyramid.` });
   }
-  if (ftype === "intermediate" || ftype === "late")
-    issues.push({ level: "tip", text: "Stacking all channels into one input (early fusion) was as good as fancier fusion on the datasets we tried. Start there and compare." });
+  if ((ftype === "intermediate" || ftype === "late") && rasters.every((r) => r.alignment === "same_grid"))
+    issues.push({ level: "tip", text: "On inputs that share a grid, stacking all channels into one input (early fusion) did as well as separate encoders in our tests (E005, E056). Start there and compare. Across a large resolution gap separate encoders helped (E059, +2.9 mIoU)." });
   if (ftype === "intermediate" && s.fusion.op === "cross_attention")
     issues.push({ level: "tip", text: "cross_attention is quadratic in tokens, so it fuses strides 16 and 32 only." });
-  if (s.meta) issues.push({ level: "tip", text: "Metadata showed no benefit on three datasets (E009, E013, E016). Compare against the same model without it, on splits that hold out whole regions or events." });
+  if (s.meta) issues.push({ level: "tip", text: "Metadata showed no benefit for date or location (E009, E013, E016, E020), but helped where the vector carries information the pixels don't give: zoom for metric depth (E055) and latitude for longitude prediction (E058). Compare against the same model without it, on splits that hold out whole regions or events." });
   if (needsShared && d.input_cross) issues.push({ level: "tip", text: "input_cross helped water mapping (E012) but not pets or clouds. It suits targets decided by a pixel's own spectrum." });
   if (!pixelHeads.length && imageHeads.length) issues.push({ level: "tip", text: "No pixel heads, so no decoder is built: this is a classifier. With pixel labels, an auxiliary segmentation head raised mAP by 2.3 in E020; drop it before deployment with model.select_heads([...])." });
   if (s.heads.some((h) => h.activation && h.type === "regression"))

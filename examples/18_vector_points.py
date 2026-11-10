@@ -10,7 +10,6 @@ targets of the whole scene stand in for a trained model's stitched predictions;
 ``point_counting.py`` trains the heads briefly.
 """
 
-import json
 import tempfile
 from pathlib import Path
 
@@ -85,17 +84,16 @@ def main():
     # 4. GeoJSON points in metres, with each peak's score.
     out_dir = Path(tempfile.mkdtemp())
     fc = pts.to_geojson()  # through scene.transform, naming scene.crs; pts.yx, pts.xy, pts.scores
-    (out_dir / "trees.geojson").write_text(json.dumps(fc))
     print("first tree:", fc["features"][0]["geometry"]["coordinates"],
           fc["features"][0]["properties"])
+    pts.write(out_dir / "trees.geojson")  # the same call as SceneRecords / VectorGraph
     try:
-        import geopandas as gpd
+        import geopandas  # noqa: F401
     except ImportError:
         print("wrote trees.geojson (a GeoPackage needs geopandas)")
         return
-    gdf = gpd.GeoDataFrame.from_features(fc["features"], crs=CRS)
-    gdf.to_file(out_dir / "trees.gpkg")
-    print(f"wrote trees.geojson, trees.gpkg ({gdf.crs}, {len(gdf)} points)")
+    pts.write(out_dir / "trees.gpkg")
+    print(f"wrote trees.geojson, trees.gpkg ({len(pts)} points)")
 
 
 if __name__ == "__main__":

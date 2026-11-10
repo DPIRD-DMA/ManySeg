@@ -6,6 +6,7 @@ from .base import (
     BuiltModel,
     ModelSpec,
     Provider,
+    check_pixel_output,
     fingerprint_module,
     split_params,
     stem_adaptation_note,
@@ -16,7 +17,9 @@ _TV_WEIGHTS = {"tv_in1k": "IMAGENET1K_V1"}
 
 class FastaiProvider(Provider):
     """fastai ``DynamicUnet`` on a torchvision body, built exactly as ``unet_learner`` does
-    (``create_body`` + ``DynamicUnet``), without fastai's Learner or training loop."""
+    (``create_body`` + ``DynamicUnet``), without fastai's Learner or training loop. Segmentation
+    models only: ``output="image"`` (image-level tasks) raises; use the timm or ManySeg
+    provider for those."""
 
     name = "fastai"
 
@@ -29,6 +32,7 @@ class FastaiProvider(Provider):
         return spec.arch == "unet" and spec.encoder.startswith("resnet")
 
     def build(self, spec: ModelSpec, img_size=None) -> BuiltModel:
+        check_pixel_output(spec, self.name)
         import torchvision
         from fastai.vision.learner import create_body
         from fastai.vision.models.unet import DynamicUnet

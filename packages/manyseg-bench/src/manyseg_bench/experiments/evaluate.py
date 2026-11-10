@@ -5,6 +5,11 @@ normalisation statistics used in training and the checkpoint (verified by sha256
 variant scores the *same* weights on the same images, and each batch is also run through the
 fp32 reference on the variant's device, so ``agreement`` is the paired fraction of valid pixels
 whose argmax matches fp32.
+
+The record names the task's ``primary_metric`` and the evaluated ``splits``; a variant that
+failed holds ``{"device", "error"}`` instead of scores. ``size_bytes`` is the serialized
+``state_dict`` for the floating-point variants and the quantised program's size for int8
+(only the int8 variants need ``manyseg[quant]``).
 """
 
 from __future__ import annotations
@@ -19,6 +24,7 @@ import torch
 
 from ..datasets import GPULoader, data_root, get_dataset
 from ..env import environment
+from ..profiling import serialized_size_bytes
 from ..providers import ModelSpec, get_provider
 from ..tasks import build_task
 from ..training.trainer import autocast
@@ -84,12 +90,6 @@ def _agreement(ref, out, y, ignore_index):
     return int(((ref.argmax(1) == out.argmax(1)) & valid).sum()), int(valid.sum())
 
 
-def _size_bytes(model) -> int:
-    from manyseg.quantize import model_size
-
-    return model_size(model)
-
-
 def evaluate_run(run: str | Path, variants=("fp32", "bf16", "fp16"), device: str = "cuda",
                  data: str | Path | None = None, out_dir: str | Path = "runs",
                  calib_batches: int = 32, threads: int = 4) -> dict:
@@ -124,7 +124,8 @@ def evaluate_run(run: str | Path, variants=("fp32", "bf16", "fp16"), device: str
            "kind": "evaluate", "source_run": record["run_id"], "tag": record.get("tag", ""),
            "spec": record["spec"], "dataset": info.name, "seed": record.get("seed"),
            "checkpoint": record["checkpoint"], "calib_batches": calib_batches,
-           "threads": threads, "variants": {}}
+           "threads": threads, "primary_metric": task.primary_metric,
+           "splits": list(splits), "variants": {}}
     envs = {}
     for v in variants:
         kind, precision = VARIANTS[v]
@@ -158,7 +159,9 @@ def _score(v, ref, loader, splits, task, info, dev, precision, calib_batches) ->
     if v.startswith("int8"):
         calib = [x for _, (x, _) in zip(range(calib_batches), loader("train"))]
         model, size = _quantised(v, ref, calib, calib[0])
-    res = {"device": dev.type, "precision": precision, "size_bytes": size or _size_bytes(ref)}
+    # floating-point variants: the state_dict as saved (no ManySeg / quantisation dependency)
+    res = {"device": dev.type, "precision": precision,
+           "size_bytes": size if size is not None else serialized_size_bytes(ref)}
     for split in splits:
         ev, agree, total, t0 = task.evaluator(), 0, 0, time.perf_counter()
         for x, y in loader(split):

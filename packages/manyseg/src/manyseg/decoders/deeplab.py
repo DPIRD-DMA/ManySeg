@@ -10,7 +10,7 @@ from torch import Tensor, nn
 from ..features import FeatureSpec
 from ..layers import init_decoder_
 from ..utils.spatial import resize_bilinear
-from .base import DECODERS, check_out_stride, pyramid_levels
+from .base import DECODERS, check_out_stride, deepest_index, pyramid_levels
 
 
 class SeparableConvBNReLU(nn.Sequential):
@@ -47,7 +47,8 @@ class ASPP(nn.Module):
 
 @DECODERS.register("deeplabv3plus")
 class DeepLabV3PlusDecoder(nn.Module):
-    """ASPP on the deepest feature + a low-level skip from the shallowest level it reads.
+    """ASPP on the deepest feature (the last one when several share the largest stride, as with
+    a dilated encoder) + a low-level skip from the shallowest level it reads.
     Output: ``channels`` (256) at that level's stride: 4 on a standard stride 4..32 pyramid,
     coarser when the encoder has no stride-4 level (e.g. ``out_indices`` starting at stride 8)
     or more than 4 levels of stride >= 4 (only the 4 deepest are read). ``out_stride`` may
@@ -64,8 +65,7 @@ class DeepLabV3PlusDecoder(nn.Module):
         super().__init__()
         levels = pyramid_levels(in_specs)
         check_out_stride("deeplabv3plus", in_specs[levels[0]].stride, out_stride)
-        self.low, self.high = levels[0], max(range(len(in_specs)),
-                                            key=lambda i: in_specs[i].stride)
+        self.low, self.high = levels[0], deepest_index(in_specs)
         deep = in_specs[self.high]
         if atrous_rates is None:
             atrous_rates = tuple(max(1, r * 16 // deep.stride) for r in (12, 24, 36))

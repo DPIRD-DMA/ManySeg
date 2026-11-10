@@ -26,7 +26,7 @@ import torch.nn.functional as F
 from torch import Tensor, nn
 
 from ..features import FeatureSpec
-from ..layers import make_norm
+from ..layers import make_norm, normalize_norm
 from ..registry import Registry
 from ..utils.resolution import scale_factor
 from ..utils.spatial import pad_to_multiple
@@ -43,7 +43,9 @@ class PixelHead(nn.Module):
     * ``d == f``: just the ``k x k`` conv; nothing is resampled (a decoder built with
       ``out_stride=f`` feeding a head with ``scale=1/f`` pays for no upsampling at all);
     * ``d > f``: conv, then bilinear upsampling by ``d / f`` (``align_corners=False``);
-    * ``d < f``: area-average by ``f / d`` (block means), then the conv on the coarse grid.
+    * ``d < f``: area-average by ``f / d`` (block means; a partial edge block averages its
+      in-image cells, as :func:`~manyseg.utils.downsample_mean`), then the conv on the coarse
+      grid.
 
     The output covers ``feature_size * d / f`` pixels (>= the scaled padded input); the model
     crops it to ``ceil(H / f) x ceil(W / f)``.
@@ -53,8 +55,9 @@ class PixelHead(nn.Module):
     * ``hidden``: widths of ``k x k`` conv -> ``norm`` -> ReLU layers before the final conv,
       e.g. ``[64, 32, 16]``; ``dilation`` (one int, or one per layer, e.g. ``[8, 16, 32]``)
       widens their receptive field to match large objects; ``norm`` is ``"batch"`` (default),
-      ``"group"`` or None, as for decoders (``"bn"`` / ``"gn"`` are accepted aliases). They
-      run on the head's grid, before upsampling.
+      ``"group"`` or None, with the aliases ``"bn"``, ``"gn"`` and ``"none"``, the same values
+      as decoders take (:func:`manyseg.layers.normalize_norm`). They run on the head's grid,
+      before upsampling.
     * ``kernel_size``: odd (default 3), so the convs keep the grid aligned.
     * ``activation="softplus"`` (regression heads): the output is ``softplus(conv)``, > 0
       (never exactly 0). Applied after resampling. ``bias_init`` stays the bias of the final
@@ -99,7 +102,11 @@ class PixelHead(nn.Module):
         """``activate=False``: skip the output activation (the model applies :meth:`activate`
         itself after a metadata head bias, so the final output stays >= 0)."""
         if self.down > 1:
-            x = F.avg_pool2d(pad_to_multiple(x, self.down), self.down)
+            # block means over the in-image cells only (as downsample_mean for targets): a
+            # partial edge block is divided by its own cell count, not diluted by the padding
+            ones = x.new_ones((1, 1, *x.shape[-2:]))
+            x = (F.avg_pool2d(pad_to_multiple(x, self.down), self.down)
+                 / F.avg_pool2d(pad_to_multiple(ones, self.down), self.down))
         if self.hidden is not None:
             x = self.hidden(x)
         x = self.conv(x)
@@ -118,10 +125,6 @@ class PixelHead(nn.Module):
 
 
 ACTIVATIONS = (None, "softplus")
-NORMS = (None, "batch", "group")
-"""Head ``norm`` values, as for decoders (:func:`manyseg.layers.make_norm`)."""
-NORM_ALIASES = {"bn": "batch", "gn": "group"}
-"""Older head norm names, still accepted (saved configs use them)."""
 
 
 def _hidden_layers(in_ch: int, hidden: Sequence[int], dilation: int | Sequence[int],
@@ -138,10 +141,7 @@ def _hidden_layers(in_ch: int, hidden: Sequence[int], dilation: int | Sequence[i
             isinstance(d, int) and not isinstance(d, bool) and d > 0 for d in dil):
         raise ValueError(f"'dilation' must be a positive int or one per hidden layer "
                          f"({len(hidden)}), got {dilation!r}")
-    norm = NORM_ALIASES.get(norm, norm) if isinstance(norm, str) else norm
-    if norm not in NORMS:
-        raise ValueError(f"head norm must be one of 'batch', 'group' or None (as for decoders; "
-                         f"'bn' and 'gn' are accepted aliases), got {norm!r}")
+    norm = normalize_norm(norm, "head norm")  # before the bias: "none" means no norm
     layers: list[nn.Module] = []
     for c, d in zip(hidden, dil):
         layers.append(nn.Conv2d(in_ch, c, kernel_size, padding=d * (kernel_size // 2),

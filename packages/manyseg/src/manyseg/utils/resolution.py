@@ -152,13 +152,21 @@ def upsample_output(y: Tensor, size, scale, mode: str = "bilinear") -> Tensor:
     ``bilinear`` (logits, continuous values; ``align_corners=False``, i.e. consistent with
     output pixel ``i`` covering input ``[i*f, (i+1)*f)``) or ``nearest`` (labels, any dtype:
     each output pixel is repeated over its block). The ``f``-times larger map is cropped.
+
+    Raises ValueError unless ``y``'s grid is exactly ``(ceil(H*s), ceil(W*s))``: a larger or
+    smaller grid belongs to another input size (crop the output to the input first).
     """
     f = scale_factor(scale)
+    if mode not in ("bilinear", "nearest"):
+        raise ValueError(f"mode must be 'bilinear' or 'nearest', got {mode!r}")
+    expect = scaled_size(int(size[0]), int(size[1]), scale)
+    if tuple(y.shape[-2:]) != expect:
+        raise ValueError(f"upsample_output: a head output for size {tuple(size)} at scale "
+                         f"{scale} has a {expect[0]} x {expect[1]} grid (ceil(H*s), ceil(W*s)), "
+                         f"got {y.shape[-2]} x {y.shape[-1]}")
     if mode == "nearest":
         out = y.repeat_interleave(f, dim=-2).repeat_interleave(f, dim=-1) if f > 1 else y
         return out[..., : size[0], : size[1]]
-    if mode != "bilinear":
-        raise ValueError(f"mode must be 'bilinear' or 'nearest', got {mode!r}")
     if f > 1:
         h, w = y.shape[-2], y.shape[-1]
         y = F.interpolate(y, size=(h * f, w * f), mode="bilinear", align_corners=False)

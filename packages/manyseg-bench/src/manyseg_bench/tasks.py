@@ -626,7 +626,8 @@ class SegMultilabelTask(Task):
     """Segmentation + multi-label classification from one class mask: the image labels are
     the classes present (``ignore_index`` excluded), so pixel supervision is an auxiliary task
     for the image classifier. Heads: ``seg`` (pixel, via the decoder) and ``logits`` (image,
-    pooling the encoder). Loss: CE(seg) + ``cls_weight`` * BCE(logits). Primary: macro AP of
+    pooling the encoder). Loss: CE(seg) + ``cls_weight`` * BCE(logits); the evaluator reports
+    that sum as ``"loss"`` and its terms under ``"seg"`` / ``"cls"``. Primary: macro AP of
     the image head; mIoU of the pixel head is reported under ``"seg"``. ``label_smoothing``
     > 0 raises: it would reach the pixel head only."""
 
@@ -673,8 +674,10 @@ class _SegMultilabelEval:
         self.cls.update(out["logits"], t["labels"])
 
     def compute(self) -> dict:
-        seg = self.seg.compute()
-        return {**self.cls.compute(), "seg": {k: seg[k] for k in ("miou", "iou", "loss")}}
+        seg, cls = self.seg.compute(), self.cls.compute()
+        # top-level loss = the training objective; its terms stay under "seg" / "cls"
+        return {**cls, "loss": seg["loss"] + self.t.cls_weight * cls["loss"],
+                "seg": {k: seg[k] for k in ("miou", "iou", "loss")}, "cls": {"loss": cls["loss"]}}
 
 
 # --- multi-label segmentation -------------------------------------------------------------------
@@ -1013,6 +1016,28 @@ class _RoadEval:
 
     def compute(self) -> dict:
         return {"mask_iou": self.inter / max(1, self.union), "loss": self.loss / max(1, self.n)}
+
+
+_TASK_CLASSES = {"semantic": "SemanticTask", "instances": "InstanceTask", "points": "PointTask",
+                 "classification": "ClassificationTask", "multilabel": "ClassificationTask",
+                 "regression": "RegressionTask", "seg_multilabel": "SegMultilabelTask",
+                 "change": "ChangeTask", "multilabel_seg": "MultiLabelSegTask",
+                 "semantic_change": "SemanticChangeTask", "corner_lines": "CornerLineTask",
+                 "roads": "RoadGraphTask"}
+
+
+def task_defaults(name: str) -> dict:
+    """The keyword defaults of task ``name``'s constructor (what ``build_task`` applies to a
+    kwarg left out), e.g. ``{"label_smoothing": 0.0, ...}`` for ``"semantic"``; ``{}`` for an
+    unknown task. Arguments ``build_task`` sets itself are left out."""
+    import inspect
+
+    cls = globals().get(_TASK_CLASSES.get(name, ""))
+    if cls is None:
+        return {}
+    return {k: p.default for k, p in inspect.signature(cls.__init__).parameters.items()
+            if p.default is not inspect.Parameter.empty
+            and k not in ("num_classes", "ignore_index", "multilabel")}
 
 
 def build_task(name: str, num_classes: int, ignore_index: int | None = None, **kwargs) -> Task:

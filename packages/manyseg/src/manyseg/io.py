@@ -72,9 +72,11 @@ def _plain(value: Any) -> Any:
     return json.loads(json.dumps(value))
 
 
-def _weights_normalize(config: Mapping[str, Any]) -> Any:
+def _weights_normalize(config: Mapping[str, Any], *, partial: bool = False) -> Any:
     """The normalisation the pretrained weights expect, as a ManyPred spec, when the model was
-    built with remote-sensing weights tags (``pretrained="ssl4eo_s2_moco"``); else None."""
+    built with remote-sensing weights tags (``pretrained="ssl4eo_s2_moco"``); else None.
+    ``partial`` (for error messages): for a multi-input model without early fusion, return
+    ``{input: steps or None}`` even when only some inputs have such a tag."""
     from .weights import get_weights
 
     def steps(arch: str, tag: Any) -> list | None:
@@ -138,11 +140,12 @@ def _weights_normalize(config: Mapping[str, Any]) -> Any:
         if cfg.get("kind") == "vector":
             continue
         arch, tag = encoder(name)
-        found = steps(arch, tag) if isinstance(arch, str) else None
-        if found is None:
-            return None  # all or nothing: a partial spec would silently skip inputs
-        per_input[name] = found
-    return per_input or None
+        per_input[name] = steps(arch, tag) if isinstance(arch, str) else None
+    if partial:
+        return per_input
+    if not per_input or None in per_input.values():
+        return None  # all or nothing: a partial spec would silently skip inputs
+    return per_input
 
 
 def _require_dense(model: Any) -> None:
@@ -296,6 +299,15 @@ def _metadata(model: DenseModel, *, normalize: Any, activations, classes, bands,
     if normalize == "weights":
         normalize = _weights_normalize(config)
         if normalize is None:
+            per_input = _weights_normalize(config, partial=True)
+            missing = ([n for n, v in per_input.items() if v is None]
+                       if isinstance(per_input, Mapping) else [])
+            if 0 < len(missing) < len(per_input or ()):
+                raise ValueError(
+                    f"normalize='weights', but inputs {missing} were not built with "
+                    f"remote-sensing pretrained weights (a weights tag), so the weights don't "
+                    f"say how to normalise them. Pass a normalisation spec for each input "
+                    f"instead: normalize={{input: steps}} for {list(per_input)}.")
             raise ValueError("normalize='weights', but the model was not built with "
                              "remote-sensing pretrained weights (a weights tag).")
     elif normalize is None:
@@ -306,8 +318,8 @@ def _metadata(model: DenseModel, *, normalize: Any, activations, classes, bands,
         )
     if normalize is not None:
         cfgs = config.get("inputs") or {None: config}
-        band_counts = {n: cfgs[n].get("in_channels") or 3 for n in image_inputs
-                       if cfgs[n].get("kind", "raster") == "raster"}  # a time series: per date
+        # every image input; a time series' bands are its channels per date
+        band_counts = {n: cfgs[n].get("in_channels") or 3 for n in image_inputs}
         check_normalize(normalize, None if image_inputs == [None] else image_inputs,
                         band_counts)
     _check_rebuildable(model, config)
@@ -623,6 +635,28 @@ def _no_download(config: dict) -> dict:
     return config
 
 
+def _restore_weight_sources(model: DenseModel, saved: Mapping[str, Any]) -> None:
+    """Undo :func:`_no_download` on ``model.build_config``: put back the saved pretrained tags
+    and weight sources (only those), so the loaded model saves again as it was built
+    (``normalize="weights"`` works and the file keeps its pretrained tag)."""
+    config = getattr(model, "build_config", None)
+    if not isinstance(config, dict):
+        return
+    saved = json.loads(json.dumps(saved))
+    pairs = [(config, saved)] + [
+        (config["inputs"][n], cfg) for n, cfg in (saved.get("inputs") or {}).items()
+        if isinstance(cfg, dict) and isinstance(config.get("inputs"), dict)
+        and isinstance(config["inputs"].get(n), dict)]
+    for have, want in pairs:
+        if "pretrained" in want:
+            have["pretrained"] = want["pretrained"]
+        kwargs = want.get("backbone_kwargs")
+        if isinstance(kwargs, dict) and isinstance(have.get("backbone_kwargs"), dict):
+            for key in _WEIGHT_SOURCES:
+                if key in kwargs:
+                    have["backbone_kwargs"][key] = kwargs[key]
+
+
 def _is_newer(saved, current: str) -> bool:
     """PEP 440 ordering (``0.1.0.dev0 < 0.1.0rc1 < 0.1.0``); False when unknown."""
     try:
@@ -760,6 +794,7 @@ def load(path: str | Path, map_location: str | torch.device = "cpu", *,
     except (RuntimeError, KeyError) as e:
         raise _version_error(path, meta, e, quantizing=recipe is not None) from e
     model.saved_metadata = meta
+    _restore_weight_sources(model, meta["create_model"])
     if recipe is not None:
         model.quantization = {"mode": recipe["mode"], "conv": recipe["conv"]}
     for rec in meta.get("pretrained_weights") or []:  # load built the backbones without them

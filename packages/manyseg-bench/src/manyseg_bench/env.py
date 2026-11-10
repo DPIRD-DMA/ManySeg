@@ -17,23 +17,55 @@ def _pkg(name: str) -> str | None:
         return None
 
 
-def gpu_contention() -> dict | None:
-    """Snapshot of *other* processes on the GPU. Timing under contention is not clean."""
+def _smi(*args: str) -> list[list[str]]:
+    """Rows of an ``nvidia-smi --format=csv,noheader,nounits`` query, split into fields."""
+    out = subprocess.run(["nvidia-smi", *args, "--format=csv,noheader,nounits"],
+                         capture_output=True, text=True, timeout=10, check=True).stdout
+    return [[f.strip() for f in ln.split(",")] for ln in out.strip().splitlines() if ln.strip()]
+
+
+def _cuda_uuid(index: int) -> str | None:
+    """The CUDA device's UUID as torch reports it (None if unavailable)."""
     try:
-        q = subprocess.run(
-            ["nvidia-smi", "--query-gpu=utilization.gpu,memory.used,memory.total",
-             "--format=csv,noheader,nounits"], capture_output=True, text=True, timeout=10,
-        ).stdout.strip().splitlines()
-        procs = subprocess.run(
-            ["nvidia-smi", "--query-compute-apps=pid,used_memory", "--format=csv,noheader,nounits"],
-            capture_output=True, text=True, timeout=10,
-        ).stdout.strip().splitlines()
-    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return str(torch.cuda.get_device_properties(index).uuid)
+    except Exception:
         return None
-    util, used, total = (int(v) for v in q[0].split(", "))
-    me = os.getpid()
-    others = [p for p in procs if p and int(p.split(", ")[0]) != me]
+
+
+def _norm_uuid(u: str) -> str:
+    return u.lower().removeprefix("gpu-")
+
+
+def gpu_contention(device: str | torch.device = "cuda") -> dict | None:
+    """Snapshot of the run's GPU and of *other* compute processes on it. Timing under
+    contention is not clean.
+
+    The GPU is ``device`` (index from the device, else the current CUDA device), found in
+    ``nvidia-smi`` by its UUID (so ``CUDA_VISIBLE_DEVICES`` renumbering does not matter; by
+    index when torch reports no UUID), and only processes on that GPU count. ``None`` for a
+    non-CUDA device, without ``nvidia-smi`` (e.g. ROCm), or when its output cannot be parsed:
+    telemetry never fails a run.
+    """
+    try:
+        dev = torch.device(device)
+        if dev.type != "cuda":
+            return None
+        index = dev.index if dev.index is not None else torch.cuda.current_device()
+        uuid = _cuda_uuid(index)
+        gpus = _smi("--query-gpu=index,uuid,utilization.gpu,memory.used,memory.total")
+        if uuid is not None:
+            row = next(g for g in gpus if _norm_uuid(g[1]) == _norm_uuid(uuid))
+        else:
+            row = next(g for g in gpus if int(g[0]) == index)
+        util, used, total = (int(v) for v in row[2:5])
+        procs = _smi("--query-compute-apps=gpu_uuid,pid,used_memory")
+        me = os.getpid()
+        others = [p for p in procs
+                  if _norm_uuid(p[0]) == _norm_uuid(row[1]) and int(p[1]) != me]
+    except Exception:  # no nvidia-smi / no CUDA / "[N/A]" or unexpected output
+        return None
     return {
+        "gpu_index": int(row[0]),
         "gpu_util_pct": util,
         "mem_used_mib": used,
         "mem_total_mib": total,
@@ -80,7 +112,7 @@ def environment(device: str | torch.device = "cpu") -> dict:
         props = torch.cuda.get_device_properties(device)
         env["gpu"] = props.name
         env["gpu_mem_gib"] = round(props.total_memory / 2**30, 1)
-        env["gpu_contention_at_start"] = gpu_contention()
+        env["gpu_contention_at_start"] = gpu_contention(device)
     elif device.type == "mps":
         env["gpu"] = "Apple MPS"
     return env

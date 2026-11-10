@@ -174,6 +174,10 @@ def export_model(model: nn.Module, example, *, dynamic: bool = True, max_size: i
     too unless ``dynamic_batch=True`` (dynamic batch, fixed H/W). The arguments mean the same
     as for :func:`manyseg.quantize.quantize_pt2e`.
 
+    The program shares its parameters and buffers with ``model`` (as ``torch.export`` does):
+    training, editing or moving ``model`` afterwards changes the program too. Export a
+    ``copy.deepcopy(model)`` to keep a snapshot.
+
     Uses deferred runtime asserts: some timm blocks (ConvNeXt/MetaFormer layer norms, Conv2dSame)
     produce guards that are always true but that export's solver cannot prove, e.g.
     ``1 % (512 * ceil(w / 32)) != 0``.

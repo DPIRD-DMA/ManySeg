@@ -24,7 +24,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .base import DatasetInfo, channel_stats, save_split
+from .base import DatasetInfo, channel_stats, check_native_size, save_split
 
 HF = "https://huggingface.co/datasets/torchgeo/eurosat/resolve/main/"
 CLASSES = ("AnnualCrop", "Forest", "HerbaceousVegetation", "Highway", "Industrial", "Pasture",
@@ -46,6 +46,7 @@ INFO = DatasetInfo(
 TASK = "classification"
 LOADER_KWARGS = {"vflip": True}
 EVAL_BATCH_SIZE = 256
+SIZE = 64  # patches as published (prepare does not resize)
 
 
 def download(raw: Path) -> None:
@@ -65,8 +66,13 @@ def label_of(name: str) -> int:
     return CLASSES.index(name.rsplit("_", 1)[0])
 
 
-def prepare(raw: Path, cache: Path, size: int = 64) -> dict:
+def prepare(raw: Path, cache: Path, size: int | None = None) -> dict:
+    """Cache the 13-band patches at their published ``SIZE`` px; another ``size`` raises
+    (before any download)."""
     import tifffile
+
+    check_native_size(size, SIZE, "eurosat")
+    size = SIZE
 
     raw, cache = Path(raw), Path(cache)
     if not (raw / "EuroSATallBands.zip").exists():

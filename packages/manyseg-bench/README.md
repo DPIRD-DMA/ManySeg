@@ -7,13 +7,16 @@ the same data, recipes and metrics.
 ```bash
 # not on PyPI: from a clone of the repository (uv sync installs every extra), or
 pip install -e "packages/manyseg-bench[manyseg,smp,geo]"   # geo: readers for the RS datasets
-# providers are extras: manyseg, smp, fastai, timm; the core and SMP / fastai / timm semantic
-# and image tasks run without ManySeg (instance, point and vector tasks need it)
+# providers are extras: manyseg, smp, fastai, timm. SMP and fastai build segmentation models
+# (semantic tasks), timm builds classifiers (image tasks); none of them needs ManySeg. Instance,
+# point and vector tasks need ManySeg, which also builds models for every other task.
 export MANYSEG_BENCH_DATA=/path/to/data
 manyseg-bench prepare oxford_pet          # or sen1floods11, ai4boundaries, oam_tcd, cloudsen12
+                                          # (--size: tile size; fixed-size datasets refuse it)
 manyseg-bench train --provider smp --arch unet --encoder resnet34 --seeds 0,1,2 --evaluate-test \
     --save-model                          # evaluate needs the saved checkpoint
-manyseg-bench profile --provider manyseg --size 512,512 --compile
+manyseg-bench profile --provider manyseg --size 512,512 --compile   # --output image: classifiers
+                                          # (the default for --provider timm)
 manyseg-bench evaluate runs/<run>.json --variants fp32,bf16,int8_weight_only
 ```
 

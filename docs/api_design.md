@@ -662,7 +662,7 @@ bias (about 6 px at init) at every stride.
 | `downsample_mean(x, s, valid=None)` | continuous targets | mean over each block's in-image (and `valid`) pixels; `valid` is `(B, H, W)`, `(B, 1, H, W)` or `(B, C, H, W)` |
 | `downsample_sum(x, s)` | density targets | block sums, so the count is preserved |
 | `downsample_max(x, s)` | heatmaps, thin boundaries | block maximum: keeps peaks; "any" for boolean maps |
-| `upsample_output(y, (H, W), s, mode)` | predictions | bilinear (logits, values) or nearest (labels, any dtype), cropped to `H × W` |
+| `upsample_output(y, (H, W), s, mode)` | predictions | bilinear (logits, values) or nearest (labels, any dtype), cropped to `H × W`; `y` must be the head grid `ceil(H·s) × ceil(W·s)`, else ValueError |
 
 Instance and point post-processing runs on the grid it is given. `find_peaks(hm, scale=s)`
 returns float input-pixel coordinates. `group_by_offsets` and `instances_from_outputs` return
@@ -812,7 +812,8 @@ out = model(x)
 labels = instances_from_outputs(out["extent"], out["boundary"], out["distance"], logits=True)
 
 # Counting / locating trees, livestock, dams, sheds
-model = create_model(backbone="resnet34", heads={**point_heads(offsets=True), **density_head()})
+model = create_model(backbone="resnet34", in_channels=4,
+                     heads={**point_heads(offsets=True), **density_head()})
 out = model(x)
 thr, curve = calibrate_threshold(val_heatmaps, val_points, metric="f1")  # E011b: ~0.15-0.2
 peaks = find_peaks(out["heatmap"], threshold=thr, smooth_sigma=0, mask=None)
@@ -822,8 +823,8 @@ count = count_from_density(out["density"], sigma=3.0)  # the density_loss sigma 
 | Preset | Heads | Targets (`manyseg.*.targets`) | Post-processing |
 | --- | --- | --- | --- |
 | `instance_heads(num_classes=1, decoders=None)` | `extent` (1 ch, or C+1 with background; `instance_losses` trains C+1 with cross-entropy + multiclass Dice against `instance_targets(semantic=...)`), `boundary` (1), `distance` (1, regression) | `instance_targets(ids, boundary_width=1, boundary_mode="inner"/"outer"/"both")`: exact EDT; distance is 1 + distance to the instance's edge, normalised per instance; tile borders are not boundaries | seeds = extent ∧ ¬boundary ∧ distance > t; every component gets at least one seed; `backend="auto"` (default): skimage watershed when scikit-image is installed (`manyseg[instances]`), else seeded growth in torch |
-| `point_heads(heatmap="regression"/"segmentation", offsets=False)` | `heatmap` (1), `offset` (2: dy, dx) | `gaussian_heatmap(points, size, sigma)`, `heatmap_from_instances` (centroids rounded to pixels; fixed or size-scaled σ), `offset_targets` (to exact centroids), `points_from_boxes` (YOLO / `xyxy` / COCO `xywh` → `(y, x)`, optional σ from box size) | `find_peaks` (max-pool NMS; optional `smooth_sigma` blur and `mask`), `calibrate_threshold`, `group_by_offsets` → instance ids, `panoptic_labels` |
-| `density_head(activation="softplus"/None)` | `density` (1; > 0 with softplus, the default since E011c) | `density_map(points, size, sigma)`: each point's Gaussian sums to exactly 1 inside the image; `density_loss` (target × 2πσ², valid mask, optional count L1) | `count_from_density(sigma= or value_scale=, mask=)`: exactly one, as given to `density_loss` (count = integral / 2πσ²) |
+| `point_heads(heatmap="regression"/"segmentation", offsets=False)` | `heatmap` (1), `offset` (2: dy, dx) | `gaussian_heatmap(points, size, sigma)`, `heatmap_from_instances` (centroids rounded to pixels; fixed or size-scaled σ), `offset_targets` (to exact centroids), `points_from_boxes` (YOLO / `xyxy` / COCO `xywh` → `(y, x)`, optional σ from box size) | `find_peaks` (max-pool NMS; optional `smooth_sigma` blur and `mask`), `calibrate_threshold` (one target entry per image; for a list of heatmap batches, one mask per batch), `group_by_offsets` → instance ids, `panoptic_labels` |
+| `density_head(activation="softplus"/None)` | `density` (1; > 0 with softplus, the default since E011c) | `density_map(points, size, sigma)`: each point inside the image adds a Gaussian that sums to exactly 1 inside it, points outside add nothing; `density_loss` (target × 2πσ², valid mask, optional count L1) | `count_from_density(sigma= or value_scale=, mask=)`: exactly one, as given to `density_loss` (count = integral / 2πσ²) |
 
 `decoders=None` shares the model decoder. `"separate"` gives each head its own `unet`. A name or
 `{head: decoder}` mapping chooses decoders per head. Post-processing (peak picking, seeded
@@ -852,7 +853,7 @@ rasterio, scipy, scikit-image); writing GeoPackages also needs geopandas.
   the tuned settings.
 * Results and writers: `SceneRecords` (footprints, fields, roofs: a list of dicts carrying the
   scene's transform and CRS, with `.write(path)` and `.to_geojson()`), `VectorGraph` (roads; carries the scene's transform and CRS, with `.write(path)` and `.to_geojson()`),
-  `manyseg.points.ScenePoints` (`.yx`, `.xy`, `.scores`, `.to_geojson()`) and
+  `manyseg.points.ScenePoints` (`.yx`, `.xy`, `.scores`, `.write(path)`, `.to_geojson()`) and
   `manyseg.points.SceneCount`; `write_records`, `records_to_geojson`, `to_geojson`.
 * Georeferencing helpers: `Scene`, `from_gdal`, `pixel_to_world`, `world_to_pixel`;
   `manyseg.points.points_to_xy` / `points_from_xy`.
@@ -878,14 +879,15 @@ model, so export and inference stay plain tensors. The workflow per task is the 
 3. **Decoding.** The predicted rasters (sigmoid applied to logit heads, or `logits=True`) →
    `decode_scene(fields, block_decoder(task), scene=scene)` → `SceneRecords`, a `VectorGraph`
    or `ScenePoints` in scene pixels, block by block for scenes of any size.
-4. **Output.** `records.write(path)` / `write_records` (GeoJSON, or GeoPackage via geopandas)
-   through the scene's geotransform and CRS.
+4. **Output.** `.write(path)` on any of these results, or `write_records` (GeoJSON, or
+   GeoPackage via geopandas), through the scene's geotransform and CRS. Without a transform the
+   coordinates stay in pixels and no CRS is written.
 
 | Task | Heads | Targets | Decoder | Reads |
 | --- | --- | --- | --- | --- |
 | Building footprints | `corner_line_heads()` | `footprint_targets` | `block_decoder("footprints")`: instances → `polygons_from_corners` (straight exterior walls; courtyards kept as traced outlines, E054) | `extent`, `boundary`, `distance`, `corner`, `direction` |
 | Field boundaries | `instance_heads()` | `field_targets` | `block_decoder("fields")`: instances → `polygons_from_labels` (pixel outlines) | `extent`, `boundary`, `distance` |
-| Road networks | `road_heads()` | `road_graph` → `road_targets` | `block_decoder("roads")`: `graph_from_road_heads` | `mask`, `keypoints`, `direction` |
+| Road networks | `road_heads()` | `road_graph` → `road_targets` | `block_decoder("roads")`: `graph_from_road_heads` (on the head grid: for a head `scale` below 1, give `decode_scene` a scene and transform for that grid) | `mask`, `keypoints`, `direction` |
 | LoD2 roof faces | `corner_line_heads()`, RGB + nDSM input | `roof_face_targets` | `block_decoder("roofs")`: faces → `planar_faces` → a plane per face → mesh | as footprints + `height` (the nDSM) |
 | Points, counts | `point_heads()`, `density_head()` | `to_pixels(kind="points")` → `points_from_xy` → `gaussian_heatmap` / `density_map` | `PointBlockDecoder`, `DensityBlockDecoder` (also `block_decoder("points")` / `("density")`) | `heatmap` (+ `offset`, `mask`); `density` |
 
@@ -1085,7 +1087,8 @@ polys = polygons_from_labels(labels, simplify=1.0)   # shapely Polygons, holes k
 
 Metrics (APLS, GEO precision / recall, junction F1, grade-separated crossings, C-IoU, PoLiS,
 N-ratio) are in `manyseg.vectors.metrics`: `graph_metrics(gt, pred, gsd)` and
-`polygon_metrics(gt, pred, gsd)` return them together.
+`polygon_metrics(gt, pred, gsd)` return them together. `polygon_metrics` takes single
+Polygons; explode MultiPolygons first.
 
 **Training presets.** Two trained models have head presets, target encoders and the experiments'
 losses, as plain functions that return the unweighted terms (`sum(parts.values())` is the trained
@@ -1270,6 +1273,9 @@ ep = export_model(multi_input_model, {"optical": o, "sar": s})
 ep = export_model(conditioned_model, {"s2": s2, "meta": meta})   # meta: (B, N), no H/W dims
 ```
 
+The program shares its parameters with `model` (as `torch.export` does), so a later change to the
+model changes the program; export a `copy.deepcopy(model)` for a snapshot.
+
 (*) `stride` is the deepest stride the network computes. When inputs are padded to less than
 that (`pad_to_stride=False`, or a multi-input model using only shallow levels), the range
 starts at `2 * stride` instead: floor-rounding layers (a 4x4 / stride 4 patchify, PVT's
@@ -1362,6 +1368,8 @@ from manyseg.quantize import compare_outputs, model_size, quantize_pt2e, quantiz
 ep = quantize_pt2e(model, example, calibration)         # calibration: iterable of inputs
 ep = quantize_pt2e(multi_input_model, {"optical": o, "sar": s}, dict_batches)
 ep = quantize_pt2e(swin_model, example, batches, dynamic=False)   # fixed size only
+# quantize_pt2e works on a copy, so `model` is untouched; a calibration batch whose shape the
+# export doesn't take (another H/W with dynamic=False, or beyond max_size) is a ValueError.
 manyseg.save(ep, "model_int8.pt2", source=model, normalize=spec, activations=activations)
 program = manyseg.load("model_int8.pt2")                # callable with tiling_spec()
 
@@ -1422,7 +1430,8 @@ loading needs `manyseg[quant]`. Quantised files use save format 2 like float fil
 * `load` on a `.pt2` returns a `QuantizedProgram`, not an `nn.Module`, because `ep.module()` raises
   on `.eval()`. It has `__call__`, `tiling_spec()`, `program`, `module`, `device`, `batch_size`
   (None if dynamic), `fixed_size` (None if dynamic) and `input_shapes`. `map_location` sets its
-  device, and a wrong device, batch size or fixed size raises an error naming the fix.
+  device (resolved, e.g. `mps:0`); `.module` runs on a copy there and `.program` stays as loaded.
+  A wrong device (index included), batch size or fixed size raises an error naming the fix.
 * `torch.export.load` can run code from a crafted file, through pickled entries and through shape
   strings passed to `sympy.sympify`. `load` checks for both first, but this is no sandbox: only
   load `.pt2` files from sources you trust.

@@ -130,14 +130,17 @@ def graph_from_road_heads(
         keypoint_threshold: Heatmap peak threshold; peaks off the road surface are ignored.
         zone_radius: Radius (px) of the disk around each keypoint where arms are rejoined.
         pair_deg: Arms through a crossing are paired if their headings are at least this far apart.
-        scale: The heads' ``scale``; coordinates are returned in input pixels.
+        scale: The heads' ``scale``: coordinates are returned in input pixels (head-grid
+            coordinates divided by ``scale``). The pixel parameters above (``spur``, ``gap``,
+            ``simplify``, ``min_length``, ``min_area``, ``zone_radius``) stay in head pixels.
         logits: ``mask`` and ``keypoints`` are logits: apply a sigmoid to both first
             (``direction`` is a value and is never transformed).
 
     A low-level building block for one tile or scene in memory; the recommended entry point is
     ``decode_scene(fields, block_decoder("roads"))``, which gives the same graph whole-scene and
     block by block. The defaults here are the same as ``block_decoder("roads")``: tuned on
-    City-Scale (1 m pixels).
+    City-Scale (1 m pixels). ``block_decoder("roads")`` has no ``scale``: it returns head-grid
+    (scene) pixels, which the scene's transform maps to world coordinates.
     """
     skeletonize = _deps()[3]
     m, kp, d = _arr(mask), _arr(keypoints), _arr(direction)
@@ -289,6 +292,9 @@ class RoadBlockDecoder:
     ``height`` / ``width`` and optionally ``transform`` / ``crs``. The graph is in scene pixel
     coordinates and carries the scene's ``transform`` / ``crs`` (:class:`VectorGraph`), so
     ``graph.to_geojson()`` / ``write_records(graph, path)`` write world coordinates.
+    The parameters are those of :func:`graph_from_road_heads` (pixel ones in scene pixels)
+    except ``scale``: the scene is the heads' grid, so a reduced-resolution head needs no
+    ``scale`` here, only a scene (and transform) for that grid, as every block decoder.
 
     Per block (dense, local): threshold and small-blob removal (blobs touching an inner window
     edge are kept, as the window sees only part of them), skeletonize, keypoint local maxima
@@ -323,7 +329,6 @@ class RoadBlockDecoder:
         simplify: float = 2.0,
         min_length: float = 20,
         min_area: int = 30,
-        scale: float = 1.0,
         logits: bool = False,
         names: dict | None = None,
     ):
@@ -337,7 +342,6 @@ class RoadBlockDecoder:
             simplify=simplify,
             min_length=min_length,
             min_area=min_area,
-            scale=scale,
             logits=bool(logits),
         )
         self.names = {"mask": "mask", "keypoints": "keypoints", "direction": "direction"}
@@ -478,7 +482,7 @@ class RoadBlockDecoder:
             p["pair_deg"],
             p["gap"],
             p["min_length"],
-            p["scale"],
+            1.0,  # scene pixels: the scene's transform maps them to world coordinates
         )
         # georeferenced as decode_scene's other results (SceneRecords, ScenePoints)
         vg.transform = getattr(scene, "transform", None)

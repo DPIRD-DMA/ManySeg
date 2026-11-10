@@ -89,6 +89,8 @@ def lr_factor(step: int, total: int, warmup: int, schedule: str) -> float:
         t = (step - warmup) / max(1, total - warmup)
         return 0.5 * (1 + math.cos(math.pi * t))
     if schedule == "onecycle":  # LR/25 up to LR over 30%, cosine down to ~0
+        if warmup:  # Recipe refuses this; a direct caller must not get a silently unused value
+            raise ValueError("schedule 'onecycle' has a fixed 30% warmup; warmup must be 0")
         pct = 0.3
         up = max(1, int(total * pct))
         if step < up:

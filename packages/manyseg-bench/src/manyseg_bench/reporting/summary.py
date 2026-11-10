@@ -51,14 +51,35 @@ def _canon(d, defaults: dict | None = None) -> str:
     return json.dumps({k: v for k, v in d.items() if v is not None}, sort_keys=True)
 
 
+def _task_kwargs(r: dict) -> str:
+    """Canonical JSON of a record's ``task_kwargs`` without the entries that restate an
+    effective default: the task constructor's default overlaid with the dataset's
+    ``TASK_KWARGS`` (what the runner applies to a kwarg left out). So ``{}`` and
+    ``{"label_smoothing": 0.0}`` (records before / after the runner wrote the recipe's
+    default) are one configuration, while any non-default setting stays distinct."""
+    from ..datasets import get_dataset
+    from ..tasks import task_defaults
+
+    kw = json.loads(json.dumps(r.get("task_kwargs") or {}))
+    try:
+        ds = get_dataset(r["dataset"]["name"])
+    except ValueError:  # a dataset this version does not know: compare as recorded
+        return _canon(kw)
+    defaults = {**task_defaults(getattr(ds, "TASK", "semantic")),
+                **getattr(ds, "TASK_KWARGS", {})}
+    defaults = json.loads(json.dumps(defaults))  # tuples -> lists, as in the records
+    return _canon({k: v for k, v in kw.items() if k not in defaults or defaults[k] != v})
+
+
 def group_key(r: dict) -> tuple:
     """Every configuration field of a train record except the seed: runs with the same key are
     seeds of one configuration and are averaged.
 
     Fields: dataset name, the full recipe (so overrides such as ``epochs=5`` separate runs even
     though the recipe keeps its name), provider, the full model spec (weights, input mode,
-    options, band names, ...), task kwargs, split scheme, subset and tag. Records written before
-    a field existed group as if it held its default.
+    options, band names, ...), task kwargs (entries equal to the task's effective default left
+    out, see ``_task_kwargs``), split scheme, subset and tag. Records written before a field
+    existed group as if it held its default.
     """
     from ..providers.base import ModelSpec
     from ..training.recipe import Recipe
@@ -67,7 +88,7 @@ def group_key(r: dict) -> tuple:
             r["spec"]["encoder"], json.dumps(r["spec"].get("options") or {}, sort_keys=True),
             r.get("tag", ""), _canon(r["recipe"], _defaults(Recipe)),
             _canon(r["spec"], _defaults(ModelSpec)),
-            _canon(r.get("task_kwargs")), r.get("split_scheme") or "official", r.get("subset"))
+            _task_kwargs(r), r.get("split_scheme") or "official", r.get("subset"))
 
 
 def _config_label(k: tuple) -> str:
@@ -78,13 +99,16 @@ def _config_label(k: tuple) -> str:
         parts.append(f"split={k[10]}")
     if k[11]:
         parts.append(f"subset={k[11]}")
-    if k[9] != "{}":
+    if k[9] != "{}":  # non-default task settings only
         parts.append(f"task={k[9]}")
     parts.append(f"epochs={rec.get('epochs')}")
     return " ".join(parts)
 
 
 def training_table(runs: list[dict]) -> str:
+    """Markdown table of train records, one row per configuration (``group_key``): mean ± std
+    over seeds of the primary metric on the final validation epoch and on each declared test
+    split evaluated (``split: value``, "n/a" when none was)."""
     groups = defaultdict(list)
     for r in runs:
         if r.get("kind") == "train":
@@ -96,13 +120,16 @@ def training_table(runs: list[dict]) -> str:
     for k, rs in sorted(groups.items(), key=lambda kv: tuple(map(str, kv[0]))):
         fps = sorted({r["weights_fingerprint"] for r in rs})
         pm = rs[0].get("primary_metric", "miou")
-        tests = [r["test"][pm] for r in rs if "test" in r]
+        # every declared test split (e.g. Sen1Floods11's test and Bolivia), named
+        splits = rs[0]["dataset"].get("test_splits") or ["test"]
+        tests = "; ".join(f"{sp}: {_ms([r[sp][pm] for r in rs if sp in r])}"
+                          for sp in splits if any(sp in r for r in rs)) or "n/a"
         lines.append(
             f"| {k[0]} | {k[1]} | {k[2]} | {k[3]} | {k[4]} | {k[5]} | {k[6]} | "
             f"{_config_label(k)} | {len(rs)} | "
             f"{rs[0]['params'] / 1e6:.2f} | {pm}: {_ms([r['final_val'][pm] for r in rs])} | "
             f"{_ms([r['final_val'].get('boundary_f1', float('nan')) for r in rs])} | "
-            f"{_ms(tests)} | "
+            f"{tests} | "
             f"{statistics.mean(r['train_time_s'] for r in rs):.0f} | {','.join(fps)} |")
     return "\n".join(lines)
 

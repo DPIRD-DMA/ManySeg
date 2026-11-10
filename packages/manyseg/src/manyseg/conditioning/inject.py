@@ -117,11 +117,12 @@ def probe_levels(decoder: nn.Module, specs: Sequence[FeatureSpec],
 
 class DecoderFiLM(nn.Module):
     """FiLM on the feature levels a decoder reads (``"features"``) and on its output
-    (``"output"``)."""
+    (``"output"``); ``on`` is one of these names or a collection of them."""
 
     def __init__(self, cond_dim: int, specs: Sequence[FeatureSpec], levels: Sequence[int],
                  out_spec: FeatureSpec, on: Sequence[str] = ("features", "output")) -> None:
         super().__init__()
+        on = (on,) if isinstance(on, str) else tuple(on)  # "output" is one name, not letters
         unknown = set(on) - {"features", "output"}
         if unknown or not on:
             raise ValueError(f"film 'on' must be a non-empty subset of ('features', 'output'), "

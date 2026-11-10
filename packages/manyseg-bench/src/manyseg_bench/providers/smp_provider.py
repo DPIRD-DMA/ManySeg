@@ -4,6 +4,7 @@ from .base import (
     BuiltModel,
     ModelSpec,
     Provider,
+    check_pixel_output,
     fingerprint_module,
     split_params,
     stem_adaptation_note,
@@ -17,7 +18,9 @@ _WEIGHTS = {"tv_in1k": "imagenet"}
 
 class SMPProvider(Provider):
     """segmentation-models-pytorch. ``tv_in1k`` ResNets use SMP's native ``resnetXX`` encoders,
-    whose ``imagenet`` weights are the torchvision V1 weights (verified by fingerprint)."""
+    whose ``imagenet`` weights are the torchvision V1 weights (verified by fingerprint).
+    Segmentation models only: ``output="image"`` (image-level tasks) raises; use the timm or
+    ManySeg provider for those."""
 
     name = "smp"
 
@@ -27,6 +30,7 @@ class SMPProvider(Provider):
         return smp.__version__
 
     def build(self, spec: ModelSpec, img_size=None) -> BuiltModel:
+        check_pixel_output(spec, self.name)
         import segmentation_models_pytorch as smp
 
         cls = getattr(smp, _ARCHS[spec.arch])

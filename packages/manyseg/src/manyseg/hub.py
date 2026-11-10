@@ -34,6 +34,17 @@ def split_name(name: str) -> tuple[str, str | None]:
     return repo, revision or None
 
 
+def _check_repo_id(repo_id: str) -> None:
+    """``repo_id`` must be a plain ``"org/name"``: the Hub refuses the ``"hf-hub:"`` prefix and an
+    ``"@revision"`` suffix, which :func:`split_name` accepts for loading."""
+    if repo_id.startswith(PREFIX) or "@" in repo_id:
+        repo, revision = split_name(repo_id)
+        hint = f", revision={revision!r}" if revision else ""
+        raise ValueError(f"push_to_hub takes a repository id, 'org/name', not {repo_id!r}: pass "
+                         f"repo_id={repo!r}{hint}. Choose the branch with revision=.")
+    split_name(repo_id)
+
+
 def download(name: str, *, token: str | None = None, cache_dir: str | Path | None = None) -> Path:
     """The local path of ``model.safetensors`` from ``"hf-hub:org/name[@revision]"``, downloaded
     on first use and cached."""
@@ -85,7 +96,7 @@ def push_to_hub(model: DenseModel, repo_id: str, *, normalize: Any = None,
             "push_to_hub uploads a DenseModel as model.safetensors; programs (ExportedProgram, "
             "QuantizedProgram from quantize_pt2e) can't be uploaded. Push the float model, or a "
             "quantize_weights model, instead.")
-    split_name(repo_id)  # validates the name before anything is written
+    _check_repo_id(repo_id)  # before anything is written
     if revision is not None and re.fullmatch(r"[0-9a-f]{40}", revision):
         raise ValueError(f"revision={revision!r} is a commit; push to a branch name.")
     with tempfile.TemporaryDirectory() as tmp:
@@ -151,7 +162,8 @@ def _heads(meta: Mapping[str, Any]) -> dict[str, dict]:
 def card(meta: Mapping[str, Any], repo_id: str, *, license: str | None = None,
          revision: str | None = None) -> str:
     """A Hub model card (``README.md``) for a file's metadata (:func:`manyseg.read_metadata`):
-    how to load it, its inputs and normalisation, its heads, and the pretrained weights it
+    how to load it (for a quantised model: its quantisation mode and that loading needs
+    ``manyseg[quant]``), its inputs and normalisation, its heads, and the pretrained weights it
     started from with their licences and citations."""
     config, heads = meta["create_model"], _heads(meta)
     kinds = {(c["type"], c["scope"]) for c in heads.values()}
@@ -177,6 +189,12 @@ def card(meta: Mapping[str, Any], repo_id: str, *, license: str | None = None,
              "with a built-in activation, such as a softplus density head, or plain values).",
              ""]
 
+    quant = meta.get("quantization")
+    if isinstance(quant, Mapping):
+        mode = quant.get("mode") or quant.get("route") or "unknown"
+        lines += [f"The weights are quantised to int8 (`{_cell(mode)}`, torchao "
+                  f"{_cell(quant.get('torchao_version', 'unknown'))}): loading needs "
+                  "`pip install 'manyseg[quant]'`.", ""]
     inputs = config.get("inputs")
     bands, norm = meta.get("bands"), meta.get("normalize")
     lines += ["## Inputs", ""]

@@ -216,13 +216,16 @@ def calibrate_threshold(heatmaps: Tensor | Sequence[Tensor], targets: Tensor | S
                         **find_peaks_kwargs) -> tuple[float, dict[float, float]]:
     """Choose the :func:`find_peaks` threshold on validation data.
 
-    ``heatmaps``: probabilities, a ``(B, [1,] H, W)`` tensor or a sequence of them (batches,
-    sizes may differ). ``targets``: one per image, either counts (a ``(B,)`` tensor or ints;
-    ``metric="count_mae"`` only) or ground-truth points ``(N_i, 2)`` ``(y, x)`` in the same
-    coordinates :func:`find_peaks` returns. ``metric``: ``"count_mae"`` (lower is better) or
-    ``"f1"`` (point F1, a maximum one-to-one matching within ``radius``; higher is better),
-    pooled over all images. Other keywords go to :func:`find_peaks` (``kernel``, ``smooth_sigma``,
-    ``scale``; a ``mask`` must cover the same images as ``heatmaps`` when it is one tensor).
+    ``heatmaps``: probabilities, a ``(B, [1,] H, W)`` tensor (an ``(H, W)`` map is one image)
+    or a sequence of them (batches, sizes may differ). ``targets``: one per image across all
+    batches, either counts (a ``(B,)`` tensor or ints; ``metric="count_mae"`` only) or a list
+    of ground-truth points ``(N_i, 2)`` ``(y, x)`` in the same coordinates :func:`find_peaks`
+    returns (``[points]`` for one image: a bare ``(N, 2)`` tensor raises). ``metric``:
+    ``"count_mae"`` (lower is better) or ``"f1"`` (point F1, a maximum one-to-one matching
+    within ``radius``; higher is better), pooled over all images. Other keywords go to
+    :func:`find_peaks` (``kernel``, ``smooth_sigma``, ``scale``, ``mask``). A ``mask`` follows
+    ``heatmaps``: one tensor shaped as the one heatmap tensor (``(H, W)`` with an ``(H, W)``
+    map), or, for a sequence of heatmaps, a sequence of masks, one per batch.
     Returns ``(best threshold, {threshold: score})``; ties go to the lower threshold.
 
     .. warning:: With a small validation set the chosen threshold is noisy. On 45 images,
@@ -239,12 +242,27 @@ def calibrate_threshold(heatmaps: Tensor | Sequence[Tensor], targets: Tensor | S
     if not thresholds:
         raise ValueError("thresholds is empty")
     batches = [heatmaps] if isinstance(heatmaps, Tensor) else list(heatmaps)
+    mask = find_peaks_kwargs.pop("mask", None)
+    if mask is None:
+        masks = [None] * len(batches)
+    elif isinstance(mask, Tensor):
+        if len(batches) != 1:
+            raise ValueError(f"one mask tensor for {len(batches)} heatmap batches: pass a "
+                             "sequence of masks, one per batch")
+        masks = [mask]
+    else:
+        masks = list(mask)
+        if len(masks) != len(batches):
+            raise ValueError(f"{len(masks)} masks for {len(batches)} heatmap batches: give "
+                             "one mask per batch")
     scores = []
-    for hm in batches:
-        hm = hm[None] if hm.dim() == 2 else hm
-        scores += [(p, s) for p, s in find_peaks(hm, thresholds[0], **find_peaks_kwargs)]
-    gts = list(targets.unbind(0)) if isinstance(targets, Tensor) and targets.dim() <= 1 \
-        else list(targets)
+    for hm, m in zip(batches, masks):  # find_peaks takes an (H, W) map (and mask) as one image
+        scores += [(p, s) for p, s in find_peaks(hm, thresholds[0], mask=m, **find_peaks_kwargs)]
+    if isinstance(targets, Tensor) and targets.dim() == 2:  # (N, 2) points of one image?
+        raise ValueError(f"targets is one {tuple(targets.shape)} tensor; targets need one entry "
+                         "per image: a (B, N, 2) tensor or a list of (N_i, 2) point tensors "
+                         "([points] for one image), or one count per image")
+    gts = list(targets.unbind(0)) if isinstance(targets, Tensor) else list(targets)
     if len(gts) != len(scores):
         raise ValueError(f"{len(gts)} targets for {len(scores)} heatmaps")
     as_points = [isinstance(g, Tensor) and g.dim() == 2 for g in gts]

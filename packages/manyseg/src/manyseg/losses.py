@@ -55,13 +55,14 @@ def soft_dice(logits: Tensor, target: Tensor, mask: Tensor | None = None,
     return (1 - (2 * inter + eps) / (denom + eps)).mean()
 
 
-def dice_bce(logits: Tensor, target: Tensor, pos_weight: float | None = None,
+def dice_bce(logits: Tensor, target: Tensor, *, pos_weight: float | None = None,
              mask: Tensor | None = None, dice_weight: float = 1.0,
              bce_weight: float = 1.0) -> Tensor:
-    """Binary Dice + BCE on logits. ``pos_weight`` up-weights positive pixels in the BCE term
-    (useful for thin boundary classes); ``mask`` ((B, H, W), (B, 1, H, W) or like ``logits``)
-    restricts both terms to valid pixels. The Dice term is :func:`soft_dice`: with several
-    channels it is pooled over them, one score per sample."""
+    """Binary Dice + BCE on logits. Every argument after ``target`` is keyword-only, so a mask
+    cannot be passed as ``pos_weight`` by position. ``pos_weight`` up-weights positive pixels
+    in the BCE term (useful for thin boundary classes); ``mask`` ((B, H, W), (B, 1, H, W) or
+    like ``logits``) restricts both terms to valid pixels. The Dice term is
+    :func:`soft_dice`: with several channels it is pooled over them, one score per sample."""
     pw = None if pos_weight is None else torch.tensor(pos_weight, device=logits.device)
     x, t = logits.float(), target.float()
     if mask is None:

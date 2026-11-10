@@ -473,7 +473,11 @@ def graph_from_mask_blocks(prob, threshold: float = 0.5, *, block: int = 2048, h
 
     if hasattr(prob, "detach"):  # torch input (any device, autograd or not), as graph_from_mask
         prob = prob.detach().float().cpu().numpy()
-    H, W = prob.shape[-2:]
+    elif not hasattr(prob, "ndim"):
+        prob = np.asarray(prob)
+    if prob.ndim != 2:  # as graph_from_mask
+        raise ValueError(f"expected a (H, W) probability map, got shape {prob.shape}")
+    H, W = prob.shape
     if H == 0 or W == 0:
         return VectorGraph(np.zeros((0, 2)), np.zeros((0, 2), np.int64))
     rows, cols = [], []

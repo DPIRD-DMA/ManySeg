@@ -136,3 +136,12 @@ def split_params(model: nn.Module, encoder: nn.Module) -> tuple[list, list]:
 
 __all__ = ["BuiltModel", "ModelSpec", "Provider", "fingerprint_module", "split_params",
            "stem_adaptation_note"]
+
+
+def check_pixel_output(spec: ModelSpec, provider: str) -> None:
+    """Raise for a segmentation-only provider asked for an image-level model (``output !=
+    "pixel"``): it would build pixel logits that fail late, in the loss."""
+    if spec.output != "pixel":
+        raise ValueError(f"the {provider} provider builds segmentation models only (pixel "
+                         f"output), got output={spec.output!r}; image-level tasks "
+                         "(classification / regression) need the timm or manyseg provider")

@@ -80,6 +80,16 @@ class ScenePoints:
             fc["crs"] = {"type": "name", "properties": {"name": str(self.crs)}}
         return fc
 
+    def write(self, path, *, layer: str | None = None):
+        """Write the points to ``path`` (``.geojson``, or e.g. ``.gpkg`` with geopandas) as
+        ``Point`` features with a ``score`` property, through the scene's ``transform`` and
+        naming its ``crs`` (pixel coordinates and no CRS without a transform), as
+        :meth:`to_geojson` (:func:`~manyseg.vectors.write_records`). Needs the ``vectors``
+        extra. Returns the path."""
+        from ..vectors.blocks import write_records
+
+        return write_records(self, path, layer=layer)
+
 
 def _bounds(b) -> tuple[int, int, int, int]:
     """``(top, bottom, left, right)`` from the contract's 4-tuple or a ``(row slice, col slice)``

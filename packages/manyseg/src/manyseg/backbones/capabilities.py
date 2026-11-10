@@ -79,5 +79,12 @@ def probe_backbone(name: str, sizes=PROBE_SIZES, export: bool = False,
             caps.export_dynamic = "ok" if same else "mismatch"
         except Exception as e:  # noqa: BLE001
             caps.export_dynamic = f"fail: {type(e).__name__}"
+            try:  # window attention refuses dynamic H/W but exports at the example's size
+                x = torch.randn(1, bb.in_channels, 64, 96)
+                ep = export_model(model, x, dynamic=False)
+                if torch.allclose(ep.module()(x), model(x), atol=1e-3, rtol=1e-3):
+                    caps.export_dynamic = "fixed size only"
+            except Exception:  # noqa: BLE001
+                pass
     caps.probe_seconds = round(time.perf_counter() - t0, 1)
     return caps

@@ -173,7 +173,7 @@ def test_cli_evaluate_prints_missing_agreement(monkeypatch, capsys):
 
     rec = {"variants": {"fp32": {"device": "cpu",
                                  "val": {"miou": 0.51234, "agreement": None}}},
-           "path": "x.json"}
+           "primary_metric": "miou", "splits": ["val"], "path": "x.json"}
     monkeypatch.setattr(experiments, "evaluate_run", lambda *a, **k: rec)
     assert cli.main(["evaluate", "run.json", "--device", "cpu"]) == 0
     out = capsys.readouterr().out

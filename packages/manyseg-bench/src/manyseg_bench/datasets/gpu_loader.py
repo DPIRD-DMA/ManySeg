@@ -250,10 +250,7 @@ class GPULoader:
             return x, y
         if isinstance(y, dict):
             return x, {k: _warp_label(v, grid) for k, v in y.items()}
-        stack = y.ndim == 4
-        y = F.grid_sample((y if stack else y[:, None]).float(), grid, mode="nearest",
-                          padding_mode="reflection", align_corners=False).round().long()
-        return x, (y if stack else y[:, 0])
+        return x, _warp_label(y, grid)  # float labels stay float (not rounded)
 
     def __iter__(self):
         order = torch.randperm(self.n, generator=self.gen) if self.train else torch.arange(self.n)

@@ -59,7 +59,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .base import DatasetInfo
+from .base import DatasetInfo, check_native_size
 
 URL = "https://zenodo.org/records/5012942/files/PASTIS.zip?download=1"
 MD5 = "cfc441bf18137ff0bbf4fad58828fb98"
@@ -236,14 +236,17 @@ def read_patch(job):
     return names, img, mask, blue
 
 
-def prepare(raw: Path, cache: Path, size: int = SIZE, workers: int = 4, k: int = K_DATES,
+def prepare(raw: Path, cache: Path, size: int | None = None, workers: int = 4, k: int = K_DATES,
             expected: dict | None = EXPECTED_PATCHES, require_checksum: bool = True,
             log=lambda m: print(m, flush=True)) -> dict:
     """Select ``k`` dates per patch and cache single-date samples (see the module docstring).
-    Arrays are written through memory maps; RAM stays bounded."""
+    Arrays are written through memory maps; RAM stays bounded. Patches keep their published
+    ``SIZE`` px; another ``size`` raises (before anything is read or allocated)."""
     import contextlib
     from concurrent.futures import ProcessPoolExecutor
 
+    check_native_size(size, SIZE, "pastis")
+    size = SIZE
     raw, cache = Path(raw), Path(cache)
     root = _root(raw)
     if require_checksum and not check_download(raw):

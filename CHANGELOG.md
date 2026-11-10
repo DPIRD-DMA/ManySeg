@@ -25,8 +25,8 @@ First release. Python 3.11–3.14, PyTorch ≥ 2.10, timm ≥ 1.0.20.
   values) injected by FiLM, a head bias or extra channels.
 * **Outputs:** any number of named heads (segmentation, regression with optional uncertainty,
   classification; per pixel or per image), per-head decoders, and image classification or
-  regression without a decoder. Pixel heads take optional hidden layers, dilation, norm and a
-  softplus activation; custom head classes register with `manyseg.heads.HEADS`.
+  regression without a decoder. Pixel heads take optional hidden layers, dilation, norm (the
+  same names as the decoders: `"batch"`, `"group"`, `None`) and a softplus activation; custom head classes register with `manyseg.heads.HEADS`.
 * **Time series** (`"kind": "timeseries"`) with masks, acquisition dates and mean / max /
   attention / concat / diff aggregation. *Experimental.*
 * **Remote-sensing pretrained weights** (`manyseg.weights`): SSL4EO-S12 Sentinel-2 MoCo and DINO,
@@ -48,8 +48,9 @@ First release. Python 3.11–3.14, PyTorch ≥ 2.10, timm ≥ 1.0.20.
   post-processing (`instances_from_outputs`, with a deterministic tie-break so a window decodes
   as the whole scene does).
 * Points and counting (`manyseg.points`): heatmap and density heads, targets from points or
-  boxes (YOLO, `xyxy`, COCO), peak finding, density counting (`count_from_density(sigma=)` undoes `density_loss`'s
-  2πσ² target scale), `density_loss` and threshold calibration.
+  boxes (YOLO, `xyxy`, COCO), peak finding, density counting (`count_from_density(sigma=)` undoes
+  `density_loss`'s 2πσ² target scale; a density target sums to the number of points inside the
+  tile), `density_loss` and threshold calibration.
 
 ### Vector outputs (`manyseg.vectors`, `manyseg[vectors]`). *Experimental*
 
@@ -60,8 +61,10 @@ Names and defaults may change before 1.0, and each decoder was tuned on one data
   vector data in a CRS, losses and a decoder.
 * `decode_scene(fields, block_decoder(task))` decodes a scene of any size block by block; with
   a halo that also covers the decoder's reach it gives the same result as a whole-scene decode
-  (see `manyseg.vectors.blocks`). Results write to GeoJSON or GeoPackage in the scene's
-  CRS.
+  (see `manyseg.vectors.blocks`). Every result (`SceneRecords`, `VectorGraph`, `ScenePoints`)
+  has `.write(path)` to GeoJSON or GeoPackage in the scene's CRS; without a transform the
+  coordinates stay in pixels and no CRS is written. Block decoders work on the grid of the
+  heads they read, so a reduced-resolution head needs a scene for that grid.
 * Road graphs from a georeferenced scene carry its transform and CRS (`VectorGraph.write()`,
   `.to_geojson()`). Geometry conversions keep Z coordinates.
 * Building blocks: `graph_from_mask`, `polygons_from_labels`, `to_pixels`, `to_geojson`,
@@ -73,23 +76,30 @@ Names and defaults may change before 1.0, and each decoder was tuned on one data
 * `soft_dice`, `dice_bce`, `multiclass_dice`, `masked_regression`, `heatmap_focal`,
   `distance_weighted_bce`, `density_loss` and `multi_head_loss`. `soft_dice`, `dice_bce`,
   `masked_regression` and `multiclass_dice` drop masked (or `ignore_index`) pixels before any
-  arithmetic, so NaN nodata there is safe; a float mask weights pixels.
+  arithmetic, so NaN nodata there is safe; a float mask weights pixels. `dice_bce`'s options
+  (`pos_weight`, `mask`, weights) are keyword-only.
 
 ### Saving, loading and deployment
 
 * `manyseg.save` / `manyseg.load`: one safetensors file with the weights and the stored
-  configuration, normalisation (a ManyPred spec), activations, class and band names, and the
-  licence and citation of the pretrained weights the model started from. No pickled data.
+  configuration, normalisation (a ManyPred spec, its per-band values checked against every
+  raster and time-series input), activations, class and band names, and the licence and
+  citation of the pretrained weights the model started from, which a loaded model keeps. No
+  pickled data.
   Save format 2; see `manyseg.io` for the compatibility policy.
-* Hugging Face Hub: `manyseg.push_to_hub` with a generated model card, and
+* Hugging Face Hub: `manyseg.push_to_hub` with a generated model card (naming the int8 mode
+  and the `manyseg[quant]` extra for a quantised model), and
   `manyseg.load("hf-hub:org/name[@revision]")`.
 * `tiling_spec()` tells [ManyPred](https://github.com/DPIRD-DMA/ManyPred) how to run the model
   over large scenes.
 * `torch.compile(dynamic=True)`, `manyseg.export.export_model` (dynamic H/W, or fixed with
   `dynamic=False` for window attention; optionally dynamic batch) and ONNX.
 * int8 quantisation (`manyseg.quantize`, `manyseg[quant]`, torchao ≥ 0.18): weight-only /
-  dynamic (`quantize_weights`) and PT2E static (`quantize_pt2e`), both savable with
-  `manyseg.save`, plus size and agreement reports.
+  dynamic (`quantize_weights`) and PT2E static (`quantize_pt2e`, on a copy of the model), both
+  savable with `manyseg.save`, plus size and agreement reports. A loaded `.pt2` runs on any
+  `map_location` and can be saved again.
+* `manyseg.describe`, `manyseg.export` and `manyseg.quantize` are reachable after
+  `import manyseg` (loaded on first use).
 
 ### Examples and notebooks
 
@@ -100,19 +110,24 @@ Names and defaults may change before 1.0, and each decoder was tuned on one data
 
 ### Benchmark (`manyseg-bench`, not published)
 
-* Providers for ManySeg, segmentation-models-pytorch, fastai and plain timm; GPU-resident seeded
-  data loading; recipes; JSON run records with provenance.
+* Providers for ManySeg, segmentation-models-pytorch, fastai and plain timm (SMP and fastai
+  build pixel models only; image-level tasks use timm or ManySeg); GPU-resident seeded data
+  loading; recipes; JSON run records with provenance. `evaluate` prints each split's primary
+  metric, and `profile --output` profiles image-level models.
 * Datasets: Oxford Pet, Sen1Floods11, CloudSEN12+, AI4Boundaries, OAM-TCD, PASTIS, EuroSAT,
   BigEarthNet v2, OSCD, LEVIR-CD, SECOND.
 * Metrics: per-class scores and macro means cover only classes present in the ground truth;
   boundary F1 skips images with no edge in either prediction or target; validation loss is
-  the training objective (label smoothing included) per non-ignored pixel; change-class scores
+  the training objective (label smoothing included; for `seg_multilabel` the segmentation
+  plus weighted classification loss) per non-ignored pixel; change-class scores
   and regression R² follow the same absent-class (NaN) rule; multi-label AP groups tied
   scores; instance matching is exact without scipy. Label smoothing applies only to the
   cross-entropy tasks, and other tasks refuse it. Run records in `experiments/` written
   before 2026-11-10 used the older boundary-F1 and validation-loss rules, and records written
   before this release may differ in change-class scores, R², tied-score AP, instance matching
-  below IoU 0.5 and absolute-distance instance decoding (now `seed_threshold` 3 px).
+  below IoU 0.5, absolute-distance instance decoding (now `seed_threshold` 3 px) and
+  `seg_multilabel` validation loss. Reports group seeds whose task settings differ only by
+  restating a default, and show every declared test split (e.g. Sen1Floods11's Bolivia).
 * Runs record the normalisation source, the settings each task applied (`task_settings`) and
   how each provider adapted a pretrained stem to more or fewer than 3 bands (`model_notes`).
 * The experiments in `experiments/` that the defaults and the README's evidence table rest on,

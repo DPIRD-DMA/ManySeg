@@ -79,7 +79,10 @@ def split_getter(ds, cache: Path, raw: Path, scheme: str = "official", mmap: boo
             split = transform(split)
         extras = getattr(ds, "series_extras", None)
         if extras is not None and part is None:  # time series dates / masks, by split name
-            split.vectors = {**(split.vectors or {}), **extras(cache, name)}
+            ex = extras(cache, name)
+            if subset:  # the same samples as the images (_select)
+                ex = {k: v[:subset] for k, v in ex.items()}
+            split.vectors = {**(split.vectors or {}), **ex}
         labels = getattr(ds, "split_labels", None)
         if labels is not None:  # image-level labels for a shared (pixel) cache
             split.masks = labels(raw, split)
@@ -298,7 +301,7 @@ def run_training(
         "vectors_dropped": bool(info.vectors) and stack,
         "norm_stats": {"source": norm_source, "mean": mean, "std": std},
         "env": env,
-        "gpu_contention_at_end": gpu_contention() if dev.type == "cuda" else None,
+        "gpu_contention_at_end": gpu_contention(dev),  # None off CUDA / on failure
         **result,
     }
     if getattr(task, "calibrate", False) and "best_threshold" in record["final_val"]:

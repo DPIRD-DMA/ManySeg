@@ -328,8 +328,8 @@ def test_calibrated_count_equals_find_peaks_at_best(metric):
 
 def test_density_map_matches_explicit_gaussian_stack():
     torch.manual_seed(0)
-    pts = torch.cat([torch.rand(1500, 2) * torch.tensor([40.0, 50.0]),  # > 1 chunk, some at borders
-                     torch.tensor([[-3.0, 25.0], [39.0, 49.0]])])
+    pts = torch.cat([torch.rand(1500, 2) * torch.tensor([39.0, 49.0]),  # > 1 chunk, some at borders
+                     torch.tensor([[-0.4, 25.0], [39.0, 49.0]])])
     sigma = 1.0 + 4 * torch.rand(len(pts))
     ys, xs = torch.arange(40.0), torch.arange(50.0)
     g = torch.exp(-((ys[None] - pts[:, :1]) ** 2) / (2 * sigma[:, None] ** 2))[:, :, None] \

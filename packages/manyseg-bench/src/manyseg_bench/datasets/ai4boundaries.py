@@ -22,7 +22,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .base import DatasetInfo
+from .base import DatasetInfo, check_native_size
 
 URL = "https://jeodpp.jrc.ec.europa.eu/ftp/jrc-opendata/DRLL/AI4BOUNDARIES/orthophoto/orthos.zip"
 MD5 = "c54bdab203a9732a5d928b14585f75c8"
@@ -45,6 +45,7 @@ TASK = "instances"
 TASK_KWARGS = {"boundary_width": 2.0}
 LOADER_KWARGS = {"device_resident": False, "vflip": True, "scale": (0.5, 1.0)}
 EVAL_BATCH_SIZE = 8
+SIZE = 512  # tiles as published (prepare does not resize)
 
 
 def _root(raw: Path) -> Path:
@@ -68,8 +69,12 @@ def _read(args):
     return img[..., :3].astype(np.uint8), seq.astype(np.int32), agree
 
 
-def prepare(raw: Path, cache: Path, size: int = 512, workers: int = 4,
+def prepare(raw: Path, cache: Path, size: int | None = None, workers: int = 4,
             expected: dict | None = EXPECTED) -> dict:
+    """Cache the tiles at their published ``SIZE`` px; another ``size`` raises (before any
+    download)."""
+    check_native_size(size, SIZE, "ai4boundaries")
+    size = SIZE
     raw, cache = Path(raw), Path(cache)
     try:
         root = _root(raw)

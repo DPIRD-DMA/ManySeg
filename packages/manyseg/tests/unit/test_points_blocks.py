@@ -250,7 +250,7 @@ def test_gaussian_blur_is_crop_invariant_bitwise():
 
 def test_density_block_count():
     rng = np.random.default_rng(0)
-    pts = torch.from_numpy(rng.uniform(0, [90, 110], (60, 2))).float()
+    pts = torch.from_numpy(rng.uniform(0, [89, 109], (60, 2))).float()  # inside the image
     from manyseg.points import density_map
 
     d = density_map([pts], (90, 110), sigma=3.0)[0].numpy() * 4.0
