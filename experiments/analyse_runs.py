@@ -2,6 +2,10 @@
 
 Usage: uv run python experiments/analyse_runs.py <runs_dir>... --key arch|tag --ref <arm>
        [--metric miou] [--flops]
+
+Only training records (``"kind": "train"``) are summarised; profile and evaluate records,
+which ``manyseg-bench`` writes to the same default ``runs`` directory, and any other JSON are
+skipped.
 """
 
 import argparse
@@ -36,6 +40,20 @@ def flops(arch: str, options: dict) -> float | None:
     return f.get_total_flops() / 1e9, sum(p.numel() for p in m.parameters()) / 1e6
 
 
+def load(dirs) -> list[dict]:
+    """Every JSON object in ``dirs/*.json`` (unparsable files and non-object JSON skipped)."""
+    out = []
+    for d in dirs:
+        for f in sorted(glob.glob(f"{d}/*.json")):
+            try:
+                r = json.loads(Path(f).read_text())
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                continue
+            if isinstance(r, dict):
+                out.append(r)
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("dirs", nargs="+")
@@ -44,8 +62,9 @@ def main():
     ap.add_argument("--metric", default=None)
     ap.add_argument("--flops", action="store_true")
     a = ap.parse_args()
-    runs = [json.loads(Path(f).read_text()) for d in a.dirs
-            for f in sorted(glob.glob(f"{d}/*.json"))]
+    runs = [r for r in load(a.dirs) if r.get("kind") == "train"]
+    if not runs:
+        raise SystemExit(f"no training records (kind 'train') in {', '.join(a.dirs)}")
     g = defaultdict(list)
     for r in runs:
         key = r["spec"]["arch"] if a.key == "arch" else r.get(a.key, "")

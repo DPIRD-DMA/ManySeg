@@ -27,15 +27,27 @@ from .points.losses import density_loss
 from .utils.spatial import mask_for as _mask_for
 
 
+def _same_shape(pred: Tensor, target: Tensor, pred_name: str = "logits",
+                target_name: str = "target") -> None:
+    """A ValueError unless ``target`` has ``pred``'s shape: broadcasting a (B, H, W) target
+    against (B, 1, H, W) logits gives (B, B, H, W), a silently wrong loss."""
+    if target.shape != pred.shape:
+        raise ValueError(f"{target_name} shape {tuple(target.shape)} does not match "
+                         f"{pred_name} {tuple(pred.shape)}; they must be equal (e.g. add the "
+                         "channel axis with target[:, None])")
+
+
 def soft_dice(logits: Tensor, target: Tensor, mask: Tensor | None = None,
               eps: float = 1.0) -> Tensor:
-    """1 - Dice on sigmoid probabilities, per sample then averaged. Shapes (B, 1, H, W) (or
-    (B, C, H, W)); ``mask`` (B, H, W), (B, 1, H, W) or like ``logits`` restricts the Dice to
-    valid pixels, whose values (even NaN) are ignored elsewhere; an empty mask gives 0.
+    """1 - Dice on sigmoid probabilities, per sample then averaged. ``logits`` and ``target``
+    have the same shape, (B, 1, H, W) (or (B, C, H, W)), else ValueError; ``mask`` (B, H, W),
+    (B, 1, H, W) or like ``logits`` restricts the Dice to valid pixels, whose values (even NaN)
+    are ignored elsewhere; an empty mask gives 0.
 
     With several channels, the Dice is pooled over them: each sample's channels and pixels form
     one set, giving one score per sample, so channels with many positive pixels dominate. For a
     Dice per class, use :func:`multiclass_dice` (softmax classes) or call this per channel."""
+    _same_shape(logits, target)
     x, t = logits.float(), target.float()
     if mask is not None:
         w = _mask_for(mask, x)
@@ -58,11 +70,13 @@ def soft_dice(logits: Tensor, target: Tensor, mask: Tensor | None = None,
 def dice_bce(logits: Tensor, target: Tensor, *, pos_weight: float | None = None,
              mask: Tensor | None = None, dice_weight: float = 1.0,
              bce_weight: float = 1.0) -> Tensor:
-    """Binary Dice + BCE on logits. Every argument after ``target`` is keyword-only, so a mask
-    cannot be passed as ``pos_weight`` by position. ``pos_weight`` up-weights positive pixels
-    in the BCE term (useful for thin boundary classes); ``mask`` ((B, H, W), (B, 1, H, W) or
-    like ``logits``) restricts both terms to valid pixels. The Dice term is
-    :func:`soft_dice`: with several channels it is pooled over them, one score per sample."""
+    """Binary Dice + BCE on logits, ``target`` shaped like ``logits`` (else ValueError). Every
+    argument after ``target`` is keyword-only, so a mask cannot be passed as ``pos_weight`` by
+    position. ``pos_weight`` up-weights positive pixels in the BCE term (useful for thin
+    boundary classes); ``mask`` ((B, H, W), (B, 1, H, W) or like ``logits``) restricts both
+    terms to valid pixels. The Dice term is :func:`soft_dice`: with several channels it is
+    pooled over them, one score per sample."""
+    _same_shape(logits, target)
     pw = None if pos_weight is None else torch.tensor(pos_weight, device=logits.device)
     x, t = logits.float(), target.float()
     if mask is None:
@@ -81,11 +95,12 @@ def dice_bce(logits: Tensor, target: Tensor, *, pos_weight: float | None = None,
 def masked_regression(pred: Tensor, target: Tensor, mask: Tensor | None = None,
                       kind: str = "l1") -> Tensor:
     """L1 / MSE (``kind`` ``"l1"`` or ``"mse"``) averaged over ``mask`` pixels (all pixels if
-    None; 0 if the mask is empty). For ``(B, C, H, W)`` predictions the mask may be
-    ``(B, H, W)``, ``(B, 1, H, W)`` or ``(B, C, H, W)``; values under a False mask (even NaN)
-    are ignored."""
+    None; 0 if the mask is empty). ``target`` has ``pred``'s shape, else ValueError. For
+    ``(B, C, H, W)`` predictions the mask may be ``(B, H, W)``, ``(B, 1, H, W)`` or
+    ``(B, C, H, W)``; values under a False mask (even NaN) are ignored."""
     if kind not in ("l1", "mse"):
         raise ValueError(f"kind must be 'l1' or 'mse', got {kind!r}")
+    _same_shape(pred, target, "pred")
     p, t = pred.float(), target.float()
     if mask is None:
         diff = p - t
@@ -101,10 +116,16 @@ def masked_regression(pred: Tensor, target: Tensor, mask: Tensor | None = None,
 
 def heatmap_focal(logits: Tensor, target: Tensor, alpha: float = 2.0, beta: float = 4.0,
                   pos: Tensor | None = None, min_pos: int = 1) -> Tensor:
-    """CenterNet penalty-reduced focal loss for Gaussian centre heatmaps (logits in). ``pos``
-    (bool, like ``target``) marks the centre pixels; default ``target >= 0.999``, which misses
-    centres that fall between pixels (pass e.g. the target's local maxima then). The summed loss
-    is divided by the number of positives, at least ``min_pos``."""
+    """CenterNet penalty-reduced focal loss for Gaussian centre heatmaps (logits in).
+    ``target`` has the shape of ``logits``, else ValueError. ``pos`` (bool, same shape) marks
+    the centre pixels; default ``target >= 0.999``, which misses centres that fall between
+    pixels (pass e.g. the target's local maxima then). The summed loss is divided by the number
+    of positives, at least ``min_pos``."""
+    _same_shape(logits, target)
+    if pos is not None:
+        _same_shape(logits, pos, target_name="pos")
+        if pos.dtype != torch.bool:
+            raise ValueError(f"pos must be a bool tensor, got {pos.dtype}")
     p = logits.float().sigmoid().clamp(1e-6, 1 - 1e-6)
     pos = target >= 0.999 if pos is None else pos
     pos_loss = -((1 - p) ** alpha) * torch.log(p) * pos

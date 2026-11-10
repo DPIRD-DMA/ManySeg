@@ -41,6 +41,11 @@ built.weights_fingerprint  # sha256 of the first conv weight (16 hex chars)
 External libraries plug in through `register_provider(MyProvider)` without any change to
 the benchmark.
 
+`arch` (`--arch`) names the decoder. Image-level models (classification and regression tasks,
+`profile --output image`) build no decoder, so their records hold the effective
+`spec.arch = "none"` and keep the value given under `requested_arch`. Runs that differ only in
+the requested arch are then one configuration in the reports.
+
 ### Weight fairness
 
 Canonical weight ids map to library-specific names. `tv_in1k` (torchvision ImageNet V1)
@@ -151,9 +156,16 @@ results are kept apart and never compared across hardware.
 
 Each result JSON contains: the Python, torch, CUDA and cuDNN versions; the versions of
 every model library; GPU name and memory; the seed; the recipe; the spec; the weight
-fingerprint; and a snapshot of **other GPU processes and utilisation** at the start and end.
-The development workstation is shared, so a result with `contended: true` is labelled
-*exploratory* for speed. Accuracy is unaffected by contention, but timing is not.
+fingerprint; the code version; and a snapshot of **other GPU processes and utilisation** at
+the start and end. The development workstation is shared, so a result with `contended: true`
+is labelled *exploratory* for speed. Accuracy is unaffected by contention, but timing is not.
+`contended` means another compute process was on the run's GPU (`other_compute_processes`,
+`other_mem_mib`). Utilisation and used memory are recorded too, but do not set the flag: they
+include the run's own work, so at the end of a run they are usually high.
+
+The code version is the git commit (`$MANYSEG_CODE_SHA` overrides it), with `-dirty` when any
+tracked file in the repository has uncommitted changes. Untracked files do not count, so
+commit new source files before a run whose provenance matters.
 
 ### Re-evaluating saved runs
 

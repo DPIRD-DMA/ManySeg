@@ -239,7 +239,11 @@ def instances_from_outputs(
         extent: ``(B, 1, H, W)`` probabilities/logits, ``(B, C, H, W)`` multi-class scores with
             background at index 0, or integer labels.
         boundary: ``(B, 1, H, W)`` probabilities (or logits with ``logits=True``).
-        distance: ``(B, 1, H, W)`` predicted (normalised) distance.
+        distance: ``(B, 1, H, W)`` predicted (normalised) distance. Non-finite values (NaN,
+            +-inf) count as 0 for both seeding and growth (as ``DensityBlockDecoder`` counts
+            NaN density as 0): such a pixel is not a seed (with ``seed_threshold >= 0``) but
+            is still part of its instance. A NaN pixel of a 1-channel ``extent`` is
+            background, and of ``boundary`` not a seed (NaN compares False).
         logits: ``True`` if ``extent`` / ``boundary`` are raw model outputs (logits, as heads
             return them), ``False`` if they are already probabilities.
         extent_threshold: Foreground threshold on the extent probability (1-channel extent
@@ -263,7 +267,10 @@ def instances_from_outputs(
         raise ValueError(f"ids must be sequential|anchor, got {ids!r}")
     fg = _foreground(extent, logits, extent_threshold)
     bnd = boundary[:, 0].sigmoid() if logits else boundary[:, 0]
-    dist = distance[:, 0].float()
+    # Non-finite distances (NaN nodata, a diverged head) count as 0, before both the seed
+    # choice and the growth: a NaN would otherwise poison its component's distance maximum
+    # (deleting a seedless object) and the watershed's priority queue.
+    dist = torch.nan_to_num(distance[:, 0].float(), nan=0.0, posinf=0.0, neginf=0.0)
     if fg.numel() == 0:  # empty batch (or tile): nothing to label
         return torch.zeros(fg.shape, dtype=torch.long, device=fg.device)
     seeds = fg & (bnd < boundary_threshold) & (dist > seed_threshold)

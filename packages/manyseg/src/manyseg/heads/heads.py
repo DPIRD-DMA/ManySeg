@@ -43,9 +43,12 @@ class PixelHead(nn.Module):
     * ``d == f``: just the ``k x k`` conv; nothing is resampled (a decoder built with
       ``out_stride=f`` feeding a head with ``scale=1/f`` pays for no upsampling at all);
     * ``d > f``: conv, then bilinear upsampling by ``d / f`` (``align_corners=False``);
-    * ``d < f``: area-average by ``f / d`` (block means; a partial edge block averages its
-      in-image cells, as :func:`~manyseg.utils.downsample_mean`), then the conv on the coarse
-      grid.
+    * ``d < f``: area-average by ``f / d`` (block means; a partial edge block of the feature
+      it gets averages only that block's cells), then the conv on the coarse grid. With
+      ``pad_to_stride=False`` that feature is the image's, so edge blocks match
+      :func:`~manyseg.utils.downsample_mean` targets. With the default padding the head reads
+      the padded feature, exactly as for an input zero-padded by the caller, so edge cells
+      include the padding (the model gives the same output whoever pads).
 
     The output covers ``feature_size * d / f`` pixels (>= the scaled padded input); the model
     crops it to ``ceil(H / f) x ceil(W / f)``.

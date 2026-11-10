@@ -25,10 +25,11 @@ FILENAME = "model.safetensors"
 
 
 def split_name(name: str) -> tuple[str, str | None]:
-    """``"hf-hub:org/name@rev"`` -> ``("org/name", "rev")`` (revision None when not given)."""
+    """``"hf-hub:org/name@rev"`` -> ``("org/name", "rev")`` (revision None when not given; an
+    ``"@"`` with nothing after it is refused rather than read as the main branch)."""
     repo = name.removeprefix(PREFIX)
-    repo, _, revision = repo.partition("@")
-    if repo.count("/") != 1 or not all(repo.split("/")):
+    repo, at, revision = repo.partition("@")
+    if repo.count("/") != 1 or not all(repo.split("/")) or (at and not revision):
         raise ValueError(f"{name!r}: expected 'hf-hub:<org>/<name>' or "
                          f"'hf-hub:<org>/<name>@<revision>'.")
     return repo, revision or None
@@ -38,11 +39,14 @@ def _check_repo_id(repo_id: str) -> None:
     """``repo_id`` must be a plain ``"org/name"``: the Hub refuses the ``"hf-hub:"`` prefix and an
     ``"@revision"`` suffix, which :func:`split_name` accepts for loading."""
     if repo_id.startswith(PREFIX) or "@" in repo_id:
-        repo, revision = split_name(repo_id)
+        repo, _, revision = repo_id.removeprefix(PREFIX).partition("@")
         hint = f", revision={revision!r}" if revision else ""
-        raise ValueError(f"push_to_hub takes a repository id, 'org/name', not {repo_id!r}: pass "
-                         f"repo_id={repo!r}{hint}. Choose the branch with revision=.")
-    split_name(repo_id)
+        fix = (f": pass repo_id={repo!r}{hint}" if repo.count("/") == 1 and all(repo.split("/"))
+               else "")
+        raise ValueError(f"push_to_hub takes a repository id 'org/name', not {repo_id!r}{fix}. "
+                         f"Choose the branch with revision=.")
+    if repo_id.count("/") != 1 or not all(repo_id.split("/")):
+        raise ValueError(f"push_to_hub takes a repository id 'org/name', got {repo_id!r}.")
 
 
 def download(name: str, *, token: str | None = None, cache_dir: str | Path | None = None) -> Path:

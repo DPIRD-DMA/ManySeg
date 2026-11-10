@@ -321,7 +321,9 @@ def create_model(
             ``rgb_indices`` (wins over an ``rgb_indices`` in the top-level
             ``backbone_kwargs``), ``temporal`` (time series). Vector (metadata) configs:
             ``{"kind": "vector"}`` with ``fields`` or ``num_features``, ``dim``, ``dropout``,
-            ``conditioning`` (``"film"`` / ``"head"`` / ``"channels"``).
+            ``conditioning`` (``"film"`` / ``"head"`` / ``"channels"``). Give metadata in
+            float32, also to a bfloat16 / float16 model: it is encoded in float32, and half
+            precision would round ids and coordinates (see :mod:`manyseg.conditioning.encoder`).
         fusion: ``{"type": "early" | "intermediate" | "late", "op": ..., "op_kwargs": ...,
             "strides": [...]}`` for several raster inputs (``strides``: intermediate only).
         pretrained: ``True`` (timm weights), ``False``, or a ``manyseg.weights`` tag such as

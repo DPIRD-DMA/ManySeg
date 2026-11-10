@@ -440,7 +440,9 @@ out = model({"s2": s2, "meta": meta})                   # optional: "meta_mask":
 
 `{"kind": "vector", "num_features": N}` declares `N` pre-normalised floats instead of `fields`.
 
-**Input convention.** A vector input is **one packed float tensor `(B, N)`**. Its columns are
+**Input convention.** A vector input is **one packed float tensor `(B, N)`**, best given in
+float32 even to a bfloat16 or float16 model (the fields are encoded in float32 and only the
+result is cast; half precision would round ids and coordinates, e.g. id 257 to 256). Its columns are
 the fields in declaration order: `coords` takes two columns (lat, then lon), `categorical`
 takes one column holding the id, and every other type takes one column. A dict of per-field
 tensors is rejected with a `TypeError`: build the tensor with
@@ -845,7 +847,8 @@ rasterio, scipy, scikit-image); writing GeoPackages also needs geopandas.
   `manyseg.points.point_heads()` / `density_head()`.
 * Target encoders: `to_pixels` (labels in a CRS → tile pixels), then `footprint_targets`,
   `field_targets`, `roof_face_targets`, `road_graph` → `road_targets`; for points
-  `manyseg.points.points_from_xy` → `gaussian_heatmap` / `density_map`.
+  `manyseg.points.points_from_xy` (float64, so a point `to_pixels` keeps just inside a tile
+  edge stays inside) → `gaussian_heatmap` / `density_map`.
 * Decoding: `decode_scene(fields, block_decoder(task), scene=Scene(H, W, transform, crs))` with
   `task` one of `"footprints"`, `"fields"`, `"roofs"`, `"roads"`, `"points"`, `"density"`. This
   is both the whole-scene and the large-scene path: with the default `block=4096` a scene of up
@@ -974,7 +977,7 @@ may be cut). Roof records hold `id`, `part` (pieces a join split off), `geometry
 `write_records(..., mesh=True)` writes 3-D polygons, z in metres).
 `"roads"` returns a `VectorGraph` carrying the scene's `transform` and `crs` (`graph.write(path)`
 / `graph.to_geojson()`, as for `SceneRecords`); points return
-`ScenePoints` (`to_geojson()`). Runnable
+`ScenePoints` (`.write(path)`, `.to_geojson()`). Runnable
 versions of each task: [`examples/14_vector_footprints.py`](../examples/14_vector_footprints.py)
 to [`18_vector_points.py`](../examples/18_vector_points.py).
 
@@ -1049,7 +1052,11 @@ over arrays or memmaps you stitched yourself.
   pixel is lost or claimed twice. This depends on the predictions: on noise-like field outputs
   (400 px scene, `block=100`), halos of 2 to 64 px gave 209-239 objects against 241 for a
   whole-scene decode, while E051's trained roof scene matched exactly. Compare on your own
-  outputs if an exact match matters.
+  outputs if an exact match matters. A non-finite `distance` counts as 0 when seeding and
+  growing instances.
+* Density: `DensityBlockDecoder` counts NaN density (and pixels with a NaN mask) as 0, so it
+  tolerates nodata; `count_from_density` propagates NaN so a broken output shows. They agree
+  on outputs without NaN.
 
 #### Building blocks
 
@@ -1432,6 +1439,9 @@ loading needs `manyseg[quant]`. Quantised files use save format 2 like float fil
   (None if dynamic), `fixed_size` (None if dynamic) and `input_shapes`. `map_location` sets its
   device (resolved, e.g. `mps:0`); `.module` runs on a copy there and `.program` stays as loaded.
   A wrong device (index included), batch size or fixed size raises an error naming the fix.
+  A multi-input program takes its dict in any key order and names missing or unexpected keys;
+  `fixed_size` (and `tiling_spec()["max_size"]`) is the primary input's size.
+* `quantize_weights` keeps the weights of `"shared:<input>"` encoders shared, also after `load`.
 * `torch.export.load` can run code from a crafted file, through pickled entries and through shape
   strings passed to `sympy.sympify`. `load` checks for both first, but this is no sandbox: only
   load `.pt2` files from sources you trust.

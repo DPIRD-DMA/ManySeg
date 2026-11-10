@@ -33,7 +33,9 @@ class ModelSpec:
     """Library-neutral model request.
 
     Attributes:
-        arch: Decoder architecture, e.g. ``"unet"``.
+        arch: Decoder architecture, e.g. ``"unet"``; ``"none"`` for image-level models
+            (``output="image"``), which build no decoder (the runner records ``"none"`` for
+            image-level tasks whatever was requested).
         encoder: Canonical encoder name, e.g. ``"resnet34"``.
         weights: Canonical weight identifier. ``"tv_in1k"`` = torchvision IMAGENET1K_V1,
             which every built-in provider can load for ResNets. ``None`` = random init.

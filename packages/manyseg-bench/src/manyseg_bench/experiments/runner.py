@@ -126,7 +126,13 @@ def split_train_stats(images) -> tuple:
 
 def resolution_info(model) -> dict | None:
     """Output-resolution settings of a ManySeg model (None for other providers): the shared
-    decoder's ``out_stride``, per-task-decoder strides and each pixel head's ``scale``."""
+    decoder's ``out_stride``, per-task-decoder strides and each pixel head's ``scale``. The
+    ManySeg provider's wrappers (``BandGroupModel``, ``WeightsInputModel``) are looked
+    through to the model they wrap."""
+    from ..providers.manyseg_provider import BandGroupModel, WeightsInputModel
+
+    while isinstance(model, (BandGroupModel, WeightsInputModel)):
+        model = model.model
     heads = getattr(model, "heads", None)
     if not hasattr(model, "_pixel_heads") or heads is None:
         return None
@@ -211,8 +217,10 @@ def run_training(
         raise ValueError(f"recipe label_smoothing={rec.label_smoothing}: task {task_name!r} "
                          "has no label smoothing; set label_smoothing=0")
     task = build_task(task_name, info.num_classes, info.ignore_index, **task_kwargs)
-    if task.image_level:
-        spec = ModelSpec(**{**spec.to_dict(), "output": "image"})
+    requested_arch = spec.arch
+    if task.image_level:  # no decoder is built: record the effective arch "none" so equivalent
+        # runs requested with different --arch values are one configuration
+        spec = ModelSpec(**{**spec.to_dict(), "output": "image", "arch": "none"})
     if task.heads() is not None:
         if provider != "manyseg":
             raise ValueError(f"task {task.name!r} needs named heads; provider {provider!r} "
@@ -278,7 +286,8 @@ def run_training(
         "tag": tag,
         "provider": provider,
         "provider_version": prov.version(),
-        "spec": spec.to_dict(),
+        "spec": spec.to_dict(),  # effective: arch "none" for image-level tasks
+        "requested_arch": requested_arch,
         "weights_fingerprint": built.weights_fingerprint,
         "model_notes": list(built.notes),
         "params": sum(p.numel() for p in built.model.parameters()),

@@ -428,7 +428,7 @@ def test_points_to_geojson_round_trip(transform):
     # and back: the same features in, the same pixels out
     back = to_pixels(fc, transform, (50, 64))
     assert np.allclose(back, xy, atol=1e-6)
-    assert torch.allclose(points_from_xy(back), peaks.float(), atol=1e-6)
+    assert torch.allclose(points_from_xy(back), peaks.double(), atol=1e-6)
 
 
 def test_to_geojson_point_inputs():

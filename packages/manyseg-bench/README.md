@@ -38,8 +38,10 @@ manyseg-bench evaluate runs/<run>.json --variants fp32,bf16,int8_weight_only
   datasets (Sen1Floods11, CloudSEN12+, PASTIS, EuroSAT, BigEarthNet, OSCD, AI4Boundaries S2);
   ImageNet constants for the RGB ones (Oxford Pet, OAM-TCD, AI4Boundaries, LEVIR-CD, SECOND).
   Each run records its source under `norm_stats`.
-* **Provenance:** every training run's JSON records the environment, code version, GPU contention,
-  FLOPs, throughput and peak memory.
+* **Provenance:** every training run's JSON records the environment, code version (git
+  commit, `-dirty` if a tracked file in the repository is modified), GPU contention (other
+  processes on the run's GPU), FLOPs, throughput and peak memory. Image-level models build no
+  decoder, so their records say `arch: none` (the `--arch` given is kept as `requested_arch`).
 
 See [GitHub](https://github.com/DPIRD-DMA/ManySeg) for the benchmark design and the
 experiments. MIT licence.

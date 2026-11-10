@@ -2,6 +2,7 @@
 
 * ``levircd`` — LEVIR-CD (Chen & Shi 2020): building change, 0.5 m RGB, 637 pairs of 1024x1024
   (official 445 / 64 / 128), tiled into non-overlapping 256x256 tiles (7,120 / 1,024 / 2,048).
+  A ``--size`` that does not divide 1024 pads the edge tiles (padding ignored: 255).
   Binary change (task ``change``, primary metric change-class F1). Licence: research use
   (see the LEVIR-CD terms). Source: the torchange parquet copy (``EVER-Z/torchange_levircd``).
 * ``second`` — SECOND (Yang et al. 2021): semantic change, 0.5–3 m aerial RGB, 512x512 pairs,
@@ -68,7 +69,8 @@ LEVIR_INFO = DatasetInfo(
     name="levircd", num_classes=2, in_channels=6, class_names=("no change", "change"),
     mean={"t1": RGB["mean"], "t2": RGB["mean"]}, std={"t1": RGB["std"], "t2": RGB["std"]},
     license="LEVIR-CD terms (research use)", source="https://justchenhao.github.io/LEVIR/",
-    inputs={"t1": 3, "t2": 3}, notes=("1024x1024 pairs tiled into 256x256",))
+    ignore_index=255, inputs={"t1": 3, "t2": 3},
+    notes=("1024x1024 pairs tiled into 256x256", "edge padding (size not dividing 1024) ignored"))
 LEVIR_SPLITS = {"train": "train", "val": "val", "test": "test"}
 LEVIR_EXPECTED = {"train": 445, "val": 64, "test": 128}
 
@@ -91,8 +93,9 @@ def prepare_levircd(raw: Path, cache: Path, size: int = 256, expected=LEVIR_EXPE
             raise RuntimeError(f"integrity: {split} has {pairs} pairs, expected {expected[split]}")
         masks = np.stack(m)
         save_split(Path(cache), split, {"t1": np.stack(a), "t2": np.stack(b)}, masks, names)
+        valid = masks != 255  # edge padding
         summary[split] = {"pairs": pairs, "tiles": len(names),
-                          "change_frac": float((masks == 1).mean())}
+                          "change_frac": float((masks[valid] == 1).mean())}
     (Path(cache) / "meta.json").write_text(json.dumps({"summary": summary}, indent=1))
     return summary
 

@@ -891,7 +891,10 @@ def records_to_geojson(records, transform=_UNSET, crs=_UNSET, *, mesh: bool = Fa
     ``crs`` (not given: the records' own, but none for pixel coordinates) is written as a
     ``name`` member when known.
     ``mesh=True`` writes roof faces as 3-D polygons from their mesh rings (z in metres).
-    ``plane`` becomes ``plane_a`` / ``_b`` / ``_c`` (in scene pixel coordinates)."""
+    ``plane`` becomes ``plane_a`` / ``_b`` / ``_c``, always in scene pixel coordinates (even
+    when the geometry is written in world coordinates): ``z = a x + b y + c`` with pixel
+    corners at integers, so the centre of pixel ``(row, col)`` is ``x = col + 0.5``,
+    ``y = row + 0.5``."""
     import json
 
     shapely = _deps()[1]

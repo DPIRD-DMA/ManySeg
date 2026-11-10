@@ -142,17 +142,22 @@ def density_map(points: Sequence[Tensor], size: tuple[int, int], sigma=3.0) -> T
     centres at integers). Each inside point's Gaussian is normalised to sum to exactly 1 over
     the image, so a point near the border keeps its full mass (truncated, renormalised); a
     point outside adds nothing, however close, so a tile's target counts that tile's objects.
+    The inside test uses the points' own dtype (pass float64, as :func:`points_from_xy` returns,
+    to keep the tile assignment of :func:`manyseg.vectors.to_pixels`); the Gaussians are then
+    rendered in float32.
     """
     h, w = size
     out = []
     for pts, sig in zip(points, _per_image(sigma, len(points))):
-        pts = pts.float()
         s = _sigmas(sig, len(pts), pts.device)
-        # outside the image: no mass (NaN points are kept, so they still show up as NaN)
-        out_y = (pts[:, 0] < -0.5) | (pts[:, 0] >= h - 0.5)
-        out_x = (pts[:, 1] < -0.5) | (pts[:, 1] >= w - 0.5)
+        # Outside the image: no mass (NaN points are kept, so they still show up as NaN). The
+        # test runs in the points' own precision (float64 from points_from_xy): a point just
+        # inside the far edge rounds onto it in float32 and would be counted by no tile.
+        p = pts if pts.is_floating_point() else pts.double()
+        out_y = (p[:, 0] < -0.5) | (p[:, 0] >= h - 0.5)
+        out_x = (p[:, 1] < -0.5) | (p[:, 1] >= w - 0.5)
         keep = ~(out_y | out_x)
-        pts, s = pts[keep], s[keep]
+        pts, s = p[keep].float(), s[keep]
         d = torch.zeros(h, w, device=pts.device)
         for i in range(0, len(pts), _AXIS_CHUNK):
             gy, gx = _gaussian_axes(pts[i:i + _AXIS_CHUNK], s[i:i + _AXIS_CHUNK], h, w)

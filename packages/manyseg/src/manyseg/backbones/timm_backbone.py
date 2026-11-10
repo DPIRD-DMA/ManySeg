@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import difflib
 import inspect
 import math
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 
 import timm
 import torch
@@ -16,6 +18,23 @@ from ..features import FeatureSpec
 from .necks import ViTPyramidNeck, default_pyramid_channels
 
 PYRAMID_STRIDES = (4, 8, 16, 32)
+
+
+_WEIGHTS_FROM_FILE = contextvars.ContextVar("manyseg_weights_from_file", default=False)
+
+
+@contextlib.contextmanager
+def weights_from_file() -> Iterator[None]:
+    """Within this context, :class:`TimmBackbone` builds the architecture its ``pretrained``
+    argument describes but downloads and loads no weights, as when the weights come from a
+    saved file (:func:`manyseg.load`). A remote-sensing weights tag still decides the stem
+    (its band count, so ``channel_adapter`` is not applied) and the normalisation statistics;
+    ``pretrained`` is then recorded as False and ``weights`` as None, as nothing was loaded."""
+    token = _WEIGHTS_FROM_FILE.set(True)
+    try:
+        yield
+    finally:
+        _WEIGHTS_FROM_FILE.reset(token)
 
 
 def _timm_create(name: str, pretrained: bool = False, **kwargs) -> nn.Module:
@@ -279,7 +298,11 @@ class TimmBackbone(nn.Module):
             out_indices = tuple(int(i) for i in idx)
             kwargs["out_indices"] = out_indices
         self.block_indices = tuple(out_indices) if self.is_plain else None
+        # which stem to build (a weights tag's band count, else RGB) is decided apart from
+        # whether weights are loaded, so a rebuild for a saved file keeps the architecture
+        load = not _WEIGHTS_FROM_FILE.get()
         self.weights: str | None = None
+        w = None
         if isinstance(pretrained, str):  # remote-sensing weights (manyseg.weights)
             from ..weights import get_weights, load_into
 
@@ -290,19 +313,22 @@ class TimmBackbone(nn.Module):
                                  f"in_channels={in_channels}")
             self.model = _create_explained(name, timm_kwargs, pretrained=False,
                                            **{**kwargs, "in_chans": w.in_channels})
-            load_into(self.model, w)
-            self.weights = w.key
+            if load:
+                load_into(self.model, w)
+                self.weights = w.key
         else:
-            self.model = _create_explained(name, timm_kwargs, pretrained=pretrained, **kwargs)
+            self.model = _create_explained(name, timm_kwargs,
+                                           pretrained=bool(pretrained) and load, **kwargs)
         self._drop_unreturned_blocks()
         self.name = name
-        self.pretrained = bool(pretrained)  # recorded for describe(); weights are already set
+        # recorded for describe() and attribution; weights are already set
+        self.pretrained = bool(pretrained) and load
         self.in_channels = in_channels
         self.channel_adapter = channel_adapter
         self.rgb_indices = None if rgb_indices is None else tuple(int(i) for i in rgb_indices)
 
         cfg = getattr(self.model, "pretrained_cfg", {}) or {}
-        native = in_channels if self.weights is not None else 3
+        native = w.in_channels if w is not None else 3
         stems = find_stem_convs(self.model, cfg.get("first_conv"), native)
         self.stem_conv_names = [n for n, _ in stems]
         self._stem_name = self.stem_conv_names[0]
@@ -345,7 +371,7 @@ class TimmBackbone(nn.Module):
                                                 self._run_adapted, in_channels,
                                                 channel_adapter)
         # the pretraining normalisation: remote-sensing weights' own, else timm's for the tag
-        if self.weights is not None:
+        if w is not None:
             self.mean, self.std = w.mean, w.std
         else:
             self.mean = tuple(cfg.get("mean", (0.485, 0.456, 0.406)))
@@ -467,4 +493,4 @@ def create_backbone(name: str, pretrained: bool | str = True, **kwargs) -> TimmB
     return TimmBackbone(name, pretrained=pretrained, **kwargs)
 
 
-__all__ = ["TimmBackbone", "create_backbone", "find_stem_conv"]
+__all__ = ["TimmBackbone", "create_backbone", "find_stem_conv", "weights_from_file"]

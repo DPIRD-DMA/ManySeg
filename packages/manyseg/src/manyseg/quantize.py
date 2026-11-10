@@ -33,6 +33,7 @@ import copy
 import io
 import json
 import re
+import types
 import warnings
 import zipfile
 from collections.abc import Iterable, Mapping
@@ -251,7 +252,9 @@ class QuantizedProgram:
     Deliberately not an ``nn.Module``: a module from ``ep.module()`` raises on ``.eval()``, also
     when nested, and callers such as ManyPred call ``.to(device, dtype).eval()`` on every module.
     Call it like the model; its device is the ``map_location`` it was loaded on, and an input on
-    another device (or another GPU) is refused.
+    another device (or another GPU) is refused. A multi-input program takes its dict with the
+    keys in any order (it is passed on in the order the program was exported with); a missing
+    or unexpected key raises a ValueError naming it.
 
     Attributes:
         program: The ``ExportedProgram`` as given (:func:`manyseg.load` loads it on the CPU),
@@ -261,10 +264,12 @@ class QuantizedProgram:
         saved_metadata: What :func:`manyseg.save` stored.
         batch_size: The only batch size the program takes, or None if it is dynamic
             (``quantize_pt2e(..., dynamic_batch=True)``).
-        fixed_size: The only ``(h, w)`` it takes, or None if H/W are dynamic (``dynamic=False``,
-            needed by window-attention backbones).
+        fixed_size: The only ``(h, w)`` its primary input takes (the input the model's
+            outputs and tiling follow), or None if that input's H/W are dynamic
+            (``dynamic=False`` fixes them, as window-attention backbones need). Other inputs'
+            sizes are in ``input_shapes``, which the calls are checked against.
         input_shapes: ``{input: shape}`` with None for dynamic dimensions (``"x"`` for a model
-            taking a single tensor).
+            taking a single tensor), in the order the program takes its inputs.
     """
 
     def __init__(self, program: torch.export.ExportedProgram, metadata: dict,
@@ -281,10 +286,11 @@ class QuantizedProgram:
         self.fixed_size: tuple[int, int] | None = (tuple(recipe["fixed_size"])
                                                    if recipe["fixed_size"] else None)
         self.input_shapes: dict[str, list] = recipe["input_shapes"]
+        self._keys = _input_keys(program)  # the dict's keys in the program's order; None: tensor
 
     def tiling_spec(self) -> dict:
         """The float model's ``tiling_spec()`` as saved, for ManyPred. ``max_size`` is the
-        program's fixed size when it has one."""
+        primary input's fixed size (``fixed_size``) when the program has one."""
         spec = copy.deepcopy(self.saved_metadata["tiling_spec"])
         if spec.get("max_size") is not None:
             spec["max_size"] = tuple(spec["max_size"])
@@ -312,7 +318,28 @@ class QuantizedProgram:
                     f"and input {name!r} has {list(t.shape)} (dimension {i}). Quantise with "
                     f"dynamic=True where the backbone allows it, or use this size.")
 
+    def _arrange(self, x: Any) -> Any:
+        """``x`` as the program takes it: a dict with exactly its keys, in its order (the
+        exported program only accepts the order it was exported with)."""
+        if self._keys is None:
+            if isinstance(x, Mapping):
+                raise ValueError(f"This program takes a single tensor, got a dict with keys "
+                                 f"{list(x)}.")
+            return x
+        if not isinstance(x, Mapping):
+            raise ValueError(f"This program takes a dict of inputs with keys {self._keys}, got "
+                             f"{type(x).__name__}.")
+        missing = [k for k in self._keys if k not in x]
+        unexpected = [k for k in x if k not in self._keys]
+        if missing or unexpected:
+            raise ValueError(
+                f"This program takes inputs {self._keys}"
+                + (f"; missing {missing}" if missing else "")
+                + (f"; unexpected {unexpected}" if unexpected else "") + ".")
+        return {k: x[k] for k in self._keys}
+
     def __call__(self, x: Any) -> Any:
+        x = self._arrange(x)
         for name, t in x.items() if isinstance(x, Mapping) else [("x", x)]:
             self._check(name, t)
         return self.module(x)
@@ -369,10 +396,34 @@ def _input_shapes(ep: torch.export.ExportedProgram) -> dict[str, list]:
             for name, n in zip(names, nodes, strict=True)}
 
 
-def _fixed_size(shapes: Mapping[str, list]) -> list[int] | None:
-    """``(h, w)`` of the first raster input if the program fixes it."""
-    raster = next((s for s in shapes.values() if len(s) >= 4), None)
-    return raster[-2:] if raster is not None and None not in raster[-2:] else None
+def _input_keys(ep: torch.export.ExportedProgram) -> list[str] | None:
+    """The keys of the dict the program takes, in the order it was exported with (its call
+    ``TreeSpec``); None for a program taking a single tensor."""
+    from torch.utils._pytree import tree_unflatten
+
+    spec = ep.call_spec.in_spec
+    args, _ = tree_unflatten([None] * spec.num_leaves, spec)  # (args, kwargs)
+    if len(args) != 1 or not isinstance(args[0], dict):
+        return None
+    return [str(k) for k in args[0]]
+
+
+def _primary_input(source: nn.Module) -> str:
+    """The name of ``source``'s primary raster input, the one its outputs and tiling follow:
+    ``"x"`` (as in :func:`_input_shapes`) for a model taking a single tensor."""
+    primary = getattr(getattr(source, "backbone", None), "primary", None)
+    conditioner = getattr(source, "conditioner", None)
+    if primary is None and conditioner is not None:  # one raster beside vector inputs
+        primary = getattr(conditioner, "single", None)
+    return "x" if primary is None else str(primary)
+
+
+def _fixed_size(shapes: Mapping[str, list], primary: str) -> list[int] | None:
+    """``(h, w)`` of input ``primary`` if the program fixes it; None if they are dynamic."""
+    shape = shapes.get(primary)
+    if shape is None or len(shape) < 4 or None in shape[-2:]:
+        return None
+    return shape[-2:]
 
 
 def _is_quantized_program(ep: torch.export.ExportedProgram) -> bool:
@@ -433,7 +484,7 @@ def _save_program(ep: torch.export.ExportedProgram, source: nn.Module, path: Pat
                          "manyseg.quantize.quantize_pt2e. For a float model, save the model.")
     _check_source(ep, source)
     shapes = _input_shapes(ep)
-    fixed = _fixed_size(shapes)
+    fixed = _fixed_size(shapes, _primary_input(source))
     first = next(iter(shapes.values()))
     rr = ep.state_dict.get(_RR_KEY)
     meta["quantization"] = {
@@ -633,6 +684,27 @@ def _is_dense_conv(mod: nn.Module, fqn: str) -> bool:
     return isinstance(mod, nn.Conv2d) and mod.weight.shape[1] > 1
 
 
+def _quantize_tied(model: nn.Module, config, accept) -> None:
+    """``torchao.quantize_`` on the layers ``accept`` selects, keeping tied weights tied: layers
+    sharing one weight (a ``"shared:<input>"`` encoder is a separate module with the same
+    parameters) are quantised once, and the others take that quantised weight. Their other
+    tensors (biases, BatchNorm state) are left as they are, shared or separate."""
+    from torchao.quantization import quantize_
+
+    groups: dict[int, list[nn.Module]] = {}
+    for fqn, mod in model.named_modules():
+        if accept(mod, fqn):
+            groups.setdefault(id(mod.weight), []).append(mod)
+    leaders = {id(mods[0]) for mods in groups.values()}
+    quantize_(model, config, filter_fn=lambda mod, fqn: id(mod) in leaders and accept(mod, fqn))
+    for leader, *others in groups.values():
+        rep = leader.__dict__.get("extra_repr")  # torchao's repr naming the quantised weight
+        for mod in others:
+            mod.weight = leader.weight
+            if rep is not None:
+                mod.extra_repr = types.MethodType(rep.__func__, mod)
+
+
 def quantize_weights(model: nn.Module, mode: str = "int8_weight_only", *, conv: bool = True,
                      inplace: bool = False) -> nn.Module:
     """int8 weights through torchao, for eager or ``torch.compile`` inference on CPU or GPU.
@@ -647,7 +719,8 @@ def quantize_weights(model: nn.Module, mode: str = "int8_weight_only", *, conv: 
 
     Conv2d weights are dequantised on the fly, so for CNNs this saves memory and disk, not
     time. ``conv=False`` leaves convs in float (Linear only). Depthwise convs and one-feature
-    Linear layers always stay float.
+    Linear layers always stay float. Weights shared between layers (a ``"shared:<input>"``
+    encoder) stay shared: each is quantised once.
     The model is copied first unless ``inplace``.
 
     :func:`manyseg.save` stores the result with its metadata, keeping the size saving, and
@@ -660,18 +733,17 @@ def quantize_weights(model: nn.Module, mode: str = "int8_weight_only", *, conv: 
         Int8DynamicActivationInt8WeightConfig,
         Int8WeightOnlyConfig,
         IntxWeightOnlyConfig,
-        quantize_,
     )
     from torchao.quantization.granularity import PerAxis
 
     if not inplace:
         model = copy.deepcopy(model)
     if conv:
-        quantize_(model, IntxWeightOnlyConfig(weight_dtype=torch.int8, granularity=PerAxis(0)),
-                  filter_fn=_is_dense_conv)
+        _quantize_tied(model, IntxWeightOnlyConfig(weight_dtype=torch.int8,
+                                                   granularity=PerAxis(0)), _is_dense_conv)
     linear = (Int8WeightOnlyConfig() if mode == "int8_weight_only"
               else Int8DynamicActivationInt8WeightConfig())
-    quantize_(model, linear, filter_fn=_is_linear)
+    _quantize_tied(model, linear, _is_linear)
     if not any(hasattr(t, "tensor_data_names") for t in model.state_dict(keep_vars=True).values()):
         warnings.warn(
             "quantize_weights quantised no layer: the model has no "

@@ -40,7 +40,11 @@ def main(argv=None) -> int:
     for name in ("train", "profile"):
         sp = sub.add_parser(name)
         sp.add_argument("--provider", required=True)
-        sp.add_argument("--arch", default="unet")
+        sp.add_argument("--arch", default="unet",
+                        help="decoder architecture. Image-level models (classification / "
+                        "regression tasks, profile --output image) build no decoder: the "
+                        "record's spec says arch 'none', the value given is kept as "
+                        "requested_arch")
         sp.add_argument("--encoder", default="resnet34")
         sp.add_argument("--weights", default="tv_in1k")
         sp.add_argument("--options", default="{}", help="JSON provider options")
@@ -130,7 +134,9 @@ def main(argv=None) -> int:
         spec = _spec(a)
         output = a.output or ("image" if a.provider == "timm" else "pixel")
         spec = ModelSpec(**{**spec.to_dict(), "in_channels": a.in_channels,
-                            "num_classes": a.num_classes, "output": output})
+                            "num_classes": a.num_classes, "output": output,
+                            # image-level models build no decoder (as in run_training)
+                            "arch": "none" if output == "image" else a.arch})
         prov = get_provider(a.provider)
         built = prov.build(spec, img_size=(h, w))
         env = environment(a.device)
@@ -142,7 +148,8 @@ def main(argv=None) -> int:
         rec = {"run_id": f"{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}",
                "kind": "profile", "tag": a.tag, "provider": a.provider,
                "provider_version": prov.version(), "spec": spec.to_dict(),
-               "weights_fingerprint": built.weights_fingerprint, "env": env,
+               "requested_arch": a.arch, "weights_fingerprint": built.weights_fingerprint,
+               "env": env,
                "resolution": resolution_info(built.model),
                "gpu_contention_at_end": (gpu_contention(a.device) if torch.device(a.device).type
                                          == "cuda" else None), **res}

@@ -32,6 +32,14 @@ def _cuda_uuid(index: int) -> str | None:
         return None
 
 
+def _mib(v: str) -> int:
+    """A process's ``used_memory`` in MiB; 0 when ``nvidia-smi`` cannot report it ("[N/A]")."""
+    try:
+        return int(v)
+    except ValueError:
+        return 0
+
+
 def _norm_uuid(u: str) -> str:
     return u.lower().removeprefix("gpu-")
 
@@ -39,6 +47,11 @@ def _norm_uuid(u: str) -> str:
 def gpu_contention(device: str | torch.device = "cuda") -> dict | None:
     """Snapshot of the run's GPU and of *other* compute processes on it. Timing under
     contention is not clean.
+
+    ``contended`` is True when another compute process is on this GPU
+    (``other_compute_processes`` > 0; ``other_mem_mib`` is their memory). Utilisation
+    (``gpu_util_pct``) and ``mem_used_mib`` are recorded as telemetry only: they include this
+    process's own kernels and memory, so at the end of a run they say nothing about others.
 
     The GPU is ``device`` (index from the device, else the current CUDA device), found in
     ``nvidia-smi`` by its UUID (so ``CUDA_VISIBLE_DEVICES`` renumbering does not matter; by
@@ -62,6 +75,7 @@ def gpu_contention(device: str | torch.device = "cuda") -> dict | None:
         me = os.getpid()
         others = [p for p in procs
                   if _norm_uuid(p[0]) == _norm_uuid(row[1]) and int(p[1]) != me]
+        other_mem = sum(_mib(p[2]) for p in others)
     except Exception:  # no nvidia-smi / no CUDA / "[N/A]" or unexpected output
         return None
     return {
@@ -70,21 +84,34 @@ def gpu_contention(device: str | torch.device = "cuda") -> dict | None:
         "mem_used_mib": used,
         "mem_total_mib": total,
         "other_compute_processes": len(others),
-        "contended": util > 5 or len(others) > 0,
+        "other_mem_mib": other_mem,
+        "contended": len(others) > 0,
     }
 
 
 def code_version() -> str | None:
     """Code snapshot that produced a result: $MANYSEG_CODE_SHA (set by batch scripts) or the
-    git commit of the source tree (with ``-dirty`` if it has uncommitted changes)."""
+    git commit of the repository holding this package, with ``-dirty`` if any tracked file
+    anywhere in that repository (library, benchmark, experiments) has uncommitted changes.
+    Untracked files do not count (data, run outputs and scratch files would otherwise mark
+    every run dirty), so commit new source files before a run. ``None`` outside a git
+    checkout (e.g. an installed wheel) or without git."""
     sha = os.environ.get("MANYSEG_CODE_SHA")
     if sha:
         return sha
     here = os.path.dirname(os.path.abspath(__file__))
+
+    def git(*args: str) -> str:
+        return subprocess.run(["git", "-C", here, *args], capture_output=True, text=True,
+                              timeout=10).stdout.strip()
+
     try:
-        rev = subprocess.run(["git", "-C", here, "rev-parse", "--short", "HEAD"],
-                             capture_output=True, text=True, timeout=10).stdout.strip()
-        dirty = subprocess.run(["git", "-C", here, "status", "--porcelain", "--", "."],
+        root = git("rev-parse", "--show-toplevel")
+        if not root:
+            return None
+        rev = git("rev-parse", "--short", "HEAD")
+        dirty = subprocess.run(["git", "-C", root, "status", "--porcelain",
+                                "--untracked-files=no"],
                                capture_output=True, text=True, timeout=10).stdout.strip()
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return None

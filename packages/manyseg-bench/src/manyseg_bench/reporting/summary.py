@@ -11,15 +11,19 @@ from pathlib import Path
 
 
 def load_runs(paths) -> list[dict]:
+    """Every JSON object in ``paths`` (files, or directories searched recursively): run
+    records of any kind. Unparsable files and non-object JSON are skipped."""
     runs = []
     for p in paths:
         p = Path(p)
         files = sorted(p.rglob("*.json")) if p.is_dir() else [p]
         for f in files:
             try:
-                runs.append(json.loads(f.read_text()))
+                r = json.loads(f.read_text())
             except (json.JSONDecodeError, UnicodeDecodeError):
                 continue
+            if isinstance(r, dict):  # run records are objects (e.g. a log.json list is not)
+                runs.append(r)
     return runs
 
 

@@ -248,12 +248,16 @@ class DensityBlockDecoder:
     scaled by ``2 pi sigma^2``) or ``value_scale`` (the loss's ``value_scale``; 1.0 for a plain
     :func:`density_map` target), as :func:`count_from_density`.
 
+    The field may have several channels; all are summed, as :func:`count_from_density` does.
     ``mask``: a field (1 channel); only pixels where it exceeds ``mask_threshold`` count, as
     ``count_from_density(density, mask=field > mask_threshold)``. Result: :class:`SceneCount`
-    (equal to the whole-scene count up to float rounding; the sum is in float64).
+    (equal to the whole-scene :func:`count_from_density` up to float rounding when the density
+    has no NaN; the sum is in float64).
 
-    NaN pixels count as 0, so a scene with nodata (NaN in ManyPred's stitched outputs) still has
-    a total. A model that returns NaN where there is data is not detected here."""
+    NaN policy (differs from :func:`count_from_density`, which propagates NaN): NaN density
+    pixels, and pixels whose mask is NaN, count as 0, so a scene with nodata (NaN in
+    ManyPred's stitched outputs) still has a total. A model that returns NaN where there is
+    data is not detected here."""
 
     field: str = "density"
     sigma: float | None = None
@@ -274,6 +278,8 @@ class DensityBlockDecoder:
     def __call__(self, fields, block, scene) -> tuple[tuple[int, int, int, int], float]:
         """The block's core and the sum of the density field over it."""
         core, win, (it, ib, il, ir) = _layout(block, scene, 0)
+        if self.field not in fields:  # as _field, before reading the channel count
+            raise KeyError(f"field {self.field!r} missing (have {sorted(fields)})")
         a = np.asarray(fields[self.field])
         a = a[None] if a.ndim == 2 else a
         d = _field(fields, self.field, a.shape[0], win)[:, it:ib, il:ir].astype(np.float64)

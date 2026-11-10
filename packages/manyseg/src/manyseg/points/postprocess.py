@@ -157,7 +157,11 @@ def count_from_density(density: Tensor, *, sigma=None, value_scale: float | None
 
     The sum runs over every pixel, so a small background bias adds up: 0.005 per pixel over
     a 792 x 792 tile is 3 phantom objects. Check counts on whole validation images (not
-    training crops), and prefer peak counting for a few large objects per image."""
+    training crops), and prefer peak counting for a few large objects per image.
+
+    NaN propagates: a NaN density pixel (even under a zero mask) makes that image's count NaN,
+    so a broken model output shows. :class:`DensityBlockDecoder`, made for stitched scenes
+    with nodata, counts NaN pixels as 0 instead."""
     value_scale = density_value_scale(sigma, value_scale)
     d = density.float()
     if mask is not None:

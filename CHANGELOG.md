@@ -17,12 +17,15 @@ First release. Python 3.11–3.14, PyTorch ≥ 2.10, timm ≥ 1.0.20.
   (`channel_adapter`) that start each band from a pretrained filter.
 * **Decoders:** U-Net (the default, matching SMP's), U-Net++, FPN, DeepLabV3+, UPerNet,
   SegFormer-MLP and a fastai-style Dynamic U-Net; reduced output resolution (`out_stride`) and
-  per-head `scale`.
+  per-head `scale`. With a dilated encoder (`output_stride=16`), every decoder and image head
+  reads the last level of each stride.
 * **Several inputs:** early, intermediate or late fusion with seven ops; inputs on the same grid
   or covering the same extent at another resolution; shared (Siamese) encoders, with `diff` /
   `concat_diff` fusion and per-input heads for change detection.
 * **Metadata:** vector inputs (cyclic, continuous, coordinates, categorical, with missing
-  values) injected by FiLM, a head bias or extra channels.
+  values) injected by FiLM, a head bias or extra channels. Fields are encoded in float32
+  whatever the model's dtype, so a bfloat16 or float16 model keeps category ids and
+  coordinates exact when given float32 metadata.
 * **Outputs:** any number of named heads (segmentation, regression with optional uncertainty,
   classification; per pixel or per image), per-head decoders, and image classification or
   regression without a decoder. Pixel heads take optional hidden layers, dilation, norm (the
@@ -50,7 +53,8 @@ First release. Python 3.11–3.14, PyTorch ≥ 2.10, timm ≥ 1.0.20.
 * Points and counting (`manyseg.points`): heatmap and density heads, targets from points or
   boxes (YOLO, `xyxy`, COCO), peak finding, density counting (`count_from_density(sigma=)` undoes
   `density_loss`'s 2πσ² target scale; a density target sums to the number of points inside the
-  tile), `density_loss` and threshold calibration.
+  tile, and a point near a shared edge counts in exactly one tile), `density_loss` and threshold
+  calibration. `instances_from_outputs` treats non-finite distances as 0.
 
 ### Vector outputs (`manyseg.vectors`, `manyseg[vectors]`). *Experimental*
 
@@ -77,15 +81,16 @@ Names and defaults may change before 1.0, and each decoder was tuned on one data
   `distance_weighted_bce`, `density_loss` and `multi_head_loss`. `soft_dice`, `dice_bce`,
   `masked_regression` and `multiclass_dice` drop masked (or `ignore_index`) pixels before any
   arithmetic, so NaN nodata there is safe; a float mask weights pixels. `dice_bce`'s options
-  (`pos_weight`, `mask`, weights) are keyword-only.
+  (`pos_weight`, `mask`, weights) are keyword-only. The target must have the prediction's
+  shape (a `(B, H, W)` target for `(B, 1, H, W)` logits is an error, not a broadcast).
 
 ### Saving, loading and deployment
 
 * `manyseg.save` / `manyseg.load`: one safetensors file with the weights and the stored
   configuration, normalisation (a ManyPred spec, its per-band values checked against every
   raster and time-series input), activations, class and band names, and the licence and
-  citation of the pretrained weights the model started from, which a loaded model keeps. No
-  pickled data.
+  citation of the pretrained weights the model started from, which a loaded model keeps (its
+  stem is rebuilt for the weights' bands without downloading them). No pickled data.
   Save format 2; see `manyseg.io` for the compatibility policy.
 * Hugging Face Hub: `manyseg.push_to_hub` with a generated model card (naming the int8 mode
   and the `manyseg[quant]` extra for a quantised model), and
@@ -97,7 +102,8 @@ Names and defaults may change before 1.0, and each decoder was tuned on one data
 * int8 quantisation (`manyseg.quantize`, `manyseg[quant]`, torchao ≥ 0.18): weight-only /
   dynamic (`quantize_weights`) and PT2E static (`quantize_pt2e`, on a copy of the model), both
   savable with `manyseg.save`, plus size and agreement reports. A loaded `.pt2` runs on any
-  `map_location` and can be saved again.
+  `map_location`, takes multi-input dicts in any key order and can be saved again;
+  `quantize_weights` keeps shared encoders' weights shared.
 * `manyseg.describe`, `manyseg.export` and `manyseg.quantize` are reachable after
   `import manyseg` (loaded on first use).
 
@@ -130,5 +136,11 @@ Names and defaults may change before 1.0, and each decoder was tuned on one data
   restating a default, and show every declared test split (e.g. Sen1Floods11's Bolivia).
 * Runs record the normalisation source, the settings each task applied (`task_settings`) and
   how each provider adapted a pretrained stem to more or fewer than 3 bands (`model_notes`).
+  `contended` means another process was on the run's GPU (its own utilisation no longer
+  counts); `code_version` is `-dirty` for a modified tracked file anywhere in the repository;
+  image-level runs record `arch: none` (the requested value as `requested_arch`). Older records
+  may say `contended: true` for uncontended runs and keep their requested arch.
+* LEVIR-CD ignores edge padding when `--size` doesn't divide 1024. `report` and
+  `experiments/analyse_runs.py` skip non-run JSON and non-training records.
 * The experiments in `experiments/` that the defaults and the README's evidence table rest on,
   negative results included.

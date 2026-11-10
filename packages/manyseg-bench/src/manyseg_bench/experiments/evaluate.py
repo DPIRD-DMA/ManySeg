@@ -6,10 +6,11 @@ variant scores the *same* weights on the same images, and each batch is also run
 fp32 reference on the variant's device, so ``agreement`` is the paired fraction of valid pixels
 whose argmax matches fp32.
 
-The record names the task's ``primary_metric`` and the evaluated ``splits``; a variant that
-failed holds ``{"device", "error"}`` instead of scores. ``size_bytes`` is the serialized
-``state_dict`` for the floating-point variants and the quantised program's size for int8
-(only the int8 variants need ``manyseg[quant]``).
+The record (``"kind": "evaluate"``) holds the dataset's ``DatasetInfo`` as ``dataset``, as a
+training record does, and names the task's ``primary_metric`` and the evaluated ``splits``; a
+variant that failed holds ``{"device", "error"}`` instead of scores. ``size_bytes`` is the
+serialized ``state_dict`` for the floating-point variants and the quantised program's size for
+int8 (only the int8 variants need ``manyseg[quant]``).
 """
 
 from __future__ import annotations
@@ -122,7 +123,7 @@ def evaluate_run(run: str | Path, variants=("fp32", "bf16", "fp16"), device: str
 
     out = {"run_id": f"{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}",
            "kind": "evaluate", "source_run": record["run_id"], "tag": record.get("tag", ""),
-           "spec": record["spec"], "dataset": info.name, "seed": record.get("seed"),
+           "spec": record["spec"], "dataset": info.to_dict(), "seed": record.get("seed"),
            "checkpoint": record["checkpoint"], "calib_batches": calib_batches,
            "threads": threads, "primary_metric": task.primary_metric,
            "splits": list(splits), "variants": {}}

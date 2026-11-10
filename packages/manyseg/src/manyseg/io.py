@@ -523,11 +523,9 @@ def _check_rebuildable(model: DenseModel, config: Mapping[str, Any]) -> None:
     buffers, so a model changed after create_model (modules added or replaced, even by ones
     without weights such as an activation) fails here, not at load time. Changes that leave
     the modules alone (a replaced ``forward``) can't be seen."""
-    from .models import create_model
-
     recipe = getattr(model, "quantization", None)
     with _keep_rng():
-        rebuilt = create_model(**_no_download(dict(config)))
+        rebuilt = _rebuild(config)
         if model.single_output is not None and rebuilt.single_output is None:
             rebuilt.select_heads([model.single_output])
         elif list(rebuilt.heads) != list(model.heads):
@@ -620,19 +618,32 @@ _DTYPES = {"float32": torch.float32, "float16": torch.float16, "bfloat16": torch
 
 
 def _no_download(config: dict) -> dict:
-    """The create_model arguments with every pretrained flag off and every weight source
-    removed: the weights come from the file."""
+    """The create_model arguments with every ``pretrained=True`` off and every weight source
+    removed: the weights come from the file. Weights tags stay, as they decide the
+    architecture (the tag's band count makes the stem); :func:`_rebuild` builds them without
+    downloading."""
     config = json.loads(json.dumps(config))
     for cfg in (config, *(config.get("inputs") or {}).values()):
         if not isinstance(cfg, dict):
             continue
-        if cfg is config or "pretrained" in cfg:
+        if cfg is config and "pretrained" not in cfg:
+            cfg["pretrained"] = False  # create_model's default is True
+        if "pretrained" in cfg and not isinstance(cfg["pretrained"], str):
             cfg["pretrained"] = False
         kwargs = cfg.get("backbone_kwargs")
         if isinstance(kwargs, dict):
             for key in _WEIGHT_SOURCES:
                 kwargs.pop(key, None)
     return config
+
+
+def _rebuild(config: Mapping[str, Any]) -> DenseModel:
+    """``create_model`` from saved arguments, as built, without downloading any weights."""
+    from .backbones.timm_backbone import weights_from_file
+    from .models import create_model
+
+    with weights_from_file():
+        return create_model(**_no_download(dict(config)))
 
 
 def _restore_weight_sources(model: DenseModel, saved: Mapping[str, Any]) -> None:
@@ -736,8 +747,6 @@ def load(path: str | Path, map_location: str | torch.device = "cpu", *,
     ``nn.Module``."""
     from safetensors.torch import load_file
 
-    from .models import create_model
-
     path = _local(path, token)
     meta = read_metadata(path)
     recipe = meta.get("quantization")
@@ -752,7 +761,7 @@ def load(path: str | Path, map_location: str | torch.device = "cpu", *,
                              f"Upgrade ManySeg.")
     try:
         with _keep_rng():
-            model = create_model(**_no_download(meta["create_model"]))
+            model = _rebuild(meta["create_model"])
     except (TypeError, ValueError) as e:
         raise _version_error(path, meta, e) from e
     if meta.get("single_output") is not None and model.single_output is None:

@@ -112,7 +112,9 @@ class FastaiUNetDecoder(nn.Module):
     FLOP-identical to fastai's, see the module docstring.
 
     Args:
-        in_specs: The input image's spec followed by the encoder features' specs.
+        in_specs: The input image's spec followed by the encoder features' specs. Of levels
+            sharing a stride (a dilated encoder) only the last is read, as in fastai, whose
+            skips are the last layer before each size change.
         last_cross: Add fastai's last cross stage (the input image concatenated, then a
             residual block) at input resolution; default: when ``out_stride`` is 1. The same
             stage is ``input_cross`` of :class:`~manyseg.decoders.UNetDecoder` (off by default
@@ -129,7 +131,11 @@ class FastaiUNetDecoder(nn.Module):
         check_input_spec(in_specs)
         self.in_channels = in_specs[0].channels
         enc = list(in_specs[1:])
-        order = sorted(range(len(enc)), key=lambda i: enc[i].stride)
+        # one level per stride, the last (deepest) one when several share it (a dilated
+        # encoder, e.g. output_stride=16): fastai's skips are the last layer before each size
+        # change, and UNet / UNet++ read the same levels
+        last = {s.stride: i for i, s in enumerate(enc)}
+        order = sorted(last.values(), key=lambda i: enc[i].stride)
         check_power_of_two_stride("FastaiUNetDecoder", out_stride, enc[order[-1]].stride)
         if last_cross is None:
             last_cross = out_stride == 1

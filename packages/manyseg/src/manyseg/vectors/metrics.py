@@ -317,6 +317,11 @@ def polygon_metrics(gt: list, pred: list, gsd: float = 1.0, *, iou_threshold: fl
     * ``miou``, ``n_ratio`` (Σ N_pred / Σ N_gt over matched pairs; the sums are returned as
       ``sum_n_pred`` / ``sum_n_gt`` for pooling over tiles) and ``polis`` (metres).
 
+    With no matched pair: ``ciou`` and ``miou`` are 0.0 (no overlap is credited), ``n_ratio``
+    and ``polis`` are NaN (undefined without a pair; skip them when averaging) and the sums 0.
+    ``det_f1`` is 1.0 when both lists are empty (nothing to find, nothing found), 0.0 when
+    only one is, so empty/empty gives ``det_f1`` 1.0 with ``ciou`` 0.0.
+
     ``gt`` and ``pred`` are lists of shapely ``Polygon`` (one per instance); anything else,
     a ``MultiPolygon`` included, raises ``ValueError`` (split multipart geometries first).
     """

@@ -272,7 +272,7 @@ def test_coordinate_conversions():
     xy = points_to_xy(yx)
     assert xy.tolist() == [[3.5, 2.5], [0.5, 0.5]]  # centre of pixel (row 2, col 3)
     back = points_from_xy(xy)
-    assert back.dtype == torch.float32 and back.tolist() == [[2, 3], [0, 0]]
+    assert back.dtype == torch.float64 and back.tolist() == [[2, 3], [0, 0]]
     hm = gaussian_heatmap([points_from_xy([[3.5, 2.5]])], (5, 6))
     assert hm.shape == (1, 1, 5, 6) and hm[0, 0, 2, 3] == 1.0
     assert points_to_xy(np.zeros((0, 2))).shape == (0, 2)
