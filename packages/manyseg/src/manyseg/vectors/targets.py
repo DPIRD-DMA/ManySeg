@@ -9,7 +9,8 @@ and shape), then:
 * roads: :func:`road_graph`, then :func:`manyseg.vectors.road_targets`.
 
 Every function returns float32 / int32 / bool numpy arrays per tile, keyed by the names the
-presets and bench tasks use (``manyseg.vectors.presets`` and the tasks in ``manyseg-bench``).
+presets and bench tasks use (``manyseg.vectors.presets`` and the tasks in ``manyseg-bench``,
+the benchmark package in the GitHub repository, not on PyPI).
 Rasterising follows rasterio (pixel centres inside; where polygons overlap, the later one wins),
 as the experiments' encoders did.
 """

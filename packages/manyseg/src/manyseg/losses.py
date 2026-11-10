@@ -10,8 +10,8 @@
 * Several heads: :func:`multi_head_loss` sums a loss per head of a model's output dict.
 
 The training code that chose these, with the weights between heads used in the experiments,
-is in the ``manyseg-bench`` package, which re-exports this module. ``distance_map`` needs SciPy
-(``manyseg[instances]``).
+is in ``manyseg-bench`` (the benchmark package in the GitHub repository, not on PyPI), which
+re-exports this module. ``distance_map`` needs SciPy (``manyseg[instances]``).
 """
 
 from __future__ import annotations

@@ -209,10 +209,11 @@ Ships in 0.1.0, marked experimental (names and defaults may change before 1.0):
 * ✅ GPU fuzzer (CUDA vs CPU, bf16, `torch.compile`): found a PyTorch Inductor bug in dynamic
   nearest upsampling, worked around (`docs/upstream/`).
 * ✅ README status line and classifiers: alpha.
-* ✅ PyPI packaging for `manyseg` and `manyseg-bench` independently: metadata, licence and
-  `py.typed` in each wheel, PyPI READMEs, `twine check` clean, and the `manyseg` wheel installs and
-  runs alone (CI `package` job on PRs and nightly). Both names are free on PyPI. **Not
-  published**; the release is 0.1.0. ✅ Tested version range: the floor is **torch 2.10 + timm 1.0.20**. Bisected locally, 2.9 + 1.0.20 is the lowest that passes the export and compile tests, but torch 2.5–2.9 has an MPS view/stride bug (timm EdgeNeXt; see OmniCloudMask issue #45), so the floor was raised to 2.10 before the first release. On torch 2.4–2.8 most dynamic export and compile tests fail, because `torch.export` lacks deferred runtime asserts before 2.9. On timm 1.0.12, CAFormer dynamic export fails. Swin dynamic fullgraph compile fails on 2.9 and passes on 2.10. A nightly CI leg on the floor runs the unit tier plus the export and compile tests.
+* ✅ Packaging: `manyseg` and `manyseg-bench` build as independent wheels (metadata, licence and
+  `py.typed` in each), and the `manyseg` wheel installs and runs alone (CI `package` job on PRs
+  and nightly). `manyseg` is ready for PyPI (PyPI README, `twine check` clean); it is not yet
+  published, and the release is 0.1.0. `manyseg-bench` stays in the repository: its results depend on
+  `experiments/` and record the git commit that produced them, which a wheel install lacks. ✅ Tested version range: the floor is **torch 2.10 + timm 1.0.20**. Bisected locally, 2.9 + 1.0.20 is the lowest that passes the export and compile tests, but torch 2.5–2.9 has an MPS view/stride bug (timm EdgeNeXt; see OmniCloudMask issue #45), so the floor was raised to 2.10 before the first release. On torch 2.4–2.8 most dynamic export and compile tests fail, because `torch.export` lacks deferred runtime asserts before 2.9. On timm 1.0.12, CAFormer dynamic export fails. Swin dynamic fullgraph compile fails on 2.9 and passes on 2.10. A nightly CI leg on the floor runs the unit tier plus the export and compile tests.
 * ✅ Unsupported backbone/size combinations: fixed-size architectures are detected at construction (meta-device probe), smaller inputs are padded, and larger ones get a clear `ValueError` naming the `img_size` fix, instead of timm shape errors.
 * ✅ Hugging Face Hub (`manyseg.hub`): `push_to_hub` uploads a `manyseg.save` file with a
   generated model card; `load` / `read_metadata` take `"hf-hub:org/name[@revision]"`.

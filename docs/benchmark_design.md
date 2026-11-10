@@ -180,7 +180,8 @@ Implemented (`manyseg-bench prepare <name>`; variants such as `sen1floods11_s2` 
 | BigEarthNet v2 (`bigearthnet`) | 19-class multi-label, S2 + S1 | Multi-label image heads, class fractions, metadata. |
 | LEVIR-CD, SECOND, OSCD (`levircd`, `second`, `oscd`) | Binary and semantic change | Siamese encoders and difference fusion. |
 
-Installing `manyseg-bench[geo]` adds the readers (tifffile, pyarrow, ...) that the remote-sensing
+Installing the `geo` extra (`pip install -e "packages/manyseg-bench[geo]"` from a clone; the
+benchmark is not on PyPI) adds the readers (tifffile, pyarrow, ...) that the remote-sensing
 datasets need. Considered but not implemented: CamVid, WHU Building, MADOS, LoveDA and ISPRS
 Vaihingen.
 

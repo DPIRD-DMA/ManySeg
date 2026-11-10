@@ -1424,7 +1424,8 @@ Compatibility with a given timm model is discovered by probing (see
 
 ## Non-goals
 
-* Training loops. These live in `manyseg-bench` or in user code; `manyseg.losses` provides the
+* Training loops. These live in `manyseg-bench` (in this repository; it is not published on
+  PyPI) or in user code; `manyseg.losses` provides the
   losses.
 * Data loading and general augmentation. `manyseg.vectors` has only what vector targets need:
   dihedral transforms and coordinate and CRS conversion for labels and outputs.

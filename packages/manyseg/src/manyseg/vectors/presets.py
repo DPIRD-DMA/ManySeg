@@ -6,7 +6,8 @@ the loss is not swamped by negatives at initialisation (initial loss about 200 a
 experiments set the bias to -2.19, ``p = 0.1007``). Head
 names are those the vector decoders read (``polygons_from_corners``, ``graph_from_road_heads``).
 Losses are in :mod:`manyseg.vectors.losses` and metrics in :mod:`manyseg.vectors.metrics`;
-``manyseg-bench`` has training tasks that use them (``CornerLineTask``, ``RoadGraphTask``).
+``manyseg-bench`` (the benchmark package in the GitHub repository, not on PyPI) has training
+tasks that use them (``CornerLineTask``, ``RoadGraphTask``).
 """
 
 from __future__ import annotations
