@@ -260,6 +260,8 @@ def instances_from_outputs(
     fg = _foreground(extent, logits, extent_threshold)
     bnd = boundary[:, 0].sigmoid() if logits else boundary[:, 0]
     dist = distance[:, 0].float()
+    if fg.numel() == 0:  # empty batch (or tile): nothing to label
+        return torch.zeros(fg.shape, dtype=torch.long, device=fg.device)
     seeds = fg & (bnd < boundary_threshold) & (dist > seed_threshold)
     if min_seed > 1:
         seeds = _drop_small_seeds(seeds, min_seed)
@@ -273,7 +275,11 @@ def instances_from_outputs(
         except ImportError:
             backend = "torch"
     if backend == "skimage":
-        from skimage.segmentation import watershed
+        try:
+            from skimage.segmentation import watershed
+        except ImportError as e:
+            raise ImportError("backend='skimage' needs the 'instances' extra: "
+                              "pip install 'manyseg[instances]'") from e
 
         out = torch.stack([
             torch.from_numpy(watershed(_marker_order(-dist[i].cpu().numpy(), mk), mk,

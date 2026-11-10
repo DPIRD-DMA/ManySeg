@@ -113,6 +113,8 @@ def downsample_mean(x: Tensor, scale, valid: Tensor | None = None) -> Tensor:
     if f == 1 and valid is None:
         return x
     w8 = torch.ones_like(x) if valid is None else valid.to(x.dtype).expand_as(x)
+    if valid is not None:  # invalid pixels may hold NaN (nodata): drop them, don't multiply
+        x = torch.where(w8 != 0, x, torch.zeros_like(x))
     s = _blocks(x * w8, f).sum(-1)
     n = _blocks(w8, f).sum(-1)
     return torch.where(n > 0, s / n.clamp(min=1), torch.zeros_like(s))

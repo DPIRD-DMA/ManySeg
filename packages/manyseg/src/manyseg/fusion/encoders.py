@@ -93,6 +93,9 @@ class MultiEncoder(nn.Module):
         alignment: ``{name: "same_grid" | "same_extent"}`` (default same_grid).
         op: fusion op name (intermediate mode).
         strides: strides to fuse (default: every primary stride present in another input).
+            Intermediate mode only: late fusion fuses decoder outputs, once.
+        op, op_kwargs: intermediate mode only (late fusion's op is the decoder's, see
+            :class:`~manyseg.fusion.LateFusionDecoder`).
     """
 
     def __init__(self, encoders: Mapping[str, nn.Module], *, mode: str = "intermediate",
@@ -123,6 +126,10 @@ class MultiEncoder(nn.Module):
         pspecs = encoders[self.primary].feature_specs
 
         if mode == "late":
+            if strides is not None:
+                raise ValueError("late fusion fuses the decoder outputs once, at the decoder's "
+                                 "output stride, so 'strides' does not apply; use intermediate "
+                                 "fusion to choose the encoder strides to fuse")
             self.groups: list[tuple[int, int]] = []
             specs: list[FeatureSpec] = []
             for n in self.names:

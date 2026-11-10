@@ -279,8 +279,9 @@ out = model({"optical": o, "sar": s})
   level there to fuse with; limit that input with `out_indices`). An input that only shares
   a read input's encoder is allowed. Same-grid inputs are all padded to a common multiple
   of their strides, so their features line up level by level.
-* **Late fusion**: `fusion={"type": "late", "op": ...}`. Each input has its own backbone and
-  decoder (same type and options). The decoder outputs are fused before the heads. A
+* **Late fusion**: `fusion={"type": "late", "op": ..., "op_kwargs": ...}`. Each input has its
+  own backbone and decoder (same type and options). The decoder outputs are fused before the
+  heads, once, at the decoder's output stride, so `strides` is an error here. A
   `same_extent` input's decoder output is resampled by its valid region onto the primary's
   valid region, as in intermediate fusion. Image-scope heads read the primary input's deepest
   encoder level.
@@ -526,7 +527,9 @@ line up exactly. ManySeg handles this explicitly:
   their positions, so pixel `(i, j)` of the output corresponds to pixel `(i, j)` of the input.
   The pad value is 0 (applied after the user's normalisation, so 0 is the per-channel mean).
   Models built with several raster inputs always pad each input inside the multi-input
-  encoder; there `pad_to_stride=False` only switches the outputs from cropping to resizing.
+  encoder and always crop the outputs, so there `pad_to_stride=False` has no effect (resizing
+  the padded output would stretch the padding into the prediction), and `tiling_spec()`
+  reports the padding multiple either way.
   (One raster plus vector inputs builds the ordinary single-input model, where
   `pad_to_stride=False` turns padding off.)
 * Decoders resize the upsampled feature to each skip's exact size rather than assuming
@@ -619,7 +622,8 @@ feature of stride `d`:
 * `d < f`: block-average by `f / d`, then the conv on the coarse grid.
 
 The model crops the head output to the scaled size of the *unpadded* primary input, so
-`pad_to_stride` keeps working (with `pad_to_stride=False` it resizes to that size instead).
+`pad_to_stride` keeps working (with `pad_to_stride=False` on a single-input model it
+resizes to that size instead).
 Multi-input models use the primary input's grid. Sizes are computed by floor division and
 crops are negative padding, so `torch.compile(dynamic=True)`, `torch.export` and ONNX keep
 dynamic H/W (tested).

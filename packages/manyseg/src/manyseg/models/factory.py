@@ -169,7 +169,7 @@ def _build_inputs(inputs, fusion, *, backbone, pretrained, channel_adapter, out_
         raise ValueError(f"unknown fusion options {sorted(fusion)}")
     enc = MultiEncoder(encoders, mode=ftype, op=op, strides=strides, alignment=alignment,
                        adapters=adapters, op_kwargs=op_kwargs)
-    return enc, ftype, {"op": op}
+    return enc, ftype, {"op": op, "op_kwargs": op_kwargs}
 
 
 def create_model(
@@ -206,7 +206,7 @@ def create_model(
             ``{"kind": "vector"}`` with ``fields`` or ``num_features``, ``dim``, ``dropout``,
             ``conditioning`` (``"film"`` / ``"head"`` / ``"channels"``).
         fusion: ``{"type": "early" | "intermediate" | "late", "op": ..., "op_kwargs": ...,
-            "strides": [...]}`` for several raster inputs.
+            "strides": [...]}`` for several raster inputs (``strides``: intermediate only).
         pretrained: ``True`` (timm weights), ``False``, or a ``manyseg.weights`` tag such as
             ``"ssl4eo_s2_dino"``.
         in_channels: Input bands of a single-input model (default 3; with ``inputs=``, set it
@@ -306,7 +306,8 @@ def create_model(
             from ..fusion import LateFusionDecoder
 
             return LateFusionDecoder(specs, bb.groups, lambda sp: dec_cls(sp, **dkw),
-                                     op=fopts["op"], alignment=[bb.alignment[n] for n in bb.names])
+                                     op=fopts["op"], alignment=[bb.alignment[n] for n in bb.names],
+                                     op_kwargs=fopts["op_kwargs"])
         if wants:
             specs = (FeatureSpec(bb.in_channels, 1, "input"), *specs)
         return dec_cls(specs, **dkw)

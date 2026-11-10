@@ -331,3 +331,55 @@ def test_share_norm_true_keeps_one_module():
 def test_share_norm_requires_shared_backbone():
     with pytest.raises(ValueError, match="share_norm"):
         make(inputs={"a": {"in_channels": 3}, "b": {"in_channels": 3, "share_norm": True}})
+
+
+@pytest.mark.parametrize("fusion", [{"type": "intermediate"}, {"type": "early"},
+                                    {"type": "late"}])
+def test_pad_to_stride_false_crops_like_true(fusion):
+    """The multi-input encoder pads every input itself, so pad_to_stride=False must crop the
+    padded output like pad_to_stride=True, not stretch the padding into the prediction."""
+    inputs = {"a": {"in_channels": 3, "backbone": "resnet18"},
+              "b": {"in_channels": 2, "backbone": "resnet18"}}
+    padded = make(inputs, fusion, num_classes=1, pad_to_stride=True).eval()
+    other = make(inputs, fusion, num_classes=1, pad_to_stride=False).eval()
+    other.load_state_dict(padded.state_dict())
+    x = {"a": torch.randn(1, 3, 65, 47), "b": torch.randn(1, 2, 65, 47)}
+    with torch.no_grad():
+        assert torch.allclose(padded(x), other(x), atol=1e-5)
+    # it still pads, so the spec says so (ManyPred rounds patches down to this)
+    assert other.tiling_spec()["pad_multiple"] == padded.tiling_spec()["pad_multiple"] == 32
+
+
+def test_pad_to_stride_false_crops_with_a_same_extent_input():
+    inputs = {"a": {"in_channels": 3, "backbone": "resnet18"},
+              "b": {"in_channels": 2, "backbone": "resnet18", "alignment": "same_extent"}}
+    padded = make(inputs, num_classes=1, pad_to_stride=True).eval()
+    other = make(inputs, num_classes=1, pad_to_stride=False).eval()
+    other.load_state_dict(padded.state_dict())
+    x = {"a": torch.randn(1, 3, 65, 47), "b": torch.randn(1, 2, 33, 24)}
+    with torch.no_grad():
+        assert torch.allclose(padded(x), other(x), atol=1e-5)
+
+
+@pytest.mark.parametrize("op, kwargs, attr, expected", [
+    ("cross_attention", {"heads": 2}, "heads", 2),
+    ("attention", {"reduction": 1}, None, None),
+])
+def test_late_fusion_passes_op_kwargs(op, kwargs, attr, expected):
+    with_kw = make(fusion={"type": "late", "op": op, "op_kwargs": kwargs}).decoder.fuse
+    default = make(fusion={"type": "late", "op": op}).decoder.fuse
+    if attr is not None:
+        assert getattr(with_kw, attr) == expected
+    else:  # reduction 1: the squeeze-excite hidden width is the full channel count
+        assert with_kw.se[0].out_channels == with_kw.se[0].in_channels
+        assert default.se[0].out_channels < default.se[0].in_channels
+
+
+def test_late_fusion_rejects_unknown_op_kwargs():
+    with pytest.raises(TypeError):
+        make(fusion={"type": "late", "op": "attention", "op_kwargs": {"bogus": 1}})
+
+
+def test_late_fusion_rejects_strides():
+    with pytest.raises(ValueError, match="late fusion.*strides"):
+        make(fusion={"type": "late", "strides": [32]})

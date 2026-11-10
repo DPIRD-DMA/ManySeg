@@ -24,7 +24,6 @@ Definitions, for an integer instance-ID mask ``m`` (0 = background):
 from __future__ import annotations
 
 import torch
-import torch.nn.functional as F
 from torch import Tensor
 
 _MAX_ELEMS = 2**26  # cap on the (rows x rows x cols) intermediate per chunk
@@ -76,19 +75,25 @@ def edt(features: Tensor) -> Tensor:
 
 
 def edge_pixels(m: Tensor) -> Tensor:
-    """Instance pixels with a 4-neighbour of a different id (replicate padding at tile edges)."""
-    p = F.pad(m[:, None].float(), (1, 1, 1, 1), mode="replicate")[:, 0].long()
-    c = p[:, 1:-1, 1:-1]
-    diff = ((p[:, :-2, 1:-1] != c) | (p[:, 2:, 1:-1] != c) | (p[:, 1:-1, :-2] != c)
-            | (p[:, 1:-1, 2:] != c))
-    return diff & (c > 0)
+    """Instance pixels with a 4-neighbour of a different id (replicate padding at tile edges).
+
+    Compares the integer ids directly (a float round trip would merge ids above 2**24)."""
+    diff = torch.zeros(m.shape, dtype=torch.bool, device=m.device)
+    v = m[:, 1:, :] != m[:, :-1, :]  # replicate padding: an outside neighbour never differs
+    diff[:, 1:] |= v
+    diff[:, :-1] |= v
+    h = m[:, :, 1:] != m[:, :, :-1]
+    diff[:, :, 1:] |= h
+    diff[:, :, :-1] |= h
+    return diff & (m > 0)
 
 
 def _per_instance_max(values: Tensor, m: Tensor) -> Tensor:
     """For each pixel, the max of ``values`` over its instance (batched, via scatter_reduce)."""
     b = m.shape[0]
-    n = int(m.max()) + 1 if m.numel() else 1
-    keys = (m + torch.arange(b, device=m.device)[:, None, None] * n).reshape(-1)
+    _, inv = torch.unique(m, return_inverse=True)  # compact ids: memory ~ instances present
+    n = int(inv.max()) + 1 if m.numel() else 1
+    keys = (inv.reshape(m.shape) + torch.arange(b, device=m.device)[:, None, None] * n).reshape(-1)
     mx = torch.zeros(b * n, device=values.device, dtype=values.dtype)
     mx = mx.scatter_reduce(0, keys, values.reshape(-1), reduce="amax", include_self=True)
     return mx[keys].reshape(m.shape)

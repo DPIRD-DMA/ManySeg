@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 
 from torch import Tensor, nn
 
@@ -19,7 +19,8 @@ class LateFusionDecoder(nn.Module):
 
     def __init__(self, in_specs: Sequence[FeatureSpec], groups: Sequence[tuple[int, int]],
                  make_decoder: Callable[[Sequence[FeatureSpec]], nn.Module],
-                 op: str = "concat", alignment: Sequence[str] | None = None) -> None:
+                 op: str = "concat", alignment: Sequence[str] | None = None,
+                 op_kwargs: Mapping | None = None) -> None:
         super().__init__()
         self.groups = [tuple(g) for g in groups]
         # Per input (primary first); same_extent outputs are resampled by valid region.
@@ -29,7 +30,8 @@ class LateFusionDecoder(nn.Module):
             raise ValueError("late fusion does not support decoders that need the input image")
         primary = self.decoders[0].out_spec
         chans = [d.out_spec.channels for d in self.decoders]
-        self.fuse = FUSION_OPS.get_or_raise(op)(chans, primary.channels)
+        self.fuse = FUSION_OPS.get_or_raise(op)(chans, primary.channels,
+                                                **dict(op_kwargs or {}))
         self.out_spec = FeatureSpec(primary.channels, primary.stride, "late_fusion")
 
     wants_valid = True  # DenseModel passes each input's unpadded (H, W)
