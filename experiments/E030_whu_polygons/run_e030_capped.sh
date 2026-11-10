@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Launch run_e030.sh as a transient user service capped at 12 GB (amendment 2): detached from
-# any terminal or Claude session, and an out-of-memory kills only this job.
+# any terminal session, and an out-of-memory kills only this job.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 mkdir -p "$here/runs"

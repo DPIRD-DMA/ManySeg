@@ -9,8 +9,7 @@ E058 found that for an image-level head, FiLM after every encoder stage beat Man
 which there reaches only the pooled feature. For pixel heads, ManySeg's FiLM already modulates
 every encoder level entering the decoder plus the decoder output, and it won in E055. Before
 adding an `on: ["encoder"]` option to ManySeg, this checks whether FiLM between stages also helps
-a dense task. Explainer with diagrams: <(private link removed)>
-(private).
+a dense task.
 
 ## Protocol
 * Data, model, recipe and metrics exactly as E055 (`train.py` is E055's plus two arms): NYUv2,

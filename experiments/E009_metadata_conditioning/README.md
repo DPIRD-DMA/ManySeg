@@ -2,7 +2,7 @@
 
 Status: **complete** (2026-10-14; 66 runs on Pawsey Setonix, AMD MI250X, code `537848a`; fold-specific normalisation verified in every run). The roadmap reserved E006
 (decoder Pareto study), E007 and E008 and E010 is taken, so this is E009. Queue:
-`experiments/queue3_metadata.sh`.
+`experiments/queues/queue3_metadata.sh`.
 
 ## Questions
 1. Does conditioning on acquisition metadata (FiLM, the default) improve flood segmentation on

@@ -4,7 +4,7 @@
 # which starts when queue4 exits), then for no other bench training, then runs E009 from a
 # frozen worktree of the then-HEAD.
 # Launch (not done automatically):
-#   nohup bash experiments/queue3_metadata.sh > experiments/queue3.log 2>&1; \
+#   nohup bash experiments/queues/queue3_metadata.sh > experiments/queue3.log 2>&1; \
 #     echo $? > experiments/queue3.log.exit
 set -u
 MAIN="${MANYSEG_REPO:?set to the main checkout}"

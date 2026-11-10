@@ -100,7 +100,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
-      - run: uvx ruff check packages examples notebooks scripts/sync_readme.py
+      - run: uvx ruff check packages examples notebooks scripts experiments/analyse_runs.py
       - run: python3 scripts/sync_readme.py --check  # PyPI README matches the repository one
 
   package:

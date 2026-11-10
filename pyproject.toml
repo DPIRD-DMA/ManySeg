@@ -33,3 +33,8 @@ target-version = "py311"
 select = ["E", "F", "I", "UP", "B", "SIM"]
 # zip(strict=True) in forward() adds Dynamo work; lengths are validated at construction.
 ignore = ["B905"]
+
+[tool.ruff.lint.per-file-ignores]
+# SVG templates: long attribute strings read better on one line
+"scripts/make_architecture.py" = ["E501"]
+"scripts/make_logo.py" = ["E501"]

@@ -1,6 +1,6 @@
 # timm 1.0.30 encoder audit (CPU, pretrained=False)
 
-Raw outputs: probe.jsonl (probe.py), probe2.py, probe3.py in this dir.
+Scripts: probe.py, probe2.py, probe3.py in this directory (probe.py's raw probe.jsonl was not kept).
 
 ## features_only per family (default feature_cls)
 

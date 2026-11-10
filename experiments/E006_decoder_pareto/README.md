@@ -4,7 +4,7 @@ Status: **complete** (2026-10-14; stage 1: 36 runs, stage 2: 32 runs, profiling:
 Pawsey Setonix as Slurm arrays (`scripts/setonix/`). Stage 1 is emitted with
 `EMIT_TASKS=<file> STAGE=1 bash run.sh`. Stage 2 is emitted with `EMIT_TASKS=<file> STAGE=2
 FRONTIER=<frontier.txt> bash run.sh` after `analyse.py --write-frontier` has applied the
-selection rule below to the stage-1 results. `experiments/queue6_pareto.sh` is a local
+selection rule below to the stage-1 results. `experiments/queues/queue6_pareto.sh` is a local
 alternative and will not be launched.
 
 Amendment (2026-10-14, before any run): the transformer encoder is `pvt_v2_b2` instead of
@@ -71,7 +71,7 @@ mIoU is dominated by object interiors. The hypothesis is checked separately in e
 
 ## Stopping rule
 * A smoke run of each new ingredient fails (reduced `fastai_unet`, PVT weights,
-  Sen1Floods11; see the preflight in `queue6_pareto.sh`): stop and fix. No partial grid is
+  Sen1Floods11; see the preflight in `queues/queue6_pareto.sh`): stop and fix. No partial grid is
   started.
 * A run that fails is retried once. If it fails again it is reported as failed and its
   config is excluded from the frontier for that cell (no substitution).

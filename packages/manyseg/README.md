@@ -10,7 +10,8 @@
 Segmentation and other dense-prediction models for PyTorch, built from
 <a href="https://github.com/huggingface/pytorch-image-models">timm</a> encoders.<br>
 Any number of bands, several inputs at different resolutions, metadata, and many outputs in one model.<br>
-<a href="https://github.com/DPIRD-DMA/ManySeg/blob/main/docs/builder/">Model builder</a>: design a model in your browser and copy the code.
+<a href="https://manyseg.readthedocs.io/en/latest/docs/builder/">Model builder</a>: design a model in your browser and copy the code.<br>
+<a href="https://manyseg.readthedocs.io">Documentation</a> · <a href="https://pypi.org/project/manyseg/">PyPI</a>
 </p>
 
 <p align="center">
@@ -62,12 +63,12 @@ tensor of raw logits; with `heads=` it is a dict of raw logits keyed by head nam
 
 ## Model builder
 
-Not sure how to combine inputs, fusion and heads? The [model builder](https://github.com/DPIRD-DMA/ManySeg/blob/main/docs/builder/) draws the
+Not sure how to combine inputs, fusion and heads? The [model builder](https://manyseg.readthedocs.io/en/latest/docs/builder/) draws the
 model as you pick options and writes the `create_model` call, refusing combinations ManySeg would
-reject. In a clone of this repository, open `docs/builder/index.html` in a browser; it needs no
-server.
+reject. It runs in the browser; offline, open `docs/builder/index.html` from a clone of this
+repository.
 
-<a href="https://github.com/DPIRD-DMA/ManySeg/blob/main/docs/builder/"><picture>
+<a href="https://manyseg.readthedocs.io/en/latest/docs/builder/"><picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/DPIRD-DMA/ManySeg/main/docs/assets/builder-dark.png">
   <img alt="The model builder's live diagram of a two-input model: encoders, gated fusion, a U-Net decoder and two heads, with parameter counts" src="https://raw.githubusercontent.com/DPIRD-DMA/ManySeg/main/docs/assets/builder-light.png" width="720">
 </picture></a>
@@ -430,9 +431,11 @@ their numbers within an experiment.
 
 ## Documentation
 
-* [`docs/builder/`](https://github.com/DPIRD-DMA/ManySeg/blob/main/docs/builder/): the model builder, a page where you pick inputs, encoders,
-  fusion, decoder and heads and get a live diagram plus the `create_model` code. In a clone of
-  this repository, open `docs/builder/index.html` in a browser; it needs no server.
+The documentation site, <https://manyseg.readthedocs.io>, has everything below plus an API reference generated from the
+docstrings.
+
+* [Model builder](https://manyseg.readthedocs.io/en/latest/docs/builder/): pick inputs, encoders, fusion, decoder and heads and get a live diagram
+  plus the `create_model` code.
 * [`notebooks/`](https://github.com/DPIRD-DMA/ManySeg/blob/main/notebooks/): walkthroughs with real data and figures: flood mapping, radar plus
   optical with several outputs, and one notebook for each vector output.
 * [`examples/`](https://github.com/DPIRD-DMA/ManySeg/blob/main/examples/): runnable scripts for most of the tasks above.
