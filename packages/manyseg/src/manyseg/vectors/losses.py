@@ -17,7 +17,7 @@ from ..losses import dice_bce, heatmap_focal, heatmap_peaks, masked_regression
 
 def corner_line_losses(out: Mapping[str, Tensor], targets: Mapping[str, Tensor], *,
                        boundary_pos_weight: float | None = None) -> dict[str, Tensor]:
-    """Terms for :func:`corner_line_heads` (footprints, roof faces; E036, E038, E047): ``instances``
+    """Terms for :func:`corner_line_heads` (footprints, roof faces): ``instances``
     (the sum of :func:`manyseg.instances.instance_losses`), ``corner`` (CenterNet focal loss,
     positives at the heatmap's 3 x 3 peaks above 0.5) and ``direction`` (L1 on the outlines).
 
@@ -34,14 +34,13 @@ def corner_line_losses(out: Mapping[str, Tensor], targets: Mapping[str, Tensor],
 
 def road_losses(out: Mapping[str, Tensor], targets: Mapping[str, Tensor], *,
                 min_keypoints: int = 16) -> dict[str, Tensor]:
-    """Terms for :func:`road_heads` (E039, E044): ``mask`` and ``line`` (Dice + BCE), ``keypoints``
+    """Terms for :func:`road_heads`: ``mask`` and ``line`` (Dice + BCE), ``keypoints``
     (one focal loss over the three heatmaps) and ``direction`` (L1 of mode 1 on the road surface,
     plus L1 of mode 2 where its target is set).
 
     ``targets``: as :func:`road_targets` returns them, stacked: ``mask``, ``line``, ``keypoints``,
     ``direction``. ``min_keypoints`` floors the focal loss's normalisation: with a floor of 1, a
-    batch without crossings let the summed negatives swamp the decoder and the mask collapsed
-    (E044).
+    batch without crossings let the summed negatives swamp the decoder and the mask collapsed.
     """
     mask, keypoints = as_channel(targets["mask"]), targets["keypoints"].float()
     direction, pred = targets["direction"].float(), out["direction"]

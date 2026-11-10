@@ -68,8 +68,9 @@ Names and defaults may change before 1.0, and each decoder was tuned on one data
 ### Losses (`manyseg.losses`)
 
 * `soft_dice`, `dice_bce`, `multiclass_dice`, `masked_regression`, `heatmap_focal`,
-  `distance_weighted_bce`, `density_loss` and `multi_head_loss`. Masked positions are excluded
-  before any arithmetic, so NaN nodata under a mask is safe.
+  `distance_weighted_bce`, `density_loss` and `multi_head_loss`. `soft_dice`, `dice_bce`,
+  `masked_regression` and `multiclass_dice` drop masked (or `ignore_index`) pixels before any
+  arithmetic, so NaN nodata there is safe; a float mask weights pixels.
 
 ### Saving, loading and deployment
 

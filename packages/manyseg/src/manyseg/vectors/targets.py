@@ -3,10 +3,10 @@
 Start from vector data in a CRS with :func:`manyseg.vectors.to_pixels` (the tile's geotransform
 and shape), then:
 
-* footprints: :func:`footprint_targets` (corner-line preset, ``CornerLineTask``; E036, E038);
-* roof faces: :func:`roof_face_targets` (the same preset, touching faces kept apart; E047);
-* fields: :func:`field_targets` (instance heads only, decoded as outlines; E046);
-* roads: :func:`road_graph`, then :func:`manyseg.vectors.road_targets` (E044).
+* footprints: :func:`footprint_targets` (corner-line preset, ``CornerLineTask``);
+* roof faces: :func:`roof_face_targets` (the same preset, touching faces kept apart);
+* fields: :func:`field_targets` (instance heads only, decoded as outlines);
+* roads: :func:`road_graph`, then :func:`manyseg.vectors.road_targets`.
 
 Every function returns float32 / int32 / bool numpy arrays per tile, keyed by the names the
 presets and bench tasks use (``manyseg.vectors.presets`` and the tasks in ``manyseg-bench``).
@@ -123,13 +123,13 @@ def _visible(polygons, keep, min_overlap: float = 0.5) -> list:
 
 
 def roof_face_targets(faces, shape: tuple[int, int], **kwargs) -> dict[str, np.ndarray]:
-    """Targets of the corner-line preset for roof faces (E047): :func:`footprint_targets` with
+    """Targets of the corner-line preset for roof faces: :func:`footprint_targets` with
     each planar face as an instance. Faces sharing an edge stay separate instances (the
     ``boundary`` target runs along the shared edge on both sides, so the instance decoder
     splits them), and both faces' walls carry the edge direction. Give faces of one building
     without overlaps (where they do overlap, the later face wins).
 
-    Roof heights are not a target: the trained roof model (E047, E049) takes a normalised DSM
+    Roof heights are not a target: the trained roof model takes a normalised DSM
     (nDSM, metres above ground) as an input channel next to the image, and the roof planes
     are fitted to it after decoding the faces."""
     return footprint_targets(faces, shape, **kwargs)
@@ -139,11 +139,11 @@ def field_targets(polygons, shape: tuple[int, int], *, boundary_width: float = 2
                   distance: str = "absolute", min_area: int = 16,
                   fill_holes: bool = True) -> dict[str, np.ndarray]:
     """Targets for field boundaries with the instance heads only (outline decoding with
-    :func:`polygons_from_labels`; E046 on Fields of The World), from pixel-coordinate polygons:
+    :func:`polygons_from_labels`; trained on Fields of The World), from pixel-coordinate polygons:
     ``instances`` ``(H, W)`` int32 and ``extent``, ``boundary``, ``distance`` ``(H, W)``
     float32 (``InstanceTask(boundary_width=2, distance="absolute")`` in ``manyseg-bench``).
 
-    ``distance`` is ``"absolute"`` (px) by default (E052: as good as normalised on trained FTW
+    ``distance`` is ``"absolute"`` (px) by default (as good as normalised on trained FTW
     models, and an instance cut by a tile edge keeps its whole-scene values, so large scenes
     stitch without seam errors); train with the same setting and decode with a
     ``seed_threshold`` in pixels (``block_decoder("fields")`` does).

@@ -145,7 +145,7 @@ def _build_inputs(inputs, fusion, *, backbone, pretrained, channel_adapter, out_
             _check_shared_adapter(n, cfg, encoders[target].in_channels)
             # Weights shared, BatchNorm per input by default: one BN shared by inputs with
             # different statistics blends its running statistics, and evaluation then applies
-            # the blend to every input (E015: val 0.50-0.65 vs 0.89).
+            # the blend to every input (Sen1Floods11 val mIoU 0.50-0.65 vs 0.89).
             encoders[n] = (encoders[target] if cfg.get("share_norm", False)
                            else share_weights(encoders[target]))
             if cfg.get("channel_adapter") == "projection":
@@ -192,7 +192,7 @@ def create_model(
 
     Exactly one of ``num_classes`` or ``heads`` is required. With ``num_classes`` the model
     returns a Tensor; with ``heads`` a ``dict[str, Tensor]`` keyed by head name, even for a
-    single head. Full reference: ``docs/api_design.md``.
+    single head. Full reference: https://manyseg.readthedocs.io/en/latest/docs/api_design/.
 
     Args:
         backbone: A timm model name, or an ``nn.Module`` with ``feature_specs`` and

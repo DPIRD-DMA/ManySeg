@@ -798,11 +798,11 @@ class RoofBlockDecoder(InstanceBlockDecoder):
 # ---------------------------------------------------------------- registry and output
 
 _DEFAULTS = {
-    # corner decoding tuned in E038 (corner 0.5 / big_dev 4 / agree 0.4 / merge 8), on the
-    # instance thresholds tuned for outlines in E030
+    # corner decoding tuned on WHU (corner 0.5 / big_dev 4 / agree 0.4 / merge 8), on the
+    # instance thresholds tuned there for outlines
     "footprints": {"method": "corners", "extent_threshold": 0.6, "boundary_threshold": 0.5,
                    "seed_threshold": 0.15},
-    # outlines on Fields of The World with absolute distance (E052): thresholds 0.4 / 0.3 / 3 px,
+    # outlines on Fields of The World with absolute distance: thresholds 0.4 / 0.3 / 3 px,
     # Douglas-Peucker 0.5 px
     "fields": {"method": "outline", "extent_threshold": 0.4, "boundary_threshold": 0.3,
                "seed_threshold": 3.0, "simplify": 0.5},
@@ -816,15 +816,15 @@ def block_decoder(task: str, **params) -> BlockDecoder:
     :func:`polygons_from_labels`, ...) keep generic defaults; the tuned settings live here.
 
     * ``"footprints"``: extent, boundary, distance + corner, direction; ``method="corners"``,
-      straight walls between corners (E038; courtyards kept as traced outlines, E054,
+      straight walls between corners (courtyards kept as traced outlines,
       ``holes=False`` fills them) or ``"outline"``, instance outlines (``simplify`` 1 px unless
       given).
-    * ``"fields"``: extent, boundary, distance; instance outlines (E046), absolute distance
-      (``seed_threshold`` in px, E052; for a model trained on normalised distance pass
-      ``seed_threshold=0.3, extent_threshold=0.6``, from E046).
+    * ``"fields"``: extent, boundary, distance; instance outlines, absolute distance
+      (``seed_threshold`` in px; for a model trained on normalised distance pass
+      ``seed_threshold=0.3, extent_threshold=0.6``).
     * ``"roofs"``: as footprints + ``height`` (nDSM, metres); thresholds tuned on trained roof
-      models (E047), :func:`planar_faces` (2.5 px), robust planes and a
-      ``"plane_intersection"`` mesh (E043b; ``mesh="mean_height"`` is the alternative,
+      models, :func:`planar_faces` (2.5 px), robust planes and a
+      ``"plane_intersection"`` mesh (``mesh="mean_height"`` is the alternative,
       ``mesh=None`` skips it).
     * ``"roads"``: mask, keypoints, direction; :class:`manyseg.vectors.roads.RoadBlockDecoder`.
     * ``"points"``: a point heatmap; :class:`manyseg.points.blocks.PointBlockDecoder`.
@@ -844,7 +844,7 @@ def block_decoder(task: str, **params) -> BlockDecoder:
         raise ValueError(f"unknown task {task!r}: footprints|fields|roofs|roads|points|density")
     kw = dict(_DEFAULTS[task])
     if task == "footprints" and params.get("method") == "outline":
-        kw["simplify"] = 1.0  # tuned in E038
+        kw["simplify"] = 1.0  # tuned on WHU
     kw.update(params)
     return InstanceBlockDecoder(**kw)
 

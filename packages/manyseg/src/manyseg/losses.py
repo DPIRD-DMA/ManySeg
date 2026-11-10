@@ -56,11 +56,14 @@ def soft_dice(logits: Tensor, target: Tensor, mask: Tensor | None = None,
         # would otherwise survive ``* 0`` and poison the loss and its gradients.
         x = torch.where(valid, x, torch.zeros_like(x))
         t = torch.where(valid, t, torch.zeros_like(t))
-        p, t = x.sigmoid() * w, t * w
+        w = w.float()
     else:
-        p = x.sigmoid()
-    inter = (p * t).flatten(1).sum(1)
-    denom = p.flatten(1).sum(1) + t.flatten(1).sum(1)
+        w = 1.0
+    # weighted Dice: each pixel's weight enters the intersection and the denominator once, so a
+    # constant float weight gives the same loss as a boolean mask
+    p = x.sigmoid()
+    inter = (w * p * t).flatten(1).sum(1)
+    denom = (w * p).flatten(1).sum(1) + (w * t).flatten(1).sum(1)
     return (1 - (2 * inter + eps) / (denom + eps)).mean()
 
 
@@ -218,7 +221,10 @@ def multiclass_dice(logits: Tensor, target: Tensor, *, ignore_index: int | None 
         raise ValueError(f"target has class ids outside [0, {classes}) that are not ignore_index")
     # Per-class sums by label rather than through a one-hot, which takes C x H x W longs. Summed
     # in float64 where available: float32 counts stop growing at 2^24 pixels.
-    p = logits.float().softmax(1)
+    x = logits.float()
+    if valid is not None:  # ignored pixels may hold NaN (nodata): drop them before the softmax
+        x = torch.where(valid[:, None], x, torch.zeros_like(x))
+    p = x.softmax(1)
     wide = torch.float32 if p.device.type == "mps" else torch.float64
     index = (target if valid is None else target.where(valid, 0))[:, None]
     weight = None if valid is None else valid[:, None].to(wide)

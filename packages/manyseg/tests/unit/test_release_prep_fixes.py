@@ -146,3 +146,27 @@ def test_pack_valid_shapes():
     b = enc.pack({"location": loc, "temperature": torch.tensor([[20.0], [NAN]])})
     assert a.shape == (2, 3)
     assert torch.equal(a.nan_to_num(-1), b.nan_to_num(-1))
+
+
+@pytest.mark.parametrize("loss", [soft_dice, dice_bce])
+def test_dice_float_weights_scale_free(loss):
+    """A constant float weight gives about the loss of a boolean mask (only the unweighted
+    smoothing eps differs): the weight enters the Dice intersection once. Squared, a perfect
+    prediction scored 0.4 at weight 0.5 and -0.94 at weight 2."""
+    logits = torch.full((1, 1, 2, 2), 8.0)
+    target = torch.ones(1, 1, 2, 2)
+    ref = loss(logits, target, mask=torch.ones(1, 1, 2, 2, dtype=torch.bool))
+    for c in (0.5, 2.0):
+        got = loss(logits, target, mask=torch.full((1, 1, 2, 2), c))
+        assert 0 <= got < 0.01 and abs(got - ref) < 0.01
+
+
+def test_multiclass_dice_ignores_nan_at_ignore_index():
+    from manyseg.losses import multiclass_dice
+
+    logits = torch.tensor([[[[2.0, NAN]], [[-2.0, NAN]]]], requires_grad=True)  # (1, 2, 1, 2)
+    target = torch.tensor([[[0, 255]]])
+    loss = multiclass_dice(logits, target, ignore_index=255)
+    assert torch.isfinite(loss)
+    loss.backward()
+    assert torch.isfinite(logits.grad).all()

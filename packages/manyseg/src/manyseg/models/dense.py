@@ -91,7 +91,7 @@ class DenseModel(nn.Module):
         late = getattr(backbone, "mode", None) == "late"
         levels = range(*backbone.groups[0]) if late else range(len(backbone.feature_specs))
         self._deepest = max(levels, key=lambda i: backbone.feature_specs[i].stride)
-        # padded inputs: decoders can skip size checks in their upsampling (E025)
+        # padded inputs: decoders can skip size checks in their upsampling
         if pad_to_stride and getattr(backbone, "fixed_size", None) is None:
             for dec in [self.decoder, *self.task_decoders.values()]:
                 if hasattr(dec, "_set_input_divisor"):
@@ -114,7 +114,7 @@ class DenseModel(nn.Module):
         """Keep only the heads ``names`` (in place; returns the model): their decoders stay,
         decoders, FiLM and head-bias layers only the dropped heads used are removed. For
         deployment after training with auxiliary heads, e.g. a classifier trained with a pixel
-        head (E020). In eval mode the kept heads' outputs are unchanged (in training mode,
+        head. In eval mode the kept heads' outputs are unchanged (in training mode,
         dropout in removed modules no longer consumes random numbers, so masks differ). The
         output stays a dict. Removed modules leave the state dict: to load a pruned
         checkpoint, rebuild the model, call ``select_heads`` with the same names, then load."""
@@ -343,7 +343,7 @@ class DenseModel(nn.Module):
                 f"backbone {getattr(self.backbone, 'name', '')!r} has a fixed input size {fixed}; "
                 f"input {(h, w)} is larger. Use tiled inference (ManyPred), or rebuild with "
                 f"backbone_kwargs={{'img_size': (H, W)}} for a larger fixed size (see "
-                "docs/backbone_compatibility.md)."
+                "https://manyseg.readthedocs.io/en/latest/docs/backbone_compatibility/)."
             )
         return F.pad(x, (0, fixed[1] - w, 0, fixed[0] - h))
 

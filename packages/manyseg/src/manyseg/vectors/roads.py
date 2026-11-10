@@ -1,4 +1,4 @@
-"""Road graphs from the unified road heads (the road default since E044b).
+"""Road graphs from the unified road heads (the default road decoder).
 
 Heads: road surface probability, keypoint heatmaps (junction, end, crossing) and a two-mode
 ``(cos 2t, sin 2t)`` direction field. Decoding: the surface skeleton graph (as
@@ -6,7 +6,7 @@ Heads: road surface probability, keypoint heatmaps (junction, end, crossing) and
 zone the arms that reach it are rejoined by the keypoint's class: to the junction (several
 junctions in one zone are linked by a minimum spanning tree), paired straight through a
 crossing (most opposite headings first, so an overpass stays two unconnected roads), or to
-the road end. On City-Scale (E044b, three seeds) this kept ~55% of grade-separated crossings
+the road end. On City-Scale (three seeds) this kept ~55% of grade-separated crossings
 against ~32% for the plain skeleton, with no loss of APLS or junction F1.
 """
 
@@ -135,8 +135,8 @@ def graph_from_road_heads(
 
     A low-level building block for one tile or scene in memory; the recommended entry point is
     ``decode_scene(fields, block_decoder("roads"))``, which gives the same graph whole-scene and
-    block by block. The defaults here are the same as ``block_decoder("roads")``: E044's
-    City-Scale tuning (1 m pixels).
+    block by block. The defaults here are the same as ``block_decoder("roads")``: tuned on
+    City-Scale (1 m pixels).
     """
     skeletonize = _deps()[3]
     m, kp, d = _arr(mask), _arr(keypoints), _arr(direction)

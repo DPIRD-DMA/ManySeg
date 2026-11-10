@@ -8,7 +8,7 @@ from torch import Tensor, nn
 class GroupNorm(nn.GroupNorm):
     """``nn.GroupNorm`` whose output keeps the input's dtype: CUDA autocast runs ``group_norm``
     in float32, which would otherwise carry float32 activations (and the ReLU after them) into
-    the next layer, which casts back to bf16 anyway (E026: -19% decoder training memory)."""
+    the next layer, which casts back to bf16 anyway (-19% decoder training memory in bf16)."""
 
     def forward(self, x: Tensor) -> Tensor:
         return super().forward(x).to(x.dtype)

@@ -37,7 +37,7 @@ def _resize_valid(f: Tensor, valid: tuple, target_valid: tuple, target_full: tup
     """Resample the valid (unpadded) region of ``f`` onto the target's valid region, then pad
     to the target's full (padded) size. Used for ``same_extent`` alignment."""
     f = crop_to(f, *valid)  # not slicing: export would specialise on stride-aligned sizes
-    f = resize_bilinear(f, target_valid)  # keeps the dtype: a concat fusion follows (E027)
+    f = resize_bilinear(f, target_valid)  # keeps the dtype: a concat fusion follows
     return F.pad(f, (0, target_full[1] - target_valid[1], 0, target_full[0] - target_valid[0]))
 
 

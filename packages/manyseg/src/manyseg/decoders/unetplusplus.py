@@ -102,7 +102,7 @@ class UNetPlusPlusDecoder(nn.Module):
 
     def _set_input_divisor(self, divisor: int) -> None:
         """Inputs padded to a multiple of the deepest stride: every level is exactly twice the
-        next, so the upsampling needs no gather (E025)."""
+        next, so the upsampling needs no gather."""
         for node in self.nodes.values():
             node.exact_2x = divisor % self._deepest_stride == 0 and node.step_2x
 

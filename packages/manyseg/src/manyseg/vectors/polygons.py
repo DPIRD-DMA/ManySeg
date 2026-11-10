@@ -31,9 +31,9 @@ def polygons_from_labels(labels, *, simplify: float = 1.0, min_area: float = 16,
     px² are dropped. A disconnected instance keeps its largest part. Returned in label order.
 
     A low-level building block with generic defaults. The settings tuned for fields are in
-    ``block_decoder("fields")`` (E046, E052 absolute distance: instance thresholds
+    ``block_decoder("fields")`` (absolute distance: instance thresholds
     0.4 / 0.3 / 3 px, ``simplify=0.5``)
-    and for footprints outlines in ``block_decoder("footprints", method="outline")`` (E038);
+    and for footprints outlines in ``block_decoder("footprints", method="outline")``;
     use those with :func:`decode_scene` unless you need this step on its own.
     """
     _deps()  # the 'vectors' extra, with a pip hint if it is missing
@@ -77,7 +77,7 @@ def planar_faces(polygons, tolerance: float = 2.5) -> list:
     cell are dropped; holes are not kept. Returned in input order; MultiPolygon inputs are split
     into their parts first, and a face whose cells come out disconnected (another face cut through
     it) keeps its largest part in place with the other parts appended at the end, so no covered
-    area is lost. E048b (trained LoD2 faces):
+    area is lost. On trained LoD2 roof faces:
     seam closure 0.38 -> 0.72 (3DBAG's own faces: 0.79), heights better, face F1 unchanged.
     """
     return [f for _, _, f in _planar_faces(polygons, tolerance)]

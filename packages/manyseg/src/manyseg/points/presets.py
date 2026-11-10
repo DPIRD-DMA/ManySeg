@@ -38,7 +38,8 @@ def density_head(decoder: Any = None, *, activation: str | None = "softplus") ->
 
     For a few large objects per image, count peaks of a heatmap head instead: a small background
     bias summed over every pixel adds up. For many small objects a density head does well.
-    ``docs/api_design.md`` has the measurements. Validate on your data.
+    https://manyseg.readthedocs.io/en/latest/docs/api_design/ has the measurements. Validate on
+    your data.
 
     ``decoder`` as one entry of :func:`point_heads` ``decoders``.
     """

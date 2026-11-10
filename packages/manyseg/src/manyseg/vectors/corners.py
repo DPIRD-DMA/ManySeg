@@ -147,8 +147,8 @@ def polygons_from_corners(labels, corner, direction, *, corner_threshold: float 
     and directions only there.
 
     A low-level building block with generic defaults. The settings tuned on trained models are
-    in ``block_decoder("footprints")`` (E038: ``corner_threshold=0.5``, ``big_dev=4``,
-    ``merge_deg=8``) and ``block_decoder("roofs")`` (E047b); use those with
+    in ``block_decoder("footprints")`` (WHU: ``corner_threshold=0.5``, ``big_dev=4``,
+    ``merge_deg=8``) and ``block_decoder("roofs")``; use those with
     :func:`decode_scene` unless you need this step on its own."""
     def _np(a):
         if hasattr(a, "detach"):

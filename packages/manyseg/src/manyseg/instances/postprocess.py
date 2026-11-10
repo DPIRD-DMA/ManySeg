@@ -38,10 +38,10 @@ def connected_components(mask: Tensor, check_every: int = 8, *,
     Each pixel starts with its own index and takes the largest label among its neighbours
     until nothing changes: every component ends with its largest pixel index. Pointer
     jumping (a pixel also takes the label of the pixel its label names, which is in the same
-    component) lets long components converge in far fewer sweeps (E026: 18-44x on long or
+    component) lets long components converge in far fewer sweeps (18-44x fewer on long or
     field-like components) with the same result. On CPU with scipy installed, scipy's labelling
     is mapped to the same ids (much faster on large components: 102 sweeps, ~9 s, for one 1024 px
-    tile of farm fields, E045)."""
+    tile of farm fields)."""
     lab = None
     if mask.device.type == "cpu":
         try:
@@ -243,7 +243,7 @@ def instances_from_outputs(
         boundary_threshold: Pixels with a boundary probability at or above this are not seeds.
         seed_threshold: Seeds need a predicted distance above this.
         min_seed: Seed fragments (4-connected) of fewer pixels are dropped, so they do not
-            become extra instances (0 keeps all; E053). A foreground component whose seeds are
+            become extra instances (0 keeps all). A foreground component whose seeds are
             all dropped still gets one, at its distance maximum.
         min_size: Instances smaller than this many pixels are removed (0 keeps all).
         backend: ``"skimage"`` (watershed), ``"torch"`` or ``"auto"`` (skimage if installed).

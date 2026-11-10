@@ -29,7 +29,7 @@ def upsample2x(x: Tensor, size: Sequence[int], mode: str, exact_2x: bool = False
     ``nearest`` and ``bilinear`` (align_corners=False) treat coarse sample ``j`` as covering
     fine pixels ``2j, 2j+1``. Odd-kernel "same"-padded strided convs instead centre sample ``j``
     on fine pixel ``2j``; ``aligned`` interpolates at fine coordinate ``i / 2`` to match that
-    geometry (see experiments/E001_upsample_alignment).
+    geometry.
     """
     if mode == "nearest":
         if exact_2x or (not torch.compiler.is_compiling() and is_2x(x.shape[-2], size[0])
@@ -37,7 +37,7 @@ def upsample2x(x: Tensor, size: Sequence[int], mode: str, exact_2x: bool = False
             return upsample2x_nearest(x, size)
         return resize_nearest(x, size)
     # bilinear outputs keep the input dtype: CUDA autocast returns float32, and the skip
-    # concat after this would make the whole block float32 (E027: -7% training memory)
+    # concat after this would make the whole block float32 (+7% training memory)
     if mode == "bilinear":
         return resize_bilinear(x, size)
     if mode == "aligned":
@@ -77,7 +77,8 @@ class UNetDecoder(nn.Module):
     the encoder feature with matching stride if there is one. ``out_stride > 1`` builds only
     the blocks down to that stride (the finest blocks are not built, so they cost no
     parameters or FLOPs); the kept blocks are identical to the default decoder's, and the head
-    upsamples the coarser output (see ``docs/api_design.md``, "Spatial policy").
+    upsamples the coarser output (see "Spatial policy" in
+    https://manyseg.readthedocs.io/en/latest/docs/api_design/).
 
     Args:
         in_specs: Encoder feature specs (strides must be powers of two).
@@ -101,9 +102,9 @@ class UNetDecoder(nn.Module):
     ) -> None:
         super().__init__()
         # input_cross: fastai DynamicUnet's full-resolution stage (concatenate the raw input
-        # image to the stride-1 output, then a residual block). E006 found this stage, not
-        # decoder width, behind fastai_unet's lead on Sen1Floods11. The model then passes
-        # [input, *features] (``wants_input``) with in_specs[0] a stride-1 input spec.
+        # image to the stride-1 output, then a residual block). A decoder comparison found this
+        # stage, not decoder width, behind fastai_unet's lead on Sen1Floods11. The model then
+        # passes [input, *features] (``wants_input``) with in_specs[0] a stride-1 input spec.
         self.wants_input = bool(input_cross)
         self._input_channels = 0
         if input_cross:
@@ -185,6 +186,6 @@ class UNetDecoder(nn.Module):
             x = block(x, features[idx] if idx >= 0 else None, size)
         if self.wants_input:
             # the input image is float32 under autocast: concatenated as is, it would make the
-            # whole full-resolution stage float32 (E026)
+            # whole full-resolution stage float32
             x = self.cross(torch.cat([x, image.to(x.dtype)], dim=1))
         return x
