@@ -170,6 +170,11 @@ class GPULoader:
                                  f"(tiles {size}, out_size {tuple(self.out_size)})")
         self.scale, self.ratio, self.hflip, self.vflip = scale, ratio, hflip, vflip
         self.drop_last = train if drop_last is None else drop_last
+        if train and len(self) == 0:  # a run would complete without a single training step
+            raise ValueError(
+                f"training loader is empty: {self.n} samples, batch size {self.bs}"
+                + (" with drop_last" if self.drop_last else "")
+                + "; use more samples (e.g. a larger --subset) or a smaller batch size")
         self.stack = stack
         self.vectors = {} if stack or not vectors else {
             k: _to_device(np.asarray(v, dtype=np.float32), device) for k, v in vectors.items()}

@@ -828,7 +828,8 @@ def block_decoder(task: str, **params) -> BlockDecoder:
       ``mesh=None`` skips it).
     * ``"roads"``: mask, keypoints, direction; :class:`manyseg.vectors.roads.RoadBlockDecoder`.
     * ``"points"``: a point heatmap; :class:`manyseg.points.blocks.PointBlockDecoder`.
-    * ``"density"``: a density head's count; :class:`manyseg.points.blocks.DensityBlockDecoder`.
+    * ``"density"``: a density head's count; :class:`manyseg.points.blocks.DensityBlockDecoder`
+      (``sigma=`` or ``value_scale=`` required, as the head was trained with ``density_loss``).
     """
     if task == "roads":
         from .roads import RoadBlockDecoder
@@ -850,12 +851,9 @@ def block_decoder(task: str, **params) -> BlockDecoder:
 
 
 def _world(geom, transform):
-    if transform is None:
-        return geom
-    from shapely import affinity
+    from .georef import pixel_to_world
 
-    a, b, c, d, e, f = (transform[k] for k in range(6))
-    return affinity.affine_transform(geom, [a, b, d, e, c, f])
+    return geom if transform is None else pixel_to_world(geom, transform)
 
 
 def _properties(rec: dict) -> dict:
@@ -887,7 +885,8 @@ def _geometries(records, transform, mesh: bool) -> list:
 def records_to_geojson(records, transform=_UNSET, crs=_UNSET, *, mesh: bool = False) -> dict:
     """GeoJSON ``FeatureCollection`` of block-decoder records (or a :class:`VectorGraph`, via
     :func:`to_geojson`). ``transform``: affine pixel -> world (rasterio order); ``None``: pixel
-    coordinates; not given: the records' own (:class:`SceneRecords`), else pixel coordinates.
+    coordinates; not given: the records' own (:class:`SceneRecords`, or a :class:`VectorGraph`
+    from :func:`decode_scene`), else pixel coordinates.
     ``crs`` (not given: the records' own, but none for pixel coordinates) is written as a
     ``name`` member when known.
     ``mesh=True`` writes roof faces as 3-D polygons from their mesh rings (z in metres).
@@ -917,9 +916,10 @@ def records_to_geojson(records, transform=_UNSET, crs=_UNSET, *, mesh: bool = Fa
 def write_records(records, path, scene=None, *, layer: str | None = None,
                   mesh: bool = False) -> Path:
     """Write records to ``path`` in world coordinates through ``scene.transform`` / ``crs``
-    (``scene`` not given: the records' own, as :class:`SceneRecords` carry them; a
-    :class:`VectorGraph` needs ``scene`` for world coordinates): ``.geojson`` / ``.json`` with
-    the standard library, anything else (e.g. ``.gpkg``) with geopandas. Returns the path."""
+    (``scene`` not given: the records' own, as :class:`SceneRecords` and a
+    :class:`VectorGraph` from :func:`decode_scene` carry them; pixel coordinates when there is
+    no transform): ``.geojson`` / ``.json`` with the standard library, anything else (e.g.
+    ``.gpkg``) with geopandas. Returns the path."""
     import json
 
     path = Path(path)

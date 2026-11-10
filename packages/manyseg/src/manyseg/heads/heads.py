@@ -207,6 +207,25 @@ def create_head(spec_decoder: FeatureSpec, spec_encoder: FeatureSpec, cfg: dict)
     channels = cfg.pop("out_channels")
     if not isinstance(kind, str):  # a registered head class
         return _custom_head(kind, kind_name, channels, cfg, spec_decoder, spec_encoder)
+    scope = head_scope({"type": kind_name, **cfg})
+    cfg.pop("scope", None)
+    if scope not in ("pixel", "image"):
+        raise ValueError(f"scope must be 'pixel' or 'image', got {scope!r}")
+    # segmentation predicts per pixel, classification per image; regression is either
+    if (kind_name, scope) in (("segmentation", "image"), ("classification", "pixel")):
+        right = "classification" if scope == "image" else "segmentation"
+        other = "pixel" if scope == "image" else "image"
+        raise ValueError(f"{kind_name!r} heads are {other}-scope: set 'scope': {other!r}, or use "
+                         f"'type': {right!r} for a {scope}-scope head (scope defaults to "
+                         "'image' for classification heads, else 'pixel')")
+    # scope first: an option no image head takes must not be answered with "add X too"
+    if scope != "pixel":
+        extra = sorted(set(cfg) & {"hidden", "dilation", "norm", "activation", "kernel_size",
+                                   "bias_init"})
+        if extra:
+            raise ValueError(f"{extra} apply to pixel heads only")
+    if scope != "pixel" and "scale" in cfg:
+        raise ValueError("'scale' applies to pixel heads only; image-scope heads have no grid")
     for k in ("dilation", "norm"):
         if k in cfg and "hidden" not in cfg:
             raise ValueError(f"head {k!r} applies to the 'hidden' layers; give 'hidden' too")
@@ -225,22 +244,6 @@ def create_head(spec_decoder: FeatureSpec, spec_encoder: FeatureSpec, cfg: dict)
             raise ValueError("'activation' with uncertainty=True would also apply to the "
                              "log-variance; leave it out")
         channels = 2 * channels
-    scope = head_scope({"type": kind_name, **cfg})
-    cfg.pop("scope", None)
-    # segmentation predicts per pixel, classification per image; regression is either
-    if (kind_name, scope) in (("segmentation", "image"), ("classification", "pixel")):
-        right = "classification" if scope == "image" else "segmentation"
-        other = "pixel" if scope == "image" else "image"
-        raise ValueError(f"{kind_name!r} heads are {other}-scope: set 'scope': {other!r}, or use "
-                         f"'type': {right!r} for a {scope}-scope head (scope defaults to "
-                         "'image' for classification heads, else 'pixel')")
-    if scope != "pixel":
-        extra = sorted(set(cfg) & {"hidden", "dilation", "norm", "activation", "kernel_size",
-                                   "bias_init"})
-        if extra:
-            raise ValueError(f"{extra} apply to pixel heads only")
-    if scope != "pixel" and "scale" in cfg:
-        raise ValueError("'scale' applies to pixel heads only; image-scope heads have no grid")
     if scope == "pixel":
         source = cfg.pop("source", "decoder")
         spec = spec_decoder if source == "decoder" else spec_encoder
@@ -249,8 +252,6 @@ def create_head(spec_decoder: FeatureSpec, spec_encoder: FeatureSpec, cfg: dict)
         source = cfg.pop("source", "encoder")
         spec = spec_decoder if source == "decoder" else spec_encoder
         head = ImageHead(spec, channels, **cfg)
-    else:
-        raise ValueError(f"scope must be 'pixel' or 'image', got {scope!r}")
     if source not in ("decoder", "encoder"):
         raise ValueError(f"source must be 'decoder' or 'encoder', got {source!r}")
     head.kind = kind

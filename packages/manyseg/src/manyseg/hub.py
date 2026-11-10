@@ -74,10 +74,17 @@ def push_to_hub(model: DenseModel, repo_id: str, *, normalize: Any = None,
             commits can be loaded but not pushed to.
         token: A Hub token with write access (default: ``HF_TOKEN`` or the stored login).
     """
+    import torch
     from huggingface_hub import HfApi
 
     from .io import read_metadata, save
+    from .quantize import QuantizedProgram
 
+    if isinstance(model, (torch.export.ExportedProgram, QuantizedProgram)):
+        raise TypeError(
+            "push_to_hub uploads a DenseModel as model.safetensors; programs (ExportedProgram, "
+            "QuantizedProgram from quantize_pt2e) can't be uploaded. Push the float model, or a "
+            "quantize_weights model, instead.")
     split_name(repo_id)  # validates the name before anything is written
     if revision is not None and re.fullmatch(r"[0-9a-f]{40}", revision):
         raise ValueError(f"revision={revision!r} is a commit; push to a branch name.")
@@ -181,7 +188,7 @@ def card(meta: Mapping[str, Any], repo_id: str, *, license: str | None = None,
                   "| input | kind | shape | bands / fields |", "|---|---|---|---|"]
         notes = []
         for key, cfg in inputs.items():
-            kind = cfg.get("kind", "image")
+            kind = cfg.get("kind", "raster")
             if kind == "vector":
                 fields = cfg.get("fields") or {}
                 shape = f"(B, {cfg.get('num_features') or 'N'})"

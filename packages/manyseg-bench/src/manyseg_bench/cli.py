@@ -30,7 +30,10 @@ def main(argv=None) -> int:
 
     pp = sub.add_parser("prepare")
     pp.add_argument("dataset")
-    pp.add_argument("--size", type=int, default=None, help="dataset default if omitted")
+    pp.add_argument("--size", type=int, default=None,
+                    help="tile / resize size in px for datasets that tile or resize (dataset "
+                    "default if omitted); fixed-size datasets (bigearthnet, ai4boundaries_s2, "
+                    "pastis_ts, second) reject a different size")
 
     for name in ("train", "profile"):
         sp = sub.add_parser(name)

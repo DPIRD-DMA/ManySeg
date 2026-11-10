@@ -93,13 +93,52 @@ def _weights_normalize(config: Mapping[str, Any]) -> Any:
     if not inputs:
         backbone = config.get("backbone")
         return steps(backbone, config.get("pretrained")) if isinstance(backbone, str) else None
+    def encoder(name: str, seen: tuple = ()) -> tuple[Any, Any]:
+        """The backbone and weights tag of input ``name``'s encoder, following
+        ``"shared:<input>"`` to the input whose encoder it shares."""
+        cfg = inputs.get(name) or {}
+        arch = cfg.get("backbone", config.get("backbone"))
+        if isinstance(arch, str) and arch.startswith("shared:"):
+            target = arch.split(":", 1)[1]
+            if cfg.get("channel_adapter") == "projection":
+                raise ValueError(
+                    f"normalize='weights': input {name!r} reaches the shared encoder through a "
+                    f"learned projection from its own {cfg.get('in_channels')} bands, so the "
+                    f"pretrained weights' normalisation does not describe it. Pass a "
+                    f"normalisation spec for each input instead.")
+            return encoder(target, (*seen, name)) if target not in (*seen, name) else (None, None)
+        return arch, cfg.get("pretrained", config.get("pretrained"))
+
+    fusion = config.get("fusion")
+    if (fusion.get("type") if isinstance(fusion, Mapping) else fusion) == "early":
+        # One encoder sees the inputs stacked along channels in key order, so each input gets
+        # its own slice of the weights' per-band statistics.
+        rasters = {n: c for n, c in inputs.items() if c.get("kind") != "vector"}
+        # as create_model: an encoder key set on any input (they must agree) overrides the
+        # top-level argument
+        def shared(key: str) -> Any:
+            return next((c[key] for c in rasters.values() if key in c), config.get(key))
+
+        arch, tag = shared("backbone"), shared("pretrained")
+        found = steps(arch, tag) if isinstance(arch, str) else None
+        if found is None:
+            return None
+        if len(found[0]["mean"]) != sum(c["in_channels"] for c in rasters.values()):
+            return None
+        per_input, start = {}, 0
+        for name, cfg in rasters.items():
+            stop = start + cfg["in_channels"]
+            per_input[name] = [{**s, "mean": s["mean"][start:stop], "std": s["std"][start:stop]}
+                               if s["type"] == "zscore" else s for s in found]
+            start = stop
+        return per_input or None
+
     per_input = {}
     for name, cfg in inputs.items():
         if cfg.get("kind") == "vector":
             continue
-        arch = cfg.get("backbone", config.get("backbone"))
-        found = steps(arch, cfg.get("pretrained", config.get("pretrained"))) if isinstance(
-            arch, str) else None
+        arch, tag = encoder(name)
+        found = steps(arch, tag) if isinstance(arch, str) else None
         if found is None:
             return None  # all or nothing: a partial spec would silently skip inputs
         per_input[name] = found
@@ -131,6 +170,9 @@ def save(model: DenseModel | torch.export.ExportedProgram, path: str | Path, *,
          extra: Mapping[str, Any] | None = None) -> Path:
     """Save ``model`` (built with :func:`manyseg.create_model`) to ``path`` (``.safetensors``).
 
+    A float or ``quantize_weights`` model always saves as safetensors: a ``.pt2`` path is
+    refused, as ``.pt2`` files hold ``quantize_pt2e`` programs.
+
     Quantised models save too, and need ``torchao`` again to load (``manyseg[quant]``):
 
     * A :func:`~manyseg.quantize.quantize_weights` model: as above, to a ``.safetensors`` file.
@@ -157,7 +199,8 @@ def save(model: DenseModel | torch.export.ExportedProgram, path: str | Path, *,
             heads default to "none", as do heads with a built-in output ``activation``
             (``"softplus"`` density heads: the model's output already is the prediction).
         classes: Class names, per head (``{head: [...]}``) or for a single head. They reach
-            ``tiling_spec()``, and ManyPred writes them into its output files.
+            ``tiling_spec()``, and ManyPred writes them into its output files. ``{head: None}``
+            names none for that head.
         bands: Band names, per input (``{input: [...]}``) or for a single input. Likewise.
         extra: Any other metadata, as plain JSON data (dicts with string keys, lists,
             strings, numbers, booleans, None), stored as is. Anything JSON would change, such
@@ -181,6 +224,11 @@ def save(model: DenseModel | torch.export.ExportedProgram, path: str | Path, *,
     if source is not None:
         raise TypeError("source= is only for saving an ExportedProgram.")
     _require_dense(model)
+    if Path(path).suffix == ".pt2":
+        raise ValueError(
+            "A DenseModel saves to a .safetensors file; .pt2 is for quantised programs. To "
+            "deploy an int8 program, quantise it with manyseg.quantize.quantize_pt2e and save "
+            "that: manyseg.save(ep, 'model.pt2', source=model).")
     quantised = _quantization(model)
     meta = _metadata(model, **names)
     if quantised is not None:
@@ -207,6 +255,9 @@ def _metadata(model: DenseModel, *, normalize: Any, activations, classes, bands,
             "manyseg.create_model from plain arguments (names and numbers, not modules or "
             "callables)."
         )
+    # a None entry ({head: None}) means "no names" for that head or input: store none
+    classes, bands = (({k: v for k, v in value.items() if v is not None} or None)
+                      if isinstance(value, Mapping) else value for value in (classes, bands))
     heads = list(model.heads)
     acts = {n: "none" for n in heads if getattr(model.heads[n], "kind", None) == "regression"}
     for name, act in dict(activations or {}).items():
@@ -221,7 +272,7 @@ def _metadata(model: DenseModel, *, normalize: Any, activations, classes, bands,
         acts[name] = act
     # a single-input model's input has no name, so its bands can only be a list
     image_inputs = [n for n, c in (config.get("inputs") or {None: {}}).items()
-                    if c.get("kind", "image") != "vector"]
+                    if c.get("kind", "raster") != "vector"]
     for arg, value, names, what in (("classes", classes, heads, "head"),
                                     ("bands", bands, image_inputs, "input")):
         if value is None:
@@ -254,7 +305,11 @@ def _metadata(model: DenseModel, *, normalize: Any, activations, classes, bands,
             stacklevel=3,
         )
     if normalize is not None:
-        check_normalize(normalize, None if image_inputs == [None] else image_inputs)
+        cfgs = config.get("inputs") or {None: config}
+        band_counts = {n: cfgs[n].get("in_channels") or 3 for n in image_inputs
+                       if cfgs[n].get("kind", "raster") == "raster"}  # a time series: per date
+        check_normalize(normalize, None if image_inputs == [None] else image_inputs,
+                        band_counts)
     _check_rebuildable(model, config)
     _check_extra(extra)
     # the model's main dtype; load casts to it, then gives each tensor its own saved dtype
@@ -443,7 +498,7 @@ def _check_names(model, config: dict, classes, bands) -> None:
         inputs = config.get("inputs") or {None: config}
         for name, values in (bands.items() if isinstance(bands, Mapping)
                              else [(next(n for n, c in inputs.items()
-                                         if c.get("kind", "image") != "vector"), bands)]):
+                                         if c.get("kind", "raster") != "vector"), bands)]):
             n = inputs[name].get("in_channels") or 3
             if len(values) != n:
                 label = "the input" if name is None else f"input {name!r}"
@@ -468,6 +523,9 @@ def _check_rebuildable(model: DenseModel, config: Mapping[str, Any]) -> None:
         if recipe is not None:
             from .quantize import quantize_weights
 
+            # quantise in the model's dtype, as load() does: torchao's quantised weights record
+            # the dtype they dequantise to
+            rebuilt.to(dtype=next(model.parameters()).dtype)
             quantize_weights(rebuilt, recipe["mode"], conv=recipe["conv"], inplace=True)
             rebuilt.to(next(model.parameters()).device)
     want, have = _structure(model), _structure(rebuilt)

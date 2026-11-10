@@ -30,7 +30,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .base import DatasetInfo, channel_stats
+from .base import DatasetInfo, channel_stats, check_native_size
 
 CACHE_NAME = "ai4boundaries_s2"
 BANDS = ("B2", "B3", "B4", "B8")
@@ -98,7 +98,9 @@ def _bounded_map(ex, fn, jobs, chunk: int = 64):
 
 
 def prepare(raw: Path, cache: Path, workers: int = 4, expected: dict | None = EXPECTED,
-            **_) -> dict:
+            size: int | None = None) -> dict:
+    """Cache the S2 time series (fixed ``SIZE`` px tiles; another ``size`` raises)."""
+    check_native_size(size, SIZE, "ai4boundaries_s2")
     from numpy.lib.format import open_memmap
 
     src, cache = source_dir(raw), Path(cache)

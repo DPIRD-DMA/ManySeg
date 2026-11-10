@@ -234,7 +234,7 @@ function headLayers(hd, i) {
       <div class="row" style="--cols:3">
         <label class="f">${lab("Hidden widths", "f.hidden")}<input type="text" class="mono" id="hd-${i}-hid" data-path="heads.${i}.hidden" placeholder="none, e.g. 64, 32" value="${esc(hd.hidden)}"></label>
         <label class="f">${lab("Dilation", "f.dil")}<input type="text" class="mono" id="hd-${i}-dil" data-path="heads.${i}.dilation" placeholder="1" value="${esc(hd.dilation)}"${off}></label>
-        <label class="f">${lab("Norm", "f.hnorm")}<select id="hd-${i}-norm" data-path="heads.${i}.norm"${off}>${opt("bn", "BatchNorm", hd.norm)}${opt("gn", "GroupNorm", hd.norm)}${opt("none", "none", hd.norm)}</select></label>
+        <label class="f">${lab("Norm", "f.hnorm")}<select id="hd-${i}-norm" data-path="heads.${i}.norm"${off}>${opt("batch", "BatchNorm", hd.norm)}${opt("group", "GroupNorm", hd.norm)}${opt("none", "none", hd.norm)}</select></label>
       </div>
       <div class="row" style="--cols:3; margin-top:8px">
         ${hd.type === "regression" ? `<label class="f">${lab("Output", "f.hact")}<select id="hd-${i}-act" data-path="heads.${i}.activation">${opt("", "raw values", hd.activation)}${opt("softplus", "softplus (> 0)", hd.activation)}</select></label>` : "<span></span>"}
@@ -294,8 +294,10 @@ function setPath(path, raw, type) {
     r.alignment = "same_grid"; if (i > 0) r.backbone = state.inputs[0].backbone; });
   if (/^inputs\.0\.backbone$/.test(path) && state.fusion.type === "early") state.inputs.forEach((r) => { r.backbone = v; });
   if (/heads\.\d+\.type$/.test(path) && v !== "regression") { obj.uncertainty = false; obj.activation = ""; }
+  // a classification head is per image, a segmentation head per pixel (create_model's defaults)
+  if (/heads\.\d+\.type$/.test(path) && v !== "regression") obj.scope = defaultScope(v);
   // image heads have no head layers (create_head refuses them)
-  if (/heads\.\d+\.scope$/.test(path) && v === "image") { obj.scale = 1; obj.decoder = ""; obj.input = ""; obj.share = ""; obj.hidden = ""; obj.activation = ""; obj.bias_init = 0; }
+  if (/heads\.\d+\.(scope|type)$/.test(path) && obj.scope === "image") { obj.scale = 1; obj.decoder = ""; obj.input = ""; obj.share = ""; obj.hidden = ""; obj.activation = ""; obj.bias_init = 0; }
   if (/heads\.\d+\.input$/.test(path) && !v) obj.share = "";
   if (/heads\.\d+\.share$/.test(path) && v) obj.decoder = "";
   if (/inputs\.\d+\.temporal$/.test(path) && v === "diff") obj.dates = 2;

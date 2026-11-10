@@ -273,17 +273,22 @@ function inputPixels(st, r, H) {
 // "64, 32" for a list field typed in a text box (arrays and numbers from examples or old states)
 const listText = (v) => Array.isArray(v) ? v.join(", ") : v == null ? "" : String(v);
 
+// create_model's default scope for a head type (manyseg.heads.head_scope)
+const defaultScope = (type) => type === "classification" ? "image" : "pixel";
+
 function normHead(h) {
+  const type = h.type ?? "segmentation";
   return {
-    name: h.name, type: h.type ?? "segmentation", channels: h.channels ?? 1,
-    scope: h.scope ?? "pixel", scale: h.scale ?? 1, uncertainty: !!h.uncertainty,
+    name: h.name, type, channels: h.channels ?? 1,
+    scope: h.scope ?? defaultScope(type), scale: h.scale ?? 1, uncertainty: !!h.uncertainty,
     decoder: h.decoder ?? "",
     input: h.input ?? "",                // per-input head: read this raster input's own features
     share: h.share ?? "",                // reuse another per-input head's decoder and head
     // PixelHead options, all off by default (the single 3x3 conv)
     hidden: listText(h.hidden),          // widths of conv -> norm -> ReLU layers, "" = none
     dilation: listText(h.dilation),      // one value or one per hidden layer, "" = 1
-    norm: h.norm === undefined ? "bn" : (h.norm ?? "none"),   // of the hidden layers: bn, gn, none
+    // of the hidden layers: batch, group, none ("bn" / "gn", aliases, in states saved earlier)
+    norm: h.norm === undefined ? "batch" : ({ bn: "batch", gn: "group" }[h.norm] ?? h.norm ?? "none"),
     activation: h.activation ?? "",      // "softplus" (regression): output > 0
     bias_init: h.bias_init ?? 0,         // the final conv's bias
     multilabel: !!h.multilabel,          // channels are independent: sigmoid when saved, not softmax
@@ -316,11 +321,11 @@ function headOptions(head) {
       if (!dil.ok || (hidden.ok && dil.vals.length !== hidden.vals.length))
         errors.push(`dilation must be one positive whole number or one per hidden layer${hidden.ok ? ` (${hidden.vals.length})` : ""}.`);
     }
-    if (h.norm !== "bn") opts.norm = h.norm === "none" ? null : h.norm;
+    if (h.norm !== "batch") opts.norm = h.norm === "none" ? null : h.norm;
   }
   if (h.activation) opts.activation = h.activation;
   if (h.bias_init) opts.bias_init = h.bias_init;
-  if (!["bn", "gn", "none"].includes(h.norm)) errors.push(`norm must be bn, gn or none, not '${h.norm}'.`);
+  if (!["batch", "group", "none"].includes(h.norm)) errors.push(`norm must be batch, group or none, not '${h.norm}'.`);
   if (!["", "softplus"].includes(h.activation)) errors.push(`the output activation must be softplus or none, not '${h.activation}'${h.activation === "relu" ? " (relu was removed: a relu density head died on the drone data)" : ""}.`);
   const set = Object.keys(opts);
   if (h.scope !== "pixel" && set.length)
@@ -601,7 +606,7 @@ function derive(s) {
   if (needsShared && d.input_cross) issues.push({ level: "tip", text: "input_cross helped water mapping (E012) but not pets or clouds. It suits targets decided by a pixel's own spectrum." });
   if (!pixelHeads.length && imageHeads.length) issues.push({ level: "tip", text: "No pixel heads, so no decoder is built: this is a classifier. With pixel labels, an auxiliary segmentation head raised mAP by 2.3 in E020; drop it before deployment with model.select_heads([...])." });
   if (s.heads.some((h) => h.activation && h.type === "regression"))
-    issues.push({ level: "tip", text: "Softplus keeps a head's output above 0. It is the default of density_head(). On a downstream drone dataset it cut density count MAE from 10.1 (raw head) to 2.9, leaving a floor of about +1.75 objects per image since softplus never reaches 0; on OAM-TCD it was no worse than the raw head (E011c). For a few large objects per image, peak counting on a heatmap was still better (MAE 1.0). The output already is the prediction, so manyseg.save records the activation as 'none'." });
+    issues.push({ level: "tip", text: "Softplus keeps a head's output above 0. It is the default of density_head(). On a downstream drone dataset it cut density count MAE to 2.9, from 7.5 for the raw head summed as is (10.1 clamped at 0). Since softplus never reaches 0, a background floor remains: about +1.75 objects per image (2.4 on an empty 792 x 792 tile); on OAM-TCD it was no worse than the raw head (E011c). For a few large objects per image, peak counting on a heatmap was still better (MAE 1.0). The output already is the prediction, so manyseg.save records the activation as 'none'." });
   if (s.heads.some((h) => h.scope === "pixel" && headOptions(h).hidden.length))
     issues.push({ level: "tip", text: "Hidden head layers are opt-in and untested in our experiments: the default single conv is SMP's head. Compare against it. They run on the head's grid, so a head scale below 1 makes them cheaper." });
   if (s.heads.some((h) => h.uncertainty)) issues.push({ level: "tip", text: "Uncertainty heads return [mean, log_variance] (2x channels), for a Gaussian NLL loss." });
@@ -866,7 +871,9 @@ function generateCode(s, D) {
     const heads = {};
     for (const h of s.heads) {
       const c = { type: h.type, out_channels: h.channels };
-      if (h.scope === "image") c.scope = "image";
+      // image scope is always written out; pixel only where it isn't the type's default, so a
+      // per-pixel classification head is refused by create_model as it is by this page
+      if (h.scope === "image" || h.scope !== defaultScope(h.type)) c.scope = h.scope;
       if (h.scope === "pixel" && h.scale !== 1) c.scale = h.scale;
       if (h.uncertainty && h.type === "regression") c.uncertainty = true;
       if (h.scope === "pixel" && h.decoder && !h.share) c.decoder = h.decoder;

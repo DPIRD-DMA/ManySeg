@@ -48,8 +48,8 @@ First release. Python 3.11–3.14, PyTorch ≥ 2.10, timm ≥ 1.0.20.
   post-processing (`instances_from_outputs`, with a deterministic tie-break so a window decodes
   as the whole scene does).
 * Points and counting (`manyseg.points`): heatmap and density heads, targets from points or
-  boxes (YOLO, `xyxy`, COCO), peak finding, density counting, `density_loss` and threshold
-  calibration.
+  boxes (YOLO, `xyxy`, COCO), peak finding, density counting (`count_from_density(sigma=)` undoes `density_loss`'s
+  2πσ² target scale), `density_loss` and threshold calibration.
 
 ### Vector outputs (`manyseg.vectors`, `manyseg[vectors]`). *Experimental*
 
@@ -62,6 +62,8 @@ Names and defaults may change before 1.0, and each decoder was tuned on one data
   a halo that also covers the decoder's reach it gives the same result as a whole-scene decode
   (see `manyseg.vectors.blocks`). Results write to GeoJSON or GeoPackage in the scene's
   CRS.
+* Road graphs from a georeferenced scene carry its transform and CRS (`VectorGraph.write()`,
+  `.to_geojson()`). Geometry conversions keep Z coordinates.
 * Building blocks: `graph_from_mask`, `polygons_from_labels`, `to_pixels`, `to_geojson`,
   `pixel_to_world` / `world_to_pixel`, dihedral augmentation, and metrics (APLS, junction F1,
   polygon C-IoU, PoLiS and others) in `manyseg.vectors.metrics`.
@@ -83,8 +85,8 @@ Names and defaults may change before 1.0, and each decoder was tuned on one data
   `manyseg.load("hf-hub:org/name[@revision]")`.
 * `tiling_spec()` tells [ManyPred](https://github.com/DPIRD-DMA/ManyPred) how to run the model
   over large scenes.
-* `torch.compile(dynamic=True)`, `manyseg.export.export_model` (dynamic size, optionally dynamic
-  batch) and ONNX.
+* `torch.compile(dynamic=True)`, `manyseg.export.export_model` (dynamic H/W, or fixed with
+  `dynamic=False` for window attention; optionally dynamic batch) and ONNX.
 * int8 quantisation (`manyseg.quantize`, `manyseg[quant]`, torchao ≥ 0.18): weight-only /
   dynamic (`quantize_weights`) and PT2E static (`quantize_pt2e`), both savable with
   `manyseg.save`, plus size and agreement reports.
@@ -104,7 +106,14 @@ Names and defaults may change before 1.0, and each decoder was tuned on one data
   BigEarthNet v2, OSCD, LEVIR-CD, SECOND.
 * Metrics: per-class scores and macro means cover only classes present in the ground truth;
   boundary F1 skips images with no edge in either prediction or target; validation loss is
-  per non-ignored pixel. Run records in `experiments/` written before 2026-11-10 used the older
-  boundary-F1 and validation-loss rules.
+  the training objective (label smoothing included) per non-ignored pixel; change-class scores
+  and regression R² follow the same absent-class (NaN) rule; multi-label AP groups tied
+  scores; instance matching is exact without scipy. Label smoothing applies only to the
+  cross-entropy tasks, and other tasks refuse it. Run records in `experiments/` written
+  before 2026-11-10 used the older boundary-F1 and validation-loss rules, and records written
+  before this release may differ in change-class scores, R², tied-score AP, instance matching
+  below IoU 0.5 and absolute-distance instance decoding (now `seed_threshold` 3 px).
+* Runs record the normalisation source, the settings each task applied (`task_settings`) and
+  how each provider adapted a pretrained stem to more or fewer than 3 bands (`model_notes`).
 * The experiments in `experiments/` that the defaults and the README's evidence table rest on,
   negative results included.

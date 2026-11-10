@@ -66,11 +66,11 @@ def test_density_loss_mask_and_errors():
 
 def test_count_from_density_scale_and_mask():
     d = torch.ones(2, 1, 4, 5)
-    assert count_from_density(d).tolist() == [20.0, 20.0]
+    assert count_from_density(d, value_scale=1.0).tolist() == [20.0, 20.0]
     assert count_from_density(d, value_scale=4.0).tolist() == [5.0, 5.0]
     m = torch.zeros(2, 4, 5)
     m[0, :2] = 1
-    assert count_from_density(d, mask=m).tolist() == [10.0, 0.0]
+    assert count_from_density(d, value_scale=1.0, mask=m).tolist() == [10.0, 0.0]
 
 
 def blob_images(n, size=32, seed=0):
@@ -297,7 +297,7 @@ def test_zero_size_boxes_get_min_sigma():
 def test_density_masks_must_match_batch():
     d = torch.ones(2, 1, 4, 5)
     with pytest.raises(ValueError, match="does not match"):
-        count_from_density(d, mask=torch.ones(1, 4, 5))
+        count_from_density(d, value_scale=1.0, mask=torch.ones(1, 4, 5))
     with pytest.raises(ValueError, match="does not match"):
         density_loss(d, [torch.zeros(0, 2)] * 2, mask=torch.ones(1, 1, 4, 5))
 

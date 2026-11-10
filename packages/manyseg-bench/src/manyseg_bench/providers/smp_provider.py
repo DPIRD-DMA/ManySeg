@@ -1,6 +1,13 @@
 from __future__ import annotations
 
-from .base import BuiltModel, ModelSpec, Provider, fingerprint_module, split_params
+from .base import (
+    BuiltModel,
+    ModelSpec,
+    Provider,
+    fingerprint_module,
+    split_params,
+    stem_adaptation_note,
+)
 
 _ARCHS = {"unet": "Unet", "unetplusplus": "UnetPlusPlus", "fpn": "FPN",
           "deeplabv3plus": "DeepLabV3Plus", "segformer": "Segformer", "upernet": "UPerNet"}
@@ -32,4 +39,5 @@ class SMPProvider(Provider):
             **spec.options,
         )
         enc, dec = split_params(model, model.encoder)
-        return BuiltModel(model, enc, dec, fingerprint_module(model.encoder))
+        return BuiltModel(model, enc, dec, fingerprint_module(model.encoder),
+                          stem_adaptation_note("smp", spec.in_channels, weights is not None))

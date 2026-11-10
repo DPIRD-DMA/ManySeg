@@ -8,7 +8,7 @@ from collections.abc import Sequence
 import torch.nn.functional as F
 from torch import Tensor
 
-from .postprocess import _squeeze
+from .postprocess import PER_POINT_SIGMA, _squeeze
 from .targets import _per_image, density_map
 
 
@@ -26,8 +26,9 @@ def density_loss(pred: Tensor, points: Sequence[Tensor], sigma=3.0, *,
     The default, ``2 pi sigma^2``, makes an isolated object's peak about 1. Unscaled, a peak
     is ``1 / (2 pi sigma^2)`` (0.001 for sigma 12), so the pixel loss is tiny and the model
     can get away with a near-constant map. Predicted counts are then
-    ``count_from_density(pred, value_scale=...)`` with the same value. With per-point sigmas,
-    give ``value_scale``.
+    ``count_from_density(pred, sigma=sigma)`` (or ``value_scale=`` the same value if given
+    here), and ``DensityBlockDecoder`` / ``block_decoder("density")`` take the same
+    ``sigma=`` / ``value_scale=``. With per-point sigmas, give ``value_scale``.
 
     ``mask`` ``(B, [1,] H, W)``, > 0 for valid pixels: the pixel loss and both counts use only
     those. ``kind``: ``"mse"`` or ``"l1"``, the mean over valid pixels. ``count_weight`` > 0
@@ -44,7 +45,7 @@ def density_loss(pred: Tensor, points: Sequence[Tensor], sigma=3.0, *,
     if value_scale is None:
         sig = _per_image(sigma, len(points))[0]
         if isinstance(sig, Tensor) and sig.dim() > 0:
-            raise ValueError("per-point sigma: give value_scale (e.g. 2 * pi * median_sigma**2)")
+            raise ValueError(PER_POINT_SIGMA)
         value_scale = 2 * math.pi * float(sig) ** 2
     p = pred.float()
     target = density_map([q.to(p.device) for q in points], tuple(p.shape[-2:]), sigma)

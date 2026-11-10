@@ -39,7 +39,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .base import DatasetInfo, channel_stats
+from .base import DatasetInfo, channel_stats, check_native_size
 
 CLASSES = (
     "Urban fabric", "Industrial or commercial units", "Arable land", "Permanent crops",
@@ -174,8 +174,10 @@ def _read_meta(raw: Path):
     return pd.read_parquet(Path(raw) / "metadata.parquet")
 
 
-def prepare(raw: Path, cache: Path, size: int = SIZE) -> dict:
-    """Stream the subset from the LMDB into memory-mapped ``.npy`` files (bounded RAM)."""
+def prepare(raw: Path, cache: Path, size: int | None = None) -> dict:
+    """Stream the subset from the LMDB into memory-mapped ``.npy`` files (bounded RAM).
+    Patches are always ``SIZE`` px; another ``size`` raises."""
+    check_native_size(size, SIZE, "bigearthnet")
     import lmdb
     import tifffile
     from numpy.lib.format import open_memmap

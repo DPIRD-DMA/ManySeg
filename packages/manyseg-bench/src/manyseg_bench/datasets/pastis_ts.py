@@ -26,7 +26,7 @@ from pathlib import Path
 import numpy as np
 
 from . import pastis
-from .base import DatasetInfo, load_split
+from .base import DatasetInfo, check_native_size, load_split
 
 CACHE_NAME = "pastis_ts"
 T = pastis.K_DATES
@@ -56,13 +56,16 @@ def group_by_patch(names: list[str]) -> list[tuple[str, list[int]]]:
     return [(p, sorted(idx, key=lambda i: season_day(names[i]))) for p, idx in groups.items()]
 
 
-def prepare(raw: Path, cache: Path, **_) -> dict:
+def prepare(raw: Path, cache: Path, size: int | None = None) -> dict:
+    """Group the prepared ``pastis`` cache's dates into series. The tile size is that cache's
+    (``prepare pastis --size``); another ``size`` raises."""
     from numpy.lib.format import open_memmap
 
     cache = Path(cache)
     src = cache.parent / pastis.CACHE_NAME
     if not (src / "train_names.json").exists():
         raise FileNotFoundError(f"{src} is not prepared; run `manyseg-bench prepare pastis`")
+    check_native_size(size, int(load_split(src, "train").images["s2"].shape[1]), "pastis_ts")
     cache.mkdir(parents=True, exist_ok=True)
     summary = {}
     for split in ("train", "val", "test"):

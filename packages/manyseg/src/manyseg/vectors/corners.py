@@ -227,12 +227,14 @@ def _corner_peaks(corner: np.ndarray, threshold: float = 0.3, kernel: int = 3,
 
 def corner_targets(polygons, shape: tuple[int, int], *, tolerance: float = 1.5,
                    turn_deg: float = 20.0,
-                   sigma: float = 2.0, line_width: float = 1.0):
+                   sigma: float = 2.0, line_radius: float = 1.0):
     """Training targets for :func:`polygons_from_corners` from polygons (pixel coordinates):
     ``corner`` (H, W) Gaussian blobs at vertices turning more than ``turn_deg`` after a
     ``tolerance`` px simplification (raster staircase jogs are not corners), ``direction``
-    (2, H, W) ``(cos 2t, sin 2t)`` of the simplified walls within ``line_width`` px, and
-    ``direction_mask`` (H, W) bool."""
+    (2, H, W) ``(cos 2t, sin 2t)`` of the simplified walls on the pixels whose centre lies
+    within ``line_radius`` px of a wall (a band ``2 * line_radius`` px wide, unlike
+    :func:`road_targets`' ``line_width``, the full band width), and ``direction_mask`` (H, W)
+    bool."""
     from rasterio.features import rasterize
     from rasterio.transform import Affine
 
@@ -253,7 +255,7 @@ def corner_targets(polygons, shape: tuple[int, int], *, tolerance: float = 1.5,
         cc = np.asarray(s.exterior.coords)
         for u, v in zip(cc[:-1], cc[1:]):
             th = math.atan2(v[1] - u[1], v[0] - u[0])
-            m = rasterize([(shapely.LineString([u, v]).buffer(line_width), 1)], out_shape=(H, W),
+            m = rasterize([(shapely.LineString([u, v]).buffer(line_radius), 1)], out_shape=(H, W),
                           transform=Affine.identity(), dtype="uint8").astype(bool)
             direction[0][m] = math.cos(2 * th)
             direction[1][m] = math.sin(2 * th)

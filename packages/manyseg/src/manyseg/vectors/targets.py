@@ -32,8 +32,9 @@ def rasterize_instances(polygons, shape: tuple[int, int], *, min_area: int = 0,
 
     * ``split``: each 4-connected piece of an id becomes its own instance;
     * ``min_area``: instances (pieces) under ``min_area`` pixels are dropped;
-    * ``fill_holes``: holes of an instance that hold only background are filled (a hole holding
-      another instance is kept around it).
+    * ``fill_holes``: holes of an instance that hold only background are filled; a hole
+      holding any pixel of another polygon (or of another piece of the same one) is kept
+      whole, background ring included, so the other instance stays surrounded by background.
 
     Ids are renumbered ``1..K`` without gaps. Returns ``(labels, source)``: ``source[k - 1]`` is
     the index of the polygon instance ``k`` came from (a polygon covering no pixel centre gets
@@ -60,11 +61,26 @@ def rasterize_instances(polygons, shape: tuple[int, int], *, min_area: int = 0,
             if c.sum() < max(min_area, 1):
                 continue
             if fill_holes:
-                c = ndimage.binary_fill_holes(c) & ((m[sl] == 0) | c)
+                c = _fill_background_holes(c, m[sl])
             o = out[sl]
             o[c & (o == 0)] = len(source) + 1
             source.append(v - 1)
     return out, np.asarray(source, np.int64)
+
+
+def _fill_background_holes(c: np.ndarray, m: np.ndarray) -> np.ndarray:
+    """``c`` with its holes filled where the hole (a 4-connected background component enclosed
+    by ``c``) holds no burnt pixel of ``m``."""
+    from scipy import ndimage
+
+    hole = ndimage.binary_fill_holes(c) & ~c
+    if not hole.any():
+        return c
+    lab, n = ndimage.label(hole)
+    occupied = np.zeros(n + 1, bool)
+    occupied[lab[m != 0]] = True
+    occupied[0] = True
+    return c | ~occupied[lab]
 
 
 def _instance_heads(labels: np.ndarray, boundary_width: float, distance: str) -> dict:
@@ -157,7 +173,8 @@ def field_targets(polygons, shape: tuple[int, int], *, boundary_width: float = 2
 
     Which fields count: every 4-connected piece of a field is its own
     instance, pieces under ``min_area`` pixels are dropped, and holes holding only background
-    are filled (a field is trained as one solid parcel; a hole around another field stays).
+    are filled (a field is trained as one solid parcel); a hole holding another field (or a
+    piece of any polygon) stays a hole, background around that field included.
     For the reference polygons that match the targets, decode the instances themselves
     (``polygons_from_labels(out["instances"])``).
     """

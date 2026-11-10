@@ -69,6 +69,25 @@ def to_label_grid(out, y):
     return upsample_output(out.float(), size, 1 / f)
 
 
+def _check_label_smoothing(value: float, task: str, applies: bool = True) -> float:
+    """Validate a ``label_smoothing`` argument; raises when it is > 0 for a task (or head)
+    whose loss would not apply it, so a recorded value is always the one trained with."""
+    value = float(value)
+    if not 0.0 <= value < 1.0:
+        raise ValueError(f"label_smoothing must be in [0, 1), got {value}")
+    if value > 0 and not applies:
+        raise ValueError(f"{task}: label_smoothing={value} would not be applied (its loss "
+                         "has no label smoothing); use label_smoothing=0")
+    return value
+
+
+# Tasks whose constructor takes ``label_smoothing`` (the runner forwards the recipe's value to
+# these; the others refuse a recipe with label_smoothing > 0). ``multilabel`` and
+# ``seg_multilabel`` take it but raise for a value > 0 (their BCE terms have none).
+LABEL_SMOOTHING_TASKS = ("semantic", "change", "classification", "multilabel",
+                         "seg_multilabel", "semantic_change")
+
+
 def _with_scale(heads: dict, scale) -> dict:
     """Task head configs with a head ``scale`` (validated; 1 leaves the configs unchanged)."""
     from manyseg.utils import scale_factor
@@ -108,7 +127,7 @@ class SemanticTask(Task):
     def __init__(self, num_classes: int, ignore_index: int | None = None,
                  label_smoothing: float = 0.0, native_metrics: bool = False) -> None:
         self.num_classes, self.ignore_index = num_classes, ignore_index
-        self.label_smoothing = label_smoothing
+        self.label_smoothing = _check_label_smoothing(label_smoothing, self.name)
         self.native_metrics = native_metrics
 
     def head_targets(self, out, y):
@@ -158,7 +177,8 @@ class _SemanticEval:
         if self.cm is None:
             self.cm = ConfusionMatrix(self.t.num_classes, self.t.ignore_index, device=y.device)
         ignore = self.t.ignore_index if self.t.ignore_index is not None else -100
-        self.loss += float(F.cross_entropy(logits, y, ignore_index=ignore, reduction="sum"))
+        self.loss += float(F.cross_entropy(logits, y, ignore_index=ignore, reduction="sum",
+                                           label_smoothing=self.t.label_smoothing))
         pred = logits.argmax(1)
         self.cm.update(pred, y)
         b = boundary_f1(pred, y, ignore_index=self.t.ignore_index)
@@ -169,7 +189,8 @@ class _SemanticEval:
     def compute(self) -> dict:
         """``miou`` etc.: see :class:`ConfusionMatrix` (classes absent from the ground truth
         are NaN and excluded). ``boundary_f1``: mean over images with a boundary in the
-        prediction or the target (NaN if there is none). ``loss``: CE per non-ignored pixel."""
+        prediction or the target (NaN if there is none). ``loss``: the training objective (CE
+        with the task's label smoothing) per non-ignored pixel, at input resolution."""
         out = self.cm.compute()
         out["boundary_f1"] = self.bf1 / self.n_bf1 if self.n_bf1 else float("nan")
         out["loss"] = self.loss / max(1, self.px)
@@ -187,18 +208,29 @@ class InstanceTask(Task):
 
     ``mode="extent_cc"`` is the simple baseline: an extent head only, instances = connected
     components of the thresholded extent (touching objects merge).
+
+    ``seed_threshold``: the decoding's minimum predicted distance for a watershed seed
+    (:func:`manyseg.instances.instances_from_outputs`), in the units of ``distance``. ``None``
+    picks ``DEFAULT_SEED_THRESHOLD[distance]``: 0.25 (a fraction of the instance's maximum)
+    for ``"normalized"``, 3 px for ``"absolute"`` (``manyseg.vectors.block_decoder("fields")``,
+    tuned on Fields of The World).
     """
 
     name = "instances"
     primary_metric = "pq"
+    DEFAULT_SEED_THRESHOLD = {"normalized": 0.25, "absolute": 3.0}
 
     def __init__(self, num_classes: int = 1, boundary_width: float = 1.0,
                  distance: str = "normalized", boundary_pos_weight: float | None = None,
                  weights: tuple[float, float, float] = (1.0, 1.0, 1.0),
                  iou_threshold: float = 0.5, decoders=None, mode: str = "boundary_distance",
-                 head_scale: float = 1) -> None:
+                 head_scale: float = 1, seed_threshold: float | None = None) -> None:
         if mode not in ("boundary_distance", "extent_cc"):
             raise ValueError(f"mode must be boundary_distance|extent_cc, got {mode!r}")
+        if distance not in self.DEFAULT_SEED_THRESHOLD:
+            raise ValueError(f"distance must be normalized|absolute, got {distance!r}")
+        self.seed_threshold = (self.DEFAULT_SEED_THRESHOLD[distance] if seed_threshold is None
+                               else float(seed_threshold))
         self.mode, self.decoders = mode, decoders
         self.head_scale = head_scale
         _with_scale({}, head_scale)  # validate early
@@ -267,7 +299,8 @@ class _InstanceEval:
             labels = relabel_sequential(connected_components(out["extent"][:, 0].float() > 0))
         else:
             labels = instances_from_outputs(out["extent"].float(), out["boundary"].float(),
-                                            out["distance"].float(), logits=True)
+                                            out["distance"].float(), logits=True,
+                                            seed_threshold=self.t.seed_threshold)
         self.om.update(labels, y)
 
     def compute(self) -> dict:
@@ -403,7 +436,9 @@ class _PointEval:
         self.n += y.shape[0]
         gt_counts = torch.tensor([float(len(p)) for p in t["points"]])
         if self.t.density:  # integrate on the native grid (counts are block sums)
-            self.cm.update(count_from_density(out["density"].float() * nt["weight"]).cpu()
+            # the target is density_map (unscaled) x density_scale: value_scale 1, then divide
+            self.cm.update(count_from_density(out["density"].float() * nt["weight"],
+                                              value_scale=1.0).cpu()
                            / self.t.density_scale, gt_counts)
             return
         peaks = self.t.find_points(out, t, nt)  # input-pixel coordinates (lowest grid threshold)
@@ -437,15 +472,18 @@ def _image_out(out):
 
 class ClassificationTask(Task):
     """Single-label (softmax + cross-entropy; primary: accuracy) or multi-label (sigmoid + BCE;
-    primary: macro average precision) image classification."""
+    primary: macro average precision) image classification. ``label_smoothing`` applies to
+    the single-label CE (training and the reported validation loss); multi-label raises for
+    a value > 0."""
 
     image_level = True
 
     def __init__(self, num_classes: int, multilabel: bool = False,
                  label_smoothing: float = 0.0) -> None:
         self.num_classes, self.multilabel = num_classes, multilabel
-        self.label_smoothing = label_smoothing
         self.name = "multilabel" if multilabel else "classification"
+        self.label_smoothing = _check_label_smoothing(label_smoothing, self.name,
+                                                      applies=not multilabel)
         self.primary_metric = "map_macro" if multilabel else "accuracy"
 
     def loss(self, out, y):
@@ -468,13 +506,15 @@ class _ClassEval:
         if self.cm is None:
             self.cm = torch.zeros(k, k, dtype=torch.long, device=y.device)
         self.cm += torch.bincount(y * k + out.argmax(1), minlength=k * k).view(k, k)
-        self.loss += float(F.cross_entropy(out, y, reduction="sum"))
+        self.loss += float(F.cross_entropy(out, y, reduction="sum",
+                                           label_smoothing=self.t.label_smoothing))
         self.n += y.shape[0]
 
     def compute(self) -> dict:
         """Per-class F1 / macro F1 / balanced accuracy over the classes present in the ground
         truth; absent classes are NaN in ``f1`` (the convention of
-        :class:`~manyseg_bench.evaluation.ConfusionMatrix`)."""
+        :class:`~manyseg_bench.evaluation.ConfusionMatrix`). ``loss``: the training objective
+        (CE with the task's label smoothing) per image."""
         cm = self.cm.double()  # rows: truth, columns: prediction
         tp, support, predicted = cm.diag(), cm.sum(1), cm.sum(0)
         present = support > 0
@@ -487,14 +527,23 @@ class _ClassEval:
 
 
 def average_precision(scores: torch.Tensor, labels: torch.Tensor) -> float:
-    """Non-interpolated AP (mean precision at each positive, scores ranked high to low; ties
-    keep input order). NaN without positives."""
-    order = torch.argsort(scores, descending=True, stable=True)
-    hits = labels[order].double()
+    """Non-interpolated AP: ``sum_n (R_n - R_{n-1}) P_n`` over the distinct score thresholds
+    (scikit-learn's ``average_precision_score``). Tied scores form one threshold, so the
+    result does not depend on the input order; without ties it is the mean precision at each
+    positive. NaN without positives."""
+    scores, hits = scores.reshape(-1).double(), labels.reshape(-1).double()
     if hits.sum() == 0:
         return float("nan")
-    prec = hits.cumsum(0) / torch.arange(1, len(hits) + 1, dtype=torch.double, device=hits.device)
-    return float((prec * hits).sum() / hits.sum())
+    order = torch.argsort(scores, descending=True, stable=True)
+    scores, hits = scores[order], hits[order]
+    tp = hits.cumsum(0)
+    last = torch.ones_like(scores, dtype=torch.bool)  # last index of each distinct score
+    last[:-1] = scores[1:] != scores[:-1]
+    n = torch.arange(1, len(hits) + 1, dtype=torch.double, device=hits.device)
+    tp, prec = tp[last], (tp / n)[last]
+    recall = tp / hits.sum()
+    gain = torch.diff(recall, prepend=recall.new_zeros(1))
+    return float((gain * prec).sum())
 
 
 class _MultiLabelEval:
@@ -562,10 +611,15 @@ class _RegressionEval:
         p, y = torch.cat(self.pred).double(), torch.cat(self.y).double()
         err = p - y
         ss_tot = ((y - y.mean(0)) ** 2).sum(0)
-        r2 = (1 - (err ** 2).sum(0) / ss_tot.clamp(min=1e-12)).tolist()
+        # R2 is undefined for a target constant over the split (ss_tot = 0): NaN, and r2_mean
+        # averages the defined entries (the NaN rule of evaluation.metrics)
+        r2 = torch.where(ss_tot > 0, 1 - (err ** 2).sum(0) / ss_tot.clamp(min=1e-300),
+                         torch.nan)
+        defined = r2[~r2.isnan()]
         return {"mae": float(err.abs().mean()), "rmse": float(err.pow(2).mean().sqrt()),
-                "rmse_per_output": err.pow(2).mean(0).sqrt().tolist(), "r2": r2,
-                "r2_mean": sum(r2) / len(r2), "loss": float(self.t.loss(p.float(), y.float()))}
+                "rmse_per_output": err.pow(2).mean(0).sqrt().tolist(), "r2": r2.tolist(),
+                "r2_mean": float(defined.mean()) if len(defined) else float("nan"),
+                "loss": float(self.t.loss(p.float(), y.float()))}
 
 
 class SegMultilabelTask(Task):
@@ -573,7 +627,8 @@ class SegMultilabelTask(Task):
     the classes present (``ignore_index`` excluded), so pixel supervision is an auxiliary task
     for the image classifier. Heads: ``seg`` (pixel, via the decoder) and ``logits`` (image,
     pooling the encoder). Loss: CE(seg) + ``cls_weight`` * BCE(logits). Primary: macro AP of
-    the image head; mIoU of the pixel head is reported under ``"seg"``."""
+    the image head; mIoU of the pixel head is reported under ``"seg"``. ``label_smoothing``
+    > 0 raises: it would reach the pixel head only."""
 
     name = "seg_multilabel"
     primary_metric = "map_macro"
@@ -582,7 +637,8 @@ class SegMultilabelTask(Task):
                  cls_weight: float = 1.0, label_smoothing: float = 0.0) -> None:
         self.num_classes, self.ignore_index, self.cls_weight = num_classes, ignore_index, \
             cls_weight
-        self.seg = SemanticTask(num_classes, ignore_index, label_smoothing)
+        self.label_smoothing = _check_label_smoothing(label_smoothing, self.name, applies=False)
+        self.seg = SemanticTask(num_classes, ignore_index)
         self.cls = ClassificationTask(num_classes, multilabel=True)
 
     def heads(self):
@@ -689,13 +745,17 @@ class _MultiLabelSegEval:
 
 def _change_scores(mat: torch.Tensor) -> dict:
     """Precision / recall / F1 / IoU of class 1 ("change") from a 2x2 (rows = target)
-    confusion matrix."""
-    m = mat.double()
-    tp, fp, fn = m[1, 1], m[0, 1], m[1, 0]
-    return {"precision_change": float(tp / (tp + fp).clamp(min=1)),
-            "recall_change": float(tp / (tp + fn).clamp(min=1)),
-            "f1_change": float(2 * tp / (2 * tp + fp + fn).clamp(min=1)),
-            "iou_change": float(tp / (tp + fp + fn).clamp(min=1))}
+    confusion matrix. The NaN rule of :mod:`manyseg_bench.evaluation.metrics`: without change
+    in the ground truth, recall / F1 / IoU are NaN; precision is NaN when change is never
+    predicted."""
+    m = mat.double().cpu()
+    tp, fp, fn = float(m[1, 1]), float(m[0, 1]), float(m[1, 0])
+    nan = float("nan")
+    present = tp + fn > 0
+    return {"precision_change": tp / (tp + fp) if tp + fp > 0 else nan,
+            "recall_change": tp / (tp + fn) if present else nan,
+            "f1_change": 2 * tp / (2 * tp + fp + fn) if present else nan,
+            "iou_change": tp / (tp + fp + fn) if present else nan}
 
 
 class ChangeTask(SemanticTask):
@@ -725,14 +785,20 @@ class SemanticChangeTask(Task):
     predicted, else 0; ``miou_scd`` = mean of the no-change and change IoUs, ``sek`` = Cohen's
     kappa of the (K+1)-class confusion without its no-change/no-change cell times
     ``exp(IoU_change - 1)``, primary ``score`` = 0.3 ``miou_scd`` + 0.7 ``sek``.
+
+    ``ignore_index``: label value excluded per channel, from the losses (the land-cover term
+    of that date, or the change term) and from the confusion matrices. ``label_smoothing``
+    applies to all three CE terms.
     """
 
     name = "semantic_change"
     primary_metric = "score"
 
     def __init__(self, num_classes: int, ignore_index: int | None = None, per_input: bool = True,
-                 share: bool = True) -> None:
+                 share: bool = True, label_smoothing: float = 0.0) -> None:
         self.num_classes, self.per_input, self.share = num_classes, per_input, share
+        self.ignore_index = ignore_index
+        self.label_smoothing = _check_label_smoothing(label_smoothing, self.name)
 
     def heads(self):
         lc = {"type": "segmentation", "out_channels": self.num_classes}
@@ -744,15 +810,24 @@ class SemanticChangeTask(Task):
                 h["lc2"]["share"] = "lc1"
         return h
 
+    def _ignored(self, y):
+        return (y == self.ignore_index if self.ignore_index is not None
+                else torch.zeros_like(y, dtype=torch.bool))
+
     def targets(self, y):
-        lc = (y[:, :2] - 1).masked_fill(y[:, :2] == 0, -100)  # land cover on changed pixels
-        return {"lc1": lc[:, 0], "lc2": lc[:, 1], "change": y[:, 2]}
+        ign = self._ignored(y)
+        # land cover on changed pixels; -100 = no target (unchanged or ignored)
+        lc = (y[:, :2] - 1).masked_fill((y[:, :2] == 0) | ign[:, :2], -100)
+        return {"lc1": lc[:, 0], "lc2": lc[:, 1],
+                "change": y[:, 2].masked_fill(ign[:, 2], -100)}
 
     def loss(self, out, t):
-        loss = F.cross_entropy(out["change"].float(), t["change"])
-        for k in ("lc1", "lc2"):
-            if bool((t[k] >= 0).any()):  # a batch without change has no land-cover target
-                loss = loss + F.cross_entropy(out[k].float(), t[k], ignore_index=-100)
+        ls = self.label_smoothing
+        loss = out["change"].float().sum() * 0.0
+        for k in ("change", "lc1", "lc2"):
+            if bool((t[k] >= 0).any()):  # e.g. a batch without change has no land-cover target
+                loss = loss + F.cross_entropy(out[k].float(), t[k], ignore_index=-100,
+                                              label_smoothing=ls)
         return loss
 
     def evaluator(self):
@@ -770,11 +845,13 @@ class _SemanticChangeEval:
         self.loss += float(self.t.loss(out, self.t.targets(y))) * y.shape[0]
         self.n += y.shape[0]
         ch = out["change"].argmax(1)
+        keep = ~self.t._ignored(y)
         for i, key in ((0, "lc1"), (1, "lc2")):
             pred = torch.where(ch == 1, out[key].argmax(1) + 1, torch.zeros_like(ch))
-            idx = (y[:, i] * self.k + pred).flatten().cpu()
+            idx = (y[:, i] * self.k + pred)[keep[:, i]].cpu()
             self.scd += torch.bincount(idx, minlength=self.k * self.k).view(self.k, self.k)
-        self.bin += torch.bincount((y[:, 2] * 2 + ch).flatten().cpu(), minlength=4).view(2, 2)
+        idx = (y[:, 2] * 2 + ch)[keep[:, 2]].cpu()
+        self.bin += torch.bincount(idx, minlength=4).view(2, 2)
 
     def compute(self) -> dict:
         cm = self.scd
@@ -821,7 +898,8 @@ class CornerLineTask(Task):
 
     ``distance="absolute"`` (experimental for footprints and roofs; the default for fields,
     E052): unnormalised distance, so an instance cut by the tile edge gets the same values as
-    in the whole scene; decode with a ``seed_threshold`` in pixels."""
+    in the whole scene. ``seed_threshold`` is passed to the instance decoding (``None``: 0.25
+    for normalised distance, 3 px for absolute; see :class:`InstanceTask`)."""
 
     name = "corner_lines"
     primary_metric = "pq"
@@ -829,9 +907,11 @@ class CornerLineTask(Task):
 
     def __init__(self, boundary_width: float = 2.0, corner_weight: float = 1.0,
                  direction_weight: float = 1.0, iou_threshold: float = 0.5,
-                 decoders=None, distance: str = "normalized") -> None:
+                 decoders=None, distance: str = "normalized",
+                 seed_threshold: float | None = None) -> None:
         self.inner = InstanceTask(boundary_width=boundary_width, iou_threshold=iou_threshold,
-                                  distance=distance)
+                                  distance=distance, seed_threshold=seed_threshold)
+        self.seed_threshold = self.inner.seed_threshold
         self.corner_weight, self.direction_weight = corner_weight, direction_weight
         self.decoders = decoders
 

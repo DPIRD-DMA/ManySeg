@@ -138,7 +138,10 @@ class ConcatAggregation(nn.Module):
             raise ValueError(f"'concat' aggregation was built for {self.dates} dates, got "
                              f"{f.shape[1]}")
         f = torch.where(mask[:, :, None, None, None], f, torch.zeros_like(f))
-        return self.fuse(f.flatten(1, 2))
+        out = self.fuse(f.flatten(1, 2))
+        # conv-BN-ReLU maps all-zero input to a nonzero bias: a sample with no valid date
+        # gets zero features, like the other aggregations.
+        return torch.where(mask.any(1)[:, None, None, None], out, torch.zeros_like(out))
 
 
 class DiffAggregation(nn.Module):

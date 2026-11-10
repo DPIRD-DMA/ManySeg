@@ -13,7 +13,8 @@ Two routes, both through torchao (``pip install 'manyseg[quant]'``):
 
 This is a module of its own rather than part of ``manyseg.export`` because it carries an
 optional dependency and because ``quantize_weights`` does not export at all. The PT2E path
-reuses ``manyseg.export.dynamic_shapes`` rather than duplicating it.
+reuses ``manyseg.export``'s dynamic shapes, window-attention check and export call rather
+than duplicating them.
 
 Both save through :func:`manyseg.save` and load through :func:`manyseg.load`, with their metadata
 and ``tiling_spec()``. A ``.pt2`` file is written without pickled data. ``torch.export.load`` can
@@ -27,6 +28,7 @@ trust.
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import io
 import json
@@ -40,7 +42,12 @@ from typing import Any
 import torch
 from torch import Tensor, nn
 
-from .export import dynamic_shapes, eval_mode
+from .export import (
+    _checked_shapes,
+    _export,
+    _windowed,  # noqa: F401  (window-attention check, also imported from here)
+    eval_mode,
+)
 
 WEIGHT_MODES = ("int8_weight_only", "int8_dynamic")
 
@@ -76,52 +83,6 @@ def _x86_quantizer(reduce_range: bool | None = None):
     return xiq.X86InductorQuantizer().set_global(cfg)
 
 
-# timm's window-attention classes, by (module, class): their dynamic-size export fails inside
-# timm (older torch versions hung instead), so they are refused up front with a clear message.
-# Matched exactly so that an unrelated module with a ``window_size`` attribute is not rejected.
-_WINDOW_ATTENTION = {
-    ("timm.models.swin_transformer", "WindowAttention"),
-    ("timm.models.swin_transformer_v2", "WindowAttention"),
-    ("timm.models.swin_transformer_v2_cr", "WindowMultiHeadAttention"),
-    ("timm.models.davit", "WindowAttention"),
-}
-
-
-def _windowed(model: nn.Module) -> str | None:
-    """Class name of the first timm window-attention module (Swin, Swin V2, DaViT), if any."""
-    return next((type(m).__name__ for m in model.modules()
-                 if (type(m).__module__, type(m).__name__) in _WINDOW_ATTENTION), None)
-
-
-def _shapes(model: nn.Module, example, dynamic: bool, max_size: int, dynamic_batch: bool):
-    """``export_model``'s dynamic-shape spec, or None (fixed size). With ``dynamic=False`` and
-    ``dynamic_batch``, only the batch is dynamic. Computed once from the float model: the
-    quantised graph is re-exported with the same spec."""
-    if not dynamic:
-        return dynamic_shapes(model, example, max_size, dynamic_batch, dynamic_hw=False)
-    if (block := _windowed(model)) is not None:
-        raise ValueError(f"window-attention backbones ({block}) cannot be exported with dynamic "
-                         "H/W; pass dynamic=False to quantise at the example's fixed size")
-    return dynamic_shapes(model, example, max_size, dynamic_batch)
-
-
-def _export(module: nn.Module, example, shapes, dynamic: bool = True
-            ) -> torch.export.ExportedProgram:
-    """``torch.export`` as ``export_model`` does it, for the float model and the int8 graph."""
-    try:
-        return torch.export.export(module, (example,), dynamic_shapes=shapes,
-                                   prefer_deferred_runtime_asserts_over_guards=True)
-    except Exception as e:  # torch.export raises several types (UserError, RuntimeError, ...)
-        if shapes is None:
-            raise
-        what, fix = (("dynamic H/W", "pass dynamic=False to quantise at the example's fixed size")
-                     if dynamic else
-                     ("a dynamic batch", "pass dynamic_batch=False to quantise at the "
-                      "example's batch size"))
-        raise ValueError(f"could not export this model with {what}; {fix}. Export error: "
-                         f"{type(e).__name__}: {e}") from e
-
-
 def _drop_unused_attrs(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
     """``convert_pt2e`` adds int8 copies of the weights but leaves the float originals
     registered (unused); drop every parameter and buffer the graph no longer reads. An attribute
@@ -154,7 +115,8 @@ def quantize_pt2e(model: nn.Module, example, calibration: Iterable, *, quantizer
     torchao's ``X86InductorQuantizer`` (per-channel weights, per-tensor activations); pass any
     other PT2E quantizer (e.g. ``ArmInductorQuantizer``) to target another backend.
     ``reduce_range`` (default: on when *this* CPU lacks VNNI) uses 7-bit activations, which
-    is needed for correct compiled int8 on such CPUs; set it for the CPU you deploy on.
+    is needed for correct compiled int8 on such CPUs; set it for the CPU you deploy on. It
+    configures the default quantizer only: passing it with ``quantizer`` raises.
 
     H/W stay dynamic as in ``export_model`` (and the batch too with ``dynamic_batch``, which
     needs an example with batch size >= 2). ``model`` is exported in eval mode and then
@@ -172,10 +134,13 @@ def quantize_pt2e(model: nn.Module, example, calibration: Iterable, *, quantizer
         torch._inductor.config.freezing = True
         fast = torch.compile(ep.module())
     """
+    if quantizer is not None and reduce_range is not None:
+        raise ValueError("reduce_range configures the default x86 quantizer; with quantizer= "
+                         "set it in that quantizer's config instead.")
     _require_torchao()
     from torchao.quantization.pt2e.quantize_pt2e import convert_pt2e, prepare_pt2e
 
-    shapes = _shapes(model, example, dynamic, max_size, dynamic_batch)
+    shapes = _checked_shapes(model, example, dynamic, max_size, dynamic_batch)
     with eval_mode(model):
         gm = _export(model, example, shapes, dynamic).module()
     rr = None  # unknown with a custom quantizer
@@ -653,6 +618,13 @@ def quantize_weights(model: nn.Module, mode: str = "int8_weight_only", *, conv: 
     linear = (Int8WeightOnlyConfig() if mode == "int8_weight_only"
               else Int8DynamicActivationInt8WeightConfig())
     quantize_(model, linear, filter_fn=_is_linear)
+    if not any(hasattr(t, "tensor_data_names") for t in model.state_dict(keep_vars=True).values()):
+        warnings.warn(
+            "quantize_weights quantised no layer: the model has no "
+            + ("Linear layer with more than one input feature (conv=False leaves convs float)"
+               if not conv else "Linear or dense Conv2d layer")
+            + ", so it is unchanged and saves as a float model.", UserWarning, stacklevel=2)
+        return model
     model.quantization = {"mode": mode, "conv": conv}  # what manyseg.load needs to rebuild it
     return model
 
@@ -720,12 +692,18 @@ def compare_outputs(reference, candidate, inputs: Iterable) -> dict[str, float]:
     * ``dtype_changed`` = 1.0, with a warning, if the candidate's dtype differs.
 
     For dict outputs every key is prefixed with the head name, e.g.
-    ``"segmentation/argmax_agreement"``.
+    ``"segmentation/argmax_agreement"``. ``nn.Module`` models run in eval mode and are then
+    returned to their previous mode.
     """
     reference, candidate = (m.module() if isinstance(m, torch.export.ExportedProgram) else m
                             for m in (reference, candidate))
     diffs: dict[str, _Diff] = {}
-    with torch.no_grad():
+    with torch.no_grad(), contextlib.ExitStack() as modes:
+        for m in (reference, candidate):
+            if isinstance(m, nn.Module):
+                # an ep.module() refuses .eval(): it is fixed in the mode it was exported in
+                with contextlib.suppress(NotImplementedError):
+                    modes.enter_context(eval_mode(m))
         for x in inputs:
             ref, out = reference(x), candidate(x)
             if isinstance(ref, Mapping):

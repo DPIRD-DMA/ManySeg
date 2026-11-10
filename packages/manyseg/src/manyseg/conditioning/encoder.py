@@ -107,6 +107,11 @@ class MetadataEncoder(nn.Module):
         finite = torch.isfinite(values)
         values = torch.where(finite, values, torch.zeros_like(values))
         b = values.shape[0]
+        nf = len(self.field_names)
+        if mask is not None and (mask.ndim != 2 or tuple(mask.shape) != (b, nf)):
+            raise ValueError(f"the metadata presence mask must be (B, F) = {(b, nf)}, one "
+                             f"column per field {list(self.field_names)} (not per value "
+                             f"column); got {tuple(mask.shape)}")
         drop = None
         if self.training and self.dropout > 0:
             drop = torch.rand(b, len(self.field_names), device=values.device) < self.dropout

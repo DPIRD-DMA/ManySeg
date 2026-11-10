@@ -2,7 +2,14 @@ from __future__ import annotations
 
 from torch import nn
 
-from .base import BuiltModel, ModelSpec, Provider, fingerprint_module, split_params
+from .base import (
+    BuiltModel,
+    ModelSpec,
+    Provider,
+    fingerprint_module,
+    split_params,
+    stem_adaptation_note,
+)
 
 _TV_WEIGHTS = {"tv_in1k": "IMAGENET1K_V1"}
 
@@ -37,7 +44,9 @@ class FastaiProvider(Provider):
         model = DynamicUnet(body, spec.num_classes, img_size, **spec.options)
         encoder = model[0]
         enc, dec = split_params(model, encoder)
-        return BuiltModel(_Plain(model), enc, dec, fingerprint_module(encoder))
+        notes = stem_adaptation_note("fastai", spec.in_channels, weights is not None,
+                                     rule="fastai")
+        return BuiltModel(_Plain(model), enc, dec, fingerprint_module(encoder), notes)
 
 
 class _Plain(nn.Module):

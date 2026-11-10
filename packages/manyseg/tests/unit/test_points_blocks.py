@@ -184,7 +184,7 @@ def test_decode_scene_checks_point_halo_early_and_empty_fields():
         decode_scene({}, dec)
     one = decode_scene({"heatmap": hm}, dec)  # default block 4096: the whole scene, one block
     assert np.array_equal(one.pixels, reference(hm, threshold=0.3, kernel=5)[0])
-    assert DensityBlockDecoder().min_halo == 0
+    assert DensityBlockDecoder(value_scale=1.0).min_halo == 0
 
 
 def test_float16_fields_and_scene_transform():
@@ -299,7 +299,7 @@ def test_block_decoder_registry_points_and_density():
 
     dec = block_decoder("points", threshold=0.3, kernel=5, max_points=50)
     assert type(dec) is PointBlockDecoder and dec.kernel == 5 and dec.max_points == 50
-    assert type(block_decoder("density")) is DensityBlockDecoder
+    assert type(block_decoder("density", sigma=2.0)) is DensityBlockDecoder
     assert block_decoder("density", value_scale=4.0, mask="fg").value_scale == 4.0
     with pytest.raises(TypeError):
         block_decoder("points", min_area=3)  # not a PointBlockDecoder parameter
@@ -325,11 +325,11 @@ def test_density_counts_nan_pixels_as_zero():
 
     density = np.ones((1, 32, 32), np.float32)
     density[0, :8, :8] = np.nan
-    dec = block_decoder("density")
+    dec = block_decoder("density", value_scale=1.0)
     assert decode_scene({"density": density}, dec, 16, 0).total == 32 * 32 - 64
     mask = np.ones((1, 32, 32), np.float32)
     mask[0, :8, :8] = np.nan
     mask[0, 16:, :] = 0
-    dec = block_decoder("density", mask="valid")
+    dec = block_decoder("density", value_scale=1.0, mask="valid")
     got = decode_scene({"density": density, "valid": mask}, dec, 16, 0)
     assert got.total == 32 * 16 - 64

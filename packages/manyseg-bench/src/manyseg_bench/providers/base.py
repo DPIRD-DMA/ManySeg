@@ -7,7 +7,15 @@ benchmark contract:
 * output: logits ``(N, num_classes, H, W)`` at input resolution.
 
 Everything else (data, augmentation, optimisation, precision, compilation, metrics) is owned
-by the benchmark and identical across providers.
+by the benchmark and identical across providers. Model construction itself follows each
+library's own rules, which differ beyond the architecture; notably, a pretrained 3-channel
+stem given ``in_channels != 3`` is adapted differently (see :func:`stem_adaptation_note`,
+recorded in each run's ``model_notes``):
+
+* SMP, timm and ManySeg (default ``channel_adapter="repeat"``): 1 channel sums the RGB
+  filters; otherwise the RGB filters are cycled over the channels and scaled by ``3 / C``;
+* fastai: 1 channel sums; 2 channels take the R and G filters x 1.5; more than 3 keep the RGB
+  filters on the first three channels and zero the extra channels' filters.
 """
 
 from __future__ import annotations
@@ -86,6 +94,30 @@ class Provider(ABC):
         return True
 
 
+_STEM_RULES = {
+    "repeat": "RGB filters cycled over the channels and scaled by 3/C",
+    "fastai": "RGB filters kept on channels 0-2, the extra channels' filters zero",
+}
+
+
+def stem_adaptation_note(library: str, in_channels: int, pretrained: bool,
+                         rule: str = "repeat") -> list[str]:
+    """``model_notes`` entry describing how ``library`` adapted a pretrained 3-channel stem to
+    ``in_channels`` (empty when nothing was adapted). ``rule``: ``"repeat"`` (SMP, timm,
+    ManySeg's default) or ``"fastai"``; other values (ManySeg ``channel_adapter`` names) are
+    recorded as given."""
+    c = int(in_channels)
+    if not pretrained or c == 3:
+        return []
+    if c == 1:
+        how = "RGB filters summed"
+    elif rule == "fastai" and c == 2:
+        how = "R and G filters x 1.5"
+    else:
+        how = _STEM_RULES.get(rule, f"channel_adapter {rule!r}")
+    return [f"stem adapted to {c} input channels ({library}): {how}"]
+
+
 def fingerprint_module(module: nn.Module) -> str:
     """Short hash of the first conv weight: equal fingerprints => same pretrained weights."""
     for m in module.modules():
@@ -102,4 +134,5 @@ def split_params(model: nn.Module, encoder: nn.Module) -> tuple[list, list]:
     return enc, dec
 
 
-__all__ = ["BuiltModel", "ModelSpec", "Provider", "fingerprint_module", "split_params"]
+__all__ = ["BuiltModel", "ModelSpec", "Provider", "fingerprint_module", "split_params",
+           "stem_adaptation_note"]

@@ -18,7 +18,10 @@ manyseg-bench evaluate runs/<run>.json --variants fp32,bf16,int8_weight_only
 ```
 
 * **Providers:** ManySeg, SMP, fastai and timm behind one interface, with weight
-  fingerprints; remote-sensing weights fed their own pretraining normalisation.
+  fingerprints; remote-sensing weights fed their own pretraining normalisation. Each library
+  builds its model by its own rules: for an ImageNet stem on more than 3 input channels,
+  SMP, timm and ManySeg (default) cycle the RGB filters and scale them by 3/C, while fastai
+  keeps the RGB filters and zeroes the extra channels' (each run's `model_notes` records it).
 * **Tasks:** semantic and multi-label segmentation, instances (PQ, object F1), points (point
   F1, count MAE), image classification, multi-label classification and regression, binary
   and semantic change detection, time series, and vector-output training (corner-line
@@ -28,7 +31,10 @@ manyseg-bench evaluate runs/<run>.json --variants fp32,bf16,int8_weight_only
   (OAM-TCD also checks each image's licence). Those splits are not all spatially independent:
   AI4Boundaries' is random, not spatially blocked, and Sen1Floods11's train/val/test share
   flood events (its Bolivia event is held out; `--split events:K:F` re-splits leave-events-out).
-  Dataset normalisation statistics come from the training split only.
+  Normalisation: per-channel statistics of the training split for the multispectral
+  datasets (Sen1Floods11, CloudSEN12+, PASTIS, EuroSAT, BigEarthNet, OSCD, AI4Boundaries S2);
+  ImageNet constants for the RGB ones (Oxford Pet, OAM-TCD, AI4Boundaries, LEVIR-CD, SECOND).
+  Each run records its source under `norm_stats`.
 * **Provenance:** every training run's JSON records the environment, code version, GPU contention,
   FLOPs, throughput and peak memory.
 

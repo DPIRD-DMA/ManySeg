@@ -161,11 +161,15 @@ def graph_from_road_heads(
         c: on_mask(refine(kp[i], peak_pixels(kp[i], keypoint_threshold, _KERNEL)))
         for i, c in enumerate(CLASSES)
     }
-    return _assemble(surf, peaks, d, (H, W), zone_radius, pair_deg, gap, scale)
+    return _assemble(surf, peaks, d, (H, W), zone_radius, pair_deg, gap, min_length, scale)
 
 
-def _assemble(surf, peaks, d, shape, zone_radius, pair_deg, gap, scale) -> VectorGraph:
-    """Surface graph + keypoint peaks -> road graph (the steps after the dense ones)."""
+def _assemble(surf, peaks, d, shape, zone_radius, pair_deg, gap, min_length, scale) -> VectorGraph:
+    """Surface graph + keypoint peaks -> road graph (the steps after the dense ones).
+
+    Rejoining at keypoints can leave new short pieces (a stub cut between two zones), so the
+    connected pieces shorter than ``min_length`` are dropped again here, in the same (head)
+    pixel units as the surface graph."""
     nx, shapely = _deps()[:2]
     from scipy.sparse.csgraph import minimum_spanning_tree
 
@@ -178,7 +182,7 @@ def _assemble(surf, peaks, d, shape, zone_radius, pair_deg, gap, scale) -> Vecto
             sub = g.subgraph(comp)
             if (
                 sum(float(np.hypot(*(g.nodes[a]["xy"] - g.nodes[b]["xy"]))) for a, b in sub.edges())
-                < 20
+                < min_length
             ):
                 g.remove_nodes_from(comp)
     bridge_ends(g, gap, shape)
@@ -282,7 +286,9 @@ class RoadBlockDecoder:
 
     ``window_fields``: ``names`` -> ``(C, h, w)`` arrays cropped to ``block.window``; ``block``
     has ``core`` / ``window`` ``(top, bottom, left, right)`` and ``scene_edges``; ``scene`` has
-    ``height`` / ``width``. The graph is in scene pixel coordinates.
+    ``height`` / ``width`` and optionally ``transform`` / ``crs``. The graph is in scene pixel
+    coordinates and carries the scene's ``transform`` / ``crs`` (:class:`VectorGraph`), so
+    ``graph.to_geojson()`` / ``write_records(graph, path)`` write world coordinates.
 
     Per block (dense, local): threshold and small-blob removal (blobs touching an inner window
     edge are kept, as the window sees only part of them), skeletonize, keypoint local maxima
@@ -463,9 +469,21 @@ class RoadBlockDecoder:
         )
         keys, first = np.unique(keys, return_index=True)  # halos overlap: same pixels twice
         d = _SparseField(keys, vals[first], (vals.shape[1] if vals.ndim == 2 else 4, H, W))
-        return _assemble(
-            surf, peaks, d, (H, W), p["zone_radius"], p["pair_deg"], p["gap"], p["scale"]
+        vg = _assemble(
+            surf,
+            peaks,
+            d,
+            (H, W),
+            p["zone_radius"],
+            p["pair_deg"],
+            p["gap"],
+            p["min_length"],
+            p["scale"],
         )
+        # georeferenced as decode_scene's other results (SceneRecords, ScenePoints)
+        vg.transform = getattr(scene, "transform", None)
+        vg.crs = getattr(scene, "crs", None)
+        return vg
 
 
 class _SparseField:

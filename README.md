@@ -198,10 +198,11 @@ record each pretrained backbone's licence and citation, and `describe()` lists t
 
 **Objects and counts.** `manyseg.instances` (touching fields, crowns, buildings) and
 `manyseg.points` (trees, animals: centres, counts) provide the heads, training targets (from
-instance masks, points or YOLO / COCO boxes) and post-processing; the losses are in
-`manyseg.losses`, plus `density_loss` in `manyseg.points`. To count, either
+instance masks, points or YOLO / COCO boxes) and post-processing; the losses, `density_loss`
+among them, are in `manyseg.losses` (`manyseg.points` re-exports `density_loss`). To count, either
 find peaks in a centre heatmap (`find_peaks`, with optional smoothing and a foreground mask)
-or sum a density map (`density_head`, `density_loss`). Which is better depends on the data.
+or sum a density map (`density_head`, `density_loss`; `count_from_density(density, sigma=)`
+divides by the target's 2πσ² scale). Which is better depends on the data.
 With many small trees per tile, the density head had half the count error of peaks at a fixed
 threshold (E011), and about the same once the threshold was calibrated on validation data (test
 MAE 19.4 against 20.6; E011b). With a few large plants per drone tile, peak counting was far
@@ -209,8 +210,9 @@ better (count MAE 1.0 against 7.5–11 for raw density heads), because a small b
 summed over every pixel adds up; count peaks for a few large objects. `density_head()` uses a
 softplus output by default: on that drone data its count MAE was 2.9, against 10.1 for the raw
 head clamped at 0 and 7.5 summed as is, and on OAM-TCD it was no worse than the raw head (E011c).
-Softplus never reaches 0, so a mostly empty tile still sums to a small positive count (about 2
-objects on an empty 792 x 792 drone tile); `density_head(activation=None)` gives the raw head.
+Softplus never reaches 0, so every tile sums to a small positive floor (about +1.75 objects per
+image, 2.4 on an empty 792 x 792 drone tile); `density_head(activation=None)` gives the raw
+head.
 The drone numbers come from one downstream dataset (45 validation images, one seed) and are not
 reproduced in this repository. Validate on your data.
 
@@ -354,10 +356,10 @@ predict_files(model, ["scene.tif"], load_func=load, output_dir="predictions",
               patch_size=1024, overlap=256, output="argmax", nodata=0)
 ```
 
-`device` defaults to CUDA, then MPS, then the CPU, and `dtype` to float16 on GPUs where it is
-fast (float32 elsewhere). Overlapping patches are blended by default (`merge="blend"`, a
-weighted mean that fades towards each patch edge).
-`merge="cut"` takes each pixel from the patch it is most central in, so nothing is averaged;
+`device` defaults to CUDA, then MPS, then the CPU, and `dtype` to float32; `dtype="float16"` or
+`"bfloat16"` is faster on GPUs that support it, and rounds the weights and outputs. Overlapping
+patches are blended by default (`merge="blend"`, a weighted mean that fades towards each patch
+edge). `merge="cut"` takes each pixel from the patch it is most central in, so nothing is averaged;
 it can be set per head (`merge={"extent": "cut"}`). Use it for road heads decoded into graphs,
 and keep blend for maps used as rasters. On City-Scale roads, blending lost junctions where
 patches overlapped (junction agreement with a whole-scene pass 0.954, cut 0.971, away from
@@ -374,10 +376,12 @@ predicts ([guide](docs/api_design.md#vector-outputs-line-graphs-polygons)). `mer
 `manypred.blocks` are on ManyPred's GitHub main since 2026-11-02, and will be in its first
 release.
 
-ManyPred moves a model to its device and `dtype` in place and sets it to eval mode, and on GPUs
-the default `dtype` is usually float16. So after a preview during training, reload the model or
-restore your checkpoint before training further or calling `manyseg.save`, or run the preview on
-a copy: otherwise the weights go on, and are saved, in the lower precision.
+ManyPred moves a model to its device and `dtype` in place and sets it to eval mode. So after a
+preview during training, call `model.train()` (and move it back if it was on another device)
+before training further. With `dtype="float16"` or `"bfloat16"` the weights are also rounded for
+good: reload the model or restore your checkpoint before training further or calling
+`manyseg.save`, or run the preview on a copy, or the weights go on, and are saved, in the lower
+precision.
 
 ## Tips from our benchmarks
 

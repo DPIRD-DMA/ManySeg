@@ -27,7 +27,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .base import DatasetInfo, channel_stats, save_split
+from .base import DatasetInfo, channel_stats, check_native_size, save_split
 
 RGB = {"mean": [0.485, 0.456, 0.406], "std": [0.229, 0.224, 0.225]}
 
@@ -109,7 +109,9 @@ SECOND_INFO = DatasetInfo(
            "val = sha1 10% of torchange train"))
 
 
-def prepare_second(raw: Path, cache: Path) -> dict:
+def prepare_second(raw: Path, cache: Path, size: int | None = None) -> dict:
+    """Cache SECOND's 512 x 512 pairs as published; another ``size`` raises."""
+    check_native_size(size, 512, "second")
     from numpy.lib.format import open_memmap
 
     Path(cache).mkdir(parents=True, exist_ok=True)

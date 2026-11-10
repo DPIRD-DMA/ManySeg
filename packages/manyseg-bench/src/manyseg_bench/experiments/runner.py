@@ -14,7 +14,7 @@ from ..datasets.base import Split, channel_stats, load_meta
 from ..env import environment, gpu_contention
 from ..profiling import count_flops
 from ..providers import ModelSpec, get_provider
-from ..tasks import build_task
+from ..tasks import LABEL_SMOOTHING_TASKS, build_task
 from ..training import evaluate, get_recipe, seed_everything, train
 
 
@@ -176,6 +176,10 @@ def run_training(
     rec = get_recipe(recipe, **(recipe_overrides or {}))
     meta = load_meta(cache)
     mean, std = meta.get("mean", info.mean), meta.get("std", info.std)
+    # meta.json holds statistics when prepare computed them from the training split; other
+    # datasets (Oxford Pet, OAM-TCD, AI4Boundaries, LEVIR-CD, SECOND) use fixed constants
+    norm_source = ("meta.json (official train split)" if "mean" in meta
+                   else f"dataset constants ({info.name} DatasetInfo mean/std)")
     if info.inputs:
         mean, std = {k: mean[k] for k in info.inputs}, {k: std[k] for k in info.inputs}
     series = dict(info.timeseries or {})
@@ -198,8 +202,11 @@ def run_training(
     torch.backends.cudnn.benchmark = torch.version.hip is None
     task_name = getattr(ds, "TASK", "semantic")
     task_kwargs = {**getattr(ds, "TASK_KWARGS", {}), **(task_overrides or {})}
-    if task_name in ("semantic", "classification", "seg_multilabel", "change"):
+    if task_name in LABEL_SMOOTHING_TASKS:
         task_kwargs.setdefault("label_smoothing", rec.label_smoothing)
+    elif rec.label_smoothing > 0:  # never record a setting the loss does not apply
+        raise ValueError(f"recipe label_smoothing={rec.label_smoothing}: task {task_name!r} "
+                         "has no label smoothing; set label_smoothing=0")
     task = build_task(task_name, info.num_classes, info.ignore_index, **task_kwargs)
     if task.image_level:
         spec = ModelSpec(**{**spec.to_dict(), "output": "image"})
@@ -218,7 +225,6 @@ def run_training(
         raise ValueError(f"provider {provider!r} does not support dict inputs; "
                          "use input_mode='stack'")
     train_split = get_split("train")
-    norm_source = "meta.json (official train split)"
     from ..providers.manyseg_provider import registry_weights
 
     rw = registry_weights(spec) if provider == "manyseg" else None
@@ -280,6 +286,10 @@ def run_training(
         "img_size": list(img_size),
         "recipe": rec.to_dict(),
         "task_kwargs": task_kwargs,
+        # resolved values the task applies (defaults included), e.g. the instance decoding's
+        # seed_threshold, which depends on the distance encoding
+        "task_settings": {k: getattr(task, k) for k in ("label_smoothing", "seed_threshold")
+                          if hasattr(task, k)},
         "cudnn_benchmark": torch.backends.cudnn.benchmark,
         "subset": subset,
         "seed": seed,

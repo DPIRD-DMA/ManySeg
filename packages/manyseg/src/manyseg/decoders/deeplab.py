@@ -47,7 +47,11 @@ class ASPP(nn.Module):
 
 @DECODERS.register("deeplabv3plus")
 class DeepLabV3PlusDecoder(nn.Module):
-    """ASPP on the deepest feature + low-level (stride-4) skip. Output: 256 ch at stride 4.
+    """ASPP on the deepest feature + a low-level skip from the shallowest level it reads.
+    Output: ``channels`` (256) at that level's stride: 4 on a standard stride 4..32 pyramid,
+    coarser when the encoder has no stride-4 level (e.g. ``out_indices`` starting at stride 8)
+    or more than 4 levels of stride >= 4 (only the 4 deepest are read). ``out_stride`` may
+    only restate it.
 
     Atrous rates default to (12, 24, 36) at output stride 16 and are scaled for other deepest
     strides (e.g. (6, 12, 18) at 32). SMP dilates the encoder to output stride 16 instead;

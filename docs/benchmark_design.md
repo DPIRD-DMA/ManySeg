@@ -10,7 +10,7 @@ imports the benchmark; a test enforces this.
 | Owned by the benchmark (identical for every provider) | Owned by the provider |
 | --- | --- |
 | Dataset preparation, resizing, splits | Building the `nn.Module` from a `ModelSpec` |
-| Normalisation (mean/std from the dataset, per pixel) | Mapping canonical weight ids to library weights |
+| Normalisation (mean/std from the training split or fixed dataset constants, per pixel; recorded as `norm_stats.source`) | Mapping canonical weight ids to library weights |
 | Augmentation (seeded, on device) | Splitting parameters into encoder and decoder |
 | Optimiser, schedule, epochs, batch size, loss | Unwrapping library-specific output types |
 | Precision, `torch.compile`, channels_last | |
@@ -19,8 +19,12 @@ imports the benchmark; a test enforces this.
 
 If a provider cannot meet the contract exactly (for example, fastai's `DynamicUnet` needs
 `img_size` at construction), the difference is handled in the provider. `BuiltModel.notes`
-(saved with each run as `model_notes`) can record such differences; today only the ManySeg
-provider writes one (bands filled with the pretraining mean).
+(saved with each run as `model_notes`) records such differences: the bands filled with the
+pretraining mean (ManySeg, remote-sensing weights), and how each library adapts a pretrained
+3-channel stem to an input with C ≠ 3 channels. SMP, timm and ManySeg (default
+`channel_adapter="repeat"`) cycle the RGB filters and scale them by 3/C; fastai keeps the RGB
+filters and zeroes the extra channels'. Multispectral comparisons across providers therefore
+include this difference in initialisation.
 
 ## Provider contract
 
@@ -99,8 +103,11 @@ task option, `calibrate`, below):
 * Remote-sensing datasets use their official splits as published, which are not always
   spatially disjoint: AI4Boundaries' official split is random, not spatially blocked, and
   Sen1Floods11's train/val/test share flood events (Bolivia is held out; `--split events:K:F`
-  gives leave-events-out folds). Input normalisation comes from the training split, or from
-  the pretraining normalisation for remote-sensing weights (also under event splits).
+  gives leave-events-out folds). Input normalisation comes from the training split for the
+  multispectral datasets (recomputed per fold under event splits), from ImageNet constants for
+  the RGB datasets (Oxford Pet, OAM-TCD, AI4Boundaries, LEVIR-CD, SECOND), or from the
+  pretraining normalisation for remote-sensing weights. Each run records the source in
+  `norm_stats.source`.
 
 ## Metrics
 
@@ -112,10 +119,18 @@ task option, `calibrate`, below):
   non-finite step count (a stability signal).
 * Per-class scores and macro means cover only classes present in the ground truth: an absent
   class is NaN in per-class lists and left out of the mean (prediction-only classes are listed
-  in `pred_only_classes`). This holds for mIoU/Dice, classification macro F1, multi-label F1
-  and multi-label segmentation mIoU. Boundary F1 is NaN for an image with no edge in either
-  prediction or target, and the mean skips such images. Validation loss is cross-entropy per
-  non-ignored pixel. Point F1 uses an exact maximum one-to-one matching (no scipy needed).
+  in `pred_only_classes`). This holds for mIoU/Dice, classification macro F1, multi-label F1,
+  multi-label segmentation mIoU and the change-class scores (`*_change`: NaN without change in
+  the ground truth; precision NaN when change is never predicted). Regression R² is NaN for a
+  target constant over the split, and `r2_mean` averages the defined outputs. Boundary F1 is NaN for an image with no edge in either
+  prediction or target, and the mean skips such images. Validation loss is the training objective (cross-entropy
+  with the recipe's label smoothing) per non-ignored pixel. Point F1 uses an exact maximum
+  one-to-one matching, and instance matching below IoU 0.5 the exact maximum-IoU-sum
+  assignment; neither needs scipy, so results do not depend on what is installed. Multi-label
+  AP is computed at distinct score thresholds (scikit-learn's definition), so tied scores do
+  not depend on input order. Label smoothing applies to the cross-entropy tasks (semantic,
+  change, semantic change, single-label classification); other tasks refuse a recipe with
+  `label_smoothing` > 0.
   Boundary F1 and validation loss in run records written before 2026-11-10 used the older
   rules (edge-free images scored 0; loss divided by all pixels) and are not comparable.
 * Efficiency: parameters, serialised `state_dict` bytes, forward FLOPs (`FlopCounterMode`,

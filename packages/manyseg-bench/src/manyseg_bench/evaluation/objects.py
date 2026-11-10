@@ -2,7 +2,10 @@
 
 Conventions:
 * Instance matching: a predicted and a ground-truth object match when IoU > ``iou_threshold``
-  (0.5 by default, which makes matches unique); TP/FP/FN, precision, recall, F1.
+  (0.5 by default, which makes matches unique); TP/FP/FN, precision, recall, F1. Below 0.5 the
+  one-to-one matches are the assignment with the largest IoU sum (exact, no scipy needed, so
+  results do not depend on what is installed; per image this maximises PQ, whose denominator
+  ``TP + FP/2 + FN/2 = (G + P) / 2`` does not depend on the matching).
 * PQ = SQ x RQ with SQ = mean IoU of matches and RQ = TP / (TP + FP/2 + FN/2) (Kirillov et al.).
 * Over-/under-segmentation (per ground-truth object, partner = predicted object with the largest
   overlap): ``over_seg = 1 - |G ∩ P| / |G|`` and ``under_seg = 1 - |G ∩ P| / |P|``, averaged over
@@ -15,6 +18,7 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
 import torch
 from torch import Tensor
 
@@ -32,29 +36,86 @@ def _overlaps(pred: Tensor, gt: Tensor):
     return inter, gsize, psize, inter / union.clamp(min=1)
 
 
+def _hungarian_max(w: np.ndarray) -> list[tuple[int, int]]:
+    """Maximum-weight assignment of an ``(n, m)`` weight matrix with ``n <= m``: one column
+    per row (shortest augmenting paths with potentials, O(n^2 m)); deterministic for a given
+    matrix."""
+    n, m = w.shape
+    cost = -w
+    u, v = np.zeros(n + 1), np.zeros(m + 1)
+    p = np.zeros(m + 1, dtype=np.int64)  # p[j]: row (1-based) assigned to column j, 0 = none
+    way = np.zeros(m + 1, dtype=np.int64)
+    for i in range(1, n + 1):
+        p[0], j0 = i, 0
+        minv = np.full(m + 1, np.inf)
+        used = np.zeros(m + 1, dtype=bool)
+        while True:
+            used[j0] = True
+            i0 = p[j0]
+            cur = cost[i0 - 1] - u[i0] - v[1:]
+            free = ~used[1:]
+            better = free & (cur < minv[1:])
+            minv[1:][better] = cur[better]
+            way[1:][better] = j0
+            cand = np.where(free, minv[1:], np.inf)
+            j1 = int(np.argmin(cand)) + 1
+            delta = cand[j1 - 1]
+            u[p[used]] += delta
+            v[used] -= delta
+            minv[1:][free] -= delta
+            j0 = j1
+            if p[j0] == 0:
+                break
+        while j0:
+            j1 = way[j0]
+            p[j0] = p[j1]
+            j0 = j1
+    return [(int(p[j]) - 1, j - 1) for j in range(1, m + 1) if p[j]]
+
+
+def _max_iou_assignment(iou: np.ndarray, cand: np.ndarray) -> list[tuple[int, int]]:
+    """One-to-one candidate pairs with the largest IoU sum, solved per connected component of
+    the candidate graph (most are single pairs)."""
+    n_g, n_p = cand.shape
+    parent = list(range(n_g + n_p))
+
+    def find(a):
+        while parent[a] != a:
+            parent[a] = parent[parent[a]]
+            a = parent[a]
+        return a
+
+    edges = np.argwhere(cand)
+    for i, j in edges:
+        a, b = find(int(i)), find(n_g + int(j))
+        if a != b:
+            parent[max(a, b)] = min(a, b)
+    comps: dict[int, tuple[list, list]] = {}
+    for i in sorted({int(i) for i in edges[:, 0]}):
+        comps.setdefault(find(i), ([], []))[0].append(i)
+    for j in sorted({int(j) for j in edges[:, 1]}):
+        comps.setdefault(find(n_g + j), ([], []))[1].append(j)
+    pairs = []
+    for rows, cols in comps.values():
+        w = np.where(cand[np.ix_(rows, cols)], iou[np.ix_(rows, cols)], 0.0)
+        if len(rows) <= len(cols):
+            sol = _hungarian_max(w)
+        else:
+            sol = [(r, c) for c, r in _hungarian_max(w.T)]
+        pairs += [(rows[r], cols[c]) for r, c in sol if cand[rows[r], cols[c]]]
+    return pairs
+
+
 def _one_to_one(iou: Tensor, thr: float) -> Tensor:
     """Boolean (G, P) match matrix. For thr >= 0.5, IoU > thr matches are unique already;
-    below that, use a maximum-IoU one-to-one assignment (scipy if available, else greedy)."""
+    below that, the one-to-one assignment of IoU > thr pairs with the largest IoU sum
+    (exact and scipy-free, so the result does not depend on the environment)."""
     cand = iou > thr
     if thr >= 0.5 or not bool(cand.any()):
         return cand
     out = torch.zeros_like(cand)
-    try:
-        from scipy.optimize import linear_sum_assignment
-
-        r, c = linear_sum_assignment(-torch.where(cand, iou, -1.0).numpy())
-        for i, j in zip(r, c):
-            out[i, j] = bool(cand[i, j])
-    except ImportError:
-        used_g, used_p = set(), set()
-        for flat in torch.argsort(iou.reshape(-1), descending=True).tolist():
-            i, j = divmod(flat, iou.shape[1])
-            if not cand[i, j]:
-                break
-            if i not in used_g and j not in used_p:
-                out[i, j] = True
-                used_g.add(i)
-                used_p.add(j)
+    for i, j in _max_iou_assignment(iou.double().numpy(), cand.numpy()):
+        out[i, j] = True
     return out
 
 

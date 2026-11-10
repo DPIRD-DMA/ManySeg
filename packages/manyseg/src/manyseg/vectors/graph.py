@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import heapq
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 
@@ -48,10 +49,18 @@ def _remove_small(mask: np.ndarray, min_area: int) -> np.ndarray:
 @dataclass
 class VectorGraph:
     """An undirected graph of straight segments: ``xy`` ``(N, 2)`` node coordinates and
-    ``edges`` ``(E, 2)`` node indices."""
+    ``edges`` ``(E, 2)`` node indices.
+
+    ``transform`` / ``crs``: the georeferencing of the pixel coordinates, if known (``None``:
+    plain pixel coordinates). ``decode_scene`` with a georeferenced ``Scene`` sets them, as
+    on its :class:`~manyseg.vectors.SceneRecords`, so :meth:`to_geojson` / :meth:`write` (and
+    :func:`~manyseg.vectors.records_to_geojson` / :func:`~manyseg.vectors.write_records`)
+    write world coordinates and name the CRS. The low-level decoders leave them ``None``."""
 
     xy: np.ndarray
     edges: np.ndarray
+    transform: Any = None
+    crs: Any = None
 
     def __post_init__(self):
         self.xy = np.asarray(self.xy, np.float64).reshape(-1, 2)
@@ -86,6 +95,21 @@ class VectorGraph:
         xy = np.array([g.nodes[n]["xy"] for n in g.nodes()]).reshape(-1, 2)
         edges = np.array([(index[u], index[v]) for u, v in g.edges() if u != v]).reshape(-1, 2)
         return cls(xy, edges)
+
+    def to_geojson(self) -> dict:
+        """GeoJSON ``FeatureCollection`` (one LineString per polyline) through ``transform``,
+        naming ``crs`` (pixel coordinates and no CRS without a transform), as
+        :func:`~manyseg.vectors.records_to_geojson`."""
+        from .blocks import records_to_geojson
+
+        return records_to_geojson(self)
+
+    def write(self, path, *, layer: str | None = None):
+        """Write to ``path`` (``.geojson``, or e.g. ``.gpkg`` with geopandas) through
+        ``transform`` / ``crs`` (:func:`~manyseg.vectors.write_records`). Returns the path."""
+        from .blocks import write_records
+
+        return write_records(self, path, layer=layer)
 
     def polylines(self) -> list[np.ndarray]:
         """The graph as polylines between key nodes (degree != 2); loops close on themselves."""

@@ -21,7 +21,6 @@ pixel lies in its core, so no peak is kept twice or lost at a seam.
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -29,7 +28,7 @@ import numpy as np
 import torch
 
 from .geo import points_to_xy
-from .postprocess import blur_radius, find_peaks
+from .postprocess import blur_radius, density_value_scale, find_peaks
 
 _UNSET: Any = object()  # "argument not given" (``None`` means pixel coordinates)
 
@@ -233,7 +232,11 @@ class SceneCount:
 @dataclass
 class DensityBlockDecoder:
     """:func:`count_from_density` block by block: the density summed over each block's core
-    (float64), divided by ``value_scale``. Needs no halo (a sum has no reach).
+    (float64), divided by the target's scale. Needs no halo (a sum has no reach).
+
+    Give exactly one of ``sigma`` (the :func:`density_loss` ``sigma``: its default target is
+    scaled by ``2 pi sigma^2``) or ``value_scale`` (the loss's ``value_scale``; 1.0 for a plain
+    :func:`density_map` target), as :func:`count_from_density`.
 
     ``mask``: a field (1 channel); only pixels where it exceeds ``mask_threshold`` count, as
     ``count_from_density(density, mask=field > mask_threshold)``. Result: :class:`SceneCount`
@@ -243,15 +246,20 @@ class DensityBlockDecoder:
     a total. A model that returns NaN where there is data is not detected here."""
 
     field: str = "density"
-    value_scale: float = 1.0
+    sigma: float | None = None
+    value_scale: float | None = None
     mask: str | None = None
     mask_threshold: float = 0.5
 
     min_halo = 0
 
     def __post_init__(self):
-        if not (math.isfinite(self.value_scale) and self.value_scale > 0):
-            raise ValueError(f"value_scale must be finite and > 0, got {self.value_scale}")
+        density_value_scale(self.sigma, self.value_scale)  # exactly one, valid
+
+    @property
+    def count_scale(self) -> float:
+        """The density is divided by this: ``value_scale``, or ``2 pi sigma^2``."""
+        return density_value_scale(self.sigma, self.value_scale)
 
     def __call__(self, fields, block, scene) -> tuple[tuple[int, int, int, int], float]:
         """The block's core and the sum of the density field over it."""
@@ -262,7 +270,7 @@ class DensityBlockDecoder:
         if self.mask is not None:  # NaN in the mask compares False
             d = np.where(np.asarray(_field(fields, self.mask, 1, win))[:, it:ib, il:ir]
                          > self.mask_threshold, d, 0.0)
-        return core, float(np.nansum(d)) / self.value_scale
+        return core, float(np.nansum(d)) / self.count_scale
 
     def combine(self, results: list, scene) -> SceneCount:
         """The scene total and per-block counts: :class:`SceneCount`."""

@@ -203,7 +203,7 @@ def test_card_multi_input_vector_timeseries_and_image_heads():
     text = hub.card(meta, "org/crops")
     assert "| `s2` | timeseries | `(B, T, 10, H, W)` | — |" in text
     assert "`s2_mask`" in text and "`s2_dates`" in text
-    assert "| `dem` | image | `(B, 1, H, W)` | height |" in text
+    assert "| `dem` | raster | `(B, 1, H, W)` | height |" in text
     assert "| `meta` | vector | `(B, N)` | doy (cyclic), latlon (coords) |" in text
     assert 'model.pack_metadata("meta", {field: values})' in text
     assert "| `crop` | segmentation | pixel | 3 | softmax | wheat, canola \\| lupin, other |" \

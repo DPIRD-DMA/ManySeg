@@ -66,14 +66,17 @@ def main():
     with torch.no_grad():
         out = model(torch.rand(1, 3, 128, 128))
     print("model fields:", {k: tuple(v[0].shape) for k, v in out.items()})
-    fields = {"heatmap": heatmap, "density": density}  # stand-in: perfect outputs
+    # stand-in: perfect outputs. A density head trained with density_loss(sigma=2.0) predicts
+    # the density times 2 pi sigma^2 (peaks about 1), so its decoder takes the same sigma.
+    fields = {"heatmap": heatmap, "density": density * (2 * np.pi * 2.0**2)}
 
     # 3. Block by block: peaks whose pixel lies in a block's core; halo >= dec.min_halo.
     #    (block_decoder builds manyseg.points' PointBlockDecoder / DensityBlockDecoder.)
     scene = Scene(*SHAPE, transform=TRANSFORM, crs=CRS)
     dec = block_decoder("points", threshold=0.5, kernel=3)
     pts = decode_scene(fields, dec, block=128, halo=16, scene=scene)  # ScenePoints
-    count = decode_scene(fields, block_decoder("density"), block=128, halo=0, scene=scene)
+    count = decode_scene(fields, block_decoder("density", sigma=2.0), block=128, halo=0,
+                         scene=scene)
     err = np.hypot(*(pts.xy[:, None] - xy[None]).transpose(2, 0, 1)).min(1)
     print(f"{len(pts)} peaks (max {err.max():.2f} px from a tree: peaks are pixels; add an "
           f"offset head for sub-pixel points); density count {count.total:.2f} over "

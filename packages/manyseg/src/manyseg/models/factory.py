@@ -188,14 +188,24 @@ def _build_inputs(inputs, fusion, *, backbone, pretrained, channel_adapter, out_
                                  "yet; give each input its own encoder")
             if target not in encoders:
                 raise ValueError(f"input {n!r} shares {target!r}, which must be defined earlier")
-            _check_shared_adapter(n, cfg, encoders[target].in_channels)
+            target_ch = getattr(encoders[target], "in_channels", None)
+            if target_ch is None and target not in adapters:
+                # a custom nn.Module backbone need not declare in_channels: it was built for
+                # (and is fed) the target input as declared
+                target_ch = inputs[target]["in_channels"]
+            if target_ch is None:
+                raise ValueError(f"input {n!r} shares the backbone of {target!r}, which does "
+                                 "not declare 'in_channels' (a custom nn.Module backbone); "
+                                 "set its in_channels attribute so the shared input's "
+                                 "channels can be checked")
+            _check_shared_adapter(n, cfg, target_ch)
             # Weights shared, BatchNorm per input by default: one BN shared by inputs with
             # different statistics blends its running statistics, and evaluation then applies
             # the blend to every input (Sen1Floods11 val mIoU 0.50-0.65 vs 0.89).
             encoders[n] = (encoders[target] if cfg.get("share_norm", False)
                            else share_weights(encoders[target]))
             if cfg.get("channel_adapter") == "projection":
-                adapters[n] = ProjectionAdapter(cfg["in_channels"], encoders[target].in_channels)
+                adapters[n] = ProjectionAdapter(cfg["in_channels"], target_ch)
         else:
             if "share_norm" in cfg:
                 raise ValueError(f"input {n!r}: 'share_norm' only applies to a "
@@ -397,7 +407,13 @@ def create_model(
                                      op=fopts["op"], alignment=[bb.alignment[n] for n in bb.names],
                                      op_kwargs=fopts["op_kwargs"])
         if wants:
-            specs = (FeatureSpec(bb.in_channels, 1, "input"), *specs)
+            ch = getattr(bb, "in_channels", None)
+            if not isinstance(ch, int):
+                raise ValueError(f"decoder {dec_cls.__name__} reads the input image, so it "
+                                 "needs the input's channel count, but the backbone module "
+                                 f"{type(bb).__name__} has no 'in_channels' attribute; set "
+                                 "one on it, or use a decoder that reads features only")
+            specs = (FeatureSpec(ch, 1, "input"), *specs)
         return dec_cls(specs, **dkw)
 
     single = None
@@ -440,6 +456,17 @@ def create_model(
         if bb.encoders[head_inputs[n]].feature_specs != \
                 bb.encoders[head_inputs[other]].feature_specs:
             raise ValueError(f"head {n!r}: 'share' needs inputs with the same feature specs")
+        if "decoder" in heads[n]:  # it reuses the other head's decoder: its own would be lost
+
+            def _dec(cfg):
+                d = cfg.get("decoder", {"type": decoder, **dict(decoder_kwargs or {})})
+                return {"type": d} if isinstance(d, str) else (
+                    dict(d) if isinstance(d, Mapping) else d)
+
+            if _dec(heads[n]) != _dec(heads[other]):
+                raise ValueError(f"head {n!r}: a head with 'share' uses the decoder of "
+                                 f"{other!r}, so it cannot set a different 'decoder' (got "
+                                 f"{heads[n]['decoder']!r}); remove it, or drop 'share'")
     reads_kwargs = any("decoder" not in heads[n] for n in head_inputs)
     for n in head_inputs:  # default: the model's decoder type and kwargs, on this input
         heads[n].setdefault("decoder", {"type": decoder, **dict(decoder_kwargs or {})})

@@ -4,8 +4,15 @@ fields and the ``(x, y)`` geometry they were encoded from.
 The 8 transforms are numbered ``d = 0..7``: ``d % 4`` quarter turns counter-clockwise as
 displayed (``np.rot90`` on the last two axes), then, for ``d >= 4``, a horizontal flip (columns
 reversed). Every flip, rotation and transpose is one of them (:data:`HFLIP`, :data:`VFLIP`,
-:data:`TRANSPOSE`). They move whole pixels, so heatmaps, line widths and masks stay exact: a
-transformed target equals the target encoded from the transformed geometry.
+:data:`TRANSPOSE`). They move whole pixels, so heatmaps, line widths and masks keep their
+values exactly. A transformed target equals the target encoded from the transformed geometry
+except at ties: where a pixel centre lies exactly on a polygon edge or on the edge of a
+line's band (e.g. a polygon vertex at ``x.5``, or a road band edge on a pixel centre),
+rasterisation (rasterio's rule, used by every encoder here) decides the tie by direction, and
+the transforms do not preserve that, so the two can differ by a one-pixel row or column along
+such an edge (and in the targets derived from it). Geometry with coordinates off the pixel
+centres has no ties; augmenting the encoded targets (rather than re-encoding) is consistent
+either way.
 
 A direction field stores an orientation ``t`` (mod 180°) as ``(cos 2t, sin 2t)`` channel pairs.
 Moving pixels is not enough for it: a quarter turn adds 90° to ``t`` (both components negate),
@@ -77,10 +84,11 @@ def dihedral_xy(xy, d: int, shape: tuple[int, int]) -> np.ndarray:
 
 
 def dihedral_geometry(geom, d: int, shape: tuple[int, int]):
-    """Transform ``d`` of a shapely geometry (pixel coordinates) in a raster of ``shape``."""
-    import shapely
+    """Transform ``d`` of a shapely geometry (pixel coordinates) in a raster of ``shape``; a Z
+    coordinate is kept."""
+    from .georef import transform_xy
 
-    return shapely.transform(geom, lambda c: dihedral_xy(c, d, shape))
+    return transform_xy(geom, lambda c: dihedral_xy(c, d, shape))
 
 
 def dihedral_shape(shape: tuple[int, int], d: int) -> tuple[int, int]:

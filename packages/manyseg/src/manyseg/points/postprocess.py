@@ -122,15 +122,43 @@ def find_peaks(heatmap: Tensor, threshold: float = 0.5, *, kernel: int = 3,
     return out
 
 
-def count_from_density(density: Tensor, *, value_scale: float = 1.0,
+PER_POINT_SIGMA = "per-point sigma: give value_scale (e.g. 2 * pi * median_sigma**2)"
+
+
+def density_value_scale(sigma=None, value_scale: float | None = None) -> float:
+    """The factor a density target was multiplied by, as :func:`density_loss` sets it: exactly
+    one of ``sigma`` (the loss's ``sigma``; the factor is ``2 pi sigma^2``) or ``value_scale``
+    (the loss's ``value_scale``, when it was given there)."""
+    if (sigma is None) == (value_scale is None):
+        raise ValueError(
+            "give exactly one of sigma= (the density_loss sigma: the target was scaled by "
+            "2 * pi * sigma**2, density_loss's default) or value_scale= (the density_loss "
+            "value_scale; 1.0 for an unscaled density_map target)")
+    if value_scale is None:
+        if isinstance(sigma, (list, tuple)) or (hasattr(sigma, "dim") and sigma.dim() > 0):
+            raise ValueError(PER_POINT_SIGMA)
+        value_scale = 2 * math.pi * float(sigma) ** 2
+    value_scale = float(value_scale)
+    if not (math.isfinite(value_scale) and value_scale > 0):
+        raise ValueError(f"value_scale must be finite and > 0, got {value_scale}")
+    return value_scale
+
+
+def count_from_density(density: Tensor, *, sigma=None, value_scale: float | None = None,
                        mask: Tensor | None = None) -> Tensor:
-    """Predicted count per image: the integral of the density map, divided by ``value_scale``
-    (the factor the training target was multiplied by; see :func:`density_loss`), over
-    ``mask`` (``(B, H, W)`` or ``(B, 1, H, W)``, > 0 inside) if given.
+    """Predicted count per image: the integral of the density map, divided by the factor the
+    training target was multiplied by, over ``mask`` (``(B, H, W)`` or ``(B, 1, H, W)``, > 0
+    inside) if given.
+
+    Give exactly one of ``sigma`` or ``value_scale``, as the model was trained with
+    :func:`density_loss`: ``sigma=`` the loss's ``sigma`` (its default target is scaled by
+    ``2 pi sigma^2``), or ``value_scale=`` the loss's ``value_scale`` (per-point sigmas;
+    ``value_scale=1.0`` for a target that is a plain :func:`density_map`).
 
     The sum runs over every pixel, so a small background bias adds up: 0.005 per pixel over
     a 792 x 792 tile is 3 phantom objects. Check counts on whole validation images (not
     training crops), and prefer peak counting for a few large objects per image."""
+    value_scale = density_value_scale(sigma, value_scale)
     d = density.float()
     if mask is not None:
         m = _squeeze(mask, "mask", like=d).float()

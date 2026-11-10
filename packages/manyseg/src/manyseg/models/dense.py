@@ -206,7 +206,12 @@ class DenseModel(nn.Module):
           ``single_output``'s head when set, as the model then returns that one tensor.
         * ``pad_multiple``: the primary input is padded to a multiple of this (1 with
           ``pad_to_stride=False`` on a single-input model; a multi-input encoder always pads).
-        * ``max_size``: ``(h, w)`` of a fixed-size backbone, else None.
+        * ``max_size``: the largest ``(h, w)`` primary input the model takes, else None: the
+          element-wise minimum of the fixed sizes of the primary's encoder and of every
+          ``same_grid`` input's encoder (those inputs share the primary's size). A
+          ``same_extent`` input's fixed-size encoder is not reflected here: its ratio to the
+          primary is only known when the data arrives, so its limit is enforced only at
+          forward time, where a larger input raises a ``ValueError`` naming the fixed size.
         * ``normalize``: the normalisation stored by :func:`manyseg.save` (a ManyPred
           normalisation spec), or None.
         * ``bands``: the input band names stored by :func:`manyseg.save`: a list for a model
@@ -248,6 +253,16 @@ class DenseModel(nn.Module):
         main = dict(encoders).get(primary, backbone)  # ModuleDict has no .get
         fixed = getattr(main, "fixed_size", None) or getattr(
             getattr(main, "backbone", None), "fixed_size", None)
+        # Every same_grid input has the primary's size, so its fixed size limits the primary
+        # too: report the most restrictive. A same_extent input's limit is in its own pixels
+        # and its ratio to the primary is only known from the data, so it is left out (its
+        # encoder still refuses a larger input at forward time).
+        fixed_sizes = getattr(backbone, "fixed_sizes", None) or {}
+        alignment = getattr(backbone, "alignment", {})
+        for n, fs in fixed_sizes.items():
+            if alignment.get(n) == "same_extent":
+                continue
+            fixed = tuple(fs) if fixed is None else (min(fixed[0], fs[0]), min(fixed[1], fs[1]))
         return {
             "inputs": inputs,
             "outputs": outputs,
@@ -269,7 +284,7 @@ class DenseModel(nn.Module):
             return {n: [str(b) for b in names] for n, names in bands.items()}
         config = getattr(self, "build_config", None) or {}
         images = [n for n, c in (config.get("inputs") or {}).items()
-                  if c.get("kind", "image") != "vector"]
+                  if c.get("kind", "raster") != "vector"]
         names = [str(b) for b in bands]
         return {images[0]: names} if images else names
 

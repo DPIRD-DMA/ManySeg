@@ -34,9 +34,11 @@ class _SegBlock(nn.Module):
 
 @DECODERS.register("fpn")
 class FPNDecoder(nn.Module):
-    """Laterals + top-down pathway on strides >= 4, per-level segmentation branches upsampled to
-    stride 4 and summed. Output: ``segmentation_channels`` at stride 4 (``out_stride`` may only
-    restate it)."""
+    """Laterals + top-down pathway on the (at most 4) deepest levels with stride >= 4,
+    per-level segmentation branches upsampled to the shallowest of them and summed. Output:
+    ``segmentation_channels`` at that level's stride: 4 on a standard stride 4..32 pyramid,
+    coarser when the encoder has no stride-4 level or more than 4 such levels (``out_stride``
+    may only restate it)."""
 
     def __init__(self, in_specs: Sequence[FeatureSpec], pyramid_channels: int = 256,
                  segmentation_channels: int = 128, dropout: float = 0.2,

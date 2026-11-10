@@ -90,8 +90,8 @@ class CoordsField(nn.Module):
 @FIELD_TYPES.register("categorical")
 class CategoricalField(nn.Module):
     """Integer id in ``[0, num)`` (stored as a float column) -> learned embedding of size
-    ``dim``. The raw value is validated before rounding: a value that is not integer-valued
-    (``|v - round(v)| > 1e-6``) or lies outside ``[0, num)`` is invalid, i.e. missing."""
+    ``dim``. A value that is not integer-valued (``|v - round(v)| > 1e-6``), or whose rounded id
+    lies outside ``[0, num)``, is invalid, i.e. missing."""
 
     columns = 1
 
@@ -105,7 +105,9 @@ class CategoricalField(nn.Module):
 
     def forward(self, v: Tensor) -> tuple[Tensor, Tensor]:
         r = torch.round(v[:, 0])
-        valid = ((v[:, 0] - r).abs() <= 1e-6) & (v[:, 0] >= 0) & (v[:, 0] < self.num)
+        # range-check the rounded id that is looked up: 2.9999995 is integer-valued (within
+        # 1e-6) and below num=3, but rounds to 3, which is out of range
+        valid = ((v[:, 0] - r).abs() <= 1e-6) & (r >= 0) & (r < self.num)
         idx = r.long()
         return self.embedding(torch.where(valid, idx, torch.zeros_like(idx))), valid
 
