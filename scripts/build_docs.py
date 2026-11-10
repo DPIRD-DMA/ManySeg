@@ -115,7 +115,9 @@ def _copy_experiment(readme: Path, dst: Path) -> None:
         shutil.copy(target, copy)
         return f"]({dst.stem}/{match[1]})"
 
-    dst.write_text(re.sub(r"\]\(([^)#:\s]+)\)", local, _site_links(readme.read_text())))
+    # a link to a sibling experiment's write-up goes to its page, not a copy of the README
+    text = re.sub(r"\]\(\.\./(E[^/)]+)/README\.md", r"](\1.md", _site_links(readme.read_text()))
+    dst.write_text(re.sub(r"\]\(([^)#:\s]+)\)", local, text))
 
 
 def main() -> int:

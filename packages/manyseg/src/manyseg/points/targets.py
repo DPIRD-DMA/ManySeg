@@ -212,9 +212,10 @@ def offset_targets(instance_mask: Tensor) -> Tensor:
     for i, (c, ids) in enumerate(centers_from_instances(m)):
         if len(ids) == 0:
             continue
-        lut = torch.zeros(int(m[i].max()) + 1, 2, device=m.device)
-        lut[ids] = c
-        cen = lut[m[i]]  # (H, W, 2)
+        u, inv = torch.unique(m[i], return_inverse=True)  # compact ids, not a max-id table
+        lut = torch.zeros(len(u), 2, device=m.device)
+        lut[torch.searchsorted(u, ids)] = c
+        cen = lut[inv]  # (H, W, 2)
         fg = (m[i] > 0).float()
         out[i, 0] = (cen[..., 0] - ys[:, None]) * fg
         out[i, 1] = (cen[..., 1] - xs[None, :]) * fg

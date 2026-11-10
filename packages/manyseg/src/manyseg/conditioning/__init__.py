@@ -1,5 +1,6 @@
 """Non-raster conditioning inputs (metadata vectors): field encoders, the metadata encoder
-and the modules that inject the embedding into a dense model. See ``docs/api_design.md``."""
+and the modules that inject the embedding into a dense model. See
+https://manyseg.readthedocs.io/en/latest/docs/api_design/."""
 
 from .build import MODES
 from .encoder import MetadataEncoder

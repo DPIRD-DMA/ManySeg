@@ -439,3 +439,53 @@ def test_save_checks_normalize_against_the_inputs(tmp_path):
     single = create_model(backbone="resnet18", pretrained=False, in_channels=3, num_classes=2)
     with pytest.raises(ValueError, match="one unnamed input"):
         save(single, {"x": one})
+
+
+def _with_meta(path, tmp_path, edit):
+    """A copy of saved file ``path`` with its manyseg metadata changed by ``edit(meta)``."""
+    from safetensors.torch import load_file, save_file
+
+    with safe_open(str(path), framework="pt") as f:
+        stored = dict(f.metadata())
+    meta = json.loads(stored["manyseg"])
+    edit(meta)
+    out = tmp_path / "edited.safetensors"
+    save_file(load_file(str(path)), str(out), metadata={**stored, "manyseg": json.dumps(meta)})
+    return out
+
+
+@pytest.mark.parametrize("multi", [False, True])
+def test_load_never_opens_a_checkpoint_path_named_by_the_file(tmp_path, monkeypatch, multi):
+    """A file's metadata must not make load() call torch.load on another path: timm's
+    checkpoint_path unpickles with weights_only=False on older timm. The weights come from the
+    file, so load drops it (and pretrained_cfg) before rebuilding."""
+    config = ({"inputs": {"a": {"in_channels": 3}, "b": {"in_channels": 2}}} if multi
+              else {"in_channels": 3})
+    model = create_model(backbone="resnet18", pretrained=False, num_classes=2, **config)
+    x = ({"a": torch.randn(1, 3, 64, 64), "b": torch.randn(1, 2, 64, 64)} if multi
+         else torch.randn(1, 3, 64, 64))
+    path = manyseg.save(model.eval(), tmp_path / "m.safetensors", activations=activations(model),
+                        normalize=normalize_for(model))
+    payload = str(tmp_path / "payload.pth")
+
+    def plant(meta):
+        targets = meta["create_model"]["inputs"].values() if multi else [meta["create_model"]]
+        for cfg in targets:
+            cfg["backbone_kwargs"] = {"checkpoint_path": payload,
+                                      "pretrained_cfg_overlay": {"file": payload}}
+
+    opened = []
+    real = torch.load
+    monkeypatch.setattr(torch, "load", lambda f, *a, **k: opened.append(f) or real(f, *a, **k))
+    loaded = manyseg.load(_with_meta(path, tmp_path, plant))
+    assert opened == []
+    torch.testing.assert_close(outputs(loaded, x), outputs(model, x))
+
+
+def test_load_refuses_an_unknown_dtype(tmp_path):
+    model = create_model(backbone="resnet18", pretrained=False, num_classes=2)
+    path = manyseg.save(model, tmp_path / "m.safetensors", activations={"logits": "softmax"},
+                        normalize=[])
+    bad = _with_meta(path, tmp_path, lambda m: m.update(dtype="Tensor"))
+    with pytest.raises(ValueError, match="unsupported dtype"):
+        manyseg.load(bad)

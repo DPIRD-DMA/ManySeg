@@ -145,7 +145,7 @@ def _build_inputs(inputs, fusion, *, backbone, pretrained, channel_adapter, out_
             _check_shared_adapter(n, cfg, encoders[target].in_channels)
             # Weights shared, BatchNorm per input by default: one BN shared by inputs with
             # different statistics blends its running statistics, and evaluation then applies
-            # the blend to every input (E015: val 0.50-0.65 vs 0.89).
+            # the blend to every input (Sen1Floods11 val mIoU 0.50-0.65 vs 0.89).
             encoders[n] = (encoders[target] if cfg.get("share_norm", False)
                            else share_weights(encoders[target]))
             if cfg.get("channel_adapter") == "projection":
@@ -169,7 +169,7 @@ def _build_inputs(inputs, fusion, *, backbone, pretrained, channel_adapter, out_
         raise ValueError(f"unknown fusion options {sorted(fusion)}")
     enc = MultiEncoder(encoders, mode=ftype, op=op, strides=strides, alignment=alignment,
                        adapters=adapters, op_kwargs=op_kwargs)
-    return enc, ftype, {"op": op}
+    return enc, ftype, {"op": op, "op_kwargs": op_kwargs}
 
 
 def create_model(
@@ -192,7 +192,7 @@ def create_model(
 
     Exactly one of ``num_classes`` or ``heads`` is required. With ``num_classes`` the model
     returns a Tensor; with ``heads`` a ``dict[str, Tensor]`` keyed by head name, even for a
-    single head. Full reference: ``docs/api_design.md``.
+    single head. Full reference: https://manyseg.readthedocs.io/en/latest/docs/api_design/.
 
     Args:
         backbone: A timm model name, or an ``nn.Module`` with ``feature_specs`` and
@@ -206,7 +206,7 @@ def create_model(
             ``{"kind": "vector"}`` with ``fields`` or ``num_features``, ``dim``, ``dropout``,
             ``conditioning`` (``"film"`` / ``"head"`` / ``"channels"``).
         fusion: ``{"type": "early" | "intermediate" | "late", "op": ..., "op_kwargs": ...,
-            "strides": [...]}`` for several raster inputs.
+            "strides": [...]}`` for several raster inputs (``strides``: intermediate only).
         pretrained: ``True`` (timm weights), ``False``, or a ``manyseg.weights`` tag such as
             ``"ssl4eo_s2_dino"``.
         in_channels: Input bands of a single-input model (default 3; with ``inputs=``, set it
@@ -306,7 +306,8 @@ def create_model(
             from ..fusion import LateFusionDecoder
 
             return LateFusionDecoder(specs, bb.groups, lambda sp: dec_cls(sp, **dkw),
-                                     op=fopts["op"], alignment=[bb.alignment[n] for n in bb.names])
+                                     op=fopts["op"], alignment=[bb.alignment[n] for n in bb.names],
+                                     op_kwargs=fopts["op_kwargs"])
         if wants:
             specs = (FeatureSpec(bb.in_channels, 1, "input"), *specs)
         return dec_cls(specs, **dkw)

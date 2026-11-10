@@ -35,7 +35,8 @@ class DenseModel(nn.Module):
             input's own (unfused) features.
         pad_to_stride: Zero-pad bottom/right to ``backbone.input_divisor`` and crop outputs
             back, which keeps outputs pixel-aligned with inputs. If False, pixel outputs are
-            resized to the input size instead.
+            resized to the input size instead. A multi-input encoder (one taking a dict) always
+            pads its inputs itself, so its outputs are always cropped and this has no effect.
 
     Pixel heads return the primary input's ``H x W``, or ``ceil(H / f) x ceil(W / f)`` for a head
     with ``scale = 1/f`` (output pixel ``(i, j)`` covers input pixels ``[i*f, (i+1)*f) x
@@ -80,13 +81,17 @@ class DenseModel(nn.Module):
             raise ValueError(f"single_output {single_output!r} is not a head")
         self.single_output = single_output
         self.pad_to_stride = pad_to_stride
+        # a multi-input encoder pads each input itself (whatever pad_to_stride says), so its
+        # outputs are cropped to the unpadded region, never resized (that would stretch the
+        # padding into the prediction)
+        self._crops = pad_to_stride or getattr(backbone, "primary", None) is not None
         self.divisor = int(getattr(backbone, "input_divisor", 1)) if pad_to_stride else 1
         # Image heads read the deepest encoder level; with late fusion the specs are every
         # input's levels concatenated, and the heads are built for the primary input's group.
         late = getattr(backbone, "mode", None) == "late"
         levels = range(*backbone.groups[0]) if late else range(len(backbone.feature_specs))
         self._deepest = max(levels, key=lambda i: backbone.feature_specs[i].stride)
-        # padded inputs: decoders can skip size checks in their upsampling (E025)
+        # padded inputs: decoders can skip size checks in their upsampling
         if pad_to_stride and getattr(backbone, "fixed_size", None) is None:
             for dec in [self.decoder, *self.task_decoders.values()]:
                 if hasattr(dec, "_set_input_divisor"):
@@ -109,7 +114,7 @@ class DenseModel(nn.Module):
         """Keep only the heads ``names`` (in place; returns the model): their decoders stay,
         decoders, FiLM and head-bias layers only the dropped heads used are removed. For
         deployment after training with auxiliary heads, e.g. a classifier trained with a pixel
-        head (E020). In eval mode the kept heads' outputs are unchanged (in training mode,
+        head. In eval mode the kept heads' outputs are unchanged (in training mode,
         dropout in removed modules no longer consumes random numbers, so masks differ). The
         output stays a dict. Removed modules leave the state dict: to load a pruned
         checkpoint, rebuild the model, call ``select_heads`` with the same names, then load."""
@@ -193,7 +198,7 @@ class DenseModel(nn.Module):
           and ``classes`` when the model was saved with them, see :func:`manyseg.save`); only
           ``single_output``'s head when set, as the model then returns that one tensor.
         * ``pad_multiple``: the primary input is padded to a multiple of this (1 with
-          ``pad_to_stride=False``).
+          ``pad_to_stride=False`` on a single-input model; a multi-input encoder always pads).
         * ``max_size``: ``(h, w)`` of a fixed-size backbone, else None.
         * ``normalize``: the normalisation stored by :func:`manyseg.save` (a ManyPred
           normalisation spec), or None.
@@ -239,8 +244,9 @@ class DenseModel(nn.Module):
         return {
             "inputs": inputs,
             "outputs": outputs,
-            "pad_multiple": (int(getattr(backbone, "grid_divisor", self.divisor))
-                             if self.pad_to_stride else 1),
+            "pad_multiple": (int(getattr(backbone, "grid_divisor",
+                                         getattr(backbone, "input_divisor", 1)))
+                             if self._crops else 1),
             "max_size": tuple(fixed) if fixed is not None else None,
             "normalize": saved.get("normalize"),
             "bands": self._band_names(saved.get("bands")),
@@ -319,7 +325,7 @@ class DenseModel(nn.Module):
         if name in self._pixel_heads:
             f = getattr(head, "factor", 1)  # 1 / scale; floor division keeps sizes symbolic
             hs, ws = (h + f - 1) // f, (w + f - 1) // f
-            if self.pad_to_stride:
+            if self._crops:
                 y = crop_to(y, hs, ws)
             else:
                 y = F.interpolate(y, size=(hs, ws), mode="bilinear", align_corners=False)
@@ -337,7 +343,7 @@ class DenseModel(nn.Module):
                 f"backbone {getattr(self.backbone, 'name', '')!r} has a fixed input size {fixed}; "
                 f"input {(h, w)} is larger. Use tiled inference (ManyPred), or rebuild with "
                 f"backbone_kwargs={{'img_size': (H, W)}} for a larger fixed size (see "
-                "docs/backbone_compatibility.md)."
+                "https://manyseg.readthedocs.io/en/latest/docs/backbone_compatibility/)."
             )
         return F.pad(x, (0, fixed[1] - w, 0, fixed[0] - h))
 

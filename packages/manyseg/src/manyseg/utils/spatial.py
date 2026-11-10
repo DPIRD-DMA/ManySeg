@@ -40,8 +40,8 @@ def pad_to_multiple(x: Tensor, divisor: int, value: float = 0.0) -> Tensor:
 def resize_bilinear(x: Tensor, size) -> Tensor:
     """Bilinear resize (``align_corners=False``) that keeps ``x``'s dtype: CUDA autocast runs
     ``upsample_bilinear2d`` in float32, and concatenating that output would make the whole
-    buffer float32 (E026: -27% UPerNet training memory). The consumer is a conv that casts
-    to bf16 anyway."""
+    buffer float32 (keeping the dtype saved 27% of UPerNet training memory). The consumer is a
+    conv that casts to bf16 anyway."""
     return F.interpolate(x, size=size, mode="bilinear", align_corners=False).to(x.dtype)
 
 
@@ -52,8 +52,7 @@ def upsample2x_nearest(x: Tensor, size) -> Tensor:
     Equal to :func:`resize_nearest` when each output dimension is ``2n`` or ``2n - 1`` for an
     input of ``n`` (``floor(i * n / (2n - 1)) == i // 2`` for ``i < 2n - 1``): a ceil-rounded
     feature pyramid, or one padded to the stride. Unlike ``mode="nearest"`` with ``size=``,
-    ``scale_factor=2`` compiles correctly with ``dynamic=True``
-    (docs/upstream/torch-inductor-dynamic-nearest.md).
+    ``scale_factor=2`` compiles correctly with ``dynamic=True``.
     """
     y = F.interpolate(x, scale_factor=2, mode="nearest")
     # autocast runs upsampling in float32; nearest only copies values, so cast back losslessly
@@ -97,8 +96,8 @@ def resize_nearest(x: Tensor, size) -> Tensor:
     the row before the exact one. Used instead of ``F.interpolate`` because torch.compile
     (torch 2.14, CUDA, ``dynamic=True``) miscompiles both ``mode="nearest"`` and any float
     version of this index: wrong outputs at sizes such as 49x66 -> 98x132 after compiling at
-    another size (docs/upstream/torch-inductor-dynamic-nearest.md). The integer form compiles
-    correctly, but its backward is an atomic scatter-add, slow in bf16 (E025): for 2x
+    another size. The integer form compiles correctly, but its backward is an atomic
+    scatter-add, slow in bf16: for 2x
     upsampling prefer :func:`upsample2x_nearest`.
     """
     h, w = x.shape[-2], x.shape[-1]

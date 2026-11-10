@@ -42,6 +42,8 @@ test = ["pytest>=8", "pytest-xdist>=3", "onnx>=1.16", "onnxscript>=0.1", "onnxru
 
 [project.urls]
 Homepage = "https://github.com/DPIRD-DMA/ManySeg"
+Documentation = "https://manyseg.readthedocs.io"
+Changelog = "https://github.com/DPIRD-DMA/ManySeg/blob/main/CHANGELOG.md"
 Repository = "https://github.com/DPIRD-DMA/ManySeg"
 Issues = "https://github.com/DPIRD-DMA/ManySeg/issues"
 
@@ -51,6 +53,12 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/manyseg"]
+
+# The sdist carries what building and testing need. tests/data (the golden saved files) is
+# caught by the repository's data/ ignore rule, so it is listed as an artifact.
+[tool.hatch.build.targets.sdist]
+include = ["src", "tests", "README.md", "LICENSE", "pyproject.toml"]
+artifacts = ["tests/data/*.safetensors"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

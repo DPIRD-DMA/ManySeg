@@ -370,8 +370,8 @@ def graph_from_mask(prob, threshold: float = 0.5, *, spur: float = 10, gap: floa
     Args:
         threshold: Foreground threshold.
         spur: Dangling branches shorter than this (px) are removed, except at the image border.
-        gap: Join mutually-nearest dangling ends closer than this (px); 0 disables. E028 tuned
-            25-50 px (1 m pixels) once occlusion breaks lines.
+        gap: Join mutually-nearest dangling ends closer than this (px); 0 disables. 25-50 px
+            (1 m pixels) suits lines broken by occlusion.
         simplify: Douglas-Peucker tolerance (px).
         min_length: Connected pieces shorter than this (px) are dropped.
         min_area: Foreground blobs smaller than this many pixels are dropped before skeletonizing.

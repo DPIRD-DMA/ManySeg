@@ -1,5 +1,5 @@
 """Training targets for the unified road heads (:func:`manyseg.vectors.road_heads`) from a road
-graph, the encoding of E039 as trained in E044. Coordinates follow
+graph. Coordinates follow
 :mod:`manyseg.vectors.graph` (``(x, y)``, pixel corners at integers).
 """
 
@@ -89,8 +89,8 @@ def road_targets(graph, shape: tuple[int, int], *, width: float = 6.0, widths=No
             edge, or ``width``) or a ``networkx.Graph`` with node ``xy`` and optional edge
             ``width`` data (default ``width``), in pixel coordinates.
         shape: ``(H, W)`` of the raster.
-        width: road width in pixels where the graph gives none (City-Scale in E044: 6 px at
-            1 m).
+        width: road width in pixels where the graph gives none (6 px at 1 m was used on
+            City-Scale).
     """
     from rasterio.features import rasterize
     from rasterio.transform import Affine

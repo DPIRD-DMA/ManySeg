@@ -69,7 +69,7 @@ class FPNDecoder(nn.Module):
             up, size = p[i + 1], cs[i].shape[-2:]
             if self._exact_2x[i] or (not torch.compiler.is_compiling() and is_2x(
                     up.shape[-2], size[0]) and is_2x(up.shape[-1], size[1])):
-                up = upsample2x_nearest(up, size)  # same values, fast backward (E025)
+                up = upsample2x_nearest(up, size)  # same values, fast backward
             else:
                 up = resize_nearest(up, size)
             p[i] = self.lateral[i](cs[i]) + up

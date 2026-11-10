@@ -198,7 +198,7 @@ def test_saved_size_and_metadata(float_and_int8, saved):
     model, q = float_and_int8
     assert saved.stat().st_size < 0.35 * model_size(export_model(model, torch.randn(1, 3, 64, 96)))
     meta = manyseg.read_metadata(saved)
-    assert meta["format"] == 3
+    assert meta["format"] == 2
     r = meta["quantization"]
     assert r["route"] == "pt2e" and r["batch_size"] == 1 and r["fixed_size"] is None
     assert r["input_shapes"] == {"x": [1, 3, None, None]}

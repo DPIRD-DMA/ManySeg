@@ -46,7 +46,7 @@ class SegFormerDecoder(nn.Module):
         # resizing is linear with weights that sum to one, so it commutes with a 1x1 conv: each
         # level gets its slice of the fuse weight at its own resolution, then is upsampled and
         # summed. Same parameters and values (up to rounding) as conv(cat(upsampled)), without
-        # the 4C-channel concat at the finest stride (E026: -26 to -38% training memory).
+        # the 4C-channel concat at the finest stride (-26 to -38% training memory).
         size = features[self.levels[0]].shape[-2:]
         conv, norm, act = self.fuse  # ConvNormAct: bias-free conv, BatchNorm, ReLU
         if not self._can_split(conv):

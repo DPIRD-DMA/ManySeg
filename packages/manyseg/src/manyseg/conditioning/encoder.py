@@ -73,13 +73,26 @@ class MetadataEncoder(nn.Module):
 
     def pack(self, values: Mapping[str, Tensor]) -> Tensor:
         """Per-field values ``{name: (B,) or (B, columns)}`` -> the packed ``(B, N)`` tensor
-        (use NaN for missing values). Not part of ``forward``."""
-        cols = []
-        for n in self.field_names:
+        (use NaN for missing values; ``(B,)`` only for one-column fields). Each field's width
+        and batch size are checked. Not part of ``forward``."""
+        cols, batch = [], None
+        for n, (a, z) in zip(self.field_names, self._cols):
             if n not in values:
                 raise KeyError(f"missing field {n!r}; expected {list(self.field_names)}")
             v = torch.as_tensor(values[n], dtype=torch.float32)
-            cols.append(v.reshape(v.shape[0], -1))
+            k = z - a
+            if v.ndim == 1 and k == 1:
+                v = v[:, None]
+            if v.ndim != 2 or v.shape[1] != k:
+                want = "(B,) or (B, 1)" if k == 1 else f"(B, {k})"
+                raise ValueError(f"field {n!r} takes {k} column{'s' * (k > 1)}: expected "
+                                 f"{want}, got shape {tuple(v.shape)}")
+            if batch is None:
+                batch = (n, v.shape[0])
+            elif v.shape[0] != batch[1]:
+                raise ValueError(f"field {n!r} has batch size {v.shape[0]} but field "
+                                 f"{batch[0]!r} has {batch[1]}")
+            cols.append(v)
         return torch.cat(cols, dim=1)
 
     def encode_fields(self, values: Tensor, mask: Tensor | None = None) -> Tensor:

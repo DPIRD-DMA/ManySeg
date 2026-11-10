@@ -1,8 +1,8 @@
 """Empirical capability probing of timm backbones (no hand-maintained allow-lists).
 
 ``probe_backbone`` builds a model with random weights and runs a few forwards to classify
-what it supports. Expensive checks (export) are optional. The generated table lives in
-``docs/backbone_compatibility.md`` (``scripts/backbone_compat.py``).
+what it supports. Expensive checks (export) are optional. The table generated with it is at
+https://manyseg.readthedocs.io/en/latest/docs/backbone_compatibility/.
 """
 
 from __future__ import annotations

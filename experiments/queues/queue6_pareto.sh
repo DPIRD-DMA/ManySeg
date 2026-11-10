@@ -6,7 +6,7 @@
 # sweep (latency / memory, contention recorded per run; re-run STAGE=profile on an idle GPU
 # before quoting latencies).
 # Launch (not done automatically):
-#   nohup bash experiments/queue6_pareto.sh > experiments/queue6.log 2>&1; \
+#   nohup bash experiments/queues/queue6_pareto.sh > experiments/queue6.log 2>&1; \
 #     echo $? > experiments/queue6.log.exit
 set -u
 MAIN="${MANYSEG_REPO:?set to the main checkout}"

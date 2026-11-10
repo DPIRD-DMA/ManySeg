@@ -3,8 +3,10 @@
 A spec is ManyPred's plain-data format (its ``normalize.py`` documents the steps). ManySeg stores
 specs but never runs them and doesn't import ManyPred, so a typo would otherwise surface only
 when inference fails. These are the rules of ManyPred's ``validate_spec``, kept in step by
-``tests/unit/test_normalize_spec.py``, without callables, which a file can't hold. One check is
-ManySeg's own, as it knows the model's inputs: a per-input spec must name every raster input.
+``tests/unit/test_normalize_spec.py``, without callables, which a file can't hold. When ManyPred
+is installed, its ``validate_spec`` runs too, so a newer ManyPred's rules apply at save time. One
+check is ManySeg's own, as it knows the model's inputs: a per-input spec must name every raster
+input.
 """
 
 from __future__ import annotations
@@ -35,6 +37,12 @@ def _flatten(value: Any) -> list:
     if len(nested) > 1 or len({len(p) for p in parts}) > 1:
         raise ValueError("uneven nesting")
     return [x for p in parts for x in p]
+
+
+def _is_number(value: Any) -> bool:
+    """A real number, not a bool (``True > 0`` would otherwise pass as 1)."""
+    return (isinstance(value, (int, float)) or hasattr(value, "__float__")) and not isinstance(
+        value, (bool, str, bytes)) and type(value).__name__ != "bool_"
 
 
 def _numbers(value: Any, name: str, *, nonzero: bool = False, positive: bool = False) -> list:
@@ -105,16 +113,12 @@ def _check_step(step: Any) -> None:
             raise ValueError("'minmax' step needs min < max for every band.")
     elif kind == "percentile":
         low, high = step.get("low", 2), step.get("high", 98)
-        try:
-            ordered = 0 <= low < high <= 100
-        except TypeError:
-            ordered = False
-        if not ordered:
+        if not (_is_number(low) and _is_number(high) and 0 <= low < high <= 100):
             raise ValueError(f"'percentile' step needs 0 <= low < high <= 100, got low={low}, "
                              f"high={high}.")
     elif kind == "db":
         eps = step.get("eps", 1e-10)
-        if isinstance(eps, str) or not eps > 0:
+        if not (_is_number(eps) and eps > 0):
             raise ValueError(f"'db' step needs eps > 0, got {eps!r}.")
     elif kind == "clip":
         if "min" not in step and "max" not in step:
@@ -127,8 +131,9 @@ def _check_step(step: Any) -> None:
 
 
 def check_steps(spec: Any) -> None:
-    """One step or a list of steps, in order. Raises ValueError saying what to fix."""
-    if spec is None:
+    """One step or a list of steps, in order. Raises ValueError saying what to fix. None and
+    False are no steps, as in ManyPred."""
+    if spec is None or spec is False:
         return
     steps = list(spec) if isinstance(spec, Sequence) and not isinstance(spec, str) else [spec]
     per_tile = False
@@ -139,6 +144,19 @@ def check_steps(spec: Any) -> None:
                              "statistics are computed once over the whole scene, before tiling. "
                              "Put scene steps first.")
         per_tile |= step.get("scope") == "tile"
+    _manypred_check(steps)
+
+
+def _manypred_check(steps: list) -> None:
+    """ManyPred's own validation when it is installed (it runs these specs)."""
+    try:
+        from manypred import validate_spec
+    except ImportError:  # not installed, or a ManyPred without it: these rules stand alone
+        return
+    try:
+        validate_spec(steps)
+    except (TypeError, ValueError) as e:
+        raise ValueError(f"ManyPred refuses this spec: {e}") from None
 
 
 def _has_steps(spec: Any) -> bool:
@@ -151,7 +169,11 @@ def check_normalize(spec: Any, inputs: Sequence[str] | None) -> None:
 
     A plain spec suits one raster, whatever metadata inputs sit beside it, and a spec with no steps
     suits any model. Otherwise several rasters take ``{input_name: steps}`` with every one present:
-    a forgotten one would silently get raw values."""
+    a forgotten one would silently get raw values. ``False`` is refused (ManyPred reads it as no
+    steps): a stored spec says so explicitly, with ``[]`` or ``{"type": "none"}``."""
+    if spec is False or (isinstance(spec, Mapping) and any(v is False for v in spec.values())):
+        raise ValueError("normalize=False is ambiguous in a saved model: pass [] or "
+                         "{'type': 'none'} for no normalisation.")
     per_input = isinstance(spec, Mapping) and "type" not in spec
     if inputs is None and per_input:
         raise ValueError("This model has one unnamed input: pass normalize as steps (a dict with "

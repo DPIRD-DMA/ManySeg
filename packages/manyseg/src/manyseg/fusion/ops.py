@@ -170,7 +170,7 @@ class CrossAttentionFusion(nn.Module):
         b, c, h, w = x.shape
         # contiguous: SDPA's flash / memory-efficient kernels need a unit last-dim stride, and
         # otherwise fall back to the math kernel, which builds the full attention matrix
-        # (E026: -50% step time, -77% memory)
+        # (measured: -50% step time, -77% memory)
         return x.reshape(b, self.heads, c // self.heads, h * w).transpose(-1, -2).contiguous()
 
     def forward(self, xs: list[Tensor]) -> Tensor:

@@ -67,8 +67,8 @@ def _has_vnni() -> bool:
 def _x86_quantizer(reduce_range: bool | None = None):
     """torchao's x86 quantizer. ``reduce_range`` (7-bit activations) defaults to "this CPU has
     no VNNI": there, inductor's u8 x s8 kernels saturate their 16-bit intermediate sums, and
-    in E008 the compiled int8 model lost ~6 mIoU on Oxford Pet (AMD Zen 3; the eager
-    reference was fine). torchao's own docs give the same advice."""
+    the compiled int8 model lost ~6 mIoU on Oxford Pet (AMD Zen 3; the eager reference was
+    fine). torchao's own docs give the same advice."""
     from torchao.quantization.pt2e.quantizer import x86_inductor_quantizer as xiq
 
     rr = (not _has_vnni()) if reduce_range is None else bool(reduce_range)
@@ -77,7 +77,7 @@ def _x86_quantizer(reduce_range: bool | None = None):
 
 
 # timm's window-attention classes, by (module, class): their dynamic-size export hangs rather
-# than fails (``architecture_review.md``). Matched exactly so that an unrelated module with a
+# than fails. Matched exactly so that an unrelated module with a
 # ``window_size`` attribute is not rejected.
 _WINDOW_ATTENTION = {
     ("timm.models.swin_transformer", "WindowAttention"),
@@ -178,7 +178,7 @@ def quantize_pt2e(model: nn.Module, example, calibration: Iterable, *, quantizer
             warnings.warn(
                 "this int8 program uses full-range activations, which are only accurate on CPUs "
                 "with VNNI (e.g. Intel Cascade Lake or newer, AMD Zen 4 or newer); on others, "
-                "compiled int8 kernels saturate silently (-6.5 mIoU on Oxford Pet in E008). To "
+                "compiled int8 kernels saturate silently (-6.5 mIoU measured on Oxford Pet). To "
                 "deploy on any x86 CPU, quantise with reduce_range=True (~0.1 mIoU). "
                 "manyseg.quantize.check_deployment(ep) verifies the deployment CPU.",
                 UserWarning, stacklevel=2)
@@ -206,7 +206,7 @@ _RR_KEY = "manyseg_int8_reduce_range"
 def check_deployment(ep: torch.export.ExportedProgram) -> None:
     """Check that a ``quantize_pt2e`` program is accurate on *this* CPU: raises if it was
     quantised with full-range activations (``reduce_range=False``) and this CPU lacks VNNI, where
-    compiled int8 kernels saturate silently (E008). Call it in the deployment script, e.g. after
+    compiled int8 kernels saturate silently. Call it in the deployment script, e.g. after
     ``torch.export.load``; takes a loaded :class:`QuantizedProgram` too. Warns if the program
     carries no record (not produced by ``quantize_pt2e``'s default quantizer)."""
     ep = ep.program if isinstance(ep, QuantizedProgram) else ep
@@ -362,7 +362,7 @@ def _check_source(ep: torch.export.ExportedProgram, source: nn.Module) -> None:
 def _save_program(ep: torch.export.ExportedProgram, source: nn.Module, path: Path,
                   meta: dict) -> Path:
     """Write ``ep`` and ``meta`` to a ``.pt2`` file holding no pickled data."""
-    from .io import _KEY, QUANTIZED_FORMAT
+    from .io import _KEY
 
     _require_torchao("saving a quantised program")
     import torchao
@@ -377,7 +377,6 @@ def _save_program(ep: torch.export.ExportedProgram, source: nn.Module, path: Pat
     fixed = _fixed_size(shapes)
     first = next(iter(shapes.values()))
     rr = ep.state_dict.get(_RR_KEY)
-    meta["format"] = QUANTIZED_FORMAT
     meta["quantization"] = {
         "route": "pt2e",
         "batch_size": first[0],
@@ -641,7 +640,8 @@ class _Diff:
         self.dtype_changed = False
 
     def add(self, ref: Tensor, out: Tensor) -> None:
-        out = out.to(ref.device)
+        # float64 on the CPU: exact for every input dtype, and MPS has no float64
+        ref, out = ref.detach().cpu(), out.detach().cpu()
         self.dtype_changed |= ref.dtype != out.dtype
         d = (ref.double() - out.double()).abs()
         self.max = max(self.max, d.max().item())

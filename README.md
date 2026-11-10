@@ -9,7 +9,8 @@
 Segmentation and other dense-prediction models for PyTorch, built from
 <a href="https://github.com/huggingface/pytorch-image-models">timm</a> encoders.<br>
 Any number of bands, several inputs at different resolutions, metadata, and many outputs in one model.<br>
-<a href="docs/builder/">Model builder</a>: design a model in your browser and copy the code.
+<a href="https://manyseg.readthedocs.io/en/latest/docs/builder/">Model builder</a>: design a model in your browser and copy the code.<br>
+<a href="https://manyseg.readthedocs.io">Documentation</a> · <a href="https://pypi.org/project/manyseg/">PyPI</a>
 </p>
 
 <p align="center">
@@ -61,12 +62,12 @@ tensor of raw logits; with `heads=` it is a dict of raw logits keyed by head nam
 
 ## Model builder
 
-Not sure how to combine inputs, fusion and heads? The [model builder](docs/builder/) draws the
+Not sure how to combine inputs, fusion and heads? The [model builder](https://manyseg.readthedocs.io/en/latest/docs/builder/) draws the
 model as you pick options and writes the `create_model` call, refusing combinations ManySeg would
-reject. In a clone of this repository, open `docs/builder/index.html` in a browser; it needs no
-server.
+reject. It runs in the browser; offline, open `docs/builder/index.html` from a clone of this
+repository.
 
-<a href="docs/builder/"><picture>
+<a href="https://manyseg.readthedocs.io/en/latest/docs/builder/"><picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/builder-dark.png">
   <img alt="The model builder's live diagram of a two-input model: encoders, gated fusion, a U-Net decoder and two heads, with parameter counts" src="docs/assets/builder-light.png" width="720">
 </picture></a>
@@ -400,12 +401,12 @@ help on your data, and an untested one is simply unknown.
 
 | Option | Result | Evidence |
 |---|---|---|
-| Separate encoders with `concat` or `gated` fusion, vs stacking bands | no gain | E005, Sen1Floods11; late fusion was worse on test |
+| Separate encoders with `concat` or `gated` fusion, vs stacking bands | no demonstrated gain in the tested shared-grid cases; helped across a 25× resolution gap (one dataset) | Shared grid: E005, Sen1Floods11 (late fusion was worse on test); E056, MFNet RGB + thermal, +0.3 mIoU (1 seed, did not clear the screen). Different scales: E059, FLAIR #2 aerial 0.4 m + Sentinel-2 10 m, +2.9 test mIoU over stacking, mostly because stacking the upsampled S2 was 2.3 below aerial alone; the S2 encoder added little over aerial alone, and a monthly time series showed no demonstrated improvement over a median. E061: a wider S2 window (200 or 400 m instead of the 100 m footprint) did not pass its one-seed screen (−0.001 val mIoU for the better arm, 400 m) |
 | Fusion ops `add`, `attention`, `cross_attention` | not tested for accuracy | none |
 | Siamese encoder with `diff` or `concat_diff`, for change detection | helped | E022, OSCD and LEVIR-CD |
 | Per-input land-cover heads, for semantic change | helped | E023, SECOND only |
 | Splitting Sentinel-2 bands into resolution groups | mixed | helped in E015; not in E016, E017 or E020 |
-| Metadata (FiLM, head bias or channels) | no clear gain | E009, E013, E016, E020 |
+| Metadata (FiLM, head bias or channels) | helped on two tasks where the vector carries information the pixels don't fully give | No clear gain for date or location (E009, E013, E016, E020). Helped for zoom in metric depth (E055, NYUv2: FiLM −4% AbsRel, beat `channels`) and latitude in longitude prediction (E058, ~48k SSL4EO-S12 locations: +4.0 to +10.3 points accuracy, though the shuffled control fell 0.0001 outside its bar; E057, a smaller pilot, agrees). In E058 (image heads) the placement mattered: head < FiLM (pooled feature) < `channels` ≈ FiLM inside the encoder (hand-written, not a ManySeg option), so try `channels` for image heads. In E060 (pixel heads, E055's task) FiLM inside the encoder showed no demonstrated improvement over ManySeg's FiLM. E062: Sentinel-2 summary statistics as FiLM for FLAIR #2 aerial segmentation did not pass the one-seed screen (+0.004 val mIoU for the best arm) |
 | Time-series input, vs stacking dates as channels | mixed | E021: `attention` won on field delineation, not on crop types; several dates beat one by a wide margin either way |
 | `fastai_unet`, vs the default U-Net | small gain at high cost | E003 Pet +0.4 test mIoU at 4× FLOPs; E006 Sen1Floods11 +1.7 test mIoU at 4–5× latency |
 | `input_cross` | mixed | E012 helped on Sen1Floods11, not Pet; E013 no gain on clouds |
@@ -429,9 +430,11 @@ their numbers within an experiment.
 
 ## Documentation
 
-* [`docs/builder/`](docs/builder/): the model builder, a page where you pick inputs, encoders,
-  fusion, decoder and heads and get a live diagram plus the `create_model` code. In a clone of
-  this repository, open `docs/builder/index.html` in a browser; it needs no server.
+The documentation site, <https://manyseg.readthedocs.io>, has everything below plus an API reference generated from the
+docstrings.
+
+* [Model builder](https://manyseg.readthedocs.io/en/latest/docs/builder/): pick inputs, encoders, fusion, decoder and heads and get a live diagram
+  plus the `create_model` code.
 * [`notebooks/`](notebooks/): walkthroughs with real data and figures: flood mapping, radar plus
   optical with several outputs, and one notebook for each vector output.
 * [`examples/`](examples/): runnable scripts for most of the tasks above.

@@ -10,6 +10,7 @@ import json
 import math
 import statistics as st
 from collections import defaultdict
+from pathlib import Path
 
 
 def ms(v):
@@ -25,9 +26,8 @@ def welch(a, b):
 
 def flops(arch: str, options: dict) -> float | None:
     import torch
-    from torch.utils.flop_counter import FlopCounterMode
-
     from manyseg import create_model
+    from torch.utils.flop_counter import FlopCounterMode
 
     m = create_model(backbone="resnet34", pretrained=False, decoder=arch, num_classes=3,
                      **options).eval()
@@ -44,7 +44,8 @@ def main():
     ap.add_argument("--metric", default=None)
     ap.add_argument("--flops", action="store_true")
     a = ap.parse_args()
-    runs = [json.load(open(f)) for d in a.dirs for f in sorted(glob.glob(f"{d}/*.json"))]
+    runs = [json.loads(Path(f).read_text()) for d in a.dirs
+            for f in sorted(glob.glob(f"{d}/*.json"))]
     g = defaultdict(list)
     for r in runs:
         key = r["spec"]["arch"] if a.key == "arch" else r.get(a.key, "")

@@ -8,10 +8,17 @@ from torch import Tensor, nn
 class GroupNorm(nn.GroupNorm):
     """``nn.GroupNorm`` whose output keeps the input's dtype: CUDA autocast runs ``group_norm``
     in float32, which would otherwise carry float32 activations (and the ReLU after them) into
-    the next layer, which casts back to bf16 anyway (E026: -19% decoder training memory)."""
+    the next layer, which casts back to bf16 anyway (-19% decoder training memory in bf16)."""
 
     def forward(self, x: Tensor) -> Tensor:
         return super().forward(x).to(x.dtype)
+
+
+def group_norm_groups(channels: int, max_groups: int = 32) -> int:
+    """Largest divisor of ``channels`` that is at most ``max_groups``: ``min(32, channels)``
+    whenever that divides (the usual widths: unchanged), and a valid group count otherwise
+    (e.g. 24 for 48 channels) instead of GroupNorm's divisibility error."""
+    return next(g for g in range(min(max_groups, channels), 0, -1) if channels % g == 0)
 
 
 def make_norm(norm: str | None, channels: int) -> nn.Module:
@@ -20,7 +27,7 @@ def make_norm(norm: str | None, channels: int) -> nn.Module:
     if norm == "batch":
         return nn.BatchNorm2d(channels)
     if norm == "group":
-        return GroupNorm(min(32, channels), channels)
+        return GroupNorm(group_norm_groups(channels), channels)
     raise ValueError(f"unknown norm {norm!r}; choose from 'batch', 'group', None")
 
 

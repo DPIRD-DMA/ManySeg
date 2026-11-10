@@ -6,8 +6,11 @@ integers, so an affine geotransform maps polygons to world coordinates.
 
 from __future__ import annotations
 
+import json
+
 import numpy as np
 
+from .georef import pixel_to_world
 from .graph import VectorGraph, _deps
 
 
@@ -28,11 +31,12 @@ def polygons_from_labels(labels, *, simplify: float = 1.0, min_area: float = 16,
     px² are dropped. A disconnected instance keeps its largest part. Returned in label order.
 
     A low-level building block with generic defaults. The settings tuned for fields are in
-    ``block_decoder("fields")`` (E046, E052 absolute distance: instance thresholds
+    ``block_decoder("fields")`` (absolute distance: instance thresholds
     0.4 / 0.3 / 3 px, ``simplify=0.5``)
-    and for footprints outlines in ``block_decoder("footprints", method="outline")`` (E038);
+    and for footprints outlines in ``block_decoder("footprints", method="outline")``;
     use those with :func:`decode_scene` unless you need this step on its own.
     """
+    _deps()  # the 'vectors' extra, with a pip hint if it is missing
     from scipy import ndimage
     from shapely import affinity
 
@@ -73,7 +77,7 @@ def planar_faces(polygons, tolerance: float = 2.5) -> list:
     cell are dropped; holes are not kept. Returned in input order; MultiPolygon inputs are split
     into their parts first, and a face whose cells come out disconnected (another face cut through
     it) keeps its largest part in place with the other parts appended at the end, so no covered
-    area is lost. E048b (trained LoD2 faces):
+    area is lost. On trained LoD2 roof faces:
     seam closure 0.38 -> 0.72 (3DBAG's own faces: 0.79), heights better, face F1 unchanged.
     """
     return [f for _, _, f in _planar_faces(polygons, tolerance)]
@@ -155,10 +159,7 @@ def _join_cluster(faces: list, tolerance: float) -> list:
 
 
 def _apply(transform, xy: np.ndarray) -> list:
-    if transform is None:
-        return xy.tolist()
-    a, b, c, d, e, f = (transform[k] for k in range(6))  # affine.Affine / rasterio order
-    return np.stack([a * xy[:, 0] + b * xy[:, 1] + c, d * xy[:, 0] + e * xy[:, 1] + f], 1).tolist()
+    return (xy if transform is None else pixel_to_world(xy, transform)).tolist()
 
 
 def _point_rows(geoms) -> np.ndarray | None:
@@ -194,9 +195,9 @@ def _properties(properties, n: int) -> list[dict]:
 
 def to_geojson(geoms, transform=None, properties: list[dict] | dict | None = None) -> dict:
     """GeoJSON ``FeatureCollection`` from a :class:`VectorGraph` (one LineString per polyline),
-    a list of ``shapely`` polygons, or points. ``transform``: an affine geotransform in rasterio /
-    ``affine.Affine`` order ``(a, b, c, d, e, f)`` from pixel ``(x, y)`` to world; ``None``
-    keeps pixel coordinates.
+    a list of ``shapely`` geometries (any type: polygons, lines, multipart, collections), or
+    points. ``transform``: an affine geotransform in rasterio / ``affine.Affine`` order
+    ``(a, b, c, d, e, f)`` from pixel ``(x, y)`` to world; ``None`` keeps pixel coordinates.
 
     Points: an ``(N, 2)`` array or a sequence of pixel ``(x, y)`` (one ``Point`` feature each),
     or shapely ``Point`` / ``MultiPoint`` geometries (alone or in the list, mixed with polygons
@@ -216,18 +217,11 @@ def to_geojson(geoms, transform=None, properties: list[dict] | dict | None = Non
         feats = [{"type": "LineString", "coordinates": _apply(transform, p)}
                  for p in geoms.polylines()]
     elif hasattr(geoms, "geom_type") or (rows := _point_rows(geoms)) is None:
-        feats = []
-        for p in ([geoms] if hasattr(geoms, "geom_type") else geoms):
-            if p.geom_type == "Point":
-                feats.append({"type": "Point",
-                              "coordinates": _apply(transform, np.asarray(p.coords))[0]})
-            elif p.geom_type == "MultiPoint":
-                xy = np.asarray([q.coords[0] for q in p.geoms]).reshape(-1, 2)
-                feats.append({"type": "MultiPoint", "coordinates": _apply(transform, xy)})
-            else:
-                rings = [_apply(transform, np.asarray(r.coords))
-                         for r in [p.exterior, *p.interiors]]
-                feats.append({"type": "Polygon", "coordinates": rings})
+        import shapely  # geometries were given, so it is installed
+
+        feats = [json.loads(shapely.to_geojson(p if transform is None
+                                               else pixel_to_world(p, transform)))
+                 for p in ([geoms] if hasattr(geoms, "geom_type") else geoms)]
     else:
         feats = [{"type": "Point", "coordinates": c} for c in _apply(transform, rows)]
     props = _properties(properties, len(feats))

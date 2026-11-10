@@ -38,10 +38,10 @@ def connected_components(mask: Tensor, check_every: int = 8, *,
     Each pixel starts with its own index and takes the largest label among its neighbours
     until nothing changes: every component ends with its largest pixel index. Pointer
     jumping (a pixel also takes the label of the pixel its label names, which is in the same
-    component) lets long components converge in far fewer sweeps (E026: 18-44x on long or
+    component) lets long components converge in far fewer sweeps (18-44x fewer on long or
     field-like components) with the same result. On CPU with scipy installed, scipy's labelling
     is mapped to the same ids (much faster on large components: 102 sweeps, ~9 s, for one 1024 px
-    tile of farm fields, E045)."""
+    tile of farm fields)."""
     lab = None
     if mask.device.type == "cpu":
         try:
@@ -243,7 +243,7 @@ def instances_from_outputs(
         boundary_threshold: Pixels with a boundary probability at or above this are not seeds.
         seed_threshold: Seeds need a predicted distance above this.
         min_seed: Seed fragments (4-connected) of fewer pixels are dropped, so they do not
-            become extra instances (0 keeps all; E053). A foreground component whose seeds are
+            become extra instances (0 keeps all). A foreground component whose seeds are
             all dropped still gets one, at its distance maximum.
         min_size: Instances smaller than this many pixels are removed (0 keeps all).
         backend: ``"skimage"`` (watershed), ``"torch"`` or ``"auto"`` (skimage if installed).
@@ -260,6 +260,8 @@ def instances_from_outputs(
     fg = _foreground(extent, logits, extent_threshold)
     bnd = boundary[:, 0].sigmoid() if logits else boundary[:, 0]
     dist = distance[:, 0].float()
+    if fg.numel() == 0:  # empty batch (or tile): nothing to label
+        return torch.zeros(fg.shape, dtype=torch.long, device=fg.device)
     seeds = fg & (bnd < boundary_threshold) & (dist > seed_threshold)
     if min_seed > 1:
         seeds = _drop_small_seeds(seeds, min_seed)
@@ -273,7 +275,11 @@ def instances_from_outputs(
         except ImportError:
             backend = "torch"
     if backend == "skimage":
-        from skimage.segmentation import watershed
+        try:
+            from skimage.segmentation import watershed
+        except ImportError as e:
+            raise ImportError("backend='skimage' needs the 'instances' extra: "
+                              "pip install 'manyseg[instances]'") from e
 
         out = torch.stack([
             torch.from_numpy(watershed(_marker_order(-dist[i].cpu().numpy(), mk), mk,

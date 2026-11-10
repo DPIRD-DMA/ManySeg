@@ -10,8 +10,8 @@
 * Several heads: :func:`multi_head_loss` sums a loss per head of a model's output dict.
 
 The training code that chose these, with the weights between heads used in the experiments,
-is in the ``manyseg-bench`` package, which re-exports this module. ``distance_map`` needs SciPy
-(``manyseg[instances]``).
+is in ``manyseg-bench`` (the benchmark package in the GitHub repository, not on PyPI), which
+re-exports this module. ``distance_map`` needs SciPy (``manyseg[instances]``).
 """
 
 from __future__ import annotations
@@ -25,15 +25,45 @@ from torch import Tensor
 from .points.losses import density_loss
 
 
+def _mask_for(mask: Tensor, ref: Tensor) -> Tensor:
+    """``mask`` shaped to broadcast against ``ref`` (B, C, H, W, or any shape): a (B, H, W) mask
+    of a 4-D ``ref`` gains a channel axis; otherwise it must have ``ref``'s rank, its batch size,
+    and each other dimension equal to ``ref``'s or 1. Anything else is a ValueError (silent
+    broadcasting would mix samples, e.g. a (B, H, W) mask read as (C, H, W))."""
+    m = mask
+    if ref.dim() == 4 and m.dim() == 3:
+        m = m.unsqueeze(1)
+    ok = (m.dim() == ref.dim() and m.shape[0] == ref.shape[0]
+          and all(a in (b, 1) for a, b in zip(m.shape[1:], ref.shape[1:])))
+    if not ok:
+        allowed = ("(B, H, W), (B, 1, H, W) or (B, C, H, W)" if ref.dim() == 4
+                   else "the prediction's shape (or 1 in non-batch dimensions)")
+        raise ValueError(f"mask must be {allowed}; got {tuple(mask.shape)} for prediction "
+                         f"{tuple(ref.shape)}")
+    return m
+
+
 def soft_dice(logits: Tensor, target: Tensor, mask: Tensor | None = None,
               eps: float = 1.0) -> Tensor:
-    """1 - Dice on sigmoid probabilities, per sample then averaged. Shapes (B, 1, H, W)."""
-    p = logits.float().sigmoid()
-    t = target.float()
+    """1 - Dice on sigmoid probabilities, per sample then averaged. Shapes (B, 1, H, W) (or
+    (B, C, H, W)); ``mask`` (B, H, W), (B, 1, H, W) or like ``logits`` restricts the Dice to
+    valid pixels, whose values (even NaN) are ignored elsewhere; an empty mask gives 0."""
+    x, t = logits.float(), target.float()
     if mask is not None:
-        p, t = p * mask, t * mask
-    inter = (p * t).flatten(1).sum(1)
-    denom = p.flatten(1).sum(1) + t.flatten(1).sum(1)
+        w = _mask_for(mask, x)
+        valid = w != 0
+        # Exclude masked pixels before any arithmetic: a NaN (nodata) target or logit there
+        # would otherwise survive ``* 0`` and poison the loss and its gradients.
+        x = torch.where(valid, x, torch.zeros_like(x))
+        t = torch.where(valid, t, torch.zeros_like(t))
+        w = w.float()
+    else:
+        w = 1.0
+    # weighted Dice: each pixel's weight enters the intersection and the denominator once, so a
+    # constant float weight gives about the loss of a boolean mask (eps is not weighted)
+    p = x.sigmoid()
+    inter = (w * p * t).flatten(1).sum(1)
+    denom = (w * p).flatten(1).sum(1) + (w * t).flatten(1).sum(1)
     return (1 - (2 * inter + eps) / (denom + eps)).mean()
 
 
@@ -41,25 +71,41 @@ def dice_bce(logits: Tensor, target: Tensor, pos_weight: float | None = None,
              mask: Tensor | None = None, dice_weight: float = 1.0,
              bce_weight: float = 1.0) -> Tensor:
     """Binary Dice + BCE on logits. ``pos_weight`` up-weights positive pixels in the BCE term
-    (useful for thin boundary classes); ``mask`` restricts both terms to valid pixels."""
+    (useful for thin boundary classes); ``mask`` ((B, H, W), (B, 1, H, W) or like ``logits``)
+    restricts both terms to valid pixels."""
     pw = None if pos_weight is None else torch.tensor(pos_weight, device=logits.device)
-    bce = F.binary_cross_entropy_with_logits(logits.float(), target.float(), pos_weight=pw,
-                                             reduction="none")
-    bce = (bce * mask).sum() / mask.sum().clamp(min=1) if mask is not None else bce.mean()
+    x, t = logits.float(), target.float()
+    if mask is None:
+        bce = F.binary_cross_entropy_with_logits(x, t, pos_weight=pw).mean()
+    else:
+        w = _mask_for(mask, x)
+        valid = w != 0
+        x = torch.where(valid, x, torch.zeros_like(x))  # NaN-safe: see soft_dice
+        t = torch.where(valid, t, torch.zeros_like(t))
+        bce = F.binary_cross_entropy_with_logits(x, t, pos_weight=pw, reduction="none")
+        w = w.float().expand_as(bce)
+        bce = (bce * w).sum() / w.sum().clamp(min=1)
     return bce_weight * bce + dice_weight * soft_dice(logits, target, mask)
 
 
 def masked_regression(pred: Tensor, target: Tensor, mask: Tensor | None = None,
                       kind: str = "l1") -> Tensor:
     """L1 / MSE (``kind`` ``"l1"`` or ``"mse"``) averaged over ``mask`` pixels (all pixels if
-    None; 0 if the mask is empty)."""
+    None; 0 if the mask is empty). For ``(B, C, H, W)`` predictions the mask may be
+    ``(B, H, W)``, ``(B, 1, H, W)`` or ``(B, C, H, W)``; values under a False mask (even NaN)
+    are ignored."""
     if kind not in ("l1", "mse"):
         raise ValueError(f"kind must be 'l1' or 'mse', got {kind!r}")
-    diff = pred.float() - target.float()
-    err = diff.abs() if kind == "l1" else diff ** 2
+    p, t = pred.float(), target.float()
     if mask is None:
-        return err.mean()
-    m = mask.expand_as(err).float()
+        diff = p - t
+        return (diff.abs() if kind == "l1" else diff ** 2).mean()
+    w = _mask_for(mask, p)
+    valid = w != 0
+    # Drop masked pixels before subtracting, so NaN (nodata) there cannot reach the loss or grads.
+    diff = torch.where(valid, p, torch.zeros_like(p)) - torch.where(valid, t, torch.zeros_like(t))
+    err = diff.abs() if kind == "l1" else diff ** 2
+    m = w.float().expand_as(err)
     return (err * m).sum() / m.sum().clamp(min=1)
 
 
@@ -175,7 +221,10 @@ def multiclass_dice(logits: Tensor, target: Tensor, *, ignore_index: int | None 
         raise ValueError(f"target has class ids outside [0, {classes}) that are not ignore_index")
     # Per-class sums by label rather than through a one-hot, which takes C x H x W longs. Summed
     # in float64 where available: float32 counts stop growing at 2^24 pixels.
-    p = logits.float().softmax(1)
+    x = logits.float()
+    if valid is not None:  # ignored pixels may hold NaN (nodata): drop them before the softmax
+        x = torch.where(valid[:, None], x, torch.zeros_like(x))
+    p = x.softmax(1)
     wide = torch.float32 if p.device.type == "mps" else torch.float64
     index = (target if valid is None else target.where(valid, 0))[:, None]
     weight = None if valid is None else valid[:, None].to(wide)

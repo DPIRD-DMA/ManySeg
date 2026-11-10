@@ -18,7 +18,7 @@ uv sync --all-packages
 uv run pytest packages/manyseg -n 4            # fast tests
 uv run pytest packages/manyseg-bench -n 4
 uv run pytest packages/manyseg -m slow -n 4    # compile, export, ONNX: run if you touched these
-uvx ruff check packages examples notebooks scripts/sync_readme.py
+uvx ruff check packages examples notebooks scripts experiments/analyse_runs.py
 python scripts/sync_readme.py                  # if you edited README.md
 ```
 

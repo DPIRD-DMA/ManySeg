@@ -397,7 +397,7 @@ class TimmBackbone(nn.Module):
 
     def set_grad_checkpointing(self, enable: bool = True) -> None:
         """Recompute the encoder's activations in the backward pass instead of storing them
-        (timm's gradient checkpointing): less training memory for more compute (E026: -22%
+        (timm's gradient checkpointing): less training memory for more compute (-22%
         peak memory for +5% step time on a ResNet-34 U-Net, -61% for +18% on ConvNeXt-T).
 
         Values are unchanged. In-place activations are switched off while it is on (they would

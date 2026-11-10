@@ -5,7 +5,7 @@ on ManySeg's feature contract, so its design can be compared against other decod
 identical encoder and training recipe. Differences from fastai: works from ``FeatureSpec``s
 rather than hooks, and the final 1x1 classifier is ManySeg's head.
 
-Characteristics (see docs/architecture_review.md section 1): BN+ReLU on the encoder output and a
+Characteristics: BN+ReLU on the encoder output and a
 2x-wide "middle" block; ICNR-initialised pixel-shuffle upsampling; BatchNorm on each skip before
 concatenation and no norm inside the decoder convs; widths ``up//2 + skip`` (halved only in
 the last block); a final shuffle to full resolution, concatenation of the input image and a
@@ -91,7 +91,7 @@ class _Block(nn.Module):
         self.exact = False  # set by the model when inputs are padded to the stride
 
     def forward(self, x: Tensor, skip: Tensor) -> Tensor:
-        # the shuffled map is 2x, the skip 2x or 2x - 1: a crop (E025); the model says when
+        # the shuffled map is 2x, the skip 2x or 2x - 1: a crop; the model says when
         # that holds, so export traces no shape test
         up = fit_nearest(self.shuf(x), skip.shape[-2:], self.exact)
         return self.conv2(self.conv1(F.relu(torch.cat([up, self.bn(skip)], dim=1), inplace=True)))
@@ -173,7 +173,7 @@ class FastaiUNetDecoder(nn.Module):
 
     def _set_input_divisor(self, divisor: int) -> None:
         """Inputs padded to a multiple of the deepest stride: each shuffled map matches its skip
-        and the output the input, so the nearest resizes are crops (E025)."""
+        and the output the input, so the nearest resizes are crops."""
         self._exact = divisor % self._deepest_stride == 0
         for blk in self.blocks:
             blk.exact = self._exact and blk.step_2x
@@ -201,6 +201,6 @@ class FastaiUNetDecoder(nn.Module):
             x = resize_nearest(x, size)
         if self.last_cross:
             # the input image is float32 under autocast: concatenated as is, it would make the
-            # input-resolution residual block float32 (E026: -20% training memory)
+            # input-resolution residual block float32 (casting saves 20% training memory)
             x = self.res(torch.cat([x, inp.to(x.dtype)], dim=1))
         return x

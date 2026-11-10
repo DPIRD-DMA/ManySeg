@@ -1,0 +1,52 @@
+name: Docs
+
+# Builds the documentation site as Read the Docs does (pip-installed docs/requirements.txt,
+# scripts/build_docs.py, strict: a broken link, image or anchor fails). ci.yml skips changes to
+# Markdown, docs/ and experiments/, which are exactly what this build reads.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**.md"
+      - "docs/**"
+      - "experiments/**/README.md"
+      - "experiments/**/*.png"
+      - "examples/**"
+      - "notebooks/**"
+      - "packages/manyseg/src/**"
+      - "scripts/build_docs.py"
+      - "scripts/griffe_rst.py"
+      - ".readthedocs.yaml"
+      - ".github/workflows/docs.yml"
+  pull_request:
+    paths:
+      - "**.md"
+      - "docs/**"
+      - "experiments/**/README.md"
+      - "experiments/**/*.png"
+      - "examples/**"
+      - "notebooks/**"
+      - "packages/manyseg/src/**"
+      - "scripts/build_docs.py"
+      - "scripts/griffe_rst.py"
+      - ".readthedocs.yaml"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"  # as .readthedocs.yaml
+      - run: pip install -r docs/requirements.txt
+      - run: python scripts/build_docs.py

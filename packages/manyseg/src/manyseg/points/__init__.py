@@ -1,6 +1,8 @@
 """Point (centre heatmap + offset) and density outputs: presets, targets, losses,
 post-processing."""
 
+from .blocks import DensityBlockDecoder, PointBlockDecoder, SceneCount, ScenePoints
+from .geo import points_from_xy, points_to_xy
 from .losses import density_loss
 from .postprocess import (
     calibrate_threshold,
@@ -19,15 +21,8 @@ from .targets import (
     points_from_boxes,
 )
 
-__all__ = ["calibrate_threshold", "centers_from_instances", "count_from_density",
+__all__ = ["DensityBlockDecoder", "PointBlockDecoder", "SceneCount", "ScenePoints",
+           "calibrate_threshold", "centers_from_instances", "count_from_density",
            "density_head", "density_loss", "density_map", "find_peaks", "gaussian_heatmap",
            "group_by_offsets", "heatmap_from_instances", "offset_targets", "panoptic_labels",
-           "point_heads", "points_from_boxes"]
-
-# --- geo coordinates and large-scene block decoding ---
-from .blocks import DensityBlockDecoder, PointBlockDecoder, SceneCount, ScenePoints  # noqa: E402
-from .geo import points_from_xy, points_to_xy  # noqa: E402
-
-__all__ += ["DensityBlockDecoder", "PointBlockDecoder", "SceneCount", "ScenePoints",
-            "points_from_xy", "points_to_xy"]
-# --- end geo coordinates and large-scene block decoding ---
+           "point_heads", "points_from_boxes", "points_from_xy", "points_to_xy"]

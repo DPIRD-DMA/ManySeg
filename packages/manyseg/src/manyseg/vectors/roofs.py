@@ -162,7 +162,7 @@ def roof_faces(labels, corner, direction, height, *, tolerance: float = 2.5, ero
     """Whole-scene roof decode from instance ``labels`` (H, W), ``corner`` (H, W), ``direction``
     (2, H, W) and ``height`` (H, W, nDSM in metres): faces of :func:`polygons_from_corners`
     (same parameters) -> :func:`roof_records`. Defaults are the settings tuned on trained roof
-    models (E047b), as in ``block_decoder("roofs")``, which gives the same records block by
+    models, as in ``block_decoder("roofs")``, which gives the same records block by
     block on scenes too large for memory (with the same parameters and instance labels from
     the same thresholds)."""
     from scipy import ndimage

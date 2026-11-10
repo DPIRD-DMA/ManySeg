@@ -1,0 +1,17 @@
+{'train': ['D077_2021', 'D008_2019', 'D066_2021', 'D023_2020', 'D034_2021', 'D017_2018', 'D035_2020', 'D086_2020'], 'val': ['D009_2019', 'D029_2021'], 'test': ['D051_2019', 'D038_2021']}
+D077_2021 train 1250 picked; 1002 kept so far {'edge': 0, 'cloud': 248}
+D008_2019 train 1250 picked; 2218 kept so far {'edge': 0, 'cloud': 282}
+D066_2021 train 1250 picked; 3307 kept so far {'edge': 0, 'cloud': 443}
+D023_2020 train 600 picked; 3907 kept so far {'edge': 0, 'cloud': 443}
+D034_2021 train 800 picked; 4642 kept so far {'edge': 0, 'cloud': 508}
+D017_2018 train 1250 picked; 5769 kept so far {'edge': 0, 'cloud': 631}
+D035_2020 train 472 picked; 6231 kept so far {'edge': 0, 'cloud': 641}
+D086_2020 train 1250 picked; 7417 kept so far {'edge': 0, 'cloud': 705}
+D009_2019 val 1000 picked; 958 kept so far {'edge': 0, 'cloud': 747}
+D029_2021 val 1000 picked; 1932 kept so far {'edge': 0, 'cloud': 773}
+D051_2019 test 1000 picked; 956 kept so far {'edge': 0, 'cloud': 817}
+D038_2021 test 565 picked; 1463 kept so far {'edge': 0, 'cloud': 875}
+train (7417, 5, 256, 256) clear dates median 31.0 aerial-S2 NIR corr median 0.451
+val (1932, 5, 256, 256) clear dates median 33.0 aerial-S2 NIR corr median 0.441
+test (1463, 5, 256, 256) clear dates median 48.0 aerial-S2 NIR corr median 0.438
+window pixels clear on >= 1 chosen date: mean 0.999

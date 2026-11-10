@@ -170,7 +170,7 @@ def calibrate_threshold(heatmaps: Tensor | Sequence[Tensor], targets: Tensor | S
     .. warning:: With a small validation set the chosen threshold is noisy. On 45 images,
        two-fold cross-calibration picked thresholds that differed between folds (0.2 vs 0.35)
        and was no better than a fixed 0.3, once worse (count MAE 1.60 -> 2.02). On a large
-       one (OAM-TCD trees, E011b) it raised test F1 from 0.40 to 0.59. Calibrate on separate
+       one (OAM-TCD trees) it raised test F1 from 0.40 to 0.59. Calibrate on separate
        folds and use it only if the threshold is stable across them.
     """
     if metric not in ("count_mae", "f1"):

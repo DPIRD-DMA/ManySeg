@@ -16,6 +16,7 @@ converts with :func:`from_gdal`; a plain 6-sequence is always read in rasterio o
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Iterable, Mapping
 
 import numpy as np
@@ -39,12 +40,16 @@ def _coeffs(transform) -> tuple[float, ...]:
     return tuple(t[:6])
 
 
+def _is_geometry(g) -> bool:
+    """A shapely geometry (checked without importing shapely, which plain arrays don't need)."""
+    shapely = sys.modules.get("shapely")
+    return shapely is not None and isinstance(g, shapely.Geometry)
+
+
 def _apply(fn, obj):
-    shapely = _deps()[1]
-    if isinstance(obj, shapely.Geometry) or (
-            isinstance(obj, (list, tuple, np.ndarray)) and len(obj)
-            and isinstance(obj[0], shapely.Geometry)):
-        return shapely.transform(obj, fn)
+    if _is_geometry(obj) or (
+            isinstance(obj, (list, tuple, np.ndarray)) and len(obj) and _is_geometry(obj[0])):
+        return sys.modules["shapely"].transform(obj, fn)
     xy = np.asarray(obj, np.float64)
     return fn(xy.reshape(-1, 2)).reshape(xy.shape)
 
