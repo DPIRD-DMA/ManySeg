@@ -60,7 +60,7 @@ def soft_dice(logits: Tensor, target: Tensor, mask: Tensor | None = None,
     else:
         w = 1.0
     # weighted Dice: each pixel's weight enters the intersection and the denominator once, so a
-    # constant float weight gives the same loss as a boolean mask
+    # constant float weight gives about the loss of a boolean mask (eps is not weighted)
     p = x.sigmoid()
     inter = (w * p * t).flatten(1).sum(1)
     denom = (w * p).flatten(1).sum(1) + (w * t).flatten(1).sum(1)

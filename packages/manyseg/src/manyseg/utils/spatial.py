@@ -40,8 +40,8 @@ def pad_to_multiple(x: Tensor, divisor: int, value: float = 0.0) -> Tensor:
 def resize_bilinear(x: Tensor, size) -> Tensor:
     """Bilinear resize (``align_corners=False``) that keeps ``x``'s dtype: CUDA autocast runs
     ``upsample_bilinear2d`` in float32, and concatenating that output would make the whole
-    buffer float32 (27% more UPerNet training memory). The consumer is a conv that casts
-    to bf16 anyway."""
+    buffer float32 (keeping the dtype saved 27% of UPerNet training memory). The consumer is a
+    conv that casts to bf16 anyway."""
     return F.interpolate(x, size=size, mode="bilinear", align_corners=False).to(x.dtype)
 
 

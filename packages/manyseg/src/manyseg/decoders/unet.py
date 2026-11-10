@@ -37,7 +37,7 @@ def upsample2x(x: Tensor, size: Sequence[int], mode: str, exact_2x: bool = False
             return upsample2x_nearest(x, size)
         return resize_nearest(x, size)
     # bilinear outputs keep the input dtype: CUDA autocast returns float32, and the skip
-    # concat after this would make the whole block float32 (+7% training memory)
+    # concat after this would make the whole block float32 (keeping it saves 7% training memory)
     if mode == "bilinear":
         return resize_bilinear(x, size)
     if mode == "aligned":

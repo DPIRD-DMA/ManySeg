@@ -201,6 +201,6 @@ class FastaiUNetDecoder(nn.Module):
             x = resize_nearest(x, size)
         if self.last_cross:
             # the input image is float32 under autocast: concatenated as is, it would make the
-            # input-resolution residual block float32 (+20% training memory)
+            # input-resolution residual block float32 (casting saves 20% training memory)
             x = self.res(torch.cat([x, inp.to(x.dtype)], dim=1))
         return x
