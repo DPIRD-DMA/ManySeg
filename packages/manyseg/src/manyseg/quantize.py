@@ -362,7 +362,7 @@ def _check_source(ep: torch.export.ExportedProgram, source: nn.Module) -> None:
 def _save_program(ep: torch.export.ExportedProgram, source: nn.Module, path: Path,
                   meta: dict) -> Path:
     """Write ``ep`` and ``meta`` to a ``.pt2`` file holding no pickled data."""
-    from .io import _KEY, QUANTIZED_FORMAT
+    from .io import _KEY
 
     _require_torchao("saving a quantised program")
     import torchao
@@ -377,7 +377,6 @@ def _save_program(ep: torch.export.ExportedProgram, source: nn.Module, path: Pat
     fixed = _fixed_size(shapes)
     first = next(iter(shapes.values()))
     rr = ep.state_dict.get(_RR_KEY)
-    meta["format"] = QUANTIZED_FORMAT
     meta["quantization"] = {
         "route": "pt2e",
         "batch_size": first[0],
@@ -641,7 +640,8 @@ class _Diff:
         self.dtype_changed = False
 
     def add(self, ref: Tensor, out: Tensor) -> None:
-        out = out.to(ref.device)
+        # float64 on the CPU: exact for every input dtype, and MPS has no float64
+        ref, out = ref.detach().cpu(), out.detach().cpu()
         self.dtype_changed |= ref.dtype != out.dtype
         d = (ref.double() - out.double()).abs()
         self.max = max(self.max, d.max().item())

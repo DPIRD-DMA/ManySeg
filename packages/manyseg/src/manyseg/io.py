@@ -25,8 +25,9 @@ Normalisation is stored as a ManyPred normalisation spec (plain data): a list of
 ``[{"type": "scale", "value": 10000}, {"type": "zscore", "mean": [...], "std": [...]}]``, or
 ``{input_name: steps}`` for several inputs.
 
-Quantised models (save format 3; float files stay format 2, so older ManySeg keeps reading them,
-and refuses a quantised file with an upgrade message rather than failing obscurely):
+Quantised models use the same format number; a ``"quantization"`` entry in the metadata marks
+them (format 3 marked them before the first release: such files still load, and the next format
+is 4):
 
 * ``quantize_weights`` models go in a ``.safetensors`` file too. Each int8 weight is stored as
   its plain tensors (``"<name>:qdata"``, ``":scale"``, ``":zero_point"``), with the arguments it
@@ -53,8 +54,8 @@ from ._normalize_spec import check_normalize
 from .models import DenseModel
 from .weights import attribution
 
-FORMAT = 2  # the first released format
-QUANTIZED_FORMAT = 3  # quantised files only: float files keep FORMAT
+FORMAT = 2  # the first released format; quantised files too (their "quantization" entry)
+_LEGACY_QUANTIZED = 3  # pre-release quantised files; read as FORMAT. The next format is 4.
 _KEY = "manyseg"
 ACTIVATIONS = ("softmax", "sigmoid", "none")
 
@@ -176,7 +177,6 @@ def save(model: DenseModel | torch.export.ExportedProgram, path: str | Path, *,
     quantised = _quantization(model)
     meta = _metadata(model, **names)
     if quantised is not None:
-        meta["format"] = QUANTIZED_FORMAT
         meta["quantization"] = quantised
     from safetensors.torch import save_file
 
@@ -476,11 +476,13 @@ def read_metadata(path: str | Path, *, token: str | None = None) -> dict:
     if fmt < FORMAT:
         raise ValueError(f"{path} uses save format {fmt}, which predates ManySeg 0.1.0 and can't "
                          f"be read. Rebuild the model with create_model and load its weights.")
-    if fmt > QUANTIZED_FORMAT:
-        raise ValueError(f"{path} uses save format {fmt}; this ManySeg reads up to "
-                         f"{QUANTIZED_FORMAT}. Upgrade ManySeg.")
-    if fmt == QUANTIZED_FORMAT and not isinstance(meta.get("quantization"), Mapping):
-        raise ValueError(f"{path}: save format {fmt} without quantisation metadata.")
+    if fmt == _LEGACY_QUANTIZED and isinstance(meta.get("quantization"), Mapping):
+        meta["format"] = fmt = FORMAT  # a pre-release quantised file: same schema
+    if fmt > FORMAT:
+        raise ValueError(f"{path} uses save format {fmt}; this ManySeg reads up to {FORMAT}. "
+                         f"Upgrade ManySeg.")
+    if "quantization" in meta and not isinstance(meta["quantization"], Mapping):
+        raise ValueError(f"{path}: invalid quantisation metadata {meta['quantization']!r}.")
     missing = {"create_model", "heads", "activations"} - set(meta)
     if missing:
         raise ValueError(f"{path}: metadata lacks {sorted(missing)}.")
@@ -502,14 +504,28 @@ def _read_archive_metadata(path: str | Path) -> str | None:
         return z.read(name).decode() if name is not None else None
 
 
+# timm options that read a local file or fetch weights: the weights come from the saved file,
+# and a file's metadata must not make load() open another path (torch.load on a pickle).
+_WEIGHT_SOURCES = ("checkpoint_path", "pretrained_cfg", "pretrained_cfg_overlay")
+
+
+_DTYPES = {"float32": torch.float32, "float16": torch.float16, "bfloat16": torch.bfloat16,
+           "float64": torch.float64}
+
+
 def _no_download(config: dict) -> dict:
-    """The create_model arguments with every pretrained flag off (the weights come from the
-    file)."""
+    """The create_model arguments with every pretrained flag off and every weight source
+    removed: the weights come from the file."""
     config = json.loads(json.dumps(config))
-    config["pretrained"] = False
-    for cfg in (config.get("inputs") or {}).values():
-        if "pretrained" in cfg:
+    for cfg in (config, *(config.get("inputs") or {}).values()):
+        if not isinstance(cfg, dict):
+            continue
+        if cfg is config or "pretrained" in cfg:
             cfg["pretrained"] = False
+        kwargs = cfg.get("backbone_kwargs")
+        if isinstance(kwargs, dict):
+            for key in _WEIGHT_SOURCES:
+                kwargs.pop(key, None)
     return config
 
 
@@ -525,13 +541,14 @@ def _is_newer(saved, current: str) -> bool:
         return False
 
 
-def _version_error(path, meta: dict, err: Exception) -> Exception:
+def _version_error(path, meta: dict, err: Exception, *, quantizing: bool = False) -> Exception:
     """The error for a file this ManySeg cannot rebuild, naming the versions involved. The
     model was built once when it was saved, so a failure here is either a newer ManySeg's
-    option or a missing migration."""
+    option or a missing migration; ``quantizing`` when it came from re-quantising the rebuilt
+    model, which depends on torchao."""
     saved = meta.get("manyseg_version", "unknown")
     recipe = meta.get("quantization")
-    if recipe is not None:
+    if recipe is not None and quantizing and not _is_newer(saved, __version__):
         import torchao
 
         return ValueError(f"{path} cannot be rebuilt: it was saved with torchao "
@@ -587,7 +604,9 @@ def load(path: str | Path, map_location: str | torch.device = "cpu", *,
         model.single_output = meta["single_output"]
     elif list(model.heads) != meta["heads"]:
         model.select_heads(meta["heads"])
-    dtype = getattr(torch, meta.get("dtype", "float32"))
+    dtype = _DTYPES.get(meta.get("dtype", "float32"))
+    if dtype is None:
+        raise ValueError(f"{path}: unsupported dtype {meta.get('dtype')!r}.")
     model.to(dtype=dtype)
     from safetensors import safe_open
 
@@ -615,7 +634,7 @@ def load(path: str | Path, map_location: str | torch.device = "cpu", *,
             state.update({alias: state[name] for alias, name in aliases.items()})
             model.load_state_dict(state, strict=True)
     except (RuntimeError, KeyError) as e:
-        raise _version_error(path, meta, e) from e
+        raise _version_error(path, meta, e, quantizing=recipe is not None) from e
     model.saved_metadata = meta
     if recipe is not None:
         model.quantization = {"mode": recipe["mode"], "conv": recipe["conv"]}

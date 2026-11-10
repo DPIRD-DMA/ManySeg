@@ -352,12 +352,12 @@ def test_float_files_keep_format_2(tmp_path):
     assert meta["format"] == 2 and "quantization" not in meta
 
 
-def test_weights_file_is_format_3_without_pickle(tmp_path):
+def test_weights_file_is_format_2_without_pickle(tmp_path):
     pytest.importorskip("torchao")
     q = quantize_weights(_model())
     path = manyseg.save(q, tmp_path / "q.safetensors", **_save_args(q))
     meta = manyseg.read_metadata(path)
-    assert meta["format"] == 3
+    assert meta["format"] == 2  # the schema version; the quantization entry marks the kind
     assert meta["quantization"]["route"] == "weights"
     assert meta["quantization"]["mode"] == "int8_weight_only"
     with safe_open(str(path), framework="pt") as f:  # safetensors: plain tensors only
@@ -471,7 +471,7 @@ def test_load_quantised_file_without_torchao_names_the_extra(tmp_path, monkeypat
     q = quantize_weights(_model())
     path = manyseg.save(q, tmp_path / "q.safetensors", **_save_args(q))
     monkeypatch.setitem(sys.modules, "torchao", None)
-    assert manyseg.read_metadata(path)["format"] == 3  # the metadata needs no torchao
+    assert "quantization" in manyseg.read_metadata(path)  # the metadata needs no torchao
     with pytest.raises(ImportError, match=r"manyseg\[quant\]"):
         manyseg.load(path)
 
@@ -503,17 +503,60 @@ def test_save_refuses_weights_that_do_not_split(tmp_path):
         manyseg.save(q, tmp_path / "q.safetensors", **_save_args(q))
 
 
-def test_format_3_without_quantisation_metadata_is_refused(tmp_path):
-    model = _model()
-    path = manyseg.save(model, tmp_path / "f.safetensors", **_save_args(model))
+def _rewrite(path, tmp_path, edit):
+    """A copy of saved file ``path`` with its manyseg metadata changed by ``edit(meta)``."""
     with safe_open(str(path), framework="pt") as f:
         meta, tensors = f.metadata(), {k: f.get_tensor(k) for k in f.keys()}  # noqa: SIM118
     stored = json.loads(meta["manyseg"])
-    stored["format"] = 3
-    bad = tmp_path / "bad.safetensors"
-    save_file(tensors, str(bad), metadata={**meta, "manyseg": json.dumps(stored)})
-    with pytest.raises(ValueError, match="without quantisation metadata"):
+    edit(stored)
+    out = tmp_path / f"edited_{path.name}"
+    save_file(tensors, str(out), metadata={**meta, "manyseg": json.dumps(stored)})
+    return out
+
+
+def test_float_file_with_format_3_asks_for_an_upgrade(tmp_path):
+    """Format 3 is retired (pre-release quantised files): without a quantization entry it is
+    a future format, and an upgrade is the right advice."""
+    model = _model()
+    path = manyseg.save(model, tmp_path / "f.safetensors", **_save_args(model))
+    bad = _rewrite(path, tmp_path, lambda m: m.update(format=3))
+    with pytest.raises(ValueError, match="Upgrade ManySeg"):
         manyseg.load(bad)
+
+
+def test_pre_release_format_3_quantised_file_still_loads(tmp_path):
+    pytest.importorskip("torchao")
+    q = quantize_weights(_model())
+    path = manyseg.save(q, tmp_path / "q.safetensors", **_save_args(q))
+    old = _rewrite(path, tmp_path, lambda m: m.update(format=3))
+    assert manyseg.read_metadata(old)["format"] == 2
+    x = torch.randn(1, 3, 64, 64)
+    with torch.no_grad():
+        torch.testing.assert_close(manyseg.load(old)(x), manyseg.load(path)(x))
+
+
+def test_invalid_quantization_entry_is_refused(tmp_path):
+    model = _model()
+    path = manyseg.save(model, tmp_path / "f.safetensors", **_save_args(model))
+    bad = _rewrite(path, tmp_path, lambda m: m.update(quantization="int8"))
+    with pytest.raises(ValueError, match="invalid quantisation metadata"):
+        manyseg.read_metadata(bad)
+
+
+def test_quantised_file_from_newer_manyseg_blames_manyseg_not_torchao(tmp_path):
+    """A create_model option this ManySeg doesn't know is a version problem, whatever torchao
+    is installed."""
+    pytest.importorskip("torchao")
+    q = quantize_weights(_model())
+    path = manyseg.save(q, tmp_path / "q.safetensors", **_save_args(q))
+
+    def newer(m):
+        m["manyseg_version"] = "99.0.0"
+        m["create_model"]["future_option"] = 1
+
+    with pytest.raises(ValueError, match=r"saved by ManySeg 99\.0\.0") as err:
+        manyseg.load(_rewrite(path, tmp_path, newer))
+    assert "torchao" not in str(err.value)
 
 
 def test_save_ep_needs_source_and_module_is_rejected(tmp_path):

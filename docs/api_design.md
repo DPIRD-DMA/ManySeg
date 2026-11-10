@@ -1371,8 +1371,8 @@ correctly. Window-attention backbones are rejected before export, because their
 dynamic export hangs rather than fails.
 
 **Saved files.** `manyseg.save` keeps the metadata and `tiling_spec()` for both routes, and
-loading needs `manyseg[quant]`. Quantised files are save format 3, so an older ManySeg asks to be
-upgraded; float files stay format 2.
+loading needs `manyseg[quant]`. Quantised files use save format 2 like float files; a
+`quantization` entry in the metadata marks them.
 
 * A `quantize_weights` file is safetensors: each int8 weight as its plain `qdata`, `scale` and
   `zero_point` tensors. `load` rebuilds the model, quantises it with the stored `mode` and `conv`,

@@ -6,6 +6,8 @@
 The file is committed: it is what a user saved with this ManySeg version, and every later
 version must keep loading it (migrating its config if keys were renamed) to the same outputs.
 Do not regenerate it to make a failing test pass.
+golden_quantized_format3 is a pre-release quantised file (format 3 then marked quantised
+files); it stays to show that such files still load.
 """
 
 import sys
@@ -56,7 +58,7 @@ def quantized(model):
     from manyseg.quantize import quantize_weights
 
     q = quantize_weights(model, "int8_dynamic")
-    name = f"golden_quantized_format{manyseg.io.QUANTIZED_FORMAT}"
+    name = f"golden_quantized_format{manyseg.io.FORMAT}"
     path = manyseg.save(q, HERE / f"{name}.safetensors",
                         normalize=[{"type": "scale", "value": 10000}],
                         activations={"seg": "softmax", "label": "softmax"},
