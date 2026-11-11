@@ -99,8 +99,22 @@ def _site_links(text: str) -> str:
     return re.sub(r"\]\(((?:\.\./)*)docs/builder/\)", r"](\1docs/builder/index.html)", text)
 
 
+_PICTURE = re.compile(
+    r'<picture>\s*<source media="\(prefers-color-scheme: dark\)" srcset="([^"]+)">\s*'
+    r'<img ([^>]*?)src="([^"]+)"([^>]*)>\s*</picture>')
+
+
+def _themed_images(text: str) -> str:
+    """A ``<picture>`` follows the operating system's colour scheme, but the site has its own
+    light / dark toggle, so a light OS with the site switched to dark showed the light graphics
+    on a dark page. Each becomes a pair of images that Material shows by the site's scheme
+    (``#only-light`` / ``#only-dark``)."""
+    return _PICTURE.sub(lambda m: f'<img {m[2]}src="{m[3]}#only-light"{m[4]}>'
+                                  f'<img {m[2]}src="{m[1]}#only-dark"{m[4]}>', text)
+
+
 def _copy_page(src: Path, dst: Path) -> None:
-    dst.write_text(_site_links(src.read_text()))
+    dst.write_text(_themed_images(_site_links(src.read_text())))
 
 
 def _copy_experiment(readme: Path, dst: Path) -> None:
