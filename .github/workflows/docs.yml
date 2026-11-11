@@ -18,19 +18,7 @@ on:
       - "scripts/griffe_rst.py"
       - ".readthedocs.yaml"
       - ".github/workflows/docs.yml"
-  pull_request:
-    paths:
-      - "**.md"
-      - "docs/**"
-      - "experiments/**/README.md"
-      - "experiments/**/*.png"
-      - "examples/**"
-      - "notebooks/**"
-      - "packages/manyseg/src/**"
-      - "scripts/build_docs.py"
-      - "scripts/griffe_rst.py"
-      - ".readthedocs.yaml"
-      - ".github/workflows/docs.yml"
+  pull_request:  # no path filter: see the changes job
   workflow_dispatch:
 
 permissions:
@@ -41,12 +29,47 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  # Required checks must report on every PR, so the workflow always runs and this job decides
+  # whether the PR touches anything the docs site reads.
+  # When it doesn't, the jobs below still start and report success under their real names,
+  # with every step skipped.
+  changes:
     runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.diff.outputs.run }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+        with:
+          fetch-depth: 0
+      - id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT" != pull_request ]; then echo "run=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          run=false
+          while IFS= read -r f; do
+            case "$f" in
+              *.md|docs/*|experiments/*/README.md|experiments/*.png|examples/*|notebooks/*) run=true ;;
+              packages/manyseg/src/*|scripts/build_docs.py|scripts/griffe_rst.py) run=true ;;
+              .readthedocs.yaml|.github/workflows/docs.yml) run=true ;;
+            esac
+          done < <(git diff --name-only "$BASE...$HEAD")
+          echo "changed files decide: run=$run"
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: changes
+    runs-on: ubuntu-latest
+    steps:
+      - if: needs.changes.outputs.run == 'true'
+        uses: actions/checkout@v4
+      - if: needs.changes.outputs.run == 'true'
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"  # as .readthedocs.yaml
-      - run: pip install -r docs/requirements.txt
-      - run: python scripts/build_docs.py
+      - if: needs.changes.outputs.run == 'true'
+        run: pip install -r docs/requirements.txt
+      - if: needs.changes.outputs.run == 'true'
+        run: python scripts/build_docs.py

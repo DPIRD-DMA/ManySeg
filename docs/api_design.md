@@ -1,6 +1,6 @@
 # ManySeg public API design
 
-Status: API for the first release, 0.1.0 (unreleased). Everything below is implemented and
+Status: API for the first release, 0.1.0 (released 2026-11-11). Everything below is implemented and
 tested, with two exceptions stated where they appear: the `token` conditioning mode raises
 `NotImplementedError`, and the large-scene flow through ManyPred needs ManyPred's GitHub main
 (not yet in a PyPI release).

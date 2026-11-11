@@ -404,6 +404,8 @@ precision.
 * **Water and other per-pixel spectral targets:** `decoder_kwargs={"input_cross": True}`
   feeds the raw bands to the last decoder stage. It did not help pet or cloud segmentation.
 * **Mixed precision is safe:** bf16, fp16 and int8 weight-only showed no accuracy loss.
+  One exception: on Windows, PyTorch's CPU bfloat16 can crash with an illegal-instruction
+  error on some processors, so use float32 on the CPU there.
 * **Training speed:** the default U-Net trains as fast as SMP's `Unet` on the same timm
   encoder: compiled steps match it, and eager steps are 18–25% faster (bf16, E025).
 

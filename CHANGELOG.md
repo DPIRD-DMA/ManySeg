@@ -4,7 +4,7 @@ All notable changes to `manyseg` (the library) and `manyseg-bench` (the benchmar
 follow [Semantic Versioning](https://semver.org/); before 1.0, minor versions may change the
 API, and every such change is listed here.
 
-## 0.1.0 (unreleased)
+## 0.1.0 (2026-11-11)
 
 First release. Python 3.11–3.14, PyTorch ≥ 2.10, timm ≥ 1.0.20.
 
@@ -113,6 +113,12 @@ Names and defaults may change before 1.0, and each decoder was tuned on one data
   Lightning, Accelerate and TorchGeo.
 * `notebooks/`: flood mapping on Sen1Floods11, optical + radar with several heads, and one
   notebook per vector output, saved with their figures.
+
+### Known issues
+
+* On Windows, PyTorch's CPU bfloat16 can crash with an illegal-instruction error
+  (`0xc000001d`) on some processors, inside `nn.Linear`. Use float32 on the CPU there; GPUs
+  and other platforms are not affected.
 
 ### Benchmark (`manyseg-bench`, not published)
 
