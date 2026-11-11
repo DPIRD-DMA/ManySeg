@@ -24,7 +24,8 @@ def _write_tile(root, split, name, k, size=32):
 
 
 @pytest.fixture
-def raw(tmp_path):
+def raw(tmp_path, monkeypatch):
+    monkeypatch.setattr(ai4boundaries, "SIZE", 32)  # the synthetic tiles' fixed size
     root = tmp_path / "raw" / "orthos"
     for split, n in (("train", 3), ("val", 2), ("test", 2)):
         for i in range(n):

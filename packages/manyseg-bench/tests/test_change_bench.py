@@ -120,4 +120,5 @@ def test_multilabel_seg_loss_is_per_valid_pixel_and_empty_evaluator():
     bce = torch.nn.functional.binary_cross_entropy_with_logits
     ref = (bce(la, a.float(), reduction="sum") + bce(lb[0, 0, 0, 0], torch.tensor(1.0))) / 5
     assert ev.compute()["loss"] == pytest.approx(float(ref))
-    assert t.evaluator().compute()["miou"] == 0.0
+    # no positives at all: no class has a defined IoU (the ConfusionMatrix convention)
+    assert t.evaluator().compute()["miou"] != t.evaluator().compute()["miou"]  # NaN

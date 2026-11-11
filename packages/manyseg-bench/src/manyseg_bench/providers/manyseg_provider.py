@@ -4,7 +4,14 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
 
-from .base import BuiltModel, ModelSpec, Provider, fingerprint_module, split_params
+from .base import (
+    BuiltModel,
+    ModelSpec,
+    Provider,
+    fingerprint_module,
+    split_params,
+    stem_adaptation_note,
+)
 
 # canonical weight id -> timm pretrained tag
 _TIMM_TAGS = {"tv_in1k": "tv_in1k"}
@@ -14,6 +21,18 @@ def _decoder(spec: ModelSpec) -> str:
     # arch "none" names image-level models, which build no decoder: ManySeg still checks the
     # decoder name, so pass its default
     return "unet" if spec.arch == "none" else spec.arch
+
+
+def _input_stem_note(cfg: dict, pretrained, opts: dict) -> list[str]:
+    """``stem_adaptation_note`` for one input, from its resolved settings: its own
+    ``pretrained`` override, and nothing for an input that shares another's encoder (it has no
+    stem of its own; a projection in front of it is learned from scratch)."""
+    backbone = cfg.get("backbone")
+    if isinstance(backbone, str) and backbone.startswith("shared:"):
+        return []
+    return stem_adaptation_note(
+        "manyseg", cfg["in_channels"], cfg.get("pretrained", pretrained) is True,
+        cfg.get("channel_adapter", opts.get("channel_adapter", "repeat")))
 
 
 class BandGroupModel(nn.Module):
@@ -151,7 +170,10 @@ class ManySegProvider(Provider):
                 inner.single_output = "logits"
             model = BandGroupModel(inner, groups)
             enc, dec = split_params(model, inner.backbone.encoders)
-            return BuiltModel(model, enc, dec, fingerprint_module(inner.backbone))
+            notes = [f"band group {n!r}: {note}" for n, cfg in inputs.items()
+                     for note in _input_stem_note(cfg, pretrained, opts)]
+            return BuiltModel(model, enc, dec, fingerprint_module(inner.backbone), notes)
+        notes: list[str] = []
         if spec.input_mode == "dict" and spec.inputs:
             inputs = {n: {"in_channels": c} for n, c in spec.inputs.items()}
             for n in spec.timeseries or []:
@@ -160,10 +182,15 @@ class ManySegProvider(Provider):
             for n, extra in opts.pop("input_options", {}).items():
                 inputs[n].update(extra)
             opts.setdefault("fusion", {"type": "intermediate"})
+            notes = [f"input {n!r}: {note}" for n, cfg in inputs.items()
+                     if cfg.get("kind") != "vector" and "in_channels" in cfg
+                     for note in _input_stem_note(cfg, pretrained, opts)]
             model = create_model(backbone=backbone, pretrained=pretrained,
                                  inputs=inputs, decoder=_decoder(spec),
                                  num_classes=n_cls, **opts)
         else:
+            notes = stem_adaptation_note("manyseg", spec.in_channels, pretrained is True,
+                                         opts.get("channel_adapter", "repeat"))
             model = create_model(
                 backbone=backbone,
                 pretrained=pretrained,
@@ -177,5 +204,5 @@ class ManySegProvider(Provider):
         # Pretrained encoders only: fusion ops / necks count as decoder-side parameters.
         encoder = getattr(model.backbone, "encoders", None) or model.backbone
         enc, dec = split_params(model, encoder)
-        return BuiltModel(model, enc, dec, fingerprint_module(model.backbone))
+        return BuiltModel(model, enc, dec, fingerprint_module(model.backbone), notes)
 

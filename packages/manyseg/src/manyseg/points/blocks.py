@@ -21,7 +21,6 @@ pixel lies in its core, so no peak is kept twice or lost at a seam.
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -29,7 +28,7 @@ import numpy as np
 import torch
 
 from .geo import points_to_xy
-from .postprocess import blur_radius, find_peaks
+from .postprocess import blur_radius, density_value_scale, find_peaks
 
 _UNSET: Any = object()  # "argument not given" (``None`` means pixel coordinates)
 
@@ -80,6 +79,16 @@ class ScenePoints:
         if self.crs is not None and t is not None:  # pixel coordinates are in no CRS
             fc["crs"] = {"type": "name", "properties": {"name": str(self.crs)}}
         return fc
+
+    def write(self, path, *, layer: str | None = None):
+        """Write the points to ``path`` (``.geojson``, or e.g. ``.gpkg`` with geopandas) as
+        ``Point`` features with a ``score`` property, through the scene's ``transform`` and
+        naming its ``crs`` (pixel coordinates and no CRS without a transform), as
+        :meth:`to_geojson` (:func:`~manyseg.vectors.write_records`). Needs the ``vectors``
+        extra. Returns the path."""
+        from ..vectors.blocks import write_records
+
+        return write_records(self, path, layer=layer)
 
 
 def _bounds(b) -> tuple[int, int, int, int]:
@@ -233,36 +242,51 @@ class SceneCount:
 @dataclass
 class DensityBlockDecoder:
     """:func:`count_from_density` block by block: the density summed over each block's core
-    (float64), divided by ``value_scale``. Needs no halo (a sum has no reach).
+    (float64), divided by the target's scale. Needs no halo (a sum has no reach).
 
+    Give exactly one of ``sigma`` (the :func:`density_loss` ``sigma``: its default target is
+    scaled by ``2 pi sigma^2``) or ``value_scale`` (the loss's ``value_scale``; 1.0 for a plain
+    :func:`density_map` target), as :func:`count_from_density`.
+
+    The field may have several channels; all are summed, as :func:`count_from_density` does.
     ``mask``: a field (1 channel); only pixels where it exceeds ``mask_threshold`` count, as
     ``count_from_density(density, mask=field > mask_threshold)``. Result: :class:`SceneCount`
-    (equal to the whole-scene count up to float rounding; the sum is in float64).
+    (equal to the whole-scene :func:`count_from_density` up to float rounding when the density
+    has no NaN; the sum is in float64).
 
-    NaN pixels count as 0, so a scene with nodata (NaN in ManyPred's stitched outputs) still has
-    a total. A model that returns NaN where there is data is not detected here."""
+    NaN policy (differs from :func:`count_from_density`, which propagates NaN): NaN density
+    pixels, and pixels whose mask is NaN, count as 0, so a scene with nodata (NaN in
+    ManyPred's stitched outputs) still has a total. A model that returns NaN where there is
+    data is not detected here."""
 
     field: str = "density"
-    value_scale: float = 1.0
+    sigma: float | None = None
+    value_scale: float | None = None
     mask: str | None = None
     mask_threshold: float = 0.5
 
     min_halo = 0
 
     def __post_init__(self):
-        if not (math.isfinite(self.value_scale) and self.value_scale > 0):
-            raise ValueError(f"value_scale must be finite and > 0, got {self.value_scale}")
+        density_value_scale(self.sigma, self.value_scale)  # exactly one, valid
+
+    @property
+    def count_scale(self) -> float:
+        """The density is divided by this: ``value_scale``, or ``2 pi sigma^2``."""
+        return density_value_scale(self.sigma, self.value_scale)
 
     def __call__(self, fields, block, scene) -> tuple[tuple[int, int, int, int], float]:
         """The block's core and the sum of the density field over it."""
         core, win, (it, ib, il, ir) = _layout(block, scene, 0)
+        if self.field not in fields:  # as _field, before reading the channel count
+            raise KeyError(f"field {self.field!r} missing (have {sorted(fields)})")
         a = np.asarray(fields[self.field])
         a = a[None] if a.ndim == 2 else a
         d = _field(fields, self.field, a.shape[0], win)[:, it:ib, il:ir].astype(np.float64)
         if self.mask is not None:  # NaN in the mask compares False
             d = np.where(np.asarray(_field(fields, self.mask, 1, win))[:, it:ib, il:ir]
                          > self.mask_threshold, d, 0.0)
-        return core, float(np.nansum(d)) / self.value_scale
+        return core, float(np.nansum(d)) / self.count_scale
 
     def combine(self, results: list, scene) -> SceneCount:
         """The scene total and per-block counts: :class:`SceneCount`."""

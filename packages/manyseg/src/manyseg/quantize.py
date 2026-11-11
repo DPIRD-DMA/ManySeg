@@ -13,7 +13,8 @@ Two routes, both through torchao (``pip install 'manyseg[quant]'``):
 
 This is a module of its own rather than part of ``manyseg.export`` because it carries an
 optional dependency and because ``quantize_weights`` does not export at all. The PT2E path
-reuses ``manyseg.export.dynamic_shapes`` rather than duplicating it.
+reuses ``manyseg.export``'s dynamic shapes, window-attention check and export call rather
+than duplicating them.
 
 Both save through :func:`manyseg.save` and load through :func:`manyseg.load`, with their metadata
 and ``tiling_spec()``. A ``.pt2`` file is written without pickled data. ``torch.export.load`` can
@@ -27,10 +28,12 @@ trust.
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import io
 import json
 import re
+import types
 import warnings
 import zipfile
 from collections.abc import Iterable, Mapping
@@ -40,7 +43,12 @@ from typing import Any
 import torch
 from torch import Tensor, nn
 
-from .export import dynamic_shapes, eval_mode
+from .export import (
+    _checked_shapes,
+    _export,
+    _windowed,  # noqa: F401  (window-attention check, also imported from here)
+    eval_mode,
+)
 
 WEIGHT_MODES = ("int8_weight_only", "int8_dynamic")
 
@@ -76,47 +84,6 @@ def _x86_quantizer(reduce_range: bool | None = None):
     return xiq.X86InductorQuantizer().set_global(cfg)
 
 
-# timm's window-attention classes, by (module, class): their dynamic-size export hangs rather
-# than fails. Matched exactly so that an unrelated module with a
-# ``window_size`` attribute is not rejected.
-_WINDOW_ATTENTION = {
-    ("timm.models.swin_transformer", "WindowAttention"),
-    ("timm.models.swin_transformer_v2", "WindowAttention"),
-    ("timm.models.swin_transformer_v2_cr", "WindowMultiHeadAttention"),
-    ("timm.models.davit", "WindowAttention"),
-}
-
-
-def _windowed(model: nn.Module) -> str | None:
-    """Class name of the first timm window-attention module (Swin, Swin V2, DaViT), if any."""
-    return next((type(m).__name__ for m in model.modules()
-                 if (type(m).__module__, type(m).__name__) in _WINDOW_ATTENTION), None)
-
-
-def _shapes(model: nn.Module, example, dynamic: bool, max_size: int, dynamic_batch: bool):
-    """``export_model``'s dynamic-shape spec, or None (fixed size). Computed once from the float
-    model: the quantised graph is re-exported with the same spec."""
-    if not dynamic:
-        return None
-    if (block := _windowed(model)) is not None:
-        raise ValueError(f"window-attention backbones ({block}) cannot be exported with dynamic "
-                         "H/W; pass dynamic=False to quantise at the example's fixed size")
-    return dynamic_shapes(model, example, max_size, dynamic_batch)
-
-
-def _export(module: nn.Module, example, shapes) -> torch.export.ExportedProgram:
-    """``torch.export`` as ``export_model`` does it, for the float model and the int8 graph."""
-    try:
-        return torch.export.export(module, (example,), dynamic_shapes=shapes,
-                                   prefer_deferred_runtime_asserts_over_guards=True)
-    except Exception as e:  # torch.export raises several types (UserError, RuntimeError, ...)
-        if shapes is None:
-            raise
-        raise ValueError(
-            "could not export this model with dynamic H/W; pass dynamic=False to quantise at "
-            f"the example's fixed size. Export error: {type(e).__name__}: {e}") from e
-
-
 def _drop_unused_attrs(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
     """``convert_pt2e`` adds int8 copies of the weights but leaves the float originals
     registered (unused); drop every parameter and buffer the graph no longer reads. An attribute
@@ -149,13 +116,17 @@ def quantize_pt2e(model: nn.Module, example, calibration: Iterable, *, quantizer
     torchao's ``X86InductorQuantizer`` (per-channel weights, per-tensor activations); pass any
     other PT2E quantizer (e.g. ``ArmInductorQuantizer``) to target another backend.
     ``reduce_range`` (default: on when *this* CPU lacks VNNI) uses 7-bit activations, which
-    is needed for correct compiled int8 on such CPUs; set it for the CPU you deploy on.
+    is needed for correct compiled int8 on such CPUs; set it for the CPU you deploy on. It
+    configures the default quantizer only: passing it with ``quantizer`` raises.
 
     H/W stay dynamic as in ``export_model`` (and the batch too with ``dynamic_batch``, which
-    needs an example with batch size >= 2). ``model`` is exported in eval mode and then
-    returned to its previous mode.
-    Window-attention backbones (Swin, DaViT) cannot export dynamically and need
-    ``dynamic=False``: the result then only accepts the example's size.
+    needs an example with batch size >= 2), within ``[min, max_size]``. ``model`` itself is not
+    changed: a copy of it is exported, in eval mode, so the result shares no tensors with it.
+    Window-attention backbones (Swin, DaViT) cannot export dynamic H/W and need
+    ``dynamic=False``: the result then only accepts the example's H/W, and its batch size
+    too unless ``dynamic_batch=True`` (which works with ``dynamic=False``: dynamic batch,
+    fixed H/W). Without ``dynamic_batch``, calibration batches must match the example's. A
+    calibration input of another shape than the export allows raises a ValueError.
 
     Returns an ``ExportedProgram``, like ``export_model``: save it with its metadata by
     ``manyseg.save(ep, "model.pt2", source=model, ...)``, or run ``ep.module()``. Eager calls
@@ -165,12 +136,18 @@ def quantize_pt2e(model: nn.Module, example, calibration: Iterable, *, quantizer
         torch._inductor.config.freezing = True
         fast = torch.compile(ep.module())
     """
+    if quantizer is not None and reduce_range is not None:
+        raise ValueError("reduce_range configures the default x86 quantizer; with quantizer= "
+                         "set it in that quantizer's config instead.")
     _require_torchao()
     from torchao.quantization.pt2e.quantize_pt2e import convert_pt2e, prepare_pt2e
 
-    shapes = _shapes(model, example, dynamic, max_size, dynamic_batch)
+    shapes = _checked_shapes(model, example, dynamic, max_size, dynamic_batch)
+    # a private copy: the program shares its unquantised tensors (biases, norms) with what was
+    # exported, so the float model must stay free to change or move
     with eval_mode(model):
-        gm = _export(model, example, shapes).module()
+        own = copy.deepcopy(model)
+    gm = _export(own, example, shapes, dynamic).module()
     rr = None  # unknown with a custom quantizer
     if quantizer is None:
         rr = (not _has_vnni()) if reduce_range is None else bool(reduce_range)
@@ -190,17 +167,61 @@ def quantize_pt2e(model: nn.Module, example, calibration: Iterable, *, quantizer
                 raise ValueError(f"calibration batch size {_batch_of(x)} differs from the "
                                  f"example's {bs}; the export fixes the batch dimension unless "
                                  "dynamic_batch=True")
-            prepared(x)
+            _check_calibration(x, example, shapes)
+            try:
+                prepared(x)
+            except AssertionError as e:  # a shape guard the check above can't foresee
+                if not str(e).startswith("Guard failed"):
+                    raise
+                raise ValueError(f"calibration input {n} has a shape this export does not take "
+                                 f"({e}). Calibrate at sizes the export allows (dynamic=, "
+                                 f"max_size=).") from e
             n += 1
     if n == 0:
         raise ValueError("calibration must yield at least one input")
     converted = _drop_unused_attrs(convert_pt2e(prepared))
     if rr is not None:  # survives torch.export.save / load; read by check_deployment
         converted.register_buffer(_RR_KEY, torch.tensor(rr))
-    return _export(converted, example, shapes)
+    return _export(converted, example, shapes, dynamic)
 
 
 _RR_KEY = "manyseg_int8_reduce_range"
+
+
+def _check_calibration(x: Any, example: Any, shapes: Any) -> None:
+    """Raise a ValueError if calibration input ``x`` has a shape the export of ``example`` with
+    ``shapes`` (:func:`manyseg.export.dynamic_shapes`) does not take: every dimension without a
+    ``Dim`` is fixed at the example's, every other one is within the ``Dim``'s bounds."""
+    spec = shapes.get("x") if isinstance(shapes, Mapping) else None
+    if isinstance(example, Mapping):
+        if not isinstance(x, Mapping) or set(x) != set(example):
+            got = sorted(x) if isinstance(x, Mapping) else type(x).__name__
+            raise ValueError(f"calibration inputs must have the example's keys "
+                             f"{sorted(example)}, got {got}")
+        items = [(k, x[k], example[k], (spec or {}).get(k)) for k in example]
+    else:
+        items = [("x", x, example, spec)]
+    for name, t, ref, dims in items:
+        if not (torch.is_tensor(t) and torch.is_tensor(ref)):
+            continue
+        if t.ndim != ref.ndim:
+            raise ValueError(f"calibration input {name!r} has {t.ndim} dimensions, the "
+                             f"example {ref.ndim}")
+        for i, (have, want) in enumerate(zip(t.shape, ref.shape, strict=True)):
+            dim = (dims or {}).get(i)
+            if dim is None and have != want:
+                spatial = t.ndim >= 4 and i >= t.ndim - 2
+                raise ValueError(
+                    f"calibration input {name!r} has size {have} in dimension {i}, but the "
+                    f"export fixes it at the example's {want}: calibrate at that size"
+                    + (", or quantise with dynamic=True where the backbone allows it"
+                       if spatial else ""))
+            if dim is not None and not dim.min <= have <= dim.max:
+                raise ValueError(
+                    f"calibration input {name!r} has size {have} in dimension {i}, outside "
+                    f"the export's range [{dim.min}, {dim.max}]: calibrate within it"
+                    + (", or raise max_size= (the upper bound of dynamic H/W)"
+                       if have > dim.max else ""))
 
 
 def check_deployment(ep: torch.export.ExportedProgram) -> None:
@@ -230,18 +251,25 @@ class QuantizedProgram:
 
     Deliberately not an ``nn.Module``: a module from ``ep.module()`` raises on ``.eval()``, also
     when nested, and callers such as ManyPred call ``.to(device, dtype).eval()`` on every module.
-    Call it like the model; its device is the ``map_location`` it was loaded on.
+    Call it like the model; its device is the ``map_location`` it was loaded on, and an input on
+    another device (or another GPU) is refused. A multi-input program takes its dict with the
+    keys in any order (it is passed on in the order the program was exported with); a missing
+    or unexpected key raises a ValueError naming it.
 
     Attributes:
-        program: The ``ExportedProgram``.
-        module: Its ``ep.module()``, e.g. to ``torch.compile`` with freezing.
+        program: The ``ExportedProgram`` as given (:func:`manyseg.load` loads it on the CPU),
+            which :func:`manyseg.save` saves.
+        module: An ``ep.module()`` of a copy of it, on ``device``, which runs the calls, e.g. to
+            ``torch.compile`` with freezing. Moving or changing it leaves ``program`` alone.
         saved_metadata: What :func:`manyseg.save` stored.
         batch_size: The only batch size the program takes, or None if it is dynamic
             (``quantize_pt2e(..., dynamic_batch=True)``).
-        fixed_size: The only ``(h, w)`` it takes, or None if H/W are dynamic (``dynamic=False``,
-            needed by window-attention backbones).
+        fixed_size: The only ``(h, w)`` its primary input takes (the input the model's
+            outputs and tiling follow), or None if that input's H/W are dynamic
+            (``dynamic=False`` fixes them, as window-attention backbones need). Other inputs'
+            sizes are in ``input_shapes``, which the calls are checked against.
         input_shapes: ``{input: shape}`` with None for dynamic dimensions (``"x"`` for a model
-            taking a single tensor).
+            taking a single tensor), in the order the program takes its inputs.
     """
 
     def __init__(self, program: torch.export.ExportedProgram, metadata: dict,
@@ -249,23 +277,27 @@ class QuantizedProgram:
         recipe = metadata["quantization"]
         self.program = program
         self.saved_metadata = metadata
-        self.device = torch.device(device)
-        self.module = program.module().to(self.device)
+        # resolved, with its index ("cuda" -> "cuda:0"), as the inputs' devices are
+        self.device = torch.empty(0, device=device).device
+        # ep.module() shares the program's tensors, so moving it would move part of the program
+        # (and break saving it): run a copy (one deepcopy keeps the tensors it shares internally)
+        self.module = copy.deepcopy(program).module().to(self.device)
         self.batch_size: int | None = recipe["batch_size"]
         self.fixed_size: tuple[int, int] | None = (tuple(recipe["fixed_size"])
                                                    if recipe["fixed_size"] else None)
         self.input_shapes: dict[str, list] = recipe["input_shapes"]
+        self._keys = _input_keys(program)  # the dict's keys in the program's order; None: tensor
 
     def tiling_spec(self) -> dict:
         """The float model's ``tiling_spec()`` as saved, for ManyPred. ``max_size`` is the
-        program's fixed size when it has one."""
+        primary input's fixed size (``fixed_size``) when the program has one."""
         spec = copy.deepcopy(self.saved_metadata["tiling_spec"])
         if spec.get("max_size") is not None:
             spec["max_size"] = tuple(spec["max_size"])
         return spec
 
     def _check(self, name: str, t: Tensor) -> None:
-        if t.device.type != self.device.type:
+        if t.device != self.device:
             raise ValueError(f"This program is on {self.device} but input {name!r} is on "
                              f"{t.device}: load it with map_location={str(t.device)!r}, or run "
                              f"it on {self.device} (with ManyPred, device={str(self.device)!r}).")
@@ -286,7 +318,28 @@ class QuantizedProgram:
                     f"and input {name!r} has {list(t.shape)} (dimension {i}). Quantise with "
                     f"dynamic=True where the backbone allows it, or use this size.")
 
+    def _arrange(self, x: Any) -> Any:
+        """``x`` as the program takes it: a dict with exactly its keys, in its order (the
+        exported program only accepts the order it was exported with)."""
+        if self._keys is None:
+            if isinstance(x, Mapping):
+                raise ValueError(f"This program takes a single tensor, got a dict with keys "
+                                 f"{list(x)}.")
+            return x
+        if not isinstance(x, Mapping):
+            raise ValueError(f"This program takes a dict of inputs with keys {self._keys}, got "
+                             f"{type(x).__name__}.")
+        missing = [k for k in self._keys if k not in x]
+        unexpected = [k for k in x if k not in self._keys]
+        if missing or unexpected:
+            raise ValueError(
+                f"This program takes inputs {self._keys}"
+                + (f"; missing {missing}" if missing else "")
+                + (f"; unexpected {unexpected}" if unexpected else "") + ".")
+        return {k: x[k] for k in self._keys}
+
     def __call__(self, x: Any) -> Any:
+        x = self._arrange(x)
         for name, t in x.items() if isinstance(x, Mapping) else [("x", x)]:
             self._check(name, t)
         return self.module(x)
@@ -296,24 +349,81 @@ class QuantizedProgram:
                 f"device={self.device})")
 
 
+def _user_placeholders(ep: torch.export.ExportedProgram) -> list:
+    wanted = {s.arg.name for s in ep.graph_signature.input_specs
+              if s.kind == torch.export.graph_signature.InputKind.USER_INPUT}
+    return [n for n in ep.graph.nodes if n.op == "placeholder" and n.name in wanted]
+
+
+def _example_inputs(ep: torch.export.ExportedProgram) -> tuple:
+    """``ep.example_inputs``, or, for a program saved without them (as :func:`manyseg.save`
+    writes it, so one loaded back from a ``.pt2`` file), inputs of the shapes and dtypes its
+    graph takes, with each dynamic dimension at the lower bound of its range (at least 2)."""
+    if ep.example_inputs is not None:
+        return ep.example_inputs
+    from torch.utils._pytree import tree_unflatten
+
+    ranges = {str(k): v for k, v in ep.range_constraints.items()}
+    gen = torch.Generator().manual_seed(0)
+
+    def size(d) -> int:
+        if isinstance(d, int):
+            return d
+        r = ranges.get(str(d.node.expr))
+        if r is None:
+            raise ValueError(f"cannot pick a size for the program's dimension {d}; save the "
+                             "program returned by quantize_pt2e instead.")
+        return max(int(r.lower), 2)
+
+    leaves = []
+    for n in _user_placeholders(ep):
+        val = n.meta["val"]
+        shape = [size(d) for d in val.shape]
+        leaves.append(torch.randn(shape, generator=gen).to(val.dtype) if val.is_floating_point()
+                      else torch.zeros(shape, dtype=val.dtype))
+    return tree_unflatten(leaves, ep.call_spec.in_spec)
+
+
 def _input_shapes(ep: torch.export.ExportedProgram) -> dict[str, list]:
     """``{input: shape}`` of the program's inputs, None for its dynamic dimensions, read from
     the graph. Dict inputs by key; a single tensor is ``"x"``."""
     from torch.utils._pytree import tree_flatten_with_path
 
-    paths, _ = tree_flatten_with_path(ep.example_inputs)
+    paths, _ = tree_flatten_with_path(_example_inputs(ep))
     names = [str(getattr(path[-1], "key", "x")) if len(path) > 2 else "x" for path, _ in paths]
-    wanted = {s.arg.name for s in ep.graph_signature.input_specs
-              if s.kind == torch.export.graph_signature.InputKind.USER_INPUT}
-    nodes = [n for n in ep.graph.nodes if n.op == "placeholder" and n.name in wanted]
+    nodes = _user_placeholders(ep)
     return {name: [d if isinstance(d, int) else None for d in n.meta["val"].shape]
             for name, n in zip(names, nodes, strict=True)}
 
 
-def _fixed_size(shapes: Mapping[str, list]) -> list[int] | None:
-    """``(h, w)`` of the first raster input if the program fixes it."""
-    raster = next((s for s in shapes.values() if len(s) >= 4), None)
-    return raster[-2:] if raster is not None and None not in raster[-2:] else None
+def _input_keys(ep: torch.export.ExportedProgram) -> list[str] | None:
+    """The keys of the dict the program takes, in the order it was exported with (its call
+    ``TreeSpec``); None for a program taking a single tensor."""
+    from torch.utils._pytree import tree_unflatten
+
+    spec = ep.call_spec.in_spec
+    args, _ = tree_unflatten([None] * spec.num_leaves, spec)  # (args, kwargs)
+    if len(args) != 1 or not isinstance(args[0], dict):
+        return None
+    return [str(k) for k in args[0]]
+
+
+def _primary_input(source: nn.Module) -> str:
+    """The name of ``source``'s primary raster input, the one its outputs and tiling follow:
+    ``"x"`` (as in :func:`_input_shapes`) for a model taking a single tensor."""
+    primary = getattr(getattr(source, "backbone", None), "primary", None)
+    conditioner = getattr(source, "conditioner", None)
+    if primary is None and conditioner is not None:  # one raster beside vector inputs
+        primary = getattr(conditioner, "single", None)
+    return "x" if primary is None else str(primary)
+
+
+def _fixed_size(shapes: Mapping[str, list], primary: str) -> list[int] | None:
+    """``(h, w)`` of input ``primary`` if the program fixes it; None if they are dynamic."""
+    shape = shapes.get(primary)
+    if shape is None or len(shape) < 4 or None in shape[-2:]:
+        return None
+    return shape[-2:]
 
 
 def _is_quantized_program(ep: torch.export.ExportedProgram) -> bool:
@@ -333,7 +443,7 @@ def _check_source(ep: torch.export.ExportedProgram, source: nn.Module) -> None:
         raise ValueError(f"source= does not look like the model this program came from: it has "
                          f"no weights of shape {sorted(other)[:3]}.")
     device = next(source.parameters()).device
-    args = ep.example_inputs[0]
+    args = _example_inputs(ep)[0]
     moved = torch.utils._pytree.tree_map(lambda t: t.to(device), args)
 
     def shape_of(out):
@@ -374,7 +484,7 @@ def _save_program(ep: torch.export.ExportedProgram, source: nn.Module, path: Pat
                          "manyseg.quantize.quantize_pt2e. For a float model, save the model.")
     _check_source(ep, source)
     shapes = _input_shapes(ep)
-    fixed = _fixed_size(shapes)
+    fixed = _fixed_size(shapes, _primary_input(source))
     first = next(iter(shapes.values()))
     rr = ep.state_dict.get(_RR_KEY)
     meta["quantization"] = {
@@ -574,6 +684,27 @@ def _is_dense_conv(mod: nn.Module, fqn: str) -> bool:
     return isinstance(mod, nn.Conv2d) and mod.weight.shape[1] > 1
 
 
+def _quantize_tied(model: nn.Module, config, accept) -> None:
+    """``torchao.quantize_`` on the layers ``accept`` selects, keeping tied weights tied: layers
+    sharing one weight (a ``"shared:<input>"`` encoder is a separate module with the same
+    parameters) are quantised once, and the others take that quantised weight. Their other
+    tensors (biases, BatchNorm state) are left as they are, shared or separate."""
+    from torchao.quantization import quantize_
+
+    groups: dict[int, list[nn.Module]] = {}
+    for fqn, mod in model.named_modules():
+        if accept(mod, fqn):
+            groups.setdefault(id(mod.weight), []).append(mod)
+    leaders = {id(mods[0]) for mods in groups.values()}
+    quantize_(model, config, filter_fn=lambda mod, fqn: id(mod) in leaders and accept(mod, fqn))
+    for leader, *others in groups.values():
+        rep = leader.__dict__.get("extra_repr")  # torchao's repr naming the quantised weight
+        for mod in others:
+            mod.weight = leader.weight
+            if rep is not None:
+                mod.extra_repr = types.MethodType(rep.__func__, mod)
+
+
 def quantize_weights(model: nn.Module, mode: str = "int8_weight_only", *, conv: bool = True,
                      inplace: bool = False) -> nn.Module:
     """int8 weights through torchao, for eager or ``torch.compile`` inference on CPU or GPU.
@@ -588,7 +719,8 @@ def quantize_weights(model: nn.Module, mode: str = "int8_weight_only", *, conv: 
 
     Conv2d weights are dequantised on the fly, so for CNNs this saves memory and disk, not
     time. ``conv=False`` leaves convs in float (Linear only). Depthwise convs and one-feature
-    Linear layers always stay float.
+    Linear layers always stay float. Weights shared between layers (a ``"shared:<input>"``
+    encoder) stay shared: each is quantised once.
     The model is copied first unless ``inplace``.
 
     :func:`manyseg.save` stores the result with its metadata, keeping the size saving, and
@@ -601,18 +733,24 @@ def quantize_weights(model: nn.Module, mode: str = "int8_weight_only", *, conv: 
         Int8DynamicActivationInt8WeightConfig,
         Int8WeightOnlyConfig,
         IntxWeightOnlyConfig,
-        quantize_,
     )
     from torchao.quantization.granularity import PerAxis
 
     if not inplace:
         model = copy.deepcopy(model)
     if conv:
-        quantize_(model, IntxWeightOnlyConfig(weight_dtype=torch.int8, granularity=PerAxis(0)),
-                  filter_fn=_is_dense_conv)
+        _quantize_tied(model, IntxWeightOnlyConfig(weight_dtype=torch.int8,
+                                                   granularity=PerAxis(0)), _is_dense_conv)
     linear = (Int8WeightOnlyConfig() if mode == "int8_weight_only"
               else Int8DynamicActivationInt8WeightConfig())
-    quantize_(model, linear, filter_fn=_is_linear)
+    _quantize_tied(model, linear, _is_linear)
+    if not any(hasattr(t, "tensor_data_names") for t in model.state_dict(keep_vars=True).values()):
+        warnings.warn(
+            "quantize_weights quantised no layer: the model has no "
+            + ("Linear layer with more than one input feature (conv=False leaves convs float)"
+               if not conv else "Linear or dense Conv2d layer")
+            + ", so it is unchanged and saves as a float model.", UserWarning, stacklevel=2)
+        return model
     model.quantization = {"mode": mode, "conv": conv}  # what manyseg.load needs to rebuild it
     return model
 
@@ -680,12 +818,18 @@ def compare_outputs(reference, candidate, inputs: Iterable) -> dict[str, float]:
     * ``dtype_changed`` = 1.0, with a warning, if the candidate's dtype differs.
 
     For dict outputs every key is prefixed with the head name, e.g.
-    ``"segmentation/argmax_agreement"``.
+    ``"segmentation/argmax_agreement"``. ``nn.Module`` models run in eval mode and are then
+    returned to their previous mode.
     """
     reference, candidate = (m.module() if isinstance(m, torch.export.ExportedProgram) else m
                             for m in (reference, candidate))
     diffs: dict[str, _Diff] = {}
-    with torch.no_grad():
+    with torch.no_grad(), contextlib.ExitStack() as modes:
+        for m in (reference, candidate):
+            if isinstance(m, nn.Module):
+                # an ep.module() refuses .eval(): it is fixed in the mode it was exported in
+                with contextlib.suppress(NotImplementedError):
+                    modes.enter_context(eval_mode(m))
         for x in inputs:
             ref, out = reference(x), candidate(x)
             if isinstance(ref, Mapping):

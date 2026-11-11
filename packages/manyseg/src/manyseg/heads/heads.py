@@ -20,14 +20,13 @@ entry for custom heads, and ``manyseg.load`` needs the class registered (importe
 
 from __future__ import annotations
 
-import math
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 import torch.nn.functional as F
 from torch import Tensor, nn
 
 from ..features import FeatureSpec
-from ..layers import GroupNorm
+from ..layers import make_norm, normalize_norm
 from ..registry import Registry
 from ..utils.resolution import scale_factor
 from ..utils.spatial import pad_to_multiple
@@ -44,7 +43,12 @@ class PixelHead(nn.Module):
     * ``d == f``: just the ``k x k`` conv; nothing is resampled (a decoder built with
       ``out_stride=f`` feeding a head with ``scale=1/f`` pays for no upsampling at all);
     * ``d > f``: conv, then bilinear upsampling by ``d / f`` (``align_corners=False``);
-    * ``d < f``: area-average by ``f / d`` (block means), then the conv on the coarse grid.
+    * ``d < f``: area-average by ``f / d`` (block means; a partial edge block of the feature
+      it gets averages only that block's cells), then the conv on the coarse grid. With
+      ``pad_to_stride=False`` that feature is the image's, so edge blocks match
+      :func:`~manyseg.utils.downsample_mean` targets. With the default padding the head reads
+      the padded feature, exactly as for an input zero-padded by the caller, so edge cells
+      include the padding (the model gives the same output whoever pads).
 
     The output covers ``feature_size * d / f`` pixels (>= the scaled padded input); the model
     crops it to ``ceil(H / f) x ceil(W / f)``.
@@ -53,8 +57,11 @@ class PixelHead(nn.Module):
 
     * ``hidden``: widths of ``k x k`` conv -> ``norm`` -> ReLU layers before the final conv,
       e.g. ``[64, 32, 16]``; ``dilation`` (one int, or one per layer, e.g. ``[8, 16, 32]``)
-      widens their receptive field to match large objects; ``norm`` is ``"bn"`` (default),
-      ``"gn"`` or None. They run on the head's grid, before upsampling.
+      widens their receptive field to match large objects; ``norm`` is ``"batch"`` (default),
+      ``"group"`` or None, with the aliases ``"bn"``, ``"gn"`` and ``"none"``, the same values
+      as decoders take (:func:`manyseg.layers.normalize_norm`). They run on the head's grid,
+      before upsampling.
+    * ``kernel_size``: odd (default 3), so the convs keep the grid aligned.
     * ``activation="softplus"`` (regression heads): the output is ``softplus(conv)``, > 0
       (never exactly 0). Applied after resampling. ``bias_init`` stays the bias of the final
       conv, before the activation. (ReLU was tried for density heads and removed: the head
@@ -64,8 +71,13 @@ class PixelHead(nn.Module):
     def __init__(self, spec: FeatureSpec, channels: int, kernel_size: int = 3,
                  bias_init: float = 0.0, scale: float = 1, *,
                  hidden: Sequence[int] | None = None, dilation: int | Sequence[int] = 1,
-                 norm: str | None = "bn", activation: str | None = None) -> None:
+                 norm: str | None = "batch", activation: str | None = None) -> None:
         super().__init__()
+        if isinstance(kernel_size, bool) or not isinstance(kernel_size, int) or \
+                kernel_size < 1 or kernel_size % 2 == 0:
+            # padding k // 2 keeps the size only for odd k; an even k grows the map by one
+            # and shifts it half a pixel
+            raise ValueError(f"head kernel_size must be a positive odd int, got {kernel_size!r}")
         self.stride = spec.stride
         self.scale = scale
         self.factor = scale_factor(scale)
@@ -93,7 +105,11 @@ class PixelHead(nn.Module):
         """``activate=False``: skip the output activation (the model applies :meth:`activate`
         itself after a metadata head bias, so the final output stays >= 0)."""
         if self.down > 1:
-            x = F.avg_pool2d(pad_to_multiple(x, self.down), self.down)
+            # block means over the in-image cells only (as downsample_mean for targets): a
+            # partial edge block is divided by its own cell count, not diluted by the padding
+            ones = x.new_ones((1, 1, *x.shape[-2:]))
+            x = (F.avg_pool2d(pad_to_multiple(x, self.down), self.down)
+                 / F.avg_pool2d(pad_to_multiple(ones, self.down), self.down))
         if self.hidden is not None:
             x = self.hidden(x)
         x = self.conv(x)
@@ -112,7 +128,6 @@ class PixelHead(nn.Module):
 
 
 ACTIVATIONS = (None, "softplus")
-NORMS = (None, "bn", "gn")
 
 
 def _hidden_layers(in_ch: int, hidden: Sequence[int], dilation: int | Sequence[int],
@@ -129,16 +144,13 @@ def _hidden_layers(in_ch: int, hidden: Sequence[int], dilation: int | Sequence[i
             isinstance(d, int) and not isinstance(d, bool) and d > 0 for d in dil):
         raise ValueError(f"'dilation' must be a positive int or one per hidden layer "
                          f"({len(hidden)}), got {dilation!r}")
-    if norm not in NORMS:
-        raise ValueError(f"head norm must be one of {NORMS}, got {norm!r}")
+    norm = normalize_norm(norm, "head norm")  # before the bias: "none" means no norm
     layers: list[nn.Module] = []
     for c, d in zip(hidden, dil):
         layers.append(nn.Conv2d(in_ch, c, kernel_size, padding=d * (kernel_size // 2),
                                 dilation=d, bias=norm is None))
-        if norm == "bn":
-            layers.append(nn.BatchNorm2d(c))
-        elif norm == "gn":
-            layers.append(GroupNorm(math.gcd(32, c), c))
+        if norm is not None:  # no Identity: the Sequential's indices are state-dict keys
+            layers.append(make_norm(norm, c))
         layers.append(nn.ReLU(inplace=True))
         in_ch = c
     return nn.Sequential(*layers)
@@ -160,11 +172,20 @@ class ImageHead(nn.Module):
             nn.init.zeros_(self.fc.bias)
 
     def forward(self, x: Tensor) -> Tensor:
+        """``x``: the feature map, already cropped to the input's valid (unpadded) region (the
+        model does that), so padding does not dilute the mean."""
         return self.fc(self.drop(x.mean(dim=(-2, -1))))
 
 
 for _t in ("segmentation", "regression", "classification"):
     HEADS[_t] = _t
+
+
+def head_scope(cfg: Mapping) -> str:
+    """A head config's scope, default filled in: ``"image"`` for ``"classification"`` heads,
+    else ``"pixel"``."""
+    default = "image" if cfg.get("type", "segmentation") == "classification" else "pixel"
+    return cfg.get("scope", default)
 
 
 def create_head(spec_decoder: FeatureSpec, spec_encoder: FeatureSpec, cfg: dict) -> tuple[
@@ -174,7 +195,8 @@ def create_head(spec_decoder: FeatureSpec, spec_encoder: FeatureSpec, cfg: dict)
     {"decoder", "encoder"}. Image-scope heads default to the deepest encoder feature.
 
     ``cfg``: ``type`` (``"segmentation"`` for pixel heads, ``"classification"`` for image
-    heads, ``"regression"`` for either), ``out_channels`` (required), ``scope``, ``source``,
+    heads, ``"regression"`` for either), ``out_channels`` (required), ``scope`` (default
+    ``"image"`` for classification, else ``"pixel"``; see :func:`head_scope`), ``source``,
     ``uncertainty`` (regression: ``2 * out_channels`` outputs, mean and log-variance),
     ``scale`` (pixel heads) and the head module's options (:class:`PixelHead`: ``kernel_size``,
     ``bias_init``, ``hidden``, ``dilation``, ``norm``, ``activation``; :class:`ImageHead`:
@@ -188,6 +210,25 @@ def create_head(spec_decoder: FeatureSpec, spec_encoder: FeatureSpec, cfg: dict)
     channels = cfg.pop("out_channels")
     if not isinstance(kind, str):  # a registered head class
         return _custom_head(kind, kind_name, channels, cfg, spec_decoder, spec_encoder)
+    scope = head_scope({"type": kind_name, **cfg})
+    cfg.pop("scope", None)
+    if scope not in ("pixel", "image"):
+        raise ValueError(f"scope must be 'pixel' or 'image', got {scope!r}")
+    # segmentation predicts per pixel, classification per image; regression is either
+    if (kind_name, scope) in (("segmentation", "image"), ("classification", "pixel")):
+        right = "classification" if scope == "image" else "segmentation"
+        other = "pixel" if scope == "image" else "image"
+        raise ValueError(f"{kind_name!r} heads are {other}-scope: set 'scope': {other!r}, or use "
+                         f"'type': {right!r} for a {scope}-scope head (scope defaults to "
+                         "'image' for classification heads, else 'pixel')")
+    # scope first: an option no image head takes must not be answered with "add X too"
+    if scope != "pixel":
+        extra = sorted(set(cfg) & {"hidden", "dilation", "norm", "activation", "kernel_size",
+                                   "bias_init"})
+        if extra:
+            raise ValueError(f"{extra} apply to pixel heads only")
+    if scope != "pixel" and "scale" in cfg:
+        raise ValueError("'scale' applies to pixel heads only; image-scope heads have no grid")
     for k in ("dilation", "norm"):
         if k in cfg and "hidden" not in cfg:
             raise ValueError(f"head {k!r} applies to the 'hidden' layers; give 'hidden' too")
@@ -206,21 +247,6 @@ def create_head(spec_decoder: FeatureSpec, spec_encoder: FeatureSpec, cfg: dict)
             raise ValueError("'activation' with uncertainty=True would also apply to the "
                              "log-variance; leave it out")
         channels = 2 * channels
-    scope = cfg.pop("scope", "pixel")
-    # segmentation predicts per pixel, classification per image; regression is either
-    if (kind_name, scope) in (("segmentation", "image"), ("classification", "pixel")):
-        right = "classification" if scope == "image" else "segmentation"
-        other = "pixel" if scope == "image" else "image"
-        raise ValueError(f"{kind_name!r} heads are {other}-scope: set 'scope': {other!r}, or use "
-                         f"'type': {right!r} for a {scope}-scope head (scope defaults to "
-                         "'pixel')")
-    if scope != "pixel":
-        extra = sorted(set(cfg) & {"hidden", "dilation", "norm", "activation", "kernel_size",
-                                   "bias_init"})
-        if extra:
-            raise ValueError(f"{extra} apply to pixel heads only")
-    if scope != "pixel" and "scale" in cfg:
-        raise ValueError("'scale' applies to pixel heads only; image-scope heads have no grid")
     if scope == "pixel":
         source = cfg.pop("source", "decoder")
         spec = spec_decoder if source == "decoder" else spec_encoder
@@ -229,8 +255,6 @@ def create_head(spec_decoder: FeatureSpec, spec_encoder: FeatureSpec, cfg: dict)
         source = cfg.pop("source", "encoder")
         spec = spec_decoder if source == "decoder" else spec_encoder
         head = ImageHead(spec, channels, **cfg)
-    else:
-        raise ValueError(f"scope must be 'pixel' or 'image', got {scope!r}")
     if source not in ("decoder", "encoder"):
         raise ValueError(f"source must be 'decoder' or 'encoder', got {source!r}")
     head.kind = kind

@@ -10,7 +10,7 @@ imports the benchmark; a test enforces this.
 | Owned by the benchmark (identical for every provider) | Owned by the provider |
 | --- | --- |
 | Dataset preparation, resizing, splits | Building the `nn.Module` from a `ModelSpec` |
-| Normalisation (mean/std from the dataset, per pixel) | Mapping canonical weight ids to library weights |
+| Normalisation (mean/std from the training split or fixed dataset constants, per pixel; recorded as `norm_stats.source`) | Mapping canonical weight ids to library weights |
 | Augmentation (seeded, on device) | Splitting parameters into encoder and decoder |
 | Optimiser, schedule, epochs, batch size, loss | Unwrapping library-specific output types |
 | Precision, `torch.compile`, channels_last | |
@@ -19,8 +19,12 @@ imports the benchmark; a test enforces this.
 
 If a provider cannot meet the contract exactly (for example, fastai's `DynamicUnet` needs
 `img_size` at construction), the difference is handled in the provider. `BuiltModel.notes`
-(saved with each run as `model_notes`) can record such differences; today only the ManySeg
-provider writes one (bands filled with the pretraining mean).
+(saved with each run as `model_notes`) records such differences: the bands filled with the
+pretraining mean (ManySeg, remote-sensing weights), and how each library adapts a pretrained
+3-channel stem to an input with C ≠ 3 channels. SMP, timm and ManySeg (default
+`channel_adapter="repeat"`) cycle the RGB filters and scale them by 3/C; fastai keeps the RGB
+filters and zeroes the extra channels'. Multispectral comparisons across providers therefore
+include this difference in initialisation.
 
 ## Provider contract
 
@@ -36,6 +40,11 @@ built.weights_fingerprint  # sha256 of the first conv weight (16 hex chars)
 
 External libraries plug in through `register_provider(MyProvider)` without any change to
 the benchmark.
+
+`arch` (`--arch`) names the decoder. Image-level models (classification and regression tasks,
+`profile --output image`) build no decoder, so their records hold the effective
+`spec.arch = "none"` and keep the value given under `requested_arch`. Runs that differ only in
+the requested arch are then one configuration in the reports.
 
 ### Weight fairness
 
@@ -96,8 +105,14 @@ task option, `calibrate`, below):
   `trainval` by name hash). `--evaluate-test` is an
   explicit flag, recorded in the result, for final comparisons of fixed configurations.
   It is never used during architecture search.
-* Remote-sensing datasets must use spatially disjoint splits: official geographic splits
-  where they exist, otherwise grid-cell or region assignment.
+* Remote-sensing datasets use their official splits as published, which are not always
+  spatially disjoint: AI4Boundaries' official split is random, not spatially blocked, and
+  Sen1Floods11's train/val/test share flood events (Bolivia is held out; `--split events:K:F`
+  gives leave-events-out folds). Input normalisation comes from the training split for the
+  multispectral datasets (recomputed per fold under event splits), from ImageNet constants for
+  the RGB datasets (Oxford Pet, OAM-TCD, AI4Boundaries, LEVIR-CD, SECOND), or from the
+  pretraining normalisation for remote-sensing weights. Each run records the source in
+  `norm_stats.source`.
 
 ## Metrics
 
@@ -107,6 +122,22 @@ task option, `calibrate`, below):
   as a target edge. That biased absolute bF1 on Sen1Floods11, CloudSEN12+ and PASTIS, equally
   for every arm; no pre-registered decision used bF1), validation loss, training-loss curve,
   non-finite step count (a stability signal).
+* Per-class scores and macro means cover only classes present in the ground truth: an absent
+  class is NaN in per-class lists and left out of the mean (prediction-only classes are listed
+  in `pred_only_classes`). This holds for mIoU/Dice, classification macro F1, multi-label F1,
+  multi-label segmentation mIoU and the change-class scores (`*_change`: NaN without change in
+  the ground truth; precision NaN when change is never predicted). Regression R² is NaN for a
+  target constant over the split, and `r2_mean` averages the defined outputs. Boundary F1 is NaN for an image with no edge in either
+  prediction or target, and the mean skips such images. Validation loss is the training objective (cross-entropy
+  with the recipe's label smoothing) per non-ignored pixel. Point F1 uses an exact maximum
+  one-to-one matching, and instance matching below IoU 0.5 the exact maximum-IoU-sum
+  assignment; neither needs scipy, so results do not depend on what is installed. Multi-label
+  AP is computed at distinct score thresholds (scikit-learn's definition), so tied scores do
+  not depend on input order. Label smoothing applies to the cross-entropy tasks (semantic,
+  change, semantic change, single-label classification); other tasks refuse a recipe with
+  `label_smoothing` > 0.
+  Boundary F1 and validation loss in run records written before 2026-11-10 used the older
+  rules (edge-free images scored 0; loss divided by all pixels) and are not comparable.
 * Efficiency: parameters, serialised `state_dict` bytes, forward FLOPs (`FlopCounterMode`,
   2×MAC).
 * Inference: median, p10 and p90 latency at batch sizes 1, 8 and 32; images/s;
@@ -125,9 +156,16 @@ results are kept apart and never compared across hardware.
 
 Each result JSON contains: the Python, torch, CUDA and cuDNN versions; the versions of
 every model library; GPU name and memory; the seed; the recipe; the spec; the weight
-fingerprint; and a snapshot of **other GPU processes and utilisation** at the start and end.
-The development workstation is shared, so a result with `contended: true` is labelled
-*exploratory* for speed. Accuracy is unaffected by contention, but timing is not.
+fingerprint; the code version; and a snapshot of **other GPU processes and utilisation** at
+the start and end. The development workstation is shared, so a result with `contended: true`
+is labelled *exploratory* for speed. Accuracy is unaffected by contention, but timing is not.
+`contended` means another compute process was on the run's GPU (`other_compute_processes`,
+`other_mem_mib`). Utilisation and used memory are recorded too, but do not set the flag: they
+include the run's own work, so at the end of a run they are usually high.
+
+The code version is the git commit (`$MANYSEG_CODE_SHA` overrides it), with `-dirty` when any
+tracked file in the repository has uncommitted changes. Untracked files do not count, so
+commit new source files before a run whose provenance matters.
 
 ### Re-evaluating saved runs
 
@@ -181,8 +219,9 @@ Implemented (`manyseg-bench prepare <name>`; variants such as `sen1floods11_s2` 
 | LEVIR-CD, SECOND, OSCD (`levircd`, `second`, `oscd`) | Binary and semantic change | Siamese encoders and difference fusion. |
 
 Installing the `geo` extra (`pip install -e "packages/manyseg-bench[geo]"` from a clone; the
-benchmark is not on PyPI) adds the readers (tifffile, pyarrow, ...) that the remote-sensing
-datasets need. Considered but not implemented: CamVid, WHU Building, MADOS, LoveDA and ISPRS
+benchmark is not on PyPI) adds the readers (tifffile, pyarrow, pandas, ...) that the remote-sensing
+datasets need. The `manyseg`, `smp`, `fastai` and `timm` extras add the model providers; the
+bench core and the SMP / fastai / timm providers' semantic and image tasks run without ManySeg. Considered but not implemented: CamVid, WHU Building, MADOS, LoveDA and ISPRS
 Vaihingen.
 
 Licenses and access details are in `datasets/*.py` docstrings and in

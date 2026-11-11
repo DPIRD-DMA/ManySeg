@@ -10,7 +10,6 @@ targets of the whole scene stand in for a trained model's stitched predictions;
 ``point_counting.py`` trains the heads briefly.
 """
 
-import json
 import tempfile
 from pathlib import Path
 
@@ -66,14 +65,17 @@ def main():
     with torch.no_grad():
         out = model(torch.rand(1, 3, 128, 128))
     print("model fields:", {k: tuple(v[0].shape) for k, v in out.items()})
-    fields = {"heatmap": heatmap, "density": density}  # stand-in: perfect outputs
+    # stand-in: perfect outputs. A density head trained with density_loss(sigma=2.0) predicts
+    # the density times 2 pi sigma^2 (peaks about 1), so its decoder takes the same sigma.
+    fields = {"heatmap": heatmap, "density": density * (2 * np.pi * 2.0**2)}
 
     # 3. Block by block: peaks whose pixel lies in a block's core; halo >= dec.min_halo.
     #    (block_decoder builds manyseg.points' PointBlockDecoder / DensityBlockDecoder.)
     scene = Scene(*SHAPE, transform=TRANSFORM, crs=CRS)
     dec = block_decoder("points", threshold=0.5, kernel=3)
     pts = decode_scene(fields, dec, block=128, halo=16, scene=scene)  # ScenePoints
-    count = decode_scene(fields, block_decoder("density"), block=128, halo=0, scene=scene)
+    count = decode_scene(fields, block_decoder("density", sigma=2.0), block=128, halo=0,
+                         scene=scene)
     err = np.hypot(*(pts.xy[:, None] - xy[None]).transpose(2, 0, 1)).min(1)
     print(f"{len(pts)} peaks (max {err.max():.2f} px from a tree: peaks are pixels; add an "
           f"offset head for sub-pixel points); density count {count.total:.2f} over "
@@ -82,17 +84,16 @@ def main():
     # 4. GeoJSON points in metres, with each peak's score.
     out_dir = Path(tempfile.mkdtemp())
     fc = pts.to_geojson()  # through scene.transform, naming scene.crs; pts.yx, pts.xy, pts.scores
-    (out_dir / "trees.geojson").write_text(json.dumps(fc))
     print("first tree:", fc["features"][0]["geometry"]["coordinates"],
           fc["features"][0]["properties"])
+    pts.write(out_dir / "trees.geojson")  # the same call as SceneRecords / VectorGraph
     try:
-        import geopandas as gpd
+        import geopandas  # noqa: F401
     except ImportError:
         print("wrote trees.geojson (a GeoPackage needs geopandas)")
         return
-    gdf = gpd.GeoDataFrame.from_features(fc["features"], crs=CRS)
-    gdf.to_file(out_dir / "trees.gpkg")
-    print(f"wrote trees.geojson, trees.gpkg ({gdf.crs}, {len(gdf)} points)")
+    pts.write(out_dir / "trees.gpkg")
+    print(f"wrote trees.geojson, trees.gpkg ({len(pts)} points)")
 
 
 if __name__ == "__main__":

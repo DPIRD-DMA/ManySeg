@@ -1,11 +1,10 @@
 """Counting and locating objects with centre-heatmap (+ offset) and density heads (CPU).
 
 Targets come from instance masks (centroids) or point lists; post-processing is outside the
-model: peaks via max-pool NMS, count = density integral, instances via offset grouping within a
-predicted foreground (a small segmentation head trained alongside).
+model: peaks via max-pool NMS, count = density integral (divided by the target's 2 pi sigma^2),
+instances via offset grouping within a predicted foreground (a small segmentation head trained
+alongside).
 """
-
-import math
 
 import torch
 import torch.nn.functional as F
@@ -64,7 +63,7 @@ def main():
     print("(40 steps from random weights: predictions are not converged)")
     print("true counts:   ", [len(p) for p in pts])
     print("peak counts:   ", [len(p) for p, _ in peaks])
-    counts = count_from_density(out["density"], value_scale=2 * math.pi * 2.0 ** 2)
+    counts = count_from_density(out["density"], sigma=2.0)  # the density_loss sigma
     print("density counts:", [round(float(c), 1) for c in counts])
     inst = group_by_offsets([p.float() for p, _ in peaks], out["offset"], out["fg"][:, 0] > 0)
     print("instances from offsets (image 0):", int(inst[0].max()))

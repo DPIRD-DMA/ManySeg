@@ -1,4 +1,12 @@
-"""Confusion-matrix segmentation metrics (computed on-device, accumulated in int64)."""
+"""Confusion-matrix segmentation metrics (computed on-device, accumulated in int64).
+
+Convention for per-class scores, shared by every task of the benchmark: a class absent from
+the ground truth of the evaluated split has no defined score. Its entry in per-class lists is
+NaN and macro means (``miou``, ``mdice``, ...) average the classes present in the ground truth
+only, so the mean is the NaN-mean of the list. False positives of absent classes still lower
+the scores of the classes they were taken from, and such classes are listed under
+``pred_only_classes``.
+"""
 
 from __future__ import annotations
 
@@ -25,16 +33,19 @@ class ConfusionMatrix:
         )
 
     def compute(self) -> dict:
+        """mIoU / mDice / mean class accuracy over the classes present in the ground truth;
+        per-class lists hold NaN for the others (module docstring)."""
         m = self.mat.double()
         tp = m.diag()
         gt = m.sum(1)
         pr = m.sum(0)
         union = gt + pr - tp
-        valid = gt > 0
-        iou = torch.where(union > 0, tp / union.clamp(min=1), torch.nan)
-        dice = torch.where(gt + pr > 0, 2 * tp / (gt + pr).clamp(min=1), torch.nan)
+        valid = gt > 0  # classes present in the ground truth (see the module docstring)
+        iou = torch.where(valid, tp / union.clamp(min=1), torch.nan)
+        dice = torch.where(valid, 2 * tp / (gt + pr).clamp(min=1), torch.nan)
         acc = torch.where(valid, tp / gt.clamp(min=1), torch.nan)
         return {
+            "pred_only_classes": torch.nonzero(~valid & (pr > 0)).flatten().tolist(),
             "miou": float(iou[valid].mean()),
             "mdice": float(dice[valid].mean()),
             "pixel_acc": float(tp.sum() / m.sum().clamp(min=1)),
@@ -49,8 +60,10 @@ class ConfusionMatrix:
 def boundary_f1(pred: Tensor, target: Tensor, tolerance: int = 2, ignore_index=None) -> Tensor:
     """Per-image boundary F1 for label maps (N, H, W) -> (N,), tolerance in pixels.
 
-    Boundaries are pixels whose 4-neighbourhood contains another label; matching uses
-    max-pool dilation by ``tolerance``.
+    Boundaries are pixels whose 3x3 neighbourhood contains another label; matching uses
+    max-pool dilation by ``tolerance``. An image with no boundary in either the prediction or
+    the target has no defined score and gets NaN (average with a NaN-mean, as the tasks do);
+    one with boundaries in only one of them scores 0.
     """
     import torch.nn.functional as F
 
@@ -73,6 +86,8 @@ def boundary_f1(pred: Tensor, target: Tensor, tolerance: int = 2, ignore_index=N
     k = 2 * tolerance + 1
     pd = F.max_pool2d(pe, k, 1, tolerance)
     td = F.max_pool2d(te, k, 1, tolerance)
-    prec = (pe * td).sum((1, 2, 3)) / pe.sum((1, 2, 3)).clamp(min=1)
-    rec = (te * pd).sum((1, 2, 3)) / te.sum((1, 2, 3)).clamp(min=1)
-    return 2 * prec * rec / (prec + rec).clamp(min=1e-12)
+    np_, nt = pe.sum((1, 2, 3)), te.sum((1, 2, 3))
+    prec = (pe * td).sum((1, 2, 3)) / np_.clamp(min=1)
+    rec = (te * pd).sum((1, 2, 3)) / nt.clamp(min=1)
+    f1 = 2 * prec * rec / (prec + rec).clamp(min=1e-12)
+    return torch.where((np_ + nt) > 0, f1, torch.nan)

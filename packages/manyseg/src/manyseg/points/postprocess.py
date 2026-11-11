@@ -70,6 +70,10 @@ def find_peaks(heatmap: Tensor, threshold: float = 0.5, *, kernel: int = 3,
     """Local maxima via max-pool NMS. Returns per image ``(points (K, 2) (y, x), scores)``,
     sorted by score descending. Pass probabilities (apply ``sigmoid`` to logits first).
 
+    ``heatmap``: ``(B, 1, H, W)`` or ``(B, H, W)``; a single ``(H, W)`` map is one image (a
+    list of one result, as :func:`calibrate_threshold` treats it). A map with more than one
+    channel raises: select the channel first (``heatmap[:, c:c + 1]``).
+
     Points are long heatmap-pixel indices, or, for a heatmap from a head with ``scale`` < 1,
     float input-pixel coordinates ``(p + 0.5) / scale - 0.5`` (the centre of the input area
     the output pixel covers). ``kernel`` is in heatmap pixels; for large objects, about their
@@ -78,9 +82,9 @@ def find_peaks(heatmap: Tensor, threshold: float = 0.5, *, kernel: int = 3,
     * ``smooth_sigma`` > 0: Gaussian-blur the heatmap first (separable, replicate padding, in
       float32), so a noisy blob gives one peak, not a cluster. Scores are then the smoothed
       values. On drone tiles with large plants, sigma 3 halved count error (MAPE 0.79 -> 0.41).
-    * ``mask`` ``(B, H, W)`` or ``(B, 1, H, W)``, bool or float (> 0 is inside): no peaks
-      outside it, e.g. ``sigmoid(out["fg"]) > 0.5`` from a foreground head, which removes
-      background false positives. Applied after smoothing.
+    * ``mask`` ``(B, H, W)`` or ``(B, 1, H, W)`` (``(H, W)`` with an ``(H, W)`` heatmap), bool
+      or float (> 0 is inside): no peaks outside it, e.g. ``sigmoid(out["fg"]) > 0.5`` from a
+      foreground head, which removes background false positives. Applied after smoothing.
     """
     if kernel < 1 or kernel % 2 != 1:
         raise ValueError(f"kernel must be odd and positive, got {kernel}")
@@ -89,7 +93,15 @@ def find_peaks(heatmap: Tensor, threshold: float = 0.5, *, kernel: int = 3,
     if smooth_sigma < 0:
         raise ValueError(f"smooth_sigma must be >= 0, got {smooth_sigma}")
     scale_factor(scale)  # validate before any work
-    hm = heatmap[:, 0] if heatmap.dim() == 4 else heatmap
+    single = heatmap.dim() == 2
+    if single:
+        heatmap = heatmap[None]
+        if mask is not None and mask.dim() == 2:
+            mask = mask[None]
+    if heatmap.dim() == 4 and heatmap.shape[1] != 1:
+        raise ValueError(f"heatmap has {heatmap.shape[1]} channels; find_peaks takes one "
+                         "(B, 1, H, W): select it first, e.g. heatmap[:, c:c + 1]")
+    hm = _squeeze(heatmap, "heatmap")
     if smooth_sigma > 0:
         hm = _gaussian_blur(hm, smooth_sigma)
     if mask is not None:
@@ -110,15 +122,47 @@ def find_peaks(heatmap: Tensor, threshold: float = 0.5, *, kernel: int = 3,
     return out
 
 
-def count_from_density(density: Tensor, *, value_scale: float = 1.0,
+PER_POINT_SIGMA = "per-point sigma: give value_scale (e.g. 2 * pi * median_sigma**2)"
+
+
+def density_value_scale(sigma=None, value_scale: float | None = None) -> float:
+    """The factor a density target was multiplied by, as :func:`density_loss` sets it: exactly
+    one of ``sigma`` (the loss's ``sigma``; the factor is ``2 pi sigma^2``) or ``value_scale``
+    (the loss's ``value_scale``, when it was given there)."""
+    if (sigma is None) == (value_scale is None):
+        raise ValueError(
+            "give exactly one of sigma= (the density_loss sigma: the target was scaled by "
+            "2 * pi * sigma**2, density_loss's default) or value_scale= (the density_loss "
+            "value_scale; 1.0 for an unscaled density_map target)")
+    if value_scale is None:
+        if isinstance(sigma, (list, tuple)) or (hasattr(sigma, "dim") and sigma.dim() > 0):
+            raise ValueError(PER_POINT_SIGMA)
+        value_scale = 2 * math.pi * float(sigma) ** 2
+    value_scale = float(value_scale)
+    if not (math.isfinite(value_scale) and value_scale > 0):
+        raise ValueError(f"value_scale must be finite and > 0, got {value_scale}")
+    return value_scale
+
+
+def count_from_density(density: Tensor, *, sigma=None, value_scale: float | None = None,
                        mask: Tensor | None = None) -> Tensor:
-    """Predicted count per image: the integral of the density map, divided by ``value_scale``
-    (the factor the training target was multiplied by; see :func:`density_loss`), over
-    ``mask`` (``(B, H, W)`` or ``(B, 1, H, W)``, > 0 inside) if given.
+    """Predicted count per image: the integral of the density map, divided by the factor the
+    training target was multiplied by, over ``mask`` (``(B, H, W)`` or ``(B, 1, H, W)``, > 0
+    inside) if given.
+
+    Give exactly one of ``sigma`` or ``value_scale``, as the model was trained with
+    :func:`density_loss`: ``sigma=`` the loss's ``sigma`` (its default target is scaled by
+    ``2 pi sigma^2``), or ``value_scale=`` the loss's ``value_scale`` (per-point sigmas;
+    ``value_scale=1.0`` for a target that is a plain :func:`density_map`).
 
     The sum runs over every pixel, so a small background bias adds up: 0.005 per pixel over
     a 792 x 792 tile is 3 phantom objects. Check counts on whole validation images (not
-    training crops), and prefer peak counting for a few large objects per image."""
+    training crops), and prefer peak counting for a few large objects per image.
+
+    NaN propagates: a NaN density pixel (even under a zero mask) makes that image's count NaN,
+    so a broken model output shows. :class:`DensityBlockDecoder`, made for stitched scenes
+    with nodata, counts NaN pixels as 0 instead."""
+    value_scale = density_value_scale(sigma, value_scale)
     d = density.float()
     if mask is not None:
         m = _squeeze(mask, "mask", like=d).float()
@@ -131,24 +175,42 @@ DEFAULT_THRESHOLDS = (0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.6
 
 def _match_points(pred: Tensor, gt: Tensor, radius: float) -> int:
     """Maximum one-to-one matching of ``(N, 2)`` point sets within ``radius`` (augmenting
-    paths, Kuhn's algorithm): the number of matches (true positives)."""
+    paths, Kuhn's algorithm): the number of matches (true positives).
+
+    The depth-first search for an augmenting path keeps its own stack (no recursion), so a long
+    chain of near points does not hit Python's recursion limit."""
     if len(pred) == 0 or len(gt) == 0:
         return 0
     near = torch.cdist(pred.double().cpu(), gt.double().cpu()) <= radius
     cand = [torch.nonzero(row)[:, 0].tolist() for row in near]
     owner: dict[int, int] = {}  # gt index -> pred index
 
-    def augment(i: int, seen: set) -> bool:
-        for j in cand[i]:
+    def augment(root: int) -> bool:
+        seen: set[int] = set()
+        # stack of (pred i, next candidate position, gt j that led to i)
+        stack = [[root, 0, -1]]
+        while stack:
+            frame = stack[-1]
+            i, k = frame[0], frame[1]
+            if k == len(cand[i]):
+                stack.pop()  # no augmenting path through i
+                continue
+            frame[1] += 1
+            j = cand[i][k]
             if j in seen:
                 continue
             seen.add(j)
-            if j not in owner or augment(owner[j], seen):
-                owner[j] = i
-                return True
+            if j in owner:
+                stack.append([owner[j], 0, j])  # try to move j's owner elsewhere
+                continue
+            # free gt j: flip the path, each pred on the stack takes the gt it was reached by
+            owner[j] = i
+            for f in range(len(stack) - 1, 0, -1):
+                owner[stack[f][2]] = stack[f - 1][0]
+            return True
         return False
 
-    return sum(augment(i, set()) for i in range(len(cand)) if cand[i])
+    return sum(augment(i) for i in range(len(cand)) if cand[i])
 
 
 @torch.no_grad()
@@ -158,13 +220,16 @@ def calibrate_threshold(heatmaps: Tensor | Sequence[Tensor], targets: Tensor | S
                         **find_peaks_kwargs) -> tuple[float, dict[float, float]]:
     """Choose the :func:`find_peaks` threshold on validation data.
 
-    ``heatmaps``: probabilities, a ``(B, [1,] H, W)`` tensor or a sequence of them (batches,
-    sizes may differ). ``targets``: one per image, either counts (a ``(B,)`` tensor or ints;
-    ``metric="count_mae"`` only) or ground-truth points ``(N_i, 2)`` ``(y, x)`` in the same
-    coordinates :func:`find_peaks` returns. ``metric``: ``"count_mae"`` (lower is better) or
-    ``"f1"`` (point F1, a maximum one-to-one matching within ``radius``; higher is better),
-    pooled over all images. Other keywords go to :func:`find_peaks` (``kernel``, ``smooth_sigma``,
-    ``scale``; a ``mask`` must cover the same images as ``heatmaps`` when it is one tensor).
+    ``heatmaps``: probabilities, a ``(B, [1,] H, W)`` tensor (an ``(H, W)`` map is one image)
+    or a sequence of them (batches, sizes may differ). ``targets``: one per image across all
+    batches, either counts (a ``(B,)`` tensor or ints; ``metric="count_mae"`` only) or a list
+    of ground-truth points ``(N_i, 2)`` ``(y, x)`` in the same coordinates :func:`find_peaks`
+    returns (``[points]`` for one image: a bare ``(N, 2)`` tensor raises). ``metric``:
+    ``"count_mae"`` (lower is better) or ``"f1"`` (point F1, a maximum one-to-one matching
+    within ``radius``; higher is better), pooled over all images. Other keywords go to
+    :func:`find_peaks` (``kernel``, ``smooth_sigma``, ``scale``, ``mask``). A ``mask`` follows
+    ``heatmaps``: one tensor shaped as the one heatmap tensor (``(H, W)`` with an ``(H, W)``
+    map), or, for a sequence of heatmaps, a sequence of masks, one per batch.
     Returns ``(best threshold, {threshold: score})``; ties go to the lower threshold.
 
     .. warning:: With a small validation set the chosen threshold is noisy. On 45 images,
@@ -181,12 +246,27 @@ def calibrate_threshold(heatmaps: Tensor | Sequence[Tensor], targets: Tensor | S
     if not thresholds:
         raise ValueError("thresholds is empty")
     batches = [heatmaps] if isinstance(heatmaps, Tensor) else list(heatmaps)
+    mask = find_peaks_kwargs.pop("mask", None)
+    if mask is None:
+        masks = [None] * len(batches)
+    elif isinstance(mask, Tensor):
+        if len(batches) != 1:
+            raise ValueError(f"one mask tensor for {len(batches)} heatmap batches: pass a "
+                             "sequence of masks, one per batch")
+        masks = [mask]
+    else:
+        masks = list(mask)
+        if len(masks) != len(batches):
+            raise ValueError(f"{len(masks)} masks for {len(batches)} heatmap batches: give "
+                             "one mask per batch")
     scores = []
-    for hm in batches:
-        hm = hm[None] if hm.dim() == 2 else hm
-        scores += [(p, s) for p, s in find_peaks(hm, thresholds[0], **find_peaks_kwargs)]
-    gts = list(targets.unbind(0)) if isinstance(targets, Tensor) and targets.dim() <= 1 \
-        else list(targets)
+    for hm, m in zip(batches, masks):  # find_peaks takes an (H, W) map (and mask) as one image
+        scores += [(p, s) for p, s in find_peaks(hm, thresholds[0], mask=m, **find_peaks_kwargs)]
+    if isinstance(targets, Tensor) and targets.dim() == 2:  # (N, 2) points of one image?
+        raise ValueError(f"targets is one {tuple(targets.shape)} tensor; targets need one entry "
+                         "per image: a (B, N, 2) tensor or a list of (N_i, 2) point tensors "
+                         "([points] for one image), or one count per image")
+    gts = list(targets.unbind(0)) if isinstance(targets, Tensor) else list(targets)
     if len(gts) != len(scores):
         raise ValueError(f"{len(gts)} targets for {len(scores)} heatmaps")
     as_points = [isinstance(g, Tensor) and g.dim() == 2 for g in gts]
@@ -213,8 +293,16 @@ def calibrate_threshold(heatmaps: Tensor | Sequence[Tensor], targets: Tensor | S
 def group_by_offsets(centers: Sequence[Tensor], offsets: Tensor, foreground: Tensor,
                      chunk: int = 65536) -> Tensor:
     """Panoptic-DeepLab grouping: each foreground pixel votes ``pixel + offset`` and joins the
-    nearest centre. Returns instance labels ``(B, H, W)`` (centre ``k`` -> label ``k + 1``)."""
+    nearest centre. Returns instance labels ``(B, H, W)`` (centre ``k`` -> label ``k + 1``).
+
+    ``offsets``: ``(B, 2, H, W)`` (dy, dx). ``foreground``: a bool or integer mask (non-zero is
+    foreground), ``(B, H, W)`` or ``(B, 1, H, W)``. Float masks raise: threshold
+    probabilities first (``fg_prob > 0.5``)."""
     b, _, h, w = offsets.shape
+    if foreground.is_floating_point() or foreground.is_complex():
+        raise ValueError("foreground must be a bool or integer mask; threshold probabilities "
+                         "first, e.g. foreground > 0.5")
+    fg = _squeeze(foreground, "foreground", like=offsets)
     ys = torch.arange(h, device=offsets.device, dtype=torch.float32)
     xs = torch.arange(w, device=offsets.device, dtype=torch.float32)
     vy = (offsets[:, 0] + ys[:, None]).reshape(b, -1)
@@ -228,7 +316,7 @@ def group_by_offsets(centers: Sequence[Tensor], offsets: Tensor, foreground: Ten
             d = (vy[i, s:s + chunk, None] - c[None, :, 0]) ** 2 + \
                 (vx[i, s:s + chunk, None] - c[None, :, 1]) ** 2
             labels[i, s:s + chunk] = d.argmin(1) + 1
-    return labels.view(b, h, w) * foreground.long()
+    return torch.where(fg.to(offsets.device) != 0, labels.view(b, h, w), 0)
 
 
 def panoptic_labels(semantic: Tensor, instances: Tensor, thing_classes: Sequence[int],

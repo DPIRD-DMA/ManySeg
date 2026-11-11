@@ -1,6 +1,7 @@
 """U-Net++ decoder (Zhou et al. 2018): nested, densely connected skip pathways.
 
-Node ``X[i][j]`` (level ``i`` = stride of encoder feature ``i``, column ``j >= 1``) fuses all
+Node ``X[i][j]`` (level ``i`` = stride of encoder feature ``i``, column ``j >= 1``; when
+several features share a stride, only the last one is read, as in the U-Net) fuses all
 previous nodes at its level with the upsampled node ``X[i+1][j-1]``. The final node
 ``X[0][L-1]`` is then upsampled without skips to ``out_stride``. Widths follow the U-Net
 default at each stride, so ``unetplusplus`` and ``unet`` are directly comparable.
@@ -23,7 +24,7 @@ import torch
 from torch import Tensor, nn
 
 from ..features import FeatureSpec
-from ..layers import init_decoder_
+from ..layers import init_decoder_, normalize_norm
 from .base import DECODERS, check_power_of_two_stride
 from .unet import UNetBlock, upsample2x
 
@@ -49,26 +50,31 @@ class UNetPlusPlusDecoder(nn.Module):
     Args:
         in_specs: The encoder features' specs.
         out_stride: Output stride; encoder levels finer than it are dropped.
-        norm: Decoder normalisation (``"batch"``, ``"group"`` or None), as for the U-Net.
+        norm: Decoder normalisation (``"batch"``, ``"group"`` or None, with the aliases
+            ``"bn"``, ``"gn"``, ``"none"``), as for the U-Net.
         upsample: ``"nearest"``, ``"bilinear"`` or ``"aligned"``, as for the U-Net.
     """
 
     def __init__(self, in_specs: Sequence[FeatureSpec], out_stride: int = 1,
                  norm: str | None = "batch", upsample: str = "nearest") -> None:
         super().__init__()
+        norm = normalize_norm(norm, "decoder norm")
         for s in in_specs:
             if s.stride & (s.stride - 1):
                 raise ValueError(f"UNetPlusPlusDecoder needs power-of-two strides, got {s.stride}")
         deepest = max(s.stride for s in in_specs)
         self._deepest_stride = deepest
         check_power_of_two_stride("UNetPlusPlusDecoder", out_stride, deepest)
-        order = sorted((i for i, s in enumerate(in_specs) if s.stride >= out_stride),
-                       key=lambda i: in_specs[i].stride)
+        # one level per stride: the last feature with it, as the U-Net (a dilated encoder,
+        # e.g. timm output_stride=16, repeats its deepest stride; the last level is deepest)
+        by_stride = {s.stride: i for i, s in enumerate(in_specs)}
+        levels = sorted(by_stride.values(), key=lambda i: in_specs[i].stride)
+        order = [i for i in levels if in_specs[i].stride >= out_stride]
         specs = [in_specs[i] for i in order]
         self._order = order
         # Nodes keep the level numbers of the full decoder, so a reduced decoder's state_dict is
         # a subset of the default one's.
-        self._first = len(in_specs) - len(order)
+        self._first = len(levels) - len(order)
         n_blocks = int(math.log2(deepest // out_stride))
         default = [max(16, 256 >> i) for i in range(n_blocks)]
         width = {deepest >> (k + 1): c for k, c in enumerate(default)}  # stride -> channels

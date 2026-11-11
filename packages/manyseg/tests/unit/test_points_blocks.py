@@ -184,7 +184,7 @@ def test_decode_scene_checks_point_halo_early_and_empty_fields():
         decode_scene({}, dec)
     one = decode_scene({"heatmap": hm}, dec)  # default block 4096: the whole scene, one block
     assert np.array_equal(one.pixels, reference(hm, threshold=0.3, kernel=5)[0])
-    assert DensityBlockDecoder().min_halo == 0
+    assert DensityBlockDecoder(value_scale=1.0).min_halo == 0
 
 
 def test_float16_fields_and_scene_transform():
@@ -250,7 +250,7 @@ def test_gaussian_blur_is_crop_invariant_bitwise():
 
 def test_density_block_count():
     rng = np.random.default_rng(0)
-    pts = torch.from_numpy(rng.uniform(0, [90, 110], (60, 2))).float()
+    pts = torch.from_numpy(rng.uniform(0, [89, 109], (60, 2))).float()  # inside the image
     from manyseg.points import density_map
 
     d = density_map([pts], (90, 110), sigma=3.0)[0].numpy() * 4.0
@@ -272,7 +272,7 @@ def test_coordinate_conversions():
     xy = points_to_xy(yx)
     assert xy.tolist() == [[3.5, 2.5], [0.5, 0.5]]  # centre of pixel (row 2, col 3)
     back = points_from_xy(xy)
-    assert back.dtype == torch.float32 and back.tolist() == [[2, 3], [0, 0]]
+    assert back.dtype == torch.float64 and back.tolist() == [[2, 3], [0, 0]]
     hm = gaussian_heatmap([points_from_xy([[3.5, 2.5]])], (5, 6))
     assert hm.shape == (1, 1, 5, 6) and hm[0, 0, 2, 3] == 1.0
     assert points_to_xy(np.zeros((0, 2))).shape == (0, 2)
@@ -299,7 +299,7 @@ def test_block_decoder_registry_points_and_density():
 
     dec = block_decoder("points", threshold=0.3, kernel=5, max_points=50)
     assert type(dec) is PointBlockDecoder and dec.kernel == 5 and dec.max_points == 50
-    assert type(block_decoder("density")) is DensityBlockDecoder
+    assert type(block_decoder("density", sigma=2.0)) is DensityBlockDecoder
     assert block_decoder("density", value_scale=4.0, mask="fg").value_scale == 4.0
     with pytest.raises(TypeError):
         block_decoder("points", min_area=3)  # not a PointBlockDecoder parameter
@@ -325,11 +325,11 @@ def test_density_counts_nan_pixels_as_zero():
 
     density = np.ones((1, 32, 32), np.float32)
     density[0, :8, :8] = np.nan
-    dec = block_decoder("density")
+    dec = block_decoder("density", value_scale=1.0)
     assert decode_scene({"density": density}, dec, 16, 0).total == 32 * 32 - 64
     mask = np.ones((1, 32, 32), np.float32)
     mask[0, :8, :8] = np.nan
     mask[0, 16:, :] = 0
-    dec = block_decoder("density", mask="valid")
+    dec = block_decoder("density", value_scale=1.0, mask="valid")
     got = decode_scene({"density": density, "valid": mask}, dec, 16, 0)
     assert got.total == 32 * 16 - 64

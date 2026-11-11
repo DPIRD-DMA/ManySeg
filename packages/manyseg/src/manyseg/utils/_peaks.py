@@ -14,7 +14,7 @@ Three steps, each used by more than one caller:
   turns a plateau into one peak (one per radius if it is wider).
 * :func:`refine`: sub-pixel ``(x, y)`` from a per-axis parabola through the log heatmap.
 
-How the callers use them (each keeps its own behaviour; the experiments' decoder settings
+How the callers use them (each keeps its own behaviour; the trained models' decoder settings
 were tuned against it):
 
 * :func:`manyseg.points.find_peaks`: torch :func:`maxima_mask` only, after its optional blur

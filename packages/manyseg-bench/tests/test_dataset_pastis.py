@@ -58,8 +58,10 @@ def make_raw(root, patches=PATCHES, log="MD5_OK"):
 
 
 def _prepare(raw, tmp_path, **kw):
-    return P.prepare(raw, tmp_path / "cache" / P.CACHE_NAME, size=S, workers=1,
-                     expected=EXPECTED, log=lambda m: None, **kw)
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(P, "SIZE", S)  # the synthetic patches' fixed size
+        return P.prepare(raw, tmp_path / "cache" / P.CACHE_NAME, size=S, workers=1,
+                         expected=EXPECTED, log=lambda m: None, **kw)
 
 
 # --- date subset ------------------------------------------------------------------------------

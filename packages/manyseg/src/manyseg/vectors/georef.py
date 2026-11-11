@@ -46,17 +46,33 @@ def _is_geometry(g) -> bool:
     return shapely is not None and isinstance(g, shapely.Geometry)
 
 
+def transform_xy(geom, fn):
+    """``shapely.transform`` of the ``(x, y)`` coordinates only: ``fn`` maps an ``(N, 2)`` array
+    to ``(N, 2)``; a Z coordinate (heights, a roof mesh) is kept as it is, and 2-D geometries
+    stay 2-D."""
+    import shapely
+
+    def fn3(c):
+        return np.concatenate([fn(c[:, :2]), c[:, 2:]], 1)
+
+    return shapely.transform(geom, fn3, include_z=True)
+
+
 def _apply(fn, obj):
     if _is_geometry(obj) or (
             isinstance(obj, (list, tuple, np.ndarray)) and len(obj) and _is_geometry(obj[0])):
-        return sys.modules["shapely"].transform(obj, fn)
+        return transform_xy(obj, fn)
     xy = np.asarray(obj, np.float64)
+    if xy.shape[-1] == 3:  # (x, y, z): z kept
+        flat = xy.reshape(-1, 3)
+        return np.concatenate([fn(flat[:, :2]), flat[:, 2:]], 1).reshape(xy.shape)
     return fn(xy.reshape(-1, 2)).reshape(xy.shape)
 
 
 def pixel_to_world(obj, transform):
     """Pixel ``(x, y)`` (an ``(..., 2)`` array, a shapely geometry or a list of them) to world
-    coordinates, as :func:`to_geojson` does."""
+    coordinates, as :func:`to_geojson` does. A Z coordinate (an ``(..., 3)`` array or 3-D
+    geometries) is kept unchanged."""
     a, b, c, d, e, f = _coeffs(transform)
 
     def fn(xy):
@@ -67,7 +83,7 @@ def pixel_to_world(obj, transform):
 
 def world_to_pixel(obj, transform):
     """World coordinates (an ``(..., 2)`` array, a shapely geometry or a list of them) to pixel
-    ``(x, y)``: the inverse of :func:`pixel_to_world`."""
+    ``(x, y)``: the inverse of :func:`pixel_to_world` (Z kept unchanged, as there)."""
     a, b, c, d, e, f = _coeffs(transform)
     det = a * e - b * d
     if det == 0:

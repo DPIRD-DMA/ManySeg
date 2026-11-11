@@ -8,7 +8,7 @@ as for ManySeg's image heads.
 
 from __future__ import annotations
 
-from .base import BuiltModel, ModelSpec, Provider, fingerprint_module
+from .base import BuiltModel, ModelSpec, Provider, fingerprint_module, stem_adaptation_note
 
 _TIMM_TAGS = {"tv_in1k": "tv_in1k"}
 
@@ -37,4 +37,6 @@ class TimmProvider(Provider):
         head = {id(p) for p in model.get_classifier().parameters()}
         enc = [p for p in model.parameters() if id(p) not in head]
         dec = [p for p in model.parameters() if id(p) in head]
-        return BuiltModel(model, enc, dec, fingerprint_module(model))
+        return BuiltModel(model, enc, dec, fingerprint_module(model),
+                          stem_adaptation_note("timm", spec.in_channels,
+                                               spec.weights is not None))

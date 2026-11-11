@@ -10,8 +10,9 @@ Coordinates are ``(y, x)`` in pixels, pixel centres at integer positions.
   peaks); ``sigma`` fixed or ``sigma_scale * sqrt(area)``.
 * :func:`offset_targets`: for every instance pixel, ``centroid - pixel`` (exact, unrounded) as
   ``(dy, dx)``; zero on background (Panoptic-DeepLab).
-* :func:`density_map`: one Gaussian per point, each normalised to sum to exactly 1 inside the
-  image (truncated at borders), so ``density.sum() == number of points``.
+* :func:`density_map`: one Gaussian per point inside the image, each normalised to sum to
+  exactly 1 inside the image (truncated at borders), so ``density.sum() == number of points
+  inside``; points outside the image add nothing.
 * :func:`points_from_boxes`: box centres (YOLO, ``xyxy`` or COCO ``xywh`` boxes) as ``(y, x)``
   points, optionally with a per-point sigma from the box size.
 """
@@ -135,13 +136,29 @@ def gaussian_heatmap(points: Sequence[Tensor], size: tuple[int, int], sigma=2.0)
 
 @torch.no_grad()
 def density_map(points: Sequence[Tensor], size: tuple[int, int], sigma=3.0) -> Tensor:
-    """Density ``(B, 1, H, W)`` whose integral equals the number of points (mass preserved)."""
+    """Density ``(B, 1, H, W)`` whose integral equals the number of points inside the image.
+
+    A point is inside when its pixel is (``-0.5 <= y < H - 0.5`` and the same for ``x``: pixel
+    centres at integers). Each inside point's Gaussian is normalised to sum to exactly 1 over
+    the image, so a point near the border keeps its full mass (truncated, renormalised); a
+    point outside adds nothing, however close, so a tile's target counts that tile's objects.
+    The inside test uses the points' own dtype (pass float64, as :func:`points_from_xy` returns,
+    to keep the tile assignment of :func:`manyseg.vectors.to_pixels`); the Gaussians are then
+    rendered in float32.
+    """
     h, w = size
     out = []
     for pts, sig in zip(points, _per_image(sigma, len(points))):
-        pts = pts.float()
-        d = torch.zeros(h, w, device=pts.device)
         s = _sigmas(sig, len(pts), pts.device)
+        # Outside the image: no mass (NaN points are kept, so they still show up as NaN). The
+        # test runs in the points' own precision (float64 from points_from_xy): a point just
+        # inside the far edge rounds onto it in float32 and would be counted by no tile.
+        p = pts if pts.is_floating_point() else pts.double()
+        out_y = (p[:, 0] < -0.5) | (p[:, 0] >= h - 0.5)
+        out_x = (p[:, 1] < -0.5) | (p[:, 1] >= w - 0.5)
+        keep = ~(out_y | out_x)
+        pts, s = p[keep].float(), s[keep]
+        d = torch.zeros(h, w, device=pts.device)
         for i in range(0, len(pts), _AXIS_CHUNK):
             gy, gx = _gaussian_axes(pts[i:i + _AXIS_CHUNK], s[i:i + _AXIS_CHUNK], h, w)
             mass = (gy.sum(1) * gx.sum(1)).clamp(min=1e-12)
@@ -183,8 +200,10 @@ def heatmap_from_instances(instance_mask: Tensor, sigma: float | None = 2.0,
     """Centre heatmap from an instance mask (centres = centroids rounded to pixels).
 
     Use ``sigma`` for a fixed width or ``sigma_scale`` for ``max(min_sigma, sigma_scale *
-    sqrt(area))``.
+    sqrt(area))`` (``sigma_scale`` takes precedence); one of them is required.
     """
+    if sigma is None and sigma_scale is None:
+        raise ValueError("heatmap_from_instances needs a fixed sigma or a sigma_scale")
     m = instance_mask.long()
     if m.dim() == 2:
         m = m[None]

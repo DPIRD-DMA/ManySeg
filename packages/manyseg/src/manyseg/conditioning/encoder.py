@@ -6,6 +6,12 @@ columns, lat then lon; ``categorical`` one column holding the id). A single tens
 model's input a flat ``dict[str, Tensor]`` (one ONNX input per vector, only a batch dimension
 to make dynamic). :meth:`MetadataEncoder.pack` builds it from per-field values.
 
+Precision: give metadata in float32. The fields are validated and encoded in float32 whatever
+the model's dtype (a model cast to bfloat16 still takes float32 metadata; any floating dtype
+is accepted and converted), and only the encodings are cast to the dtype of the layer they
+feed. Metadata already rounded to half precision has lost information: in bfloat16 the
+category id 257 becomes 256 and the latitude 52.13 becomes 52.25.
+
 Missing values: a field is missing where the optional mask ``(B, F)`` (one column per field,
 1 = present) is 0, or where any of its columns is NaN, or where the field rejects the value
 (out-of-range category). Missing fields are replaced by a learned per-field "unknown" vector
@@ -97,16 +103,25 @@ class MetadataEncoder(nn.Module):
 
     def encode_fields(self, values: Tensor, mask: Tensor | None = None) -> Tensor:
         """``(B, N)`` values (+ optional ``(B, F)`` presence mask) -> ``(B, width)``
-        concatenated field encodings, with unknown vectors in place of missing fields."""
+        concatenated field encodings, with unknown vectors in place of missing fields. Computed
+        in float32 whatever the module's dtype (``values`` are converted; give them in float32,
+        see the module docstring), and returned in float32."""
         if isinstance(values, Mapping):
             raise TypeError("metadata must be one packed (B, N) float tensor, not a dict of "
                             "fields; build it with MetadataEncoder.pack({field: values})")
         if values.ndim != 2 or values.shape[1] != self.columns:
             raise ValueError(f"metadata must be (B, {self.columns}) with {self.columns} columns "
                              f"for fields {list(self.field_names)}; got {tuple(values.shape)}")
+        # float32 whatever the model dtype: bfloat16 would round ids (257 -> 256) and coordinates
+        values = values.float()
         finite = torch.isfinite(values)
         values = torch.where(finite, values, torch.zeros_like(values))
         b = values.shape[0]
+        nf = len(self.field_names)
+        if mask is not None and (mask.ndim != 2 or tuple(mask.shape) != (b, nf)):
+            raise ValueError(f"the metadata presence mask must be (B, F) = {(b, nf)}, one "
+                             f"column per field {list(self.field_names)} (not per value "
+                             f"column); got {tuple(mask.shape)}")
         drop = None
         if self.training and self.dropout > 0:
             drop = torch.rand(b, len(self.field_names), device=values.device) < self.dropout
@@ -118,9 +133,16 @@ class MetadataEncoder(nn.Module):
                 present = present & (mask[:, i] > 0)
             if drop is not None:
                 present = present & ~drop[:, i]
-            unk = self.unknown[name].to(e.dtype).expand(b, -1)
+            # learned encodings (an embedding of a bfloat16 model) widen to float32 losslessly
+            e = e.float()
+            unk = self.unknown[name].float().expand(b, -1)
             out.append(torch.where(present[:, None], e, unk))
         return torch.cat(out, dim=1)
 
     def forward(self, values: Tensor, mask: Tensor | None = None) -> Tensor:
-        return self.mlp(self.encode_fields(values, mask))
+        """The MLP on :meth:`encode_fields`, the encodings cast to the MLP's dtype (without the
+        MLP, ``dim=None``: the float32 encodings, which their consumer casts)."""
+        e = self.encode_fields(values, mask)
+        if isinstance(self.mlp, nn.Sequential):
+            e = e.to(self.mlp[0].weight.dtype)
+        return self.mlp(e)

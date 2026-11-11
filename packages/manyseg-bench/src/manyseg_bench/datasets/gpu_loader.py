@@ -170,6 +170,11 @@ class GPULoader:
                                  f"(tiles {size}, out_size {tuple(self.out_size)})")
         self.scale, self.ratio, self.hflip, self.vflip = scale, ratio, hflip, vflip
         self.drop_last = train if drop_last is None else drop_last
+        if train and len(self) == 0:  # a run would complete without a single training step
+            raise ValueError(
+                f"training loader is empty: {self.n} samples, batch size {self.bs}"
+                + (" with drop_last" if self.drop_last else "")
+                + "; use more samples (e.g. a larger --subset) or a smaller batch size")
         self.stack = stack
         self.vectors = {} if stack or not vectors else {
             k: _to_device(np.asarray(v, dtype=np.float32), device) for k, v in vectors.items()}
@@ -245,10 +250,7 @@ class GPULoader:
             return x, y
         if isinstance(y, dict):
             return x, {k: _warp_label(v, grid) for k, v in y.items()}
-        stack = y.ndim == 4
-        y = F.grid_sample((y if stack else y[:, None]).float(), grid, mode="nearest",
-                          padding_mode="reflection", align_corners=False).round().long()
-        return x, (y if stack else y[:, 0])
+        return x, _warp_label(y, grid)  # float labels stay float (not rounded)
 
     def __iter__(self):
         order = torch.randperm(self.n, generator=self.gen) if self.train else torch.arange(self.n)

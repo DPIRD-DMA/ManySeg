@@ -279,6 +279,18 @@ def graph_metrics(gt, pred, gsd: float = 1.0) -> dict:
 # --------------------------------------------------------------------------------------
 
 
+def _check_polygons(geoms, name: str) -> None:
+    for i, g in enumerate(geoms):
+        kind = getattr(g, "geom_type", type(g).__name__)
+        if kind == "MultiPolygon":
+            raise ValueError(f"{name}[{i}] is a MultiPolygon: polygon_metrics takes single "
+                             "Polygons, one per instance; explode multipart geometries first "
+                             "(list(g.geoms), or GeoDataFrame.explode()), each part then counts "
+                             "as an instance")
+        if kind != "Polygon":
+            raise ValueError(f"{name}[{i}] is a {kind}: polygon_metrics takes shapely Polygons")
+
+
 def _n_vertices(p) -> int:
     return len(p.exterior.coords) - 1
 
@@ -304,8 +316,19 @@ def polygon_metrics(gt: list, pred: list, gsd: float = 1.0, *, iou_threshold: fl
       PQ-like single number);
     * ``miou``, ``n_ratio`` (Σ N_pred / Σ N_gt over matched pairs; the sums are returned as
       ``sum_n_pred`` / ``sum_n_gt`` for pooling over tiles) and ``polis`` (metres).
+
+    With no matched pair: ``ciou`` and ``miou`` are 0.0 (no overlap is credited), ``n_ratio``
+    and ``polis`` are NaN (undefined without a pair; skip them when averaging) and the sums 0.
+    ``det_f1`` is 1.0 when both lists are empty (nothing to find, nothing found), 0.0 when
+    only one is, so empty/empty gives ``det_f1`` 1.0 with ``ciou`` 0.0.
+
+    ``gt`` and ``pred`` are lists of shapely ``Polygon`` (one per instance); anything else,
+    a ``MultiPolygon`` included, raises ``ValueError`` (split multipart geometries first).
     """
     import shapely
+
+    _check_polygons(gt, "gt")
+    _check_polygons(pred, "pred")
 
     gt_n = [len(g.simplify(gt_vertex_tolerance).exterior.coords) - 1 for g in gt]
     pairs = []

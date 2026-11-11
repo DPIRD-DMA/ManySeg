@@ -77,6 +77,9 @@ def render(rows: list[dict]) -> str:
         out += [f"The {n_fixed} `fixed` models are detected at construction "
                 "(`TimmBackbone.fixed_size` = native size), so inputs up to that size work via "
                 "padding; for larger inputs rebuild with `backbone_kwargs={\"img_size\": (H, W)}`."]
+    if any(r.get("export_dynamic") == "fixed size only" for r in rows):
+        out += ["`fixed size only` models refuse dynamic H/W export (window attention) but export "
+                "at a fixed size with `export_model(model, x, dynamic=False)`."]
     out += [""]
     return "\n".join(out)
 

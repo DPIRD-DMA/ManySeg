@@ -25,13 +25,28 @@ FILENAME = "model.safetensors"
 
 
 def split_name(name: str) -> tuple[str, str | None]:
-    """``"hf-hub:org/name@rev"`` -> ``("org/name", "rev")`` (revision None when not given)."""
+    """``"hf-hub:org/name@rev"`` -> ``("org/name", "rev")`` (revision None when not given; an
+    ``"@"`` with nothing after it is refused rather than read as the main branch)."""
     repo = name.removeprefix(PREFIX)
-    repo, _, revision = repo.partition("@")
-    if repo.count("/") != 1 or not all(repo.split("/")):
+    repo, at, revision = repo.partition("@")
+    if repo.count("/") != 1 or not all(repo.split("/")) or (at and not revision):
         raise ValueError(f"{name!r}: expected 'hf-hub:<org>/<name>' or "
                          f"'hf-hub:<org>/<name>@<revision>'.")
     return repo, revision or None
+
+
+def _check_repo_id(repo_id: str) -> None:
+    """``repo_id`` must be a plain ``"org/name"``: the Hub refuses the ``"hf-hub:"`` prefix and an
+    ``"@revision"`` suffix, which :func:`split_name` accepts for loading."""
+    if repo_id.startswith(PREFIX) or "@" in repo_id:
+        repo, _, revision = repo_id.removeprefix(PREFIX).partition("@")
+        hint = f", revision={revision!r}" if revision else ""
+        fix = (f": pass repo_id={repo!r}{hint}" if repo.count("/") == 1 and all(repo.split("/"))
+               else "")
+        raise ValueError(f"push_to_hub takes a repository id 'org/name', not {repo_id!r}{fix}. "
+                         f"Choose the branch with revision=.")
+    if repo_id.count("/") != 1 or not all(repo_id.split("/")):
+        raise ValueError(f"push_to_hub takes a repository id 'org/name', got {repo_id!r}.")
 
 
 def download(name: str, *, token: str | None = None, cache_dir: str | Path | None = None) -> Path:
@@ -74,11 +89,18 @@ def push_to_hub(model: DenseModel, repo_id: str, *, normalize: Any = None,
             commits can be loaded but not pushed to.
         token: A Hub token with write access (default: ``HF_TOKEN`` or the stored login).
     """
+    import torch
     from huggingface_hub import HfApi
 
     from .io import read_metadata, save
+    from .quantize import QuantizedProgram
 
-    split_name(repo_id)  # validates the name before anything is written
+    if isinstance(model, (torch.export.ExportedProgram, QuantizedProgram)):
+        raise TypeError(
+            "push_to_hub uploads a DenseModel as model.safetensors; programs (ExportedProgram, "
+            "QuantizedProgram from quantize_pt2e) can't be uploaded. Push the float model, or a "
+            "quantize_weights model, instead.")
+    _check_repo_id(repo_id)  # before anything is written
     if revision is not None and re.fullmatch(r"[0-9a-f]{40}", revision):
         raise ValueError(f"revision={revision!r} is a commit; push to a branch name.")
     with tempfile.TemporaryDirectory() as tmp:
@@ -144,7 +166,8 @@ def _heads(meta: Mapping[str, Any]) -> dict[str, dict]:
 def card(meta: Mapping[str, Any], repo_id: str, *, license: str | None = None,
          revision: str | None = None) -> str:
     """A Hub model card (``README.md``) for a file's metadata (:func:`manyseg.read_metadata`):
-    how to load it, its inputs and normalisation, its heads, and the pretrained weights it
+    how to load it (for a quantised model: its quantisation mode and that loading needs
+    ``manyseg[quant]``), its inputs and normalisation, its heads, and the pretrained weights it
     started from with their licences and citations."""
     config, heads = meta["create_model"], _heads(meta)
     kinds = {(c["type"], c["scope"]) for c in heads.values()}
@@ -170,6 +193,12 @@ def card(meta: Mapping[str, Any], repo_id: str, *, license: str | None = None,
              "with a built-in activation, such as a softplus density head, or plain values).",
              ""]
 
+    quant = meta.get("quantization")
+    if isinstance(quant, Mapping):
+        mode = quant.get("mode") or quant.get("route") or "unknown"
+        lines += [f"The weights are quantised to int8 (`{_cell(mode)}`, torchao "
+                  f"{_cell(quant.get('torchao_version', 'unknown'))}): loading needs "
+                  "`pip install 'manyseg[quant]'`.", ""]
     inputs = config.get("inputs")
     bands, norm = meta.get("bands"), meta.get("normalize")
     lines += ["## Inputs", ""]
@@ -181,7 +210,7 @@ def card(meta: Mapping[str, Any], repo_id: str, *, license: str | None = None,
                   "| input | kind | shape | bands / fields |", "|---|---|---|---|"]
         notes = []
         for key, cfg in inputs.items():
-            kind = cfg.get("kind", "image")
+            kind = cfg.get("kind", "raster")
             if kind == "vector":
                 fields = cfg.get("fields") or {}
                 shape = f"(B, {cfg.get('num_features') or 'N'})"

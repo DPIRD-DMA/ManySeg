@@ -13,8 +13,10 @@ from torch import nn
 from ..adapters import ProjectionAdapter
 from ..backbones import TimmBackbone
 from ..decoders import DECODERS
+from ..decoders.base import deepest_index
 from ..features import FeatureSpec
 from ..heads import create_head
+from ..heads.heads import head_scope
 from ..registry import check_module_names
 from .dense import DenseModel
 
@@ -30,6 +32,26 @@ def check_input_keys(name: str, cfg: Mapping) -> None:
         raise ValueError(f"input {name!r}: unknown keys {sorted(unknown)}")
     if "in_channels" not in cfg:
         raise ValueError(f"input {name!r}: 'in_channels' is required")
+
+
+def check_raster_input(name: str, cfg: Mapping, inputs: Mapping, backbone) -> None:
+    """The checks of one raster or time-series input config that do not depend on the other
+    inputs' encoders (run by every path that builds a raster input, so a model with one raster
+    and a vector input rejects what a model without the vector input rejects)."""
+    check_input_keys(name, cfg)
+    if cfg.get("kind", "raster") not in ("raster", "timeseries"):
+        raise ValueError(f"input {name!r}: kind {cfg['kind']!r} is not a raster kind")
+    if "temporal" in cfg and cfg.get("kind") != "timeseries":
+        raise ValueError(f"input {name!r}: 'temporal' applies to "
+                         "{'kind': 'timeseries'} inputs only")
+    for suffix in ("mask", "dates"):
+        if cfg.get("kind") == "timeseries" and f"{name}_{suffix}" in inputs:
+            raise ValueError(f"input name {name}_{suffix} is reserved for the {suffix} of "
+                             f"time series {name!r}")
+    bname = cfg.get("backbone", backbone)
+    if "share_norm" in cfg and not (isinstance(bname, str) and bname.startswith("shared:")):
+        raise ValueError(f"input {name!r}: 'share_norm' only applies to a "
+                         "'shared:<input>' backbone")
 
 
 def share_weights(encoder: nn.Module) -> nn.Module:
@@ -65,6 +87,63 @@ def _check_shared_adapter(name: str, cfg: Mapping, encoder_channels: int) -> Non
                          f"has the {channels} channels the encoder it shares expects")
 
 
+def backbone_kwargs_with_rgb(name: str, cfg: Mapping, backbone_kwargs) -> dict:
+    """An input's backbone kwargs: its own ``backbone_kwargs`` (else the top-level ones), with
+    its ``rgb_indices``, which win over an ``rgb_indices`` in the top-level ``backbone_kwargs``
+    (giving it both in the input's own ``backbone_kwargs`` and as its key is an error)."""
+    bkw = dict(cfg.get("backbone_kwargs", backbone_kwargs) or {})
+    if cfg.get("rgb_indices") is not None:
+        if "rgb_indices" in dict(cfg.get("backbone_kwargs") or {}):
+            raise ValueError(f"input {name!r}: 'rgb_indices' given both as a key and in its "
+                             "'backbone_kwargs'; give it once")
+        bkw["rgb_indices"] = cfg["rgb_indices"]
+    return bkw
+
+
+def _timm_options_given(*, pretrained=True, channel_adapter="repeat", out_indices=None,
+                        backbone_kwargs=None, rgb_indices=None) -> list[str]:
+    """The timm options among these that would configure something: a weights tag, a
+    ``channel_adapter`` other than ``"repeat"``, ``out_indices``, non-empty
+    ``backbone_kwargs`` or ``rgb_indices``. ``pretrained`` True / False and the defaults are
+    no-ops for a built module."""
+    given = []
+    if isinstance(pretrained, str):
+        given.append(f"pretrained={pretrained!r}")
+    if channel_adapter != "repeat":
+        given.append(f"channel_adapter={channel_adapter!r}")
+    if out_indices is not None:
+        given.append(f"out_indices={out_indices!r}")
+    if backbone_kwargs:
+        given.append(f"backbone_kwargs={dict(backbone_kwargs)!r}")
+    if rgb_indices is not None:
+        given.append(f"rgb_indices={rgb_indices!r}")
+    return given
+
+
+_MODULE_IGNORES = ("pretrained", "channel_adapter", "out_indices", "backbone_kwargs",
+                   "rgb_indices")
+
+
+def check_module_input(name: str, cfg: Mapping, module: nn.Module, channels: int) -> None:
+    """An input encoded by a backbone given as an ``nn.Module``: timm options that would
+    configure something are errors (the same rule as :func:`check_module_options`:
+    ``pretrained`` True / False and default values are accepted), and its channel count must
+    be the module's (when the module exposes ``in_channels``)."""
+    given = _timm_options_given(**{k: cfg[k] for k in _MODULE_IGNORES if k in cfg})
+    if given:
+        raise ValueError(f"input {name!r}: {', '.join(given)} configure a timm backbone, but "
+                         "its backbone is an nn.Module (already built); configure the module "
+                         "itself")
+    _check_module_channels(module, channels, f"input {name!r} has")
+
+
+def _check_module_channels(module: nn.Module, channels: int, what: str) -> None:
+    expected = getattr(module, "in_channels", None)
+    if isinstance(expected, int) and expected != channels:
+        raise ValueError(f"{what} {channels} channels but the backbone module "
+                         f"{type(module).__name__} takes {expected} (its in_channels)")
+
+
 def _build_inputs(inputs, fusion, *, backbone, pretrained, channel_adapter, out_indices,
                   backbone_kwargs):
     if isinstance(fusion, str):
@@ -74,30 +153,30 @@ def _build_inputs(inputs, fusion, *, backbone, pretrained, channel_adapter, out_
     if ftype not in FUSION_TYPES:
         raise ValueError(f"unknown fusion type {ftype!r}; choose from {FUSION_TYPES}")
     for n, cfg in inputs.items():
-        check_input_keys(n, cfg)
-        if cfg.get("kind", "raster") not in ("raster", "timeseries"):
-            raise ValueError(f"input {n!r}: kind {cfg['kind']!r} is not a raster kind")
-        if "temporal" in cfg and cfg.get("kind") != "timeseries":
-            raise ValueError(f"input {n!r}: 'temporal' applies to "
-                             "{'kind': 'timeseries'} inputs only")
-        for suffix in ("mask", "dates"):
-            if cfg.get("kind") == "timeseries" and f"{n}_{suffix}" in inputs:
-                raise ValueError(f"input name {n}_{suffix} is reserved for the {suffix} of "
-                                 f"time series {n!r}")
+        check_raster_input(n, cfg, inputs, backbone)
     series = {n for n, cfg in inputs.items() if cfg.get("kind") == "timeseries"}
     from ..fusion import EarlyFusionEncoder, MultiEncoder
     from ..temporal import TemporalEncoder, parse_temporal
 
-    def make_bb(cfg, channels):
+    built_timm = False
+
+    def make_bb(n, cfg, channels):
+        nonlocal built_timm
         name = cfg.get("backbone", backbone)
         if not isinstance(name, str):
+            check_module_input(n, cfg, name, channels)
             return name
+        built_timm = True
         return TimmBackbone(name, pretrained=cfg.get("pretrained", pretrained),
                             in_channels=channels,
                             channel_adapter=cfg.get("channel_adapter", channel_adapter),
                             out_indices=cfg.get("out_indices", out_indices),
-                            rgb_indices=cfg.get("rgb_indices"),
-                            **dict(cfg.get("backbone_kwargs", backbone_kwargs) or {}))
+                            **backbone_kwargs_with_rgb(n, cfg, backbone_kwargs))
+
+    def check_top_level():  # top-level timm options with no timm backbone to apply them to
+        if not built_timm:
+            check_module_options(pretrained=pretrained, channel_adapter=channel_adapter,
+                                 out_indices=out_indices, backbone_kwargs=backbone_kwargs)
 
     if ftype == "early" and series:
         raise ValueError(f"early fusion stacks channels and cannot take the time series "
@@ -130,7 +209,9 @@ def _build_inputs(inputs, fusion, *, backbone, pretrained, channel_adapter, out_
                                  f"same_grid; input {n!r} is {cfg['alignment']!r}")
         total = sum(cfg["in_channels"] for cfg in inputs.values())
         channels = {n: cfg["in_channels"] for n, cfg in inputs.items()}
-        return EarlyFusionEncoder(list(inputs), make_bb(shared_cfg, total), channels), ftype, {}
+        bb = make_bb(" + ".join(inputs), shared_cfg, total)
+        check_top_level()
+        return EarlyFusionEncoder(list(inputs), bb, channels), ftype, {}
 
     encoders, adapters = {}, {}
     for n, cfg in inputs.items():
@@ -142,22 +223,30 @@ def _build_inputs(inputs, fusion, *, backbone, pretrained, channel_adapter, out_
                                  "yet; give each input its own encoder")
             if target not in encoders:
                 raise ValueError(f"input {n!r} shares {target!r}, which must be defined earlier")
-            _check_shared_adapter(n, cfg, encoders[target].in_channels)
+            target_ch = getattr(encoders[target], "in_channels", None)
+            if target_ch is None and target not in adapters:
+                # a custom nn.Module backbone need not declare in_channels: it was built for
+                # (and is fed) the target input as declared
+                target_ch = inputs[target]["in_channels"]
+            if target_ch is None:
+                raise ValueError(f"input {n!r} shares the backbone of {target!r}, which does "
+                                 "not declare 'in_channels' (a custom nn.Module backbone); "
+                                 "set its in_channels attribute so the shared input's "
+                                 "channels can be checked")
+            _check_shared_adapter(n, cfg, target_ch)
             # Weights shared, BatchNorm per input by default: one BN shared by inputs with
             # different statistics blends its running statistics, and evaluation then applies
             # the blend to every input (Sen1Floods11 val mIoU 0.50-0.65 vs 0.89).
             encoders[n] = (encoders[target] if cfg.get("share_norm", False)
                            else share_weights(encoders[target]))
             if cfg.get("channel_adapter") == "projection":
-                adapters[n] = ProjectionAdapter(cfg["in_channels"], encoders[target].in_channels)
+                adapters[n] = ProjectionAdapter(cfg["in_channels"], target_ch)
         else:
-            if "share_norm" in cfg:
-                raise ValueError(f"input {n!r}: 'share_norm' only applies to a "
-                                 "'shared:<input>' backbone")
-            encoders[n] = make_bb(cfg, cfg["in_channels"])
+            encoders[n] = make_bb(n, cfg, cfg["in_channels"])
             if n in series:
                 kind, opts = parse_temporal(n, cfg.get("temporal", "mean"))
                 encoders[n] = TemporalEncoder(encoders[n], kind, opts)
+    check_top_level()
     alignment = {n: cfg.get("alignment", "same_grid") for n, cfg in inputs.items()}
     if len(inputs) == 1 and set(fusion) & {"op", "op_kwargs", "strides"}:
         raise ValueError(f"fusion options {sorted(set(fusion) & {'op', 'op_kwargs', 'strides'})} "
@@ -170,6 +259,26 @@ def _build_inputs(inputs, fusion, *, backbone, pretrained, channel_adapter, out_
     enc = MultiEncoder(encoders, mode=ftype, op=op, strides=strides, alignment=alignment,
                        adapters=adapters, op_kwargs=op_kwargs)
     return enc, ftype, {"op": op, "op_kwargs": op_kwargs}
+
+
+def check_module_options(*, in_channels=None, module=None, pretrained=True,
+                         channel_adapter="repeat", out_indices=None, backbone_kwargs=None) -> None:
+    """A backbone given as an ``nn.Module`` is already built: options that configure a timm
+    backbone would be silently ignored, so they are errors. ``pretrained=True`` (the default)
+    and ``False`` are accepted (there is nothing to load); a weights tag is not.
+    ``in_channels`` must equal the module's ``in_channels`` when it exposes one."""
+    given = _timm_options_given(pretrained=pretrained, channel_adapter=channel_adapter,
+                                out_indices=out_indices, backbone_kwargs=backbone_kwargs)
+    if given:
+        raise ValueError(f"{', '.join(given)} configure a timm backbone, but backbone is an "
+                         "nn.Module (already built), so they would be ignored; configure the "
+                         "module itself, or pass a timm model name")
+    if in_channels is not None and module is not None:
+        if not isinstance(getattr(module, "in_channels", None), int):
+            raise ValueError(f"in_channels={in_channels} can't change a backbone given as an "
+                             f"nn.Module ({type(module).__name__} has no 'in_channels' to "
+                             "check it against); leave it out")
+        _check_module_channels(module, in_channels, f"in_channels={in_channels}: the input has")
 
 
 def create_model(
@@ -196,15 +305,25 @@ def create_model(
 
     Args:
         backbone: A timm model name, or an ``nn.Module`` with ``feature_specs`` and
-            ``input_divisor``.
+            ``input_divisor``. A module is used as built: the timm options (``pretrained``
+            other than True/False, ``channel_adapter``, ``out_indices``, ``backbone_kwargs``,
+            ``rgb_indices``) are then errors, and ``in_channels`` must equal the module's
+            ``in_channels`` if given. With ``inputs=``, every input without its own
+            ``backbone`` is encoded by this same module object (weights and BatchNorm
+            shared, as with ``"shared:<input>"`` plus ``share_norm``), and each such input's
+            ``in_channels`` must match the module's; give inputs separate module instances
+            (``"backbone": module`` per input) for separate encoders.
         inputs: Several inputs, ``{name: config}`` (the first raster input is the primary).
             Raster or time-series configs: ``in_channels`` (required), ``kind``
             (``"raster"`` / ``"timeseries"``), ``backbone`` (or ``"shared:<input>"``),
             ``pretrained``, ``channel_adapter``, ``alignment`` (``"same_grid"`` /
             ``"same_extent"``), ``share_norm``, ``backbone_kwargs``, ``out_indices``,
-            ``rgb_indices``, ``temporal`` (time series). Vector (metadata) configs:
+            ``rgb_indices`` (wins over an ``rgb_indices`` in the top-level
+            ``backbone_kwargs``), ``temporal`` (time series). Vector (metadata) configs:
             ``{"kind": "vector"}`` with ``fields`` or ``num_features``, ``dim``, ``dropout``,
-            ``conditioning`` (``"film"`` / ``"head"`` / ``"channels"``).
+            ``conditioning`` (``"film"`` / ``"head"`` / ``"channels"``). Give metadata in
+            float32, also to a bfloat16 / float16 model: it is encoded in float32, and half
+            precision would round ids and coordinates (see :mod:`manyseg.conditioning.encoder`).
         fusion: ``{"type": "early" | "intermediate" | "late", "op": ..., "op_kwargs": ...,
             "strides": [...]}`` for several raster inputs (``strides``: intermediate only).
         pretrained: ``True`` (timm weights), ``False``, or a ``manyseg.weights`` tag such as
@@ -216,7 +335,8 @@ def create_model(
         backbone_kwargs: Passed to ``timm.create_model``, so the keywords depend on the
             architecture (``drop_path_rate``, for one, exists only where timm implements
             stochastic depth); also takes ``rgb_indices`` (input channels carrying R, G, B for
-            the ``rgb_plus_*`` / ``projection`` adapters).
+            the ``rgb_plus_*`` / ``projection`` adapters; with ``inputs=``, for every input,
+            unless the input sets its own ``rgb_indices``).
         decoder: A decoder name, a decoder class or callable, or one dict
             ``{"type": name, **options}``.
         decoder_kwargs: Options for the decoder (not together with the same keys in a dict
@@ -224,10 +344,12 @@ def create_model(
         num_classes: One segmentation head with this many output channels.
         heads: ``{name: config}`` with ``type`` (``"segmentation"``: pixel scope,
             ``"classification"``: image scope, ``"regression"``: either), ``out_channels``
-            (required), ``scope`` (``"pixel"`` / ``"image"``), ``source``, ``scale``,
+            (required), ``scope`` (``"pixel"`` / ``"image"``; default ``"image"`` for
+            classification, else ``"pixel"``), ``source``, ``scale``,
             ``uncertainty``, ``decoder`` (a per-head decoder), ``input`` and ``share``
             (per-input heads), and head options (pixel: ``kernel_size``, ``bias_init``,
-            ``hidden``, ``dilation``, ``norm``, ``activation``; image: ``dropout``,
+            ``hidden``, ``dilation``, ``norm`` (``"batch"`` / ``"group"`` / None),
+            ``activation``; image: ``dropout``,
             ``init_std``; see :class:`manyseg.heads.PixelHead`). A ``type`` registered with
             ``manyseg.heads.HEADS.register`` builds a custom head class.
         pad_to_stride: Pad inputs to the encoder stride and crop outputs back (default);
@@ -248,8 +370,17 @@ def create_model(
                              "decoder_kwargs")
         decoder = d.pop("type")
         decoder_kwargs = {**dict(decoder_kwargs or {}), **d}
+    if not (isinstance(decoder, str) or callable(decoder)):
+        raise ValueError("decoder must be a decoder name, a decoder class or callable, or a dict "
+                         f"{{'type': name, **options}}; got {decoder!r}")
     if heads is not None:
         check_module_names("head", heads)
+        for n, cfg in heads.items():
+            d = cfg.get("decoder", "unet") if isinstance(cfg, Mapping) else "unet"
+            if not (isinstance(d, str | Mapping) or callable(d)):
+                raise ValueError(f"head {n!r}: 'decoder' must be a decoder name, a decoder "
+                                 f"class or callable, or a dict {{'type': name, **options}}; "
+                                 f"got {d!r} (leave the key out to use the model's decoder)")
     if inputs is not None:
         check_module_names("input", inputs)
         if in_channels is not None:
@@ -283,6 +414,9 @@ def create_model(
             **dict(backbone_kwargs or {}),
         )
     else:
+        check_module_options(in_channels=in_channels, module=backbone, pretrained=pretrained,
+                             channel_adapter=channel_adapter, out_indices=out_indices,
+                             backbone_kwargs=backbone_kwargs)
         bb = backbone
 
     def resolve(d):
@@ -309,7 +443,13 @@ def create_model(
                                      op=fopts["op"], alignment=[bb.alignment[n] for n in bb.names],
                                      op_kwargs=fopts["op_kwargs"])
         if wants:
-            specs = (FeatureSpec(bb.in_channels, 1, "input"), *specs)
+            ch = getattr(bb, "in_channels", None)
+            if not isinstance(ch, int):
+                raise ValueError(f"decoder {dec_cls.__name__} reads the input image, so it "
+                                 "needs the input's channel count, but the backbone module "
+                                 f"{type(bb).__name__} has no 'in_channels' attribute; set "
+                                 "one on it, or use a decoder that reads features only")
+            specs = (FeatureSpec(ch, 1, "input"), *specs)
         return dec_cls(specs, **dkw)
 
     single = None
@@ -335,7 +475,7 @@ def create_model(
         if inp not in bb.names:
             raise ValueError(f"head {n!r}: unknown input {inp!r}; raster inputs are "
                              f"{list(bb.names)}")
-        if heads[n].get("scope", "pixel") != "pixel":
+        if head_scope(heads[n]) != "pixel":
             raise ValueError(f"head {n!r}: 'input' heads are pixel heads")
         if getattr(bb.encoders[inp], "temporal", False):
             raise ValueError(f"head {n!r}: 'input' cannot be a time series yet")
@@ -352,16 +492,27 @@ def create_model(
         if bb.encoders[head_inputs[n]].feature_specs != \
                 bb.encoders[head_inputs[other]].feature_specs:
             raise ValueError(f"head {n!r}: 'share' needs inputs with the same feature specs")
+        if "decoder" in heads[n]:  # it reuses the other head's decoder: its own would be lost
+
+            def _dec(cfg):
+                d = cfg.get("decoder", {"type": decoder, **dict(decoder_kwargs or {})})
+                return {"type": d} if isinstance(d, str) else (
+                    dict(d) if isinstance(d, Mapping) else d)
+
+            if _dec(heads[n]) != _dec(heads[other]):
+                raise ValueError(f"head {n!r}: a head with 'share' uses the decoder of "
+                                 f"{other!r}, so it cannot set a different 'decoder' (got "
+                                 f"{heads[n]['decoder']!r}); remove it, or drop 'share'")
     reads_kwargs = any("decoder" not in heads[n] for n in head_inputs)
     for n in head_inputs:  # default: the model's decoder type and kwargs, on this input
         heads[n].setdefault("decoder", {"type": decoder, **dict(decoder_kwargs or {})})
     task_cfgs = {n: cfg.pop("decoder") for n, cfg in heads.items() if "decoder" in cfg}
     for n in task_cfgs:
-        if heads[n].get("scope", "pixel") != "pixel":
+        if head_scope(heads[n]) != "pixel":
             raise ValueError(f"head {n!r}: task-specific decoders are only for pixel heads")
     # pixel heads read the decoder by default, image heads only with "source": "decoder"
     needs_shared = any(n not in task_cfgs and heads[n].get(
-        "source", "decoder" if heads[n].get("scope", "pixel") == "pixel" else "encoder")
+        "source", "decoder" if head_scope(heads[n]) == "pixel" else "encoder")
         == "decoder" for n in heads)
     shared = build_decoder(resolve(decoder), dict(decoder_kwargs or {})) if needs_shared else None
     if not needs_shared:
@@ -389,7 +540,7 @@ def create_model(
     enc_specs = bb.feature_specs
     if ftype == "late":
         enc_specs = enc_specs[bb.groups[0][0]:bb.groups[0][1]]
-    deepest = max(enc_specs, key=lambda s: s.stride)
+    deepest = enc_specs[deepest_index(enc_specs)]
     built, sources = {}, {}
     for name, cfg in heads.items():
         if name in shares:

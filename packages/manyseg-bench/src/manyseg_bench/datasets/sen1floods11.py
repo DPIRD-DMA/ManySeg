@@ -32,7 +32,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .base import DatasetInfo, save_split
+from .base import DatasetInfo, check_native_size, save_split
 
 HF_URL = ("https://huggingface.co/datasets/blumenstiel/Sen1Floods11/resolve/main/"
           "sen1floods11_v1_1.tar.gz")
@@ -77,6 +77,7 @@ INFO_META_NOGEO = DatasetInfo(**{
     "vectors": {"meta": {"fields": {k: v for k, v in META_FIELDS.items() if k != "latlon"}}}})
 LOADER_KWARGS = {"out_size": (256, 256), "scale": (0.25, 1.0), "vflip": True}
 EVAL_BATCH_SIZE = 8
+SIZE = 512  # chips as published (prepare does not resize)
 
 
 def _root(raw: Path) -> Path:
@@ -109,7 +110,11 @@ def _read_chip(root: Path, name: str):
     return hwc, lab
 
 
-def prepare(raw: Path, cache: Path, size: int = 512, workers: int = 4) -> dict:
+def prepare(raw: Path, cache: Path, size: int | None = None, workers: int = 4) -> dict:
+    """Cache the hand-labelled chips at their published ``SIZE`` px; another ``size``
+    raises (before any download)."""
+    check_native_size(size, SIZE, "sen1floods11")
+    size = SIZE
     raw, cache = Path(raw), Path(cache)
     root = _root(raw)
     if not (root / "splits").exists():

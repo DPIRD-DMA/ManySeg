@@ -13,13 +13,19 @@ from .graph import VectorGraph, _deps
 
 
 def _gaussians(pts: np.ndarray, sigma: float, shape: tuple[int, int]) -> np.ndarray:
-    """Max-composited Gaussians (peak 1) at float ``(x, y)`` points, cut at 3 sigma."""
+    """Max-composited Gaussians (peak 1) at float ``(x, y)`` points (pixel centres at ``+0.5``).
+
+    Each Gaussian covers the pixels whose centre lies within ``ceil(3 sigma) + 0.5`` px of the
+    point along each axis. The window is symmetric about the point, so a flipped or rotated
+    point set gives the flipped or rotated heatmap (:mod:`manyseg.vectors.augment`)."""
     out = np.zeros(shape, np.float32)
     r = int(math.ceil(3 * sigma))
+    half = r + 0.5
     for x, y in np.asarray(pts, np.float64).reshape(-1, 2):
-        c0, r0 = int(math.floor(x)) - r, int(math.floor(y)) - r
-        cs, rs = np.arange(c0, c0 + 2 * r + 1), np.arange(r0, r0 + 2 * r + 1)
-        cm, rm = (cs >= 0) & (cs < shape[1]), (rs >= 0) & (rs < shape[0])
+        c0, r0 = int(math.floor(x)) - r - 1, int(math.floor(y)) - r - 1
+        cs, rs = np.arange(c0, c0 + 2 * r + 3), np.arange(r0, r0 + 2 * r + 3)
+        cm = (cs >= 0) & (cs < shape[1]) & (np.abs(cs + 0.5 - x) <= half)
+        rm = (rs >= 0) & (rs < shape[0]) & (np.abs(rs + 0.5 - y) <= half)
         if not cm.any() or not rm.any():
             continue
         dx = (cs[cm] + 0.5 - x)[None, :]
@@ -81,8 +87,12 @@ def road_targets(graph, shape: tuple[int, int], *, width: float = 6.0, widths=No
       overpasses: ``(x, y)`` points the graph does not hold, since they are not nodes);
     * ``direction`` ``(4, H, W)``: two ``(cos 2t, sin 2t)`` modes over the road surface. Mode 1
       is the direction of the first edge (in graph edge order) covering a pixel; mode 2 that of
-      an edge of a *different* degree-2 chain crossing it at more than ``cross_deg`` degrees
-      (zero elsewhere), so a crossing keeps both roads' directions.
+      an edge of a *different* degree-2 chain (a run of edges between nodes of degree != 2)
+      whose surface also covers the pixel at more than ``cross_deg`` degrees to mode 1 (zero
+      elsewhere). That holds wherever two chains' surfaces overlap at an angle: at
+      grade-separated crossings, so they keep both roads' directions, and also around
+      junctions, where the chains meeting at the node overlap (a T-junction gets mode 2 near
+      its node). It is not limited to ``crossings``.
 
     Args:
         graph: a :class:`~manyseg.vectors.VectorGraph` (road widths from ``widths``, one per

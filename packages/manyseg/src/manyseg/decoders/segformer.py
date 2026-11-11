@@ -17,7 +17,10 @@ from .base import DECODERS, check_out_stride, pyramid_levels
 class SegFormerDecoder(nn.Module):
     """Per-level linear (1x1) to ``channels``, upsample to the shallowest level, concat, fuse
     (computed per level, see ``forward``).
-    Output: ``channels`` at stride 4 (``out_stride`` may only restate it)."""
+    Output: ``channels`` at the stride of the shallowest level it reads (the at most 4
+    deepest levels with stride >= 4): 4 on a standard stride 4..32 pyramid, coarser when the
+    encoder has no stride-4 level or more than 4 such levels (``out_stride`` may only restate
+    it)."""
 
     def __init__(self, in_specs: Sequence[FeatureSpec], channels: int = 256,
                  dropout: float = 0.1, out_stride: int | None = None) -> None:

@@ -189,7 +189,8 @@ Ships in 0.1.0, marked experimental (names and defaults may change before 1.0):
   `api_design.md`). Tiles of at least 1024 px with 256 px overlap (E050b).
 * Removed: the graph tensor (B2 / R2; E028, E030), and clip-edge corner suppression
   (`corner_targets(tile_edges="ignore")`), which changed nothing measurable in the end-to-end
-  test (numbers in the CHANGELOG).
+  test (numbers in the seam-study comment of
+  `packages/manyseg/tests/integration/test_vector_pipeline.py`).
 
 ## Phase 6: release preparation 🔄
 
@@ -222,8 +223,10 @@ Ships in 0.1.0, marked experimental (names and defaults may change before 1.0):
   (`packages/manyseg/tests/integration/test_vector_pipeline.py`: vectors in a CRS → per-tile targets → stitching
   → block decoding → GeoPackage). The graph tensor was moved out of the library (E030).
 * ✅ Fields default to `distance="absolute"` (E052).
-* ✅ Clip-edge corner suppression (`tile_edges="ignore"`) removed from the API; its negative
-  result is in the CHANGELOG.
+* ✅ Clip-edge corner suppression (`tile_edges="ignore"`) removed from the API: it changed nothing
+  measurable at seams (the corners decoder merges a clip vertex on a straight wall, and `cut`
+  never stitches in a clip edge once overlap / 2 > 7 px) and cost a little IoU on buildings cut
+  by the scene edge; numbers in `packages/manyseg/tests/integration/test_vector_pipeline.py`.
 * ✅ Seeds in narrow parts of an instance (extra faces at hip-roof tips, extra fields at field
   corners): the extra objects are gone with a minimum seed size of 8 px (E053). A hip-roof tip
   can still go to a neighbouring face, and a field's narrow strip can split under the 3 px seed

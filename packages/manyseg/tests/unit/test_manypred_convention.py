@@ -157,7 +157,7 @@ def test_density_under_real_manypred_with_nodata():
     blocks = _real_blocks()
     d = np.ones((1, 64, 64), np.float32)
     d[0, :10, :10] = np.nan
-    dec = block_decoder("density")
+    dec = block_decoder("density", value_scale=1.0)
     got = blocks.postprocess_blocks({"density": d}, dec, block=24, halo=0, combine=dec.combine)
     assert got.total == 64 * 64 - 100
 

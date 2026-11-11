@@ -39,7 +39,7 @@ class FiLM(nn.Module):
         nn.init.zeros_(self.proj.bias)
 
     def forward(self, x: Tensor, e: Tensor) -> Tensor:
-        gamma, beta = self.proj(e).to(x.dtype).chunk(2, dim=1)
+        gamma, beta = self.proj(e.to(self.proj.weight.dtype)).to(x.dtype).chunk(2, dim=1)
         return x * (1 + gamma[:, :, None, None]) + beta[:, :, None, None]
 
 
@@ -117,11 +117,12 @@ def probe_levels(decoder: nn.Module, specs: Sequence[FeatureSpec],
 
 class DecoderFiLM(nn.Module):
     """FiLM on the feature levels a decoder reads (``"features"``) and on its output
-    (``"output"``)."""
+    (``"output"``); ``on`` is one of these names or a collection of them."""
 
     def __init__(self, cond_dim: int, specs: Sequence[FeatureSpec], levels: Sequence[int],
                  out_spec: FeatureSpec, on: Sequence[str] = ("features", "output")) -> None:
         super().__init__()
+        on = (on,) if isinstance(on, str) else tuple(on)  # "output" is one name, not letters
         unknown = set(on) - {"features", "output"}
         if unknown or not on:
             raise ValueError(f"film 'on' must be a non-empty subset of ('features', 'output'), "
@@ -233,5 +234,8 @@ class Conditioner(nn.Module):
     def head(self, name: str, y: Tensor, cond) -> Tensor:
         if cond[1] is None or name not in self.head_bias:
             return y
-        b = self.head_bias[name](cond[1]).to(y.dtype)
+        layer = self.head_bias[name]
+        w = next(layer.parameters(), None)
+        e = cond[1] if w is None else cond[1].to(w.dtype)
+        b = layer(e).to(y.dtype)
         return y + (b if y.ndim == 2 else b[:, :, None, None])

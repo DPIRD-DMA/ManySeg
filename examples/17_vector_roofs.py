@@ -118,7 +118,8 @@ def main():
         shapely.equals_exact(a["geometry"], b["geometry"], 0) and a["plane"] == b["plane"]
         for a, b in zip(records, whole))
     print(f"{len(records)} faces decoded; {records.stats}; equal to the whole-scene decode: {same}")
-    # planes are in scene pixels: z = a * col + b * row + c (metres); slope in degrees:
+    # planes are in scene pixels, corners at integers: z = a * (col + 0.5) + b * (row + 0.5) + c
+    # (metres) at the centre of pixel (row, col); slope in degrees:
     a, b, c = records[0]["plane"]
     print(f"first face: {np.degrees(np.arctan(np.hypot(a, b) / PX)):.0f} deg roof pitch")
 

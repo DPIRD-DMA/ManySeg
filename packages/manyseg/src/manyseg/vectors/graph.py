@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import heapq
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 
@@ -48,10 +49,18 @@ def _remove_small(mask: np.ndarray, min_area: int) -> np.ndarray:
 @dataclass
 class VectorGraph:
     """An undirected graph of straight segments: ``xy`` ``(N, 2)`` node coordinates and
-    ``edges`` ``(E, 2)`` node indices."""
+    ``edges`` ``(E, 2)`` node indices.
+
+    ``transform`` / ``crs``: the georeferencing of the pixel coordinates, if known (``None``:
+    plain pixel coordinates). ``decode_scene`` with a georeferenced ``Scene`` sets them, as
+    on its :class:`~manyseg.vectors.SceneRecords`, so :meth:`to_geojson` / :meth:`write` (and
+    :func:`~manyseg.vectors.records_to_geojson` / :func:`~manyseg.vectors.write_records`)
+    write world coordinates and name the CRS. The low-level decoders leave them ``None``."""
 
     xy: np.ndarray
     edges: np.ndarray
+    transform: Any = None
+    crs: Any = None
 
     def __post_init__(self):
         self.xy = np.asarray(self.xy, np.float64).reshape(-1, 2)
@@ -86,6 +95,21 @@ class VectorGraph:
         xy = np.array([g.nodes[n]["xy"] for n in g.nodes()]).reshape(-1, 2)
         edges = np.array([(index[u], index[v]) for u, v in g.edges() if u != v]).reshape(-1, 2)
         return cls(xy, edges)
+
+    def to_geojson(self) -> dict:
+        """GeoJSON ``FeatureCollection`` (one LineString per polyline) through ``transform``,
+        naming ``crs`` (pixel coordinates and no CRS without a transform), as
+        :func:`~manyseg.vectors.records_to_geojson`."""
+        from .blocks import records_to_geojson
+
+        return records_to_geojson(self)
+
+    def write(self, path, *, layer: str | None = None):
+        """Write to ``path`` (``.geojson``, or e.g. ``.gpkg`` with geopandas) through
+        ``transform`` / ``crs`` (:func:`~manyseg.vectors.write_records`). Returns the path."""
+        from .blocks import write_records
+
+        return write_records(self, path, layer=layer)
 
     def polylines(self) -> list[np.ndarray]:
         """The graph as polylines between key nodes (degree != 2); loops close on themselves."""
@@ -307,7 +331,8 @@ def _join_degree2(nodes, chains):
 
 # A road cut by the image border ends its skeleton about half a road width inside (3.25 px for
 # 6 px roads); within this margin an end counts as "at the border": spur pruning keeps it and
-# bridge_ends does not join it to another cut end (E2E test, 2026-10-29; was 3 px).
+# bridge_ends does not join it to another cut end. The margin must exceed that inset (a 3 px
+# margin is below the 3.25 px of a cut 6 px road); 5 px leaves room for skeleton jitter.
 BORDER_MARGIN = 5.0
 
 
@@ -446,9 +471,13 @@ def graph_from_mask_blocks(prob, threshold: float = 0.5, *, block: int = 2048, h
     skeletonize = _deps()[3]
     from scipy import ndimage
 
-    if hasattr(prob, "detach"):  # as graph_from_mask (Codex 10-28 #2)
+    if hasattr(prob, "detach"):  # torch input (any device, autograd or not), as graph_from_mask
         prob = prob.detach().float().cpu().numpy()
-    H, W = prob.shape[-2:]
+    elif not hasattr(prob, "ndim"):
+        prob = np.asarray(prob)
+    if prob.ndim != 2:  # as graph_from_mask
+        raise ValueError(f"expected a (H, W) probability map, got shape {prob.shape}")
+    H, W = prob.shape
     if H == 0 or W == 0:
         return VectorGraph(np.zeros((0, 2)), np.zeros((0, 2), np.int64))
     rows, cols = [], []

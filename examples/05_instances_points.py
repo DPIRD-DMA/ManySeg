@@ -78,7 +78,8 @@ def main():
                                    backend="torch")
     print("round trip from targets: instances", [int(e.max()) for e in exact],
           "| peaks", [len(p) for p, _ in find_peaks(hm, threshold=0.5)],
-          "| density", [round(c, 2) for c in count_from_density(den).tolist()])
+          "| density",  # den is an unscaled density_map, so value_scale=1
+          [round(c, 2) for c in count_from_density(den, value_scale=1.0).tolist()])
 
 
 if __name__ == "__main__":

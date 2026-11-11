@@ -21,21 +21,38 @@ def group_norm_groups(channels: int, max_groups: int = 32) -> int:
     return next(g for g in range(min(max_groups, channels), 0, -1) if channels % g == 0)
 
 
+NORMS = ("batch", "group", None)
+"""Normalisation choices for decoder blocks and pixel-head hidden layers."""
+NORM_ALIASES = {"bn": "batch", "gn": "group", "none": None}
+"""Other accepted spellings (saved configs use ``"bn"`` / ``"gn"``)."""
+
+
+def normalize_norm(norm: str | None, what: str = "norm") -> str | None:
+    """``norm`` as one of :data:`NORMS`: ``"batch"`` (alias ``"bn"``), ``"group"`` (alias
+    ``"gn"``) or None (alias ``"none"``); anything else raises ValueError."""
+    if isinstance(norm, str):
+        norm = NORM_ALIASES.get(norm, norm)
+    if norm not in NORMS:
+        raise ValueError(f"{what} must be one of 'batch', 'group' or None ('bn', 'gn' and "
+                         f"'none' are accepted aliases), got {norm!r}")
+    return norm
+
+
 def make_norm(norm: str | None, channels: int) -> nn.Module:
-    if norm is None or norm == "none":
+    """The norm layer for ``norm`` (see :func:`normalize_norm`); ``nn.Identity`` for None."""
+    norm = normalize_norm(norm)
+    if norm is None:
         return nn.Identity()
     if norm == "batch":
         return nn.BatchNorm2d(channels)
-    if norm == "group":
-        return GroupNorm(group_norm_groups(channels), channels)
-    raise ValueError(f"unknown norm {norm!r}; choose from 'batch', 'group', None")
+    return GroupNorm(group_norm_groups(channels), channels)
 
 
 class ConvNormAct(nn.Sequential):
     def __init__(self, cin: int, cout: int, k: int = 3, norm: str | None = "batch") -> None:
-        has_norm = norm not in (None, "none")
+        norm = normalize_norm(norm)  # before the bias: "none" is no norm, so the conv has one
         super().__init__(
-            nn.Conv2d(cin, cout, k, padding=k // 2, bias=not has_norm),
+            nn.Conv2d(cin, cout, k, padding=k // 2, bias=norm is None),
             make_norm(norm, cout),
             nn.ReLU(inplace=True),
         )

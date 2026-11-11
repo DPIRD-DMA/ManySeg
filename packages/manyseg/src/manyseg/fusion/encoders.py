@@ -45,11 +45,28 @@ def _ceil_div(a, b):
     return (a + b - 1) // b
 
 
+def _pad_input(x: Tensor, divisor: int, fixed, what: str) -> Tensor:
+    """Pad bottom/right to a multiple of ``divisor``, or up to ``fixed`` (a fixed-size
+    backbone's ``(h, w)``; a larger input is an error)."""
+    if fixed is None:
+        return pad_to_multiple(x, divisor)
+    h, w = x.shape[-2], x.shape[-1]
+    if h > fixed[0] or w > fixed[1]:
+        raise ValueError(f"{what}: the backbone has a fixed input size {tuple(fixed)}; got "
+                         f"{(h, w)}. Use tiled inference (ManyPred) or "
+                         "backbone_kwargs={'img_size': ...}")
+    return F.pad(x, (0, fixed[1] - w, 0, fixed[0] - h))
+
+
 class EarlyFusionEncoder(nn.Module):
     """Concatenate inputs along channels (fixed key order) in front of one backbone.
 
     ``channels`` (optional, ``{name: C}``) records each input's share of the concatenation for
     :func:`manyseg.describe.describe`; the backbone's stem only sees the total.
+
+    The stacked input is padded to the backbone's ``input_divisor``, or up to its
+    ``fixed_size`` for a fixed-size backbone (an input larger than that is an error); the model
+    crops the outputs back to the input size.
     """
 
     fused_strides: tuple[int, ...] = ()
@@ -62,6 +79,7 @@ class EarlyFusionEncoder(nn.Module):
         self.backbone = backbone
         self.feature_specs = backbone.feature_specs
         self.input_divisor = backbone.input_divisor
+        self.fixed_size = getattr(backbone, "fixed_size", None)
         self.primary = self.names[0]
 
     def _restrict_levels(self, levels) -> None:
@@ -78,7 +96,8 @@ class EarlyFusionEncoder(nn.Module):
                     f" but {self.primary!r} is {tuple(ref)}"
                 )
         x = torch.cat([inputs[n] for n in self.names], dim=1)
-        return self.backbone(pad_to_multiple(x, self.input_divisor))
+        return self.backbone(_pad_input(x, self.input_divisor, self.fixed_size,
+                                        f"inputs {list(self.names)}"))
 
 
 class MultiEncoder(nn.Module):
@@ -217,16 +236,8 @@ class MultiEncoder(nn.Module):
 
     def _pad(self, n: str, x: Tensor) -> Tensor:
         """Pad to the encoder's stride multiple, or up to a fixed-size backbone's size."""
-        fixed = self.fixed_sizes.get(n)
-        if fixed is None:
-            return pad_to_multiple(x, self.grid_divisor if self.alignment[n] == "same_grid"
-                                   else self.divisors[n])
-        h, w = x.shape[-2], x.shape[-1]
-        if h > fixed[0] or w > fixed[1]:
-            raise ValueError(f"input {n!r}: its backbone has a fixed input size {fixed}; got "
-                             f"{(h, w)}. Use tiled inference (ManyPred) or "
-                             "backbone_kwargs={'img_size': ...}")
-        return F.pad(x, (0, fixed[1] - w, 0, fixed[0] - h))
+        return _pad_input(x, self.grid_divisor if self.alignment[n] == "same_grid"
+                          else self.divisors[n], self.fixed_sizes.get(n), f"input {n!r}")
 
     def _encode(self, inputs: Mapping[str, Tensor]):
         _check_inputs(inputs, self.names, [f"{n}_{s}" for n in self.names

@@ -28,8 +28,10 @@ def point_heads(heatmap: str = "regression", offsets: bool = False,
 
 
 def density_head(decoder: Any = None, *, activation: str | None = "softplus") -> dict[str, dict]:
-    """A 1-channel density map whose integral is the count (:func:`count_from_density`).
-    Train with :func:`density_loss`.
+    """A 1-channel density map whose integral, divided by the training target's scale, is the
+    count. Train with :func:`density_loss` (its default target is :func:`density_map` times
+    ``2 pi sigma^2``) and count with :func:`count_from_density` (or
+    ``block_decoder("density")``) given the same ``sigma=`` (or ``value_scale=``).
 
     ``activation``: ``"softplus"`` (default) or ``None`` (raw values). The model applies it, so
     training and inference use the same one. Softplus never reaches 0, so a mostly empty tile

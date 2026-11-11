@@ -1,4 +1,5 @@
-"""UPerNet decoder (Xiao et al. 2018): PPM on the deepest level + FPN, fused at stride 4."""
+"""UPerNet decoder (Xiao et al. 2018): PPM on the deepest level + FPN, fused at the shallowest
+level read (stride 4 on a standard pyramid)."""
 
 from __future__ import annotations
 
@@ -31,13 +32,16 @@ class PPM(nn.Module):
 @DECODERS.register("upernet")
 class UPerNetDecoder(nn.Module):
     """UPerNet decoder (``decoder="upernet"``): a pyramid pooling module on the deepest level
-    and an FPN, fused at stride 4.
+    and an FPN over the (at most 4) deepest levels with stride >= 4, fused at the shallowest
+    of them: stride 4 on a standard stride 4..32 pyramid, coarser when the encoder has no
+    stride-4 level or more than 4 such levels.
 
     Args:
         in_specs: The encoder features' specs.
         channels: Width of the PPM, FPN and fusion convolutions.
         pool_scales: Output sizes of the pyramid pooling branches.
-        out_stride: Output stride (default: stride 4, the fusion's).
+        out_stride: May only restate the native output stride (the fusion's, see above;
+            any other value is an error, see ``check_out_stride``).
     """
 
     def __init__(self, in_specs: Sequence[FeatureSpec], channels: int = 256,

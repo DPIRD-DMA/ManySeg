@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 import torch.nn.functional as F
 from torch import Tensor, nn
 
+from ..decoders.base import deepest_index
 from ..utils.spatial import crop_to, pad_to_multiple
 
 if TYPE_CHECKING:
@@ -36,7 +37,11 @@ class DenseModel(nn.Module):
         pad_to_stride: Zero-pad bottom/right to ``backbone.input_divisor`` and crop outputs
             back, which keeps outputs pixel-aligned with inputs. If False, pixel outputs are
             resized to the input size instead. A multi-input encoder (one taking a dict) always
-            pads its inputs itself, so its outputs are always cropped and this has no effect.
+            pads its inputs itself, and a fixed-size backbone always gets its input padded to
+            that size, so their outputs are always cropped and this has no effect.
+
+    Image-scope heads pool over the valid (unpadded) region only: when the input was padded,
+    their feature map is first cropped to ``ceil(H / s) x ceil(W / s)`` (``s`` its stride).
 
     Pixel heads return the primary input's ``H x W``, or ``ceil(H / f) x ceil(W / f)`` for a head
     with ``scale = 1/f`` (output pixel ``(i, j)`` covers input pixels ``[i*f, (i+1)*f) x
@@ -84,13 +89,16 @@ class DenseModel(nn.Module):
         # a multi-input encoder pads each input itself (whatever pad_to_stride says), so its
         # outputs are cropped to the unpadded region, never resized (that would stretch the
         # padding into the prediction)
-        self._crops = pad_to_stride or getattr(backbone, "primary", None) is not None
+        # (likewise a fixed-size backbone: _pad pads up to its size whatever pad_to_stride says)
+        self._pads_itself = getattr(backbone, "primary", None) is not None
+        self._crops = (pad_to_stride or self._pads_itself
+                       or getattr(backbone, "fixed_size", None) is not None)
         self.divisor = int(getattr(backbone, "input_divisor", 1)) if pad_to_stride else 1
         # Image heads read the deepest encoder level; with late fusion the specs are every
         # input's levels concatenated, and the heads are built for the primary input's group.
         late = getattr(backbone, "mode", None) == "late"
         levels = range(*backbone.groups[0]) if late else range(len(backbone.feature_specs))
-        self._deepest = max(levels, key=lambda i: backbone.feature_specs[i].stride)
+        self._deepest = deepest_index(backbone.feature_specs, levels)
         # padded inputs: decoders can skip size checks in their upsampling
         if pad_to_stride and getattr(backbone, "fixed_size", None) is None:
             for dec in [self.decoder, *self.task_decoders.values()]:
@@ -199,7 +207,12 @@ class DenseModel(nn.Module):
           ``single_output``'s head when set, as the model then returns that one tensor.
         * ``pad_multiple``: the primary input is padded to a multiple of this (1 with
           ``pad_to_stride=False`` on a single-input model; a multi-input encoder always pads).
-        * ``max_size``: ``(h, w)`` of a fixed-size backbone, else None.
+        * ``max_size``: the largest ``(h, w)`` primary input the model takes, else None: the
+          element-wise minimum of the fixed sizes of the primary's encoder and of every
+          ``same_grid`` input's encoder (those inputs share the primary's size). A
+          ``same_extent`` input's fixed-size encoder is not reflected here: its ratio to the
+          primary is only known when the data arrives, so its limit is enforced only at
+          forward time, where a larger input raises a ``ValueError`` naming the fixed size.
         * ``normalize``: the normalisation stored by :func:`manyseg.save` (a ManyPred
           normalisation spec), or None.
         * ``bands``: the input band names stored by :func:`manyseg.save`: a list for a model
@@ -241,12 +254,22 @@ class DenseModel(nn.Module):
         main = dict(encoders).get(primary, backbone)  # ModuleDict has no .get
         fixed = getattr(main, "fixed_size", None) or getattr(
             getattr(main, "backbone", None), "fixed_size", None)
+        # Every same_grid input has the primary's size, so its fixed size limits the primary
+        # too: report the most restrictive. A same_extent input's limit is in its own pixels
+        # and its ratio to the primary is only known from the data, so it is left out (its
+        # encoder still refuses a larger input at forward time).
+        fixed_sizes = getattr(backbone, "fixed_sizes", None) or {}
+        alignment = getattr(backbone, "alignment", {})
+        for n, fs in fixed_sizes.items():
+            if alignment.get(n) == "same_extent":
+                continue
+            fixed = tuple(fs) if fixed is None else (min(fixed[0], fs[0]), min(fixed[1], fs[1]))
         return {
             "inputs": inputs,
             "outputs": outputs,
             "pad_multiple": (int(getattr(backbone, "grid_divisor",
                                          getattr(backbone, "input_divisor", 1)))
-                             if self._crops else 1),
+                             if self.pad_to_stride or self._pads_itself else 1),
             "max_size": tuple(fixed) if fixed is not None else None,
             "normalize": saved.get("normalize"),
             "bands": self._band_names(saved.get("bands")),
@@ -262,7 +285,7 @@ class DenseModel(nn.Module):
             return {n: [str(b) for b in names] for n, names in bands.items()}
         config = getattr(self, "build_config", None) or {}
         images = [n for n, c in (config.get("inputs") or {}).items()
-                  if c.get("kind", "image") != "vector"]
+                  if c.get("kind", "raster") != "vector"]
         names = [str(b) for b in bands]
         return {images[0]: names} if images else names
 
@@ -318,6 +341,11 @@ class DenseModel(nn.Module):
             inp = self._decode_cond(f"task_{name}", self.task_decoders[name], x, feats, cond,
                                     valid)
         head = self.heads[name]
+        if name not in self._pixel_heads and self._crops:
+            # image heads pool: crop the padding away first so it does not dilute the mean
+            # (floor division keeps the sizes symbolic for torch.export)
+            s = self._source_stride(name, src)
+            inp = crop_to(inp, (h + s - 1) // s, (w + s - 1) // s)
         # a head bias goes before a built-in output activation, so softplus heads stay > 0
         late = (cond is not None and getattr(head, "activation", None) is not None
                 and name in self.conditioner.head_bias)
@@ -332,6 +360,14 @@ class DenseModel(nn.Module):
         if cond is not None:
             y = self.conditioner.head(name, y, cond)
         return head.activate(y) if late else y
+
+    def _source_stride(self, name: str, src: str) -> int:
+        """Stride of the feature map head ``name`` reads."""
+        if src == "decoder":
+            return self.decoder.out_spec.stride
+        if src == "encoder":
+            return self.backbone.feature_specs[self._deepest].stride
+        return self.task_decoders[name].out_spec.stride
 
     def _pad(self, x: Tensor) -> Tensor:
         fixed = getattr(self.backbone, "fixed_size", None)

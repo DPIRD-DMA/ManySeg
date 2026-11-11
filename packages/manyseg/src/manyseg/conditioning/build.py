@@ -43,6 +43,25 @@ def split_inputs(inputs: Mapping[str, Mapping]) -> tuple[dict, dict]:
     return rasters, vectors
 
 
+FILM_ON = ("features", "output")
+"""Where ``film`` conditioning applies by default (both): the decoder's input levels and its
+output."""
+
+
+def _film_on(name: str, on) -> frozenset:
+    """A ``film`` input's ``on`` as a set: one name (``"output"``) or a non-empty collection
+    of names from :data:`FILM_ON`, in any order."""
+    items = (on,) if isinstance(on, str) else on
+    try:
+        got = frozenset(items)
+    except TypeError:
+        got = None
+    if not got or not got <= set(FILM_ON):
+        raise ValueError(f"vector input {name!r}: film 'on' must be 'features', 'output' or a "
+                         f"non-empty list of them, got {on!r}")
+    return got
+
+
 def parse_vector(name: str, cfg: Mapping) -> tuple[Callable[[], MetadataEncoder], str, dict]:
     """``(encoder factory, mode, mode options)``. Encoders are constructed only after the
     raster model, so the raster weights do not depend on the metadata configuration."""
@@ -62,6 +81,8 @@ def parse_vector(name: str, cfg: Mapping) -> tuple[Callable[[], MetadataEncoder]
     bad = set(cond) - _MODE_OPTIONS[mode]
     if bad:
         raise ValueError(f"vector input {name!r}: unknown {mode!r} options {sorted(bad)}")
+    if mode == "film":
+        cond["on"] = _film_on(name, cond.get("on", FILM_ON))
     if mode == "channels" and "dim" in cfg:
         raise ValueError(f"vector input {name!r}: 'dim' does not apply to 'channels' mode "
                          "(the field encodings themselves become channels)")
@@ -77,14 +98,19 @@ def parse_vector(name: str, cfg: Mapping) -> tuple[Callable[[], MetadataEncoder]
 def build_conditioned_model(create_model: Callable[..., nn.Module], *, inputs, fusion, backbone,
                             pretrained, channel_adapter, out_indices, backbone_kwargs,
                             heads, num_classes, **common: Any) -> nn.Module:
-    from ..models.factory import check_input_keys
+    from ..models.factory import (
+        backbone_kwargs_with_rgb,
+        check_input_keys,
+        check_module_input,
+        check_raster_input,
+    )
 
     rasters, vectors = split_inputs(inputs)
     shared = dict(pretrained=pretrained, channel_adapter=channel_adapter,
-                  out_indices=out_indices, heads=heads, num_classes=num_classes, **common)
+                  out_indices=out_indices, heads=heads, num_classes=num_classes)
     if not vectors:
         return create_model(backbone=backbone, inputs=rasters, fusion=fusion,
-                            backbone_kwargs=backbone_kwargs, **shared)
+                            backbone_kwargs=backbone_kwargs, **shared, **common)
     if not rasters:
         raise ValueError(f"vector inputs {sorted(vectors)} only condition a model; at least one "
                          "raster input is required")
@@ -120,28 +146,41 @@ def build_conditioned_model(create_model: Callable[..., nn.Module], *, inputs, f
         # One raster: build the ordinary single-input model (plain-tensor backbone), so every
         # decoder (including those that need the input image) and adapter works unchanged.
         (single, cfg), = rasters.items()
-        check_input_keys(single, cfg)
-        bkw = dict(cfg.get("backbone_kwargs", backbone_kwargs) or {})
-        if cfg.get("rgb_indices") is not None:
-            bkw["rgb_indices"] = cfg["rgb_indices"]
+        # the per-input checks the multi-input path runs, so adding a vector input never
+        # makes a rejected raster config valid
+        check_raster_input(single, cfg, inputs, backbone)
+        bb = cfg.get("backbone", backbone)
+        if isinstance(bb, str) and bb.startswith("shared:"):
+            raise ValueError(f"input {single!r} shares {bb.split(':', 1)[1]!r}, which must be "
+                             "a raster input defined earlier")
+        channels = cfg["in_channels"]
+        if not isinstance(bb, str):  # a built module: no timm options; channels must match
+            check_module_input(single, cfg, bb, channels)
+            channels = None
+        if heads is not None:
+            shared["heads"], common = _single_raster_heads(heads, single, vectors, common)
         model = create_model(
-            backbone=cfg.get("backbone", backbone), in_channels=cfg["in_channels"],
-            backbone_kwargs=bkw,
-            **{**shared, **{k: cfg[k] for k in ("pretrained", "channel_adapter", "out_indices")
-                            if k in cfg}})
+            backbone=bb, in_channels=channels,
+            backbone_kwargs=backbone_kwargs_with_rgb(single, cfg, backbone_kwargs),
+            **{**shared, **common,
+               **{k: cfg[k] for k in ("pretrained", "channel_adapter", "out_indices")
+                  if k in cfg}})
     else:
+        _check_head_inputs(heads, vectors)
         model = create_model(backbone=backbone, inputs=rasters, fusion=fusion,
-                             backbone_kwargs=backbone_kwargs, **shared)
+                             backbone_kwargs=backbone_kwargs, **shared, **common)
 
     encoders = {n: make() for n, make in makers.items()}
     film_names = [n for n in vectors if modes[n] == "film"]
     head_names = [n for n in vectors if modes[n] == "head"]
     film = {}
     if film_names:
-        ons = {tuple(opts[n].get("on", ("features", "output"))) for n in film_names}
+        ons = {opts[n]["on"] for n in film_names}  # sets: the order of 'on' does not matter
         if len(ons) > 1:
-            raise ValueError("all 'film' vector inputs must use the same 'on' option")
-        on = ons.pop()
+            raise ValueError("all 'film' vector inputs must use the same 'on' option, got "
+                             + ", ".join(f"{n!r}: {sorted(opts[n]['on'])}" for n in film_names))
+        on_set = ons.pop()
+        on = tuple(k for k in FILM_ON if k in on_set)
         dim = sum(encoders[n].dim for n in film_names)
         specs = tuple(model.backbone.feature_specs)
         in_ch = getattr(model.backbone, "in_channels", None)
@@ -189,3 +228,49 @@ def build_conditioned_model(create_model: Callable[..., nn.Module], *, inputs, f
                                               if c.get("kind") == "timeseries"],
                                     channel_targets=targets, film=film, head_bias=head_bias)
     return model
+
+
+def _check_head_inputs(heads, vectors) -> None:
+    """A head's ``"input"`` names a raster input, never a vector one."""
+    for n, cfg in (heads or {}).items():
+        if cfg.get("input") in vectors:
+            raise ValueError(f"head {n!r}: 'input' {cfg['input']!r} is a vector (metadata) "
+                             "input; 'input' names the raster input whose features the head "
+                             "decodes")
+
+
+def _single_raster_heads(heads, single: str, vectors, common: dict) -> tuple[dict, dict]:
+    """``(heads, common)`` for a model with one raster input (built as a single-input model):
+    a head's ``"input": <that raster>`` is unambiguous, so it becomes what a per-input head
+    is there, a head with its own decoder (default: the model's ``decoder`` type and
+    ``decoder_kwargs``, which move into it when no other head reads the shared decoder)."""
+    from ..heads.heads import head_scope
+
+    _check_head_inputs(heads, vectors)
+    out = {n: dict(cfg) for n, cfg in heads.items()}
+    moved = []
+    for n, cfg in out.items():
+        if "input" not in cfg:
+            continue
+        if cfg["input"] != single:
+            raise ValueError(f"head {n!r}: unknown input {cfg['input']!r}; the raster input is "
+                             f"{single!r}")
+        if "share" in cfg:
+            raise ValueError(f"head {n!r}: 'share' links per-input heads on different raster "
+                             f"inputs; this model has one raster input, {single!r}")
+        del cfg["input"]
+        if cfg.get("source") == "encoder":
+            raise ValueError(f"head {n!r}: 'source': 'encoder' reads the encoder directly, so it "
+                             "cannot also have its own decoder ('decoder' / 'input')")
+        if head_scope(cfg) != "pixel":
+            raise ValueError(f"head {n!r}: 'input' heads are pixel heads")
+        if "decoder" not in cfg:
+            cfg["decoder"] = {"type": common.get("decoder", "unet"),
+                              **dict(common.get("decoder_kwargs") or {})}
+            moved.append(n)
+    reads_shared = any("decoder" not in cfg and cfg.get(
+        "source", "decoder" if head_scope(cfg) == "pixel" else "encoder") == "decoder"
+        for cfg in out.values())
+    if moved and not reads_shared:  # the kwargs are in the heads' decoders now
+        common = {**common, "decoder_kwargs": None}
+    return out, common

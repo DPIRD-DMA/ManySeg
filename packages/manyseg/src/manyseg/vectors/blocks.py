@@ -828,7 +828,8 @@ def block_decoder(task: str, **params) -> BlockDecoder:
       ``mesh=None`` skips it).
     * ``"roads"``: mask, keypoints, direction; :class:`manyseg.vectors.roads.RoadBlockDecoder`.
     * ``"points"``: a point heatmap; :class:`manyseg.points.blocks.PointBlockDecoder`.
-    * ``"density"``: a density head's count; :class:`manyseg.points.blocks.DensityBlockDecoder`.
+    * ``"density"``: a density head's count; :class:`manyseg.points.blocks.DensityBlockDecoder`
+      (``sigma=`` or ``value_scale=`` required, as the head was trained with ``density_loss``).
     """
     if task == "roads":
         from .roads import RoadBlockDecoder
@@ -850,12 +851,9 @@ def block_decoder(task: str, **params) -> BlockDecoder:
 
 
 def _world(geom, transform):
-    if transform is None:
-        return geom
-    from shapely import affinity
+    from .georef import pixel_to_world
 
-    a, b, c, d, e, f = (transform[k] for k in range(6))
-    return affinity.affine_transform(geom, [a, b, d, e, c, f])
+    return geom if transform is None else pixel_to_world(geom, transform)
 
 
 def _properties(rec: dict) -> dict:
@@ -886,12 +884,17 @@ def _geometries(records, transform, mesh: bool) -> list:
 
 def records_to_geojson(records, transform=_UNSET, crs=_UNSET, *, mesh: bool = False) -> dict:
     """GeoJSON ``FeatureCollection`` of block-decoder records (or a :class:`VectorGraph`, via
-    :func:`to_geojson`). ``transform``: affine pixel -> world (rasterio order); ``None``: pixel
-    coordinates; not given: the records' own (:class:`SceneRecords`), else pixel coordinates.
+    :func:`to_geojson`, or a :class:`~manyseg.points.ScenePoints`: one ``Point`` per point
+    with its ``score``). ``transform``: affine pixel -> world (rasterio order); ``None``: pixel
+    coordinates; not given: the records' own (:class:`SceneRecords`, :class:`ScenePoints`, or
+    a :class:`VectorGraph` from :func:`decode_scene`), else pixel coordinates.
     ``crs`` (not given: the records' own, but none for pixel coordinates) is written as a
     ``name`` member when known.
     ``mesh=True`` writes roof faces as 3-D polygons from their mesh rings (z in metres).
-    ``plane`` becomes ``plane_a`` / ``_b`` / ``_c`` (in scene pixel coordinates)."""
+    ``plane`` becomes ``plane_a`` / ``_b`` / ``_c``, always in scene pixel coordinates (even
+    when the geometry is written in world coordinates): ``z = a x + b y + c`` with pixel
+    corners at integers, so the centre of pixel ``(row, col)`` is ``x = col + 0.5``,
+    ``y = row + 0.5``."""
     import json
 
     shapely = _deps()[1]
@@ -904,6 +907,8 @@ def records_to_geojson(records, transform=_UNSET, crs=_UNSET, *, mesh: bool = Fa
         crs = getattr(records, "crs", None) if transform is not None else None
     if isinstance(records, VectorGraph):
         fc = to_geojson(records, transform)
+    elif _is_scene_points(records):
+        fc = to_geojson(records.xy, transform, {"score": records.scores})
     else:
         geoms = _geometries(records, transform, mesh)
         fc = {"type": "FeatureCollection",
@@ -914,18 +919,28 @@ def records_to_geojson(records, transform=_UNSET, crs=_UNSET, *, mesh: bool = Fa
     return fc
 
 
+def _is_scene_points(records) -> bool:
+    from ..points.blocks import ScenePoints
+
+    return isinstance(records, ScenePoints)
+
+
 def write_records(records, path, scene=None, *, layer: str | None = None,
                   mesh: bool = False) -> Path:
     """Write records to ``path`` in world coordinates through ``scene.transform`` / ``crs``
-    (``scene`` not given: the records' own, as :class:`SceneRecords` carry them; a
-    :class:`VectorGraph` needs ``scene`` for world coordinates): ``.geojson`` / ``.json`` with
-    the standard library, anything else (e.g. ``.gpkg``) with geopandas. Returns the path."""
+    (``scene`` not given: the records' own, as :class:`SceneRecords`,
+    :class:`~manyseg.points.ScenePoints` and a :class:`VectorGraph` from :func:`decode_scene`
+    carry them). Without a transform the coordinates stay in pixels and no CRS is written, as
+    :func:`records_to_geojson`. ``.geojson`` / ``.json`` with the standard library, anything
+    else (e.g. ``.gpkg``) with geopandas. ``ScenePoints`` are written as ``Point`` features with
+    a ``score`` property. Returns the path."""
     import json
 
     path = Path(path)
     src = records if scene is None else scene
     transform = getattr(src, "transform", None)
-    crs = getattr(src, "crs", None)
+    # pixel coordinates are not in the scene's CRS: name it only with a transform
+    crs = getattr(src, "crs", None) if transform is not None else None
     if path.suffix.lower() in (".geojson", ".json"):
         path.write_text(json.dumps(records_to_geojson(records, transform, crs, mesh=mesh)))
         return path
@@ -939,6 +954,10 @@ def write_records(records, path, scene=None, *, layer: str | None = None,
         shapely = _deps()[1]
         geoms = [_world(shapely.LineString(p), transform) for p in records.polylines()]
         props: list = [{} for _ in geoms]
+    elif _is_scene_points(records):
+        shapely = _deps()[1]
+        geoms = [_world(g, transform) for g in shapely.points(records.xy)]
+        props = [{"score": float(s)} for s in records.scores]
     else:
         geoms = _geometries(records, transform, mesh)
         props = [_properties(r) for r in records]

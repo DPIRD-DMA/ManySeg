@@ -36,7 +36,8 @@ def road_losses(out: Mapping[str, Tensor], targets: Mapping[str, Tensor], *,
                 min_keypoints: int = 16) -> dict[str, Tensor]:
     """Terms for :func:`road_heads`: ``mask`` and ``line`` (Dice + BCE), ``keypoints``
     (one focal loss over the three heatmaps) and ``direction`` (L1 of mode 1 on the road surface,
-    plus L1 of mode 2 where its target is set).
+    plus L1 of mode 2 where its target is set: where two road chains overlap at an angle, at
+    crossings and around junctions, see :func:`road_targets`).
 
     ``targets``: as :func:`road_targets` returns them, stacked: ``mask``, ``line``, ``keypoints``,
     ``direction``. ``min_keypoints`` floors the focal loss's normalisation: with a floor of 1, a
@@ -44,6 +45,7 @@ def road_losses(out: Mapping[str, Tensor], targets: Mapping[str, Tensor], *,
     """
     mask, keypoints = as_channel(targets["mask"]), targets["keypoints"].float()
     direction, pred = targets["direction"].float(), out["direction"]
+    # pixels with a mode-2 target: chain overlaps at crossings *and* junctions (road_targets)
     crossing = direction[:, 2:].abs().sum(1, keepdim=True) > 0
     return {"mask": dice_bce(out["mask"], mask.float()),
             "line": dice_bce(out["line"], as_channel(targets["line"]).float()),

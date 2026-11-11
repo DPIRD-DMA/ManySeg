@@ -31,11 +31,15 @@ def points_to_xy(points) -> np.ndarray:
 
 def points_from_xy(xy) -> Tensor:
     """``(N, 2)`` ``(x, y)`` with pixel corners at integers (e.g. from
-    ``manyseg.vectors.to_pixels(..., kind="points")``) -> a float32 ``(N, 2)`` ``(y, x)`` tensor
+    ``manyseg.vectors.to_pixels(..., kind="points")``) -> a float64 ``(N, 2)`` ``(y, x)`` tensor
     with pixel centres at integers, one image's points for :func:`gaussian_heatmap` /
     :func:`density_map` (pass a list of them, one per image)::
 
         hm = gaussian_heatmap([points_from_xy(xy)], (H, W), sigma=2.0)   # (1, 1, H, W)
+
+    float64 keeps the tile assignment exact: a point that ``to_pixels`` keeps just inside a
+    tile's right or bottom edge would round onto the edge in float32, and :func:`density_map`
+    (which tests "inside" in the points' dtype) would then count it in no tile.
     """
     a = np.asarray(xy, np.float64).reshape(-1, 2)
-    return torch.from_numpy(np.ascontiguousarray(a[:, ::-1] - 0.5)).float()
+    return torch.from_numpy(np.ascontiguousarray(a[:, ::-1] - 0.5))

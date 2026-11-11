@@ -29,7 +29,7 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor
 
-from .spatial import crop_to
+from .spatial import crop_to, mask_for
 
 SCALES = (1, 0.5, 0.25, 0.125)
 """Allowed per-head ``"scale"`` values (output resolution relative to the input)."""
@@ -108,11 +108,17 @@ def downsample_labels(labels: Tensor, scale, ignore_index: int | None = None,
 @torch.no_grad()
 def downsample_mean(x: Tensor, scale, valid: Tensor | None = None) -> Tensor:
     """Area average ``(..., H, W)`` over each block's in-image pixels (and ``valid`` pixels if
-    given); a block without any such pixel is 0."""
+    given); a block without any such pixel is 0.
+
+    ``valid`` (bool) is per pixel: for a ``(B, C, H, W)`` ``x`` it is
+    ``(B, H, W)`` or ``(B, 1, H, W)`` (shared by all channels) or ``(B, C, H, W)``; otherwise it
+    has ``x``'s shape, with 1 allowed in any dimension but the first. Other shapes raise
+    ValueError. Pixels outside ``valid`` are ignored even if they hold NaN."""
     f = scale_factor(scale)
     if f == 1 and valid is None:
         return x
-    w8 = torch.ones_like(x) if valid is None else valid.to(x.dtype).expand_as(x)
+    w8 = (torch.ones_like(x) if valid is None
+          else mask_for(valid, x, "valid").to(x.dtype).expand_as(x))
     if valid is not None:  # invalid pixels may hold NaN (nodata): drop them, don't multiply
         x = torch.where(w8 != 0, x, torch.zeros_like(x))
     s = _blocks(x * w8, f).sum(-1)
@@ -146,13 +152,21 @@ def upsample_output(y: Tensor, size, scale, mode: str = "bilinear") -> Tensor:
     ``bilinear`` (logits, continuous values; ``align_corners=False``, i.e. consistent with
     output pixel ``i`` covering input ``[i*f, (i+1)*f)``) or ``nearest`` (labels, any dtype:
     each output pixel is repeated over its block). The ``f``-times larger map is cropped.
+
+    Raises ValueError unless ``y``'s grid is exactly ``(ceil(H*s), ceil(W*s))``: a larger or
+    smaller grid belongs to another input size (crop the output to the input first).
     """
     f = scale_factor(scale)
+    if mode not in ("bilinear", "nearest"):
+        raise ValueError(f"mode must be 'bilinear' or 'nearest', got {mode!r}")
+    expect = scaled_size(int(size[0]), int(size[1]), scale)
+    if tuple(y.shape[-2:]) != expect:
+        raise ValueError(f"upsample_output: a head output for size {tuple(size)} at scale "
+                         f"{scale} has a {expect[0]} x {expect[1]} grid (ceil(H*s), ceil(W*s)), "
+                         f"got {y.shape[-2]} x {y.shape[-1]}")
     if mode == "nearest":
         out = y.repeat_interleave(f, dim=-2).repeat_interleave(f, dim=-1) if f > 1 else y
         return out[..., : size[0], : size[1]]
-    if mode != "bilinear":
-        raise ValueError(f"mode must be 'bilinear' or 'nearest', got {mode!r}")
     if f > 1:
         h, w = y.shape[-2], y.shape[-1]
         y = F.interpolate(y, size=(h * f, w * f), mode="bilinear", align_corners=False)

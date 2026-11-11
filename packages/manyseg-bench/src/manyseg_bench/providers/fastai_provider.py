@@ -2,14 +2,24 @@ from __future__ import annotations
 
 from torch import nn
 
-from .base import BuiltModel, ModelSpec, Provider, fingerprint_module, split_params
+from .base import (
+    BuiltModel,
+    ModelSpec,
+    Provider,
+    check_pixel_output,
+    fingerprint_module,
+    split_params,
+    stem_adaptation_note,
+)
 
 _TV_WEIGHTS = {"tv_in1k": "IMAGENET1K_V1"}
 
 
 class FastaiProvider(Provider):
     """fastai ``DynamicUnet`` on a torchvision body, built exactly as ``unet_learner`` does
-    (``create_body`` + ``DynamicUnet``), without fastai's Learner or training loop."""
+    (``create_body`` + ``DynamicUnet``), without fastai's Learner or training loop. Segmentation
+    models only: ``output="image"`` (image-level tasks) raises; use the timm or ManySeg
+    provider for those."""
 
     name = "fastai"
 
@@ -22,6 +32,7 @@ class FastaiProvider(Provider):
         return spec.arch == "unet" and spec.encoder.startswith("resnet")
 
     def build(self, spec: ModelSpec, img_size=None) -> BuiltModel:
+        check_pixel_output(spec, self.name)
         import torchvision
         from fastai.vision.learner import create_body
         from fastai.vision.models.unet import DynamicUnet
@@ -37,7 +48,9 @@ class FastaiProvider(Provider):
         model = DynamicUnet(body, spec.num_classes, img_size, **spec.options)
         encoder = model[0]
         enc, dec = split_params(model, encoder)
-        return BuiltModel(_Plain(model), enc, dec, fingerprint_module(encoder))
+        notes = stem_adaptation_note("fastai", spec.in_channels, weights is not None,
+                                     rule="fastai")
+        return BuiltModel(_Plain(model), enc, dec, fingerprint_module(encoder), notes)
 
 
 class _Plain(nn.Module):

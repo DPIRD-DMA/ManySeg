@@ -13,6 +13,14 @@ from pathlib import Path
 import numpy as np
 
 
+def check_native_size(size: int | None, native: int, dataset: str) -> None:
+    """For datasets whose tiles have a fixed size: ``prepare(size=...)`` may only restate it
+    (``manyseg-bench prepare --size`` must not be silently ignored)."""
+    if size is not None and int(size) != native:
+        raise ValueError(f"{dataset} has fixed {native} x {native} tiles; size={size} is not "
+                         "supported (omit --size)")
+
+
 def data_root(path: str | os.PathLike | None = None) -> Path:
     """Resolve the data root: explicit path > $MANYSEG_BENCH_DATA > ~/.cache/manyseg-bench."""
     p = path or os.environ.get("MANYSEG_BENCH_DATA") or Path.home() / ".cache" / "manyseg-bench"

@@ -429,7 +429,7 @@ def test_early_fusion_with_a_prunable_backbone():
 
 @pytest.mark.parametrize("head,right", [
     ({"type": "segmentation", "out_channels": 2, "scope": "image"}, "classification"),
-    ({"type": "classification", "out_channels": 2}, "segmentation")])
+    ({"type": "classification", "out_channels": 2, "scope": "pixel"}, "segmentation")])
 def test_head_type_must_match_its_scope(head, right):
     with pytest.raises(ValueError, match=right):
         build(heads={"h": head})

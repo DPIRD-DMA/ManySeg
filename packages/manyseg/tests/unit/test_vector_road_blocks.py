@@ -170,7 +170,7 @@ def test_scene_exercises_bridging_and_crossings():
 def test_parameters_and_names():
     f = _scene(1, quantize=False)
     p = dict(threshold=0.4, keypoint_threshold=0.3, zone_radius=12.0, pair_deg=140.0, spur=15,
-             gap=30, simplify=1.0, min_length=10, min_area=60, scale=0.5)
+             gap=30, simplify=1.0, min_length=10, min_area=60)
     ref = _whole(f, **p)
     g = {"m": f["mask"], "kp": f["keypoints"], "dir": f["direction"]}
     dec = RoadBlockDecoder(**p, names={"mask": "m", "keypoints": "kp", "direction": "dir"})

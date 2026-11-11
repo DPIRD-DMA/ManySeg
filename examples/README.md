@@ -25,8 +25,9 @@ run on CPU.
 | [`13_torchgeo.py`](13_torchgeo.py) | TorchGeo's segmentation task with `configure_models` swapped for a ManySeg model: its losses, metrics, scheduler, freezing and `predict_step` (needs `torchgeo`, Python ≥ 3.12) |
 
 Vector outputs (experimental; need `manyseg[vectors]`). Each goes from vector data in a CRS to
-training targets, the model's heads, a scene decoded block by block (`decode_scene`, equal to a
-whole-scene decode) and GeoJSON, plus a GeoPackage when geopandas is installed. The targets of
+training targets, the model's heads, a scene decoded block by block (`decode_scene`; on these
+clean targets it equals a whole-scene decode, which in general also needs the halo to cover the
+decoder's reach) and GeoJSON, plus a GeoPackage when geopandas is installed. The targets of
 the whole scene stand in for a trained model's stitched outputs, so each runs in seconds; see
 [Vector outputs](../docs/api_design.md#vector-outputs-line-graphs-polygons) for training and
 for large scenes with ManyPred.

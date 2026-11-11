@@ -59,8 +59,8 @@ def test_density_mass_preserved_including_border_points():
     pts = torch.cat([PTS, torch.tensor([[0.0, 0.0], [39.0, 47.0]])])
     d = density_map([pts], (40, 48), sigma=3.0)
     torch.testing.assert_close(d.sum(), torch.tensor(float(len(pts))), atol=1e-4, rtol=0)
-    torch.testing.assert_close(count_from_density(d), torch.tensor([float(len(pts))]),
-                               atol=1e-4, rtol=0)
+    torch.testing.assert_close(count_from_density(d, value_scale=1.0),
+                               torch.tensor([float(len(pts))]), atol=1e-4, rtol=0)
 
 
 def test_centers_from_instances():
@@ -186,7 +186,7 @@ def test_point_preset_shapes(offsets, decoders):
 def test_density_preset_and_count():
     model = create_model(backbone="resnet18", pretrained=False, heads=density_head()).eval()
     d = model(torch.randn(1, 3, 64, 64))["density"]
-    assert d.shape == (1, 1, 64, 64) and count_from_density(d).shape == (1,)
+    assert d.shape == (1, 1, 64, 64) and count_from_density(d, sigma=3.0).shape == (1,)
 
 
 def test_heatmap_preset_kind():

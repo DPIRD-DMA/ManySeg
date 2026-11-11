@@ -6,7 +6,8 @@ when inference fails. These are the rules of ManyPred's ``validate_spec``, kept 
 ``tests/unit/test_normalize_spec.py``, without callables, which a file can't hold. When ManyPred
 is installed, its ``validate_spec`` runs too, so a newer ManyPred's rules apply at save time. One
 check is ManySeg's own, as it knows the model's inputs: a per-input spec must name every raster
-input.
+input, and per-band values must match each input's band count (ManyPred can't check that before
+it sees the data).
 """
 
 from __future__ import annotations
@@ -140,10 +141,13 @@ def check_steps(spec: Any) -> None:
     for step in steps:
         _check_step(step)
         if step.get("scope") == "scene" and per_tile:
-            raise ValueError("A scope='scene' step can't follow a scope='tile' step: scene "
-                             "statistics are computed once over the whole scene, before tiling. "
-                             "Put scene steps first.")
-        per_tile |= step.get("scope") == "tile"
+            raise ValueError("A scope='scene' step can't follow a per-tile step (scope='tile', "
+                             "or a 'percentile' step without a scope): scene statistics are "
+                             "computed once over the whole scene, before tiling. Put scene "
+                             "steps first.")
+        # an unscoped percentile step is per tile, as in ManyPred
+        per_tile |= step.get("scope") == "tile" or (step.get("type") == "percentile"
+                                                    and step.get("scope") is None)
     _manypred_check(steps)
 
 
@@ -164,13 +168,35 @@ def _has_steps(spec: Any) -> bool:
     return any(step["type"] != "none" for step in steps)
 
 
-def check_normalize(spec: Any, inputs: Sequence[str] | None) -> None:
+_PER_BAND = ("value", "mean", "std", "min", "max")
+
+
+def _check_bands(spec: Any, bands: int) -> None:
+    """Per-band values (``mean``, ``std``, ``min``, ``max``, a scale ``value``) are a scalar
+    or one per band."""
+    steps = list(spec) if isinstance(spec, Sequence) and not isinstance(spec, str) else [spec]
+    for step in steps:
+        if not isinstance(step, Mapping):
+            continue
+        for key in _PER_BAND:
+            if key in step:
+                value = step[key].tolist() if hasattr(step[key], "tolist") else step[key]
+                n = len(_flatten(value))
+                if n not in (1, bands):
+                    raise ValueError(f"{step['type']!r} step: {key} has {n} values but the input "
+                                     f"has {bands} bands; give one value per band or a scalar.")
+
+
+def check_normalize(spec: Any, inputs: Sequence[str] | None,
+                    bands: Mapping[Any, int] | None = None) -> None:
     """``spec`` for a model's raster ``inputs`` (None: one unnamed input, which takes steps).
 
     A plain spec suits one raster, whatever metadata inputs sit beside it, and a spec with no steps
     suits any model. Otherwise several rasters take ``{input_name: steps}`` with every one present:
     a forgotten one would silently get raw values. ``False`` is refused (ManyPred reads it as no
-    steps): a stored spec says so explicitly, with ``[]`` or ``{"type": "none"}``."""
+    steps): a stored spec says so explicitly, with ``[]`` or ``{"type": "none"}``. ``bands``
+    (``{input_name: C}``, key None for the unnamed input) checks per-band values against each
+    input's band count."""
     if spec is False or (isinstance(spec, Mapping) and any(v is False for v in spec.values())):
         raise ValueError("normalize=False is ambiguous in a saved model: pass [] or "
                          "{'type': 'none'} for no normalisation.")
@@ -180,6 +206,8 @@ def check_normalize(spec: Any, inputs: Sequence[str] | None) -> None:
                          f"'type' or a list of them), not per input {sorted(spec)}.")
     if not per_input:
         check_steps(spec)
+        if bands and len(bands) == 1:
+            _check_bands(spec, next(iter(bands.values())))
         if inputs is not None and len(inputs) > 1 and _has_steps(spec):
             raise ValueError(f"This model has several raster inputs {list(inputs)}: pass normalize "
                              f"as {{input_name: steps}}, got {spec!r}.")
@@ -195,5 +223,7 @@ def check_normalize(spec: Any, inputs: Sequence[str] | None) -> None:
     for name, steps in spec.items():
         try:
             check_steps(steps)
+            if bands and name in bands:
+                _check_bands(steps, bands[name])
         except ValueError as e:
             raise ValueError(f"normalize for input {name!r}: {e}") from None

@@ -191,7 +191,8 @@ def _image_use(dec: nn.Module) -> str:
 
     if isinstance(dec, FastaiUNetDecoder) and not dec.last_cross:
         return "size only"
-    return "concatenated at stride 1"
+    # unet's input_cross and fastai_unet's last_cross are the same stage under two names
+    return "concatenated at stride 1 (cross stage: unet input_cross = fastai_unet last_cross)"
 
 
 def _decoder_options(dec: nn.Module) -> list[tuple[str, str, bool]]:
@@ -755,27 +756,28 @@ class _Builder:
 
     def _stage_params(self) -> dict[str, int]:
         m, bb = self.model, self.bb
-        enc = adapters = fusion = 0
-        decs = [m.decoder, *m.task_decoders.values()]
-        dec = heads = 0
+        enc = adapters = 0
+        fusers: list[nn.Module] = []
+        decs: list[nn.Module] = []
         if self.early:
             enc = _nparams(bb.backbone)
         elif self.multi:
             enc = _nparams(*bb.encoders.values())
             adapters = _nparams(*bb.adapters.values())
-            fusion = _nparams(*getattr(bb, "fusers", {}).values())
+            fusers += getattr(bb, "fusers", {}).values()
         else:
             enc = _nparams(bb)
-        for d in decs:
+        # one count per stage: a decoder shared by several heads (per-input heads with
+        # "share") is counted once
+        for d in [m.decoder, *m.task_decoders.values()]:
             if isinstance(d, self.LateFusionDecoder):
-                fusion += _nparams(d.fuse)
-                dec += _nparams(*d.decoders)
+                fusers.append(d.fuse)
+                decs += d.decoders
             elif d is not None:
-                dec += _nparams(d)
-        heads = _nparams(*m.heads.values())
-        out = {"adapters": adapters, "encoders": enc, "fusion": fusion,
-               "conditioning": _nparams(self.cond), "decoders": dec, "heads": heads}
-        return out
+                decs.append(d)
+        return {"adapters": adapters, "encoders": enc, "fusion": _nparams(*fusers),
+                "conditioning": _nparams(self.cond), "decoders": _nparams(*decs),
+                "heads": _nparams(*m.heads.values())}
 
     def _summary(self) -> list[tuple[str, str]]:
         m = self.model
@@ -792,7 +794,7 @@ class _Builder:
         fixed = getattr(self.bb, "fixed_size", None)
         if fixed is not None:
             s.append(("input", f"fixed size {fixed}, zero-padded"))
-        elif m.pad_to_stride:
+        elif m.pad_to_stride or getattr(m, "_pads_itself", False):  # multi-input: always
             s.append(("input", f"pad to multiple of {getattr(self.bb, 'input_divisor', 1)}"
                       if not self.multi else "padded per input to each encoder's divisor"))
         else:

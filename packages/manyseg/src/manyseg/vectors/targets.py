@@ -12,7 +12,7 @@ Every function returns float32 / int32 / bool numpy arrays per tile, keyed by th
 presets and bench tasks use (``manyseg.vectors.presets`` and the tasks in ``manyseg-bench``,
 the benchmark package in the GitHub repository, not on PyPI).
 Rasterising follows rasterio (pixel centres inside; where polygons overlap, the later one wins),
-as the experiments' encoders did.
+as the trained models' targets were made.
 """
 
 from __future__ import annotations
@@ -32,8 +32,9 @@ def rasterize_instances(polygons, shape: tuple[int, int], *, min_area: int = 0,
 
     * ``split``: each 4-connected piece of an id becomes its own instance;
     * ``min_area``: instances (pieces) under ``min_area`` pixels are dropped;
-    * ``fill_holes``: holes of an instance that hold only background are filled (a hole holding
-      another instance is kept around it).
+    * ``fill_holes``: holes of an instance that hold only background are filled; a hole
+      holding any pixel of another polygon (or of another piece of the same one) is kept
+      whole, background ring included, so the other instance stays surrounded by background.
 
     Ids are renumbered ``1..K`` without gaps. Returns ``(labels, source)``: ``source[k - 1]`` is
     the index of the polygon instance ``k`` came from (a polygon covering no pixel centre gets
@@ -60,11 +61,26 @@ def rasterize_instances(polygons, shape: tuple[int, int], *, min_area: int = 0,
             if c.sum() < max(min_area, 1):
                 continue
             if fill_holes:
-                c = ndimage.binary_fill_holes(c) & ((m[sl] == 0) | c)
+                c = _fill_background_holes(c, m[sl])
             o = out[sl]
             o[c & (o == 0)] = len(source) + 1
             source.append(v - 1)
     return out, np.asarray(source, np.int64)
+
+
+def _fill_background_holes(c: np.ndarray, m: np.ndarray) -> np.ndarray:
+    """``c`` with its holes filled where the hole (a 4-connected background component enclosed
+    by ``c``) holds no burnt pixel of ``m``."""
+    from scipy import ndimage
+
+    hole = ndimage.binary_fill_holes(c) & ~c
+    if not hole.any():
+        return c
+    lab, n = ndimage.label(hole)
+    occupied = np.zeros(n + 1, bool)
+    occupied[lab[m != 0]] = True
+    occupied[0] = True
+    return c | ~occupied[lab]
 
 
 def _instance_heads(labels: np.ndarray, boundary_width: float, distance: str) -> dict:
@@ -145,13 +161,20 @@ def field_targets(polygons, shape: tuple[int, int], *, boundary_width: float = 2
     float32 (``InstanceTask(boundary_width=2, distance="absolute")`` in ``manyseg-bench``).
 
     ``distance`` is ``"absolute"`` (px) by default (as good as normalised on trained FTW
-    models, and an instance cut by a tile edge keeps its whole-scene values, so large scenes
-    stitch without seam errors); train with the same setting and decode with a
-    ``seed_threshold`` in pixels (``block_decoder("fields")`` does).
+    models); train with the same setting and decode with a ``seed_threshold`` in pixels
+    (``block_decoder("fields")`` does). Absolute distances do not depend on how much of an
+    instance the tile holds, as normalised ones do, but they can still differ from the
+    whole scene's near the tile border: replicate padding removes the false edge along the
+    border, yet where an instance's nearest true edge lies outside the tile, its pixels near
+    the border measure to a farther edge inside the tile (an instance on scene rows 10-25 cut
+    by a tile of rows 0-19 has 10 px at row 19 where the scene has 7). Encode tiles with a
+    halo (crop the targets after encoding a larger window) when the values must match the
+    scene's.
 
     Which fields count: every 4-connected piece of a field is its own
     instance, pieces under ``min_area`` pixels are dropped, and holes holding only background
-    are filled (a field is trained as one solid parcel; a hole around another field stays).
+    are filled (a field is trained as one solid parcel); a hole holding another field (or a
+    piece of any polygon) stays a hole, background around that field included.
     For the reference polygons that match the targets, decode the instances themselves
     (``polygons_from_labels(out["instances"])``).
     """

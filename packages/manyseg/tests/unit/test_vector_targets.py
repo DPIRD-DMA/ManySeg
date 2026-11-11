@@ -262,7 +262,10 @@ def test_rasterize_instances_rules():
     lab, src = rasterize_instances(polys, (size, size), fill_holes=True, split=True,
                                    min_area=16)
     assert list(src) == [0, 1, 2, 2]  # neck split in two, tiny dropped
-    assert lab[16, 16] == 1 and lab[20, 20] == 2  # hole filled around the inner field
+    # a hole holding another field stays a hole: background around the inner field
+    assert lab[16, 16] == 0 and lab[20, 20] == 2
+    alone, _ = rasterize_instances([ring_field], (size, size), fill_holes=True)
+    assert alone[16, 16] == 1  # a hole of background only is filled
     assert lab[51, 3] == 0
     # later polygons win where they overlap
     lab, _ = rasterize_instances([shapely.box(0, 0, 10, 10), shapely.box(5, 5, 15, 15)], (16, 16))
@@ -425,7 +428,7 @@ def test_points_to_geojson_round_trip(transform):
     # and back: the same features in, the same pixels out
     back = to_pixels(fc, transform, (50, 64))
     assert np.allclose(back, xy, atol=1e-6)
-    assert torch.allclose(points_from_xy(back), peaks.float(), atol=1e-6)
+    assert torch.allclose(points_from_xy(back), peaks.double(), atol=1e-6)
 
 
 def test_to_geojson_point_inputs():

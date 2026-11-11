@@ -116,7 +116,8 @@ def graph_from_road_heads(
         keypoints (np.ndarray | torch.Tensor): ``(3, H, W)`` junction, end and crossing
             heatmaps (probabilities; logits with ``logits=True``).
         direction (np.ndarray | torch.Tensor): ``(4, H, W)`` two ``(cos 2t, sin 2t)`` modes (the
-            second only at crossings).
+            second where two road chains overlap at an angle: crossings and junctions, as
+            :func:`road_targets` sets it).
         threshold: Road-surface threshold, as :func:`graph_from_mask`.
         spur: Dangling branches shorter than this (px) are removed, as :func:`graph_from_mask`.
         gap: Mutually-nearest dangling ends closer than this (px) are joined (0 disables), as
@@ -129,14 +130,17 @@ def graph_from_road_heads(
         keypoint_threshold: Heatmap peak threshold; peaks off the road surface are ignored.
         zone_radius: Radius (px) of the disk around each keypoint where arms are rejoined.
         pair_deg: Arms through a crossing are paired if their headings are at least this far apart.
-        scale: The heads' ``scale``; coordinates are returned in input pixels.
+        scale: The heads' ``scale``: coordinates are returned in input pixels (head-grid
+            coordinates divided by ``scale``). The pixel parameters above (``spur``, ``gap``,
+            ``simplify``, ``min_length``, ``min_area``, ``zone_radius``) stay in head pixels.
         logits: ``mask`` and ``keypoints`` are logits: apply a sigmoid to both first
             (``direction`` is a value and is never transformed).
 
     A low-level building block for one tile or scene in memory; the recommended entry point is
     ``decode_scene(fields, block_decoder("roads"))``, which gives the same graph whole-scene and
     block by block. The defaults here are the same as ``block_decoder("roads")``: tuned on
-    City-Scale (1 m pixels).
+    City-Scale (1 m pixels). ``block_decoder("roads")`` has no ``scale``: it returns head-grid
+    (scene) pixels, which the scene's transform maps to world coordinates.
     """
     skeletonize = _deps()[3]
     m, kp, d = _arr(mask), _arr(keypoints), _arr(direction)
@@ -160,11 +164,15 @@ def graph_from_road_heads(
         c: on_mask(refine(kp[i], peak_pixels(kp[i], keypoint_threshold, _KERNEL)))
         for i, c in enumerate(CLASSES)
     }
-    return _assemble(surf, peaks, d, (H, W), zone_radius, pair_deg, gap, scale)
+    return _assemble(surf, peaks, d, (H, W), zone_radius, pair_deg, gap, min_length, scale)
 
 
-def _assemble(surf, peaks, d, shape, zone_radius, pair_deg, gap, scale) -> VectorGraph:
-    """Surface graph + keypoint peaks -> road graph (the steps after the dense ones)."""
+def _assemble(surf, peaks, d, shape, zone_radius, pair_deg, gap, min_length, scale) -> VectorGraph:
+    """Surface graph + keypoint peaks -> road graph (the steps after the dense ones).
+
+    Rejoining at keypoints can leave new short pieces (a stub cut between two zones), so the
+    connected pieces shorter than ``min_length`` are dropped again here, in the same (head)
+    pixel units as the surface graph."""
     nx, shapely = _deps()[:2]
     from scipy.sparse.csgraph import minimum_spanning_tree
 
@@ -177,7 +185,7 @@ def _assemble(surf, peaks, d, shape, zone_radius, pair_deg, gap, scale) -> Vecto
             sub = g.subgraph(comp)
             if (
                 sum(float(np.hypot(*(g.nodes[a]["xy"] - g.nodes[b]["xy"]))) for a, b in sub.edges())
-                < 20
+                < min_length
             ):
                 g.remove_nodes_from(comp)
     bridge_ends(g, gap, shape)
@@ -281,7 +289,12 @@ class RoadBlockDecoder:
 
     ``window_fields``: ``names`` -> ``(C, h, w)`` arrays cropped to ``block.window``; ``block``
     has ``core`` / ``window`` ``(top, bottom, left, right)`` and ``scene_edges``; ``scene`` has
-    ``height`` / ``width``. The graph is in scene pixel coordinates.
+    ``height`` / ``width`` and optionally ``transform`` / ``crs``. The graph is in scene pixel
+    coordinates and carries the scene's ``transform`` / ``crs`` (:class:`VectorGraph`), so
+    ``graph.to_geojson()`` / ``write_records(graph, path)`` write world coordinates.
+    The parameters are those of :func:`graph_from_road_heads` (pixel ones in scene pixels)
+    except ``scale``: the scene is the heads' grid, so a reduced-resolution head needs no
+    ``scale`` here, only a scene (and transform) for that grid, as every block decoder.
 
     Per block (dense, local): threshold and small-blob removal (blobs touching an inner window
     edge are kept, as the window sees only part of them), skeletonize, keypoint local maxima
@@ -316,7 +329,6 @@ class RoadBlockDecoder:
         simplify: float = 2.0,
         min_length: float = 20,
         min_area: int = 30,
-        scale: float = 1.0,
         logits: bool = False,
         names: dict | None = None,
     ):
@@ -330,7 +342,6 @@ class RoadBlockDecoder:
             simplify=simplify,
             min_length=min_length,
             min_area=min_area,
-            scale=scale,
             logits=bool(logits),
         )
         self.names = {"mask": "mask", "keypoints": "keypoints", "direction": "direction"}
@@ -462,9 +473,21 @@ class RoadBlockDecoder:
         )
         keys, first = np.unique(keys, return_index=True)  # halos overlap: same pixels twice
         d = _SparseField(keys, vals[first], (vals.shape[1] if vals.ndim == 2 else 4, H, W))
-        return _assemble(
-            surf, peaks, d, (H, W), p["zone_radius"], p["pair_deg"], p["gap"], p["scale"]
+        vg = _assemble(
+            surf,
+            peaks,
+            d,
+            (H, W),
+            p["zone_radius"],
+            p["pair_deg"],
+            p["gap"],
+            p["min_length"],
+            1.0,  # scene pixels: the scene's transform maps them to world coordinates
         )
+        # georeferenced as decode_scene's other results (SceneRecords, ScenePoints)
+        vg.transform = getattr(scene, "transform", None)
+        vg.crs = getattr(scene, "crs", None)
+        return vg
 
 
 class _SparseField:

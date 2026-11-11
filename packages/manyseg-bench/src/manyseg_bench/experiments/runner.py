@@ -15,7 +15,7 @@ from ..datasets.base import Split, channel_stats, load_meta
 from ..env import environment, gpu_contention
 from ..profiling import count_flops
 from ..providers import ModelSpec, get_provider
-from ..tasks import build_task
+from ..tasks import LABEL_SMOOTHING_TASKS, build_task
 from ..training import evaluate, get_recipe, seed_everything, train
 
 
@@ -99,7 +99,10 @@ def split_getter(ds, cache: Path, raw: Path, scheme: str = "official", mmap: boo
             split = transform(split)
         extras = getattr(ds, "series_extras", None)
         if extras is not None and part is None:  # time series dates / masks, by split name
-            split.vectors = {**(split.vectors or {}), **extras(cache, name)}
+            ex = extras(cache, name)
+            if subset:  # the same samples as the images (_select)
+                ex = {k: v[:subset] for k, v in ex.items()}
+            split.vectors = {**(split.vectors or {}), **ex}
         labels = getattr(ds, "split_labels", None)
         if labels is not None:  # image-level labels for a shared (pixel) cache
             split.masks = labels(raw, split)
@@ -124,9 +127,32 @@ def weights_normalisation(w, band_names, dn_per_unit: float) -> tuple[list, list
     return mean, std
 
 
+def split_train_stats(images) -> tuple:
+    """Per-channel ``(mean, std)`` of a training split's images (dict inputs: per input).
+
+    Pooled split schemes (``events:K:F``) normalise with these instead of ``meta.json`` so no
+    held-out chip enters the statistics. Not used when remote-sensing weights fix the
+    normalisation: that comes from pretraining, not from the data, so it cannot leak, and the
+    weights' input handling (e.g. clipping to [0, 1]) expects it.
+    """
+    stats = ({k: channel_stats(v) for k, v in images.items()} if isinstance(images, dict)
+             else {None: channel_stats(images)})
+    mean = {k: m for k, (m, _) in stats.items()}
+    std = {k: sd for k, (_, sd) in stats.items()}
+    if None in mean:
+        return mean[None], std[None]
+    return mean, std
+
+
 def resolution_info(model) -> dict | None:
     """Output-resolution settings of a ManySeg model (None for other providers): the shared
-    decoder's ``out_stride``, per-task-decoder strides and each pixel head's ``scale``."""
+    decoder's ``out_stride``, per-task-decoder strides and each pixel head's ``scale``. The
+    ManySeg provider's wrappers (``BandGroupModel``, ``WeightsInputModel``) are looked
+    through to the model they wrap."""
+    from ..providers.manyseg_provider import BandGroupModel, WeightsInputModel
+
+    while isinstance(model, (BandGroupModel, WeightsInputModel)):
+        model = model.model
     heads = getattr(model, "heads", None)
     if not hasattr(model, "_pixel_heads") or heads is None:
         return None
@@ -180,6 +206,10 @@ def run_training(
     rec = get_recipe(recipe, **(recipe_overrides or {}))
     meta = load_meta(cache)
     mean, std = meta.get("mean", info.mean), meta.get("std", info.std)
+    # meta.json holds statistics when prepare computed them from the training split; other
+    # datasets (Oxford Pet, OAM-TCD, AI4Boundaries, LEVIR-CD, SECOND) use fixed constants
+    norm_source = ("meta.json (official train split)" if "mean" in meta
+                   else f"dataset constants ({info.name} DatasetInfo mean/std)")
     if info.inputs:
         mean, std = {k: mean[k] for k in info.inputs}, {k: std[k] for k in info.inputs}
     series = dict(info.timeseries or {})
@@ -202,11 +232,16 @@ def run_training(
     torch.backends.cudnn.benchmark = torch.version.hip is None
     task_name = getattr(ds, "TASK", "semantic")
     task_kwargs = {**getattr(ds, "TASK_KWARGS", {}), **(task_overrides or {})}
-    if task_name in ("semantic", "classification", "seg_multilabel", "change"):
+    if task_name in LABEL_SMOOTHING_TASKS:
         task_kwargs.setdefault("label_smoothing", rec.label_smoothing)
+    elif rec.label_smoothing > 0:  # never record a setting the loss does not apply
+        raise ValueError(f"recipe label_smoothing={rec.label_smoothing}: task {task_name!r} "
+                         "has no label smoothing; set label_smoothing=0")
     task = build_task(task_name, info.num_classes, info.ignore_index, **task_kwargs)
-    if task.image_level:
-        spec = ModelSpec(**{**spec.to_dict(), "output": "image"})
+    requested_arch = spec.arch
+    if task.image_level:  # no decoder is built: record the effective arch "none" so equivalent
+        # runs requested with different --arch values are one configuration
+        spec = ModelSpec(**{**spec.to_dict(), "output": "image", "arch": "none"})
     if task.heads() is not None:
         if provider != "manyseg":
             raise ValueError(f"task {task.name!r} needs named heads; provider {provider!r} "
@@ -224,7 +259,6 @@ def run_training(
     train_split = get_split("train")
     if train_subset is not None:  # labels are scarce, statistics stay those of the full split
         train_split = select_train_subset(train_split, train_subset, seed)
-    norm_source = "meta.json (official train split)"
     from ..providers.manyseg_provider import registry_weights
 
     rw = registry_weights(spec) if provider == "manyseg" else None
@@ -239,14 +273,8 @@ def run_training(
         mean, std = ({inp: m}, {inp: s}) if isinstance(mean, dict) else (m, s)
         norm_source = f"weights {rw.key} (pretraining normalisation)"
         spec = ModelSpec(**{**spec.to_dict(), "band_names": list(bands)})
-    if split != "official":  # pooled splits: never let held-out chips into the statistics
-        imgs = train_split.images
-        stats = ({k: channel_stats(v) for k, v in imgs.items()} if isinstance(imgs, dict)
-                 else {None: channel_stats(imgs)})
-        mean = {k: m for k, (m, _) in stats.items()}
-        std = {k: sd for k, (_, sd) in stats.items()}
-        if None in mean:
-            mean, std = mean[None], std[None]
+    if split != "official" and rw is None:
+        mean, std = split_train_stats(train_split.images)
         norm_source = f"train split of {split}"
     imgs = train_split.images
     img_size = tuple((next(iter(imgs.values())) if isinstance(imgs, dict) else imgs).shape[-3:-1])
@@ -281,7 +309,8 @@ def run_training(
         "tag": tag,
         "provider": provider,
         "provider_version": prov.version(),
-        "spec": spec.to_dict(),
+        "spec": spec.to_dict(),  # effective: arch "none" for image-level tasks
+        "requested_arch": requested_arch,
         "weights_fingerprint": built.weights_fingerprint,
         "model_notes": list(built.notes),
         "params": sum(p.numel() for p in built.model.parameters()),
@@ -292,6 +321,10 @@ def run_training(
         "img_size": list(img_size),
         "recipe": rec.to_dict(),
         "task_kwargs": task_kwargs,
+        # resolved values the task applies (defaults included), e.g. the instance decoding's
+        # seed_threshold, which depends on the distance encoding
+        "task_settings": {k: getattr(task, k) for k in ("label_smoothing", "seed_threshold")
+                          if hasattr(task, k)},
         "cudnn_benchmark": torch.backends.cudnn.benchmark,
         "subset": subset,
         "train_subset": train_subset,
@@ -301,7 +334,7 @@ def run_training(
         "vectors_dropped": bool(info.vectors) and stack,
         "norm_stats": {"source": norm_source, "mean": mean, "std": std},
         "env": env,
-        "gpu_contention_at_end": gpu_contention() if dev.type == "cuda" else None,
+        "gpu_contention_at_end": gpu_contention(dev),  # None off CUDA / on failure
         **result,
     }
     if getattr(task, "calibrate", False) and "best_threshold" in record["final_val"]:

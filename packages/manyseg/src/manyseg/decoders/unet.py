@@ -10,7 +10,7 @@ import torch.nn.functional as F
 from torch import Tensor, nn
 
 from ..features import FeatureSpec
-from ..layers import ConvNormAct, init_decoder_
+from ..layers import ConvNormAct, init_decoder_, normalize_norm
 from ..utils.spatial import is_2x, resize_bilinear, resize_nearest, upsample2x_nearest
 from .base import DECODERS, check_power_of_two_stride
 
@@ -85,10 +85,13 @@ class UNetDecoder(nn.Module):
         channels: Output channels of each block, deepest first. Default: SMP's
             ``(256, 128, 64, 32, 16)`` truncated/extended to the number of blocks.
         out_stride: Stride of the decoder output: 1 (input resolution, default), 2, 4, ...
-        norm: ``"batch"``, ``"group"`` or ``None``.
+        norm: ``"batch"``, ``"group"`` or None (aliases ``"bn"``, ``"gn"``, ``"none"``; see
+            :func:`manyseg.layers.normalize_norm`).
         upsample: ``"nearest"`` (SMP-equivalent default), ``"bilinear"`` or ``"aligned"``.
         input_cross: Add fastai's full-resolution stage: the raw input image is concatenated
-            to the stride-1 output, followed by a residual block (needs ``out_stride=1``).
+            to the stride-1 output, followed by a residual block (needs ``out_stride=1``). The
+            same stage is ``last_cross`` of :class:`~manyseg.decoders.FastaiUNetDecoder`
+            (there on by default at ``out_stride=1``; here off by default).
     """
 
     def __init__(
@@ -116,6 +119,7 @@ class UNetDecoder(nn.Module):
             in_specs = list(in_specs[1:])
         if upsample not in UPSAMPLE_MODES:
             raise ValueError(f"unknown upsample mode {upsample!r}; choose from {UPSAMPLE_MODES}")
+        norm = normalize_norm(norm, "decoder norm")
         specs = sorted(in_specs, key=lambda s: s.stride)
         for s in specs:
             if s.stride & (s.stride - 1):
