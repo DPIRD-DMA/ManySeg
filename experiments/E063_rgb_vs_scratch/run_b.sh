@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# E055 part B: fewer labels on Sen1Floods11 S2, 900 optimiser steps at every size (README.md).
+# E063 part B: fewer labels on Sen1Floods11 S2, 900 optimiser steps at every size (README.md).
 set -u
 export MANYSEG_BENCH_DATA="${MANYSEG_BENCH_DATA:?set to the dataset root}"
-OUT=${OUT_ROOT:?set OUT_ROOT}/experiments/E055_rgb_vs_scratch/runs_b
+OUT=${OUT_ROOT:?set OUT_ROOT}/experiments/E063_rgb_vs_scratch/runs_b
 SEEDS=${SEEDS:-0,1,2,3,4}
 fails=0
 for n in ${SIZES:-12 25 63 252}; do

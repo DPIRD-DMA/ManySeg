@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# E055 part C: all arms on CloudSEN12+, one seed of all arms at a time (README.md).
+# E063 part C: all arms on CloudSEN12+, one seed of all arms at a time (README.md).
 set -u
 export MANYSEG_BENCH_DATA="${MANYSEG_BENCH_DATA:?set to the dataset root}"
-OUT=${OUT_ROOT:?set OUT_ROOT}/experiments/E055_rgb_vs_scratch/runs_c
+OUT=${OUT_ROOT:?set OUT_ROOT}/experiments/E063_rgb_vs_scratch/runs_c
 EP=${EPOCHS:-20}
 EXTRA=${EXTRA:-}  # preflight only: e.g. --subset 64
 fails=0

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# E055 part A: scratch arms on E024's protocol. Run from a worktree at 9a2d519 (README.md).
+# E063 part A: scratch arms on E024's protocol. Run from a worktree at 9a2d519 (README.md).
 set -u
 export MANYSEG_BENCH_DATA="${MANYSEG_BENCH_DATA:?set to the dataset root}"
-OUT=${OUT_ROOT:?set OUT_ROOT}/experiments/E055_rgb_vs_scratch/runs_a
+OUT=${OUT_ROOT:?set OUT_ROOT}/experiments/E063_rgb_vs_scratch/runs_a
 SEEDS=${SEEDS:-0,1,2}
 fails=0
 for ds in ${DATASETS:-sen1floods11_s2 bigearthnet pastis}; do

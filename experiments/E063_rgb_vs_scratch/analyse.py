@@ -1,4 +1,4 @@
-"""E055 analysis: the registered decisions of README.md. Part A compares scratch arms with E024's
+"""E063 analysis: the registered decisions of README.md. Part A compares scratch arms with E024's
 imagenet runs and part C (CloudSEN12) with its own (pooled SD); part B compares arms paired by
 seed (95% CI, t, df 4)."""
 

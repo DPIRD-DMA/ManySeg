@@ -1,4 +1,8 @@
-# E055: RGB-pretrained weights vs training from scratch on non-RGB inputs (pre-registered)
+# E063: RGB-pretrained weights vs training from scratch on non-RGB inputs (pre-registered)
+
+Numbered E055 while it ran and renumbered on 2026-11-11, because E055 was taken on `main` by
+another experiment. Run tags (`e055a-`, `e055b-`, `e055c-`), scripts' unit names and the frozen
+worktree name (`e055-7a3a544`) keep the old number.
 
 Status: **done** (registered 2026-11-04, before any run; finished 2026-11-05). Local RTX 4090, no
 Pawsey units.
@@ -89,7 +93,7 @@ may favour whichever arm overfits least.
   BigEarthNet was re-reading from disk (epochs about 95 s, against 29 s in E024). Speed only.
 
 ## Results
-Tables: `uv run python experiments/E055_rgb_vs_scratch/analyse.py`. All 87 runs
+Tables: `uv run python experiments/E063_rgb_vs_scratch/analyse.py`. All 87 runs
 completed, no non-finite losses. Arms sharing a seed started from the same random weights.
 
 ### Part A: three datasets, all labels

@@ -689,7 +689,7 @@ create_model(backbone="resnet34", pretrained=True, in_channels=13, channel_adapt
 > `projection` was harmful, in a run that froze it for epoch 1 and then trained it at 0.1×
 > learning rate, so a normally trained projection may do better.
 >
-> **Evidence (E055, ResNet-50, Sentinel-2):** RGB weights are not guaranteed to beat random weights
+> **Evidence (E063, ResNet-50, Sentinel-2):** RGB weights are not guaranteed to beat random weights
 > on inputs that aren't RGB. Against the better of two scratch recipes, the final val metric moved
 > +4.2 points on CloudSEN12+, +1.0 on PASTIS, −0.6 on Sen1Floods11 and −1.0 on BigEarthNet. Using
 > 12-252 Sen1Floods11 chips, the arms were level at every size. ImageNet weights ran under one
