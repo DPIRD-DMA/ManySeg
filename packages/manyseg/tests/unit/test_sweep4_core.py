@@ -1,12 +1,20 @@
 """Sweep 4 core fixes: loss shape checks, float32 metadata encoding in reduced-precision
 models, FastaiUNet's one level per stride; pixel-head output shapes."""
 
+import sys
+
 import pytest
 import torch
 from manyseg import create_model
 from manyseg.decoders import DECODERS
 from manyseg.features import FeatureSpec
 from manyseg.losses import dice_bce, heatmap_focal, masked_regression, soft_dice
+
+# PyTorch on Windows can run a bfloat16 Linear on the CPU with an instruction some processors lack
+# (0xc000001d, illegal instruction), which kills the worker; GitHub's Windows runners hit it
+# depending on their CPU. A PyTorch issue, not ManySeg's.
+WINDOWS_CPU_BF16 = pytest.mark.skipif(sys.platform == "win32",
+                                      reason="PyTorch's CPU bfloat16 Linear can crash on Windows")
 
 # --- pixel-head output shapes ----------------------------------------------------------------
 
@@ -59,6 +67,7 @@ def _meta_model(**fields):
         "meta": {"kind": "vector", "fields": fields}}).eval()
 
 
+@WINDOWS_CPU_BF16
 def test_bfloat16_model_takes_float32_metadata_and_keeps_ids():
     torch.manual_seed(0)
     m = _meta_model(tile={"type": "categorical", "num": 1000}, loc={"type": "coords"},
