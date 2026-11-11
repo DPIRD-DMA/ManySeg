@@ -4,7 +4,7 @@ All notable changes to `manyseg` (the library) and `manyseg-bench` (the benchmar
 follow [Semantic Versioning](https://semver.org/); before 1.0, minor versions may change the
 API, and every such change is listed here.
 
-## 0.1.0 (unreleased)
+## 0.1.0 (2026-11-11)
 
 First release. Python 3.11–3.14, PyTorch ≥ 2.10, timm ≥ 1.0.20.
 
