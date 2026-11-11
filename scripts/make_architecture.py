@@ -42,7 +42,7 @@ THEMES = {
     "light": dict(ink="#0F172A", muted="#64748B", line="#94A3B8", plate="#F8FAFC", edge="#CBD5E1",
                   soft="#E2E8F0", a="#0D9488", a_soft="#CCFBF1", b="#6366F1", b_soft="#E0E7FF",
                   c="#F59E0B", c_soft="#FEF3C7", d="#F43F5E", bg="#FFFFFF"),
-    "dark": dict(ink="#F1F5F9", muted="#94A3B8", line="#64748B", plate="#1E293B", edge="#475569",
+    "dark": dict(ink="#F1F5F9", muted="#CBD5E1", line="#7C8BA1", plate="#1E293B", edge="#475569",
                  soft="#334155", a="#2DD4BF", a_soft="#134E4A", b="#818CF8", b_soft="#312E81",
                  c="#FBBF24", c_soft="#78350F", d="#FB7185", bg="#0D1117"),
 }
