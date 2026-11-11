@@ -250,5 +250,4 @@ Ships in 0.1.0, marked experimental (names and defaults may change before 1.0):
 | Leakage in remote-sensing splits | Official geographic splits, or grid-cell assignment. Document the protocol for each dataset. |
 | Vector decoders chosen on one to three seeds, one dataset per task, and partly from oracles | Marked experimental (names and defaults may change before 1.0); each decision rule and its seeds are in `experiments/`. |
 | Roofs need an nDSM, and were trained and tested only in the Netherlands, where the 3DBAG targets and the AHN height input share a source (E047) | Stated in the vector guide (`api_design.md`); RGB-only roofs were tested and failed (E049). |
-| Large-scene vector decoding through ManyPred needs ManyPred features on its main but not yet released (`merge="cut"`, block post-processing) | Release ManyPred first; `decode_scene` works on any stitched raster without ManyPred. |
 | Upstream API drift (timm, SMP, fastai) | Pin tested versions in results; slow tests and a torch/timm floor leg run nightly; network tests run locally. |

@@ -228,7 +228,7 @@ only the smallest halo a decoder accepts and doesn't guarantee the same result a
 decode: on noise-like field predictions, halos up to 64 px gave different objects. An instance
 reaching much further than the halo can split at a block seam, and for roads the halo must also
 cover the skeleton's data-dependent reach (the decoder warns). With ManyPred this happens while
-it predicts (needs ManyPred's GitHub main; not yet in a PyPI release).
+it predicts.
 
 ```python
 from manyseg.vectors import Scene, block_decoder, decode_scene
@@ -331,11 +331,12 @@ and a fixed-size backbone refuses anything larger than its size. For larger scen
 [ManyPred](https://github.com/DPIRD-DMA/ManyPred), our tiled inference library: it predicts
 overlapping patches in batches, stitches them, skips nodata, and reads and writes GeoTIFFs
 larger than memory. It is a separate library so it can run any PyTorch model that returns a
-tensor or a dict of tensors; ManySeg does not import it. It is not on PyPI yet, so install it
-from GitHub (`[geo]` adds rasterio for GeoTIFFs):
+tensor or a dict of tensors; ManySeg does not import it (`[geo]` adds rasterio for GeoTIFFs):
 
 ```bash
-pip install "manypred[geo] @ git+https://github.com/DPIRD-DMA/ManyPred"
+pip install "manypred[geo]"
+# or
+uv add "manypred[geo]"
 ```
 
 ManyPred reads the model's `tiling_spec()` (padding multiple, fixed input size, each head's
@@ -378,9 +379,8 @@ on trained field or footprint models.
 The vector decoders (**Vector outputs** above) run on large scenes through `manypred.blocks`:
 `postprocess_blocks` decodes saved rasters block by block, and
 `predict_files(..., merge="cut", block_postprocess=BlockPostprocess(...))` decodes while it
-predicts ([guide](docs/api_design.md#vector-outputs-line-graphs-polygons)). `merge` and
-`manypred.blocks` are on ManyPred's GitHub main since 2026-11-02, and will be in its first
-release.
+predicts ([guide](docs/api_design.md#vector-outputs-line-graphs-polygons)). Both need
+ManyPred 0.1.0 or later.
 
 ManyPred moves a model to its device and `dtype` in place and sets it to eval mode. So after a
 preview during training, call `model.train()` (and move it back if it was on another device)
