@@ -114,6 +114,12 @@ Names and defaults may change before 1.0, and each decoder was tuned on one data
 * `notebooks/`: flood mapping on Sen1Floods11, optical + radar with several heads, and one
   notebook per vector output, saved with their figures.
 
+### Known issues
+
+* On Windows, PyTorch's CPU bfloat16 can crash with an illegal-instruction error
+  (`0xc000001d`) on some processors, inside `nn.Linear`. Use float32 on the CPU there; GPUs
+  and other platforms are not affected.
+
 ### Benchmark (`manyseg-bench`, not published)
 
 * Providers for ManySeg, segmentation-models-pytorch, fastai and plain timm (SMP and fastai
