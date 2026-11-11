@@ -71,7 +71,7 @@ repository.
 
 <a href="https://manyseg.readthedocs.io/en/latest/docs/builder/"><picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/DPIRD-DMA/ManySeg/main/docs/assets/builder-dark.png">
-  <img alt="The model builder's live diagram of a two-input model: encoders, gated fusion, a U-Net decoder and two heads, with parameter counts" src="https://raw.githubusercontent.com/DPIRD-DMA/ManySeg/main/docs/assets/builder-light.png" width="720">
+  <img alt="The model builder's live diagram of a two-input model: encoders, gated fusion, a U-Net decoder and two heads, with parameter counts" src="https://raw.githubusercontent.com/DPIRD-DMA/ManySeg/main/docs/assets/builder-light.png" width="860">
 </picture></a>
 
 ## Common tasks
