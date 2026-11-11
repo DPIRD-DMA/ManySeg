@@ -9,8 +9,15 @@
 Segmentation and other dense-prediction models for PyTorch, built from
 <a href="https://github.com/huggingface/pytorch-image-models">timm</a> encoders.<br>
 Any number of bands, several inputs at different resolutions, metadata, and many outputs in one model.<br>
-<a href="https://manyseg.readthedocs.io/en/latest/docs/builder/">Model builder</a>: design a model in your browser and copy the code.<br>
-<a href="https://manyseg.readthedocs.io">Documentation</a> · <a href="https://pypi.org/project/manyseg/">PyPI</a>
+<a href="https://manyseg.readthedocs.io/en/latest/docs/builder/">Model builder</a>: design a model in your browser and copy the code.
+</p>
+
+<p align="center">
+  <a href="https://pypi.org/project/manyseg/"><img alt="PyPI" src="https://img.shields.io/pypi/v/manyseg"></a>
+  <a href="https://pypi.org/project/manyseg/"><img alt="Python versions" src="https://img.shields.io/pypi/pyversions/manyseg"></a>
+  <a href="https://github.com/DPIRD-DMA/ManySeg/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/DPIRD-DMA/ManySeg/actions/workflows/ci.yml/badge.svg?branch=main"></a>
+  <a href="https://manyseg.readthedocs.io/en/stable/"><img alt="Documentation" src="https://readthedocs.org/projects/manyseg/badge/?version=stable"></a>
+  <a href="https://github.com/DPIRD-DMA/ManySeg/blob/main/LICENSE"><img alt="License: MIT" src="https://img.shields.io/pypi/l/manyseg"></a>
 </p>
 
 <p align="center">
