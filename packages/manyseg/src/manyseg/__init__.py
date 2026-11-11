@@ -1,6 +1,11 @@
 """ManySeg: composable dense-prediction models for PyTorch."""
 
-__version__ = "0.1.0.dev0"
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    __version__ = version("manyseg")
+except PackageNotFoundError:  # imported from a source tree that was never installed
+    __version__ = "0+unknown"
 
 from .features import FeatureSpec  # noqa: E402
 from .hub import push_to_hub  # noqa: E402

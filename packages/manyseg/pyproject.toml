@@ -1,6 +1,6 @@
 [project]
 name = "manyseg"
-version = "0.1.0.dev0"
+dynamic = ["version"]
 description = "Composable dense-prediction models for PyTorch: timm backbones, any channel count, multiple inputs and outputs."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -48,8 +48,15 @@ Repository = "https://github.com/DPIRD-DMA/ManySeg"
 Issues = "https://github.com/DPIRD-DMA/ManySeg/issues"
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
+
+# The version comes from the latest git tag (v0.1.0 -> 0.1.0); between tags it is a dev version
+# such as 0.1.1.dev3+g1a2b3c4. The repository root is two levels up. An sdist carries its
+# version in PKG-INFO, so builds from it need no git.
+[tool.hatch.version]
+source = "vcs"
+raw-options = { root = "../.." }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/manyseg"]
