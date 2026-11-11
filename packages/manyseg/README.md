@@ -433,6 +433,7 @@ help on your data, and an untested one is simply unknown.
 | Boundary + distance heads, for touching objects | helped | E010, AI4Boundaries: doubled panoptic quality against extent alone |
 | An auxiliary segmentation head on an image classifier | helped | E020, BigEarthNet only; looks like regularisation |
 | SSL4EO DINO weights with their own normalisation | helped | E024, three Sentinel-2 datasets, ResNet-50 |
+| ImageNet RGB weights on Sentinel-2, vs random weights | mixed | E063: helped on CloudSEN12+ (+4.2 points) and PASTIS (+1.0), slightly worse on Sen1Floods11 and BigEarthNet; level with 12–252 labelled chips |
 | Footprint decoder (corners and walls) | helped on boundary quality, slightly lower detection | E038, WHU aerial only, 2 seeds |
 | Field decoder (instance outlines) | chosen over corners and walls | E046 and E052, Fields of The World Netherlands only, 1–2 seeds |
 | Road decoder (unified heads) | kept more overpasses, no loss on APLS | E044 and E044b, City-Scale only, 3 seeds |

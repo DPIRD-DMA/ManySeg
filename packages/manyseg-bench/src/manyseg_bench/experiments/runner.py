@@ -7,6 +7,7 @@ import time
 import uuid
 from pathlib import Path
 
+import numpy as np
 import torch
 
 from ..datasets import GPULoader, data_root, get_dataset, load_split
@@ -30,6 +31,25 @@ def _select(split, info, subset: int | None = None):
         split.masks = ({k: v[sl] for k, v in split.masks.items()}
                        if isinstance(split.masks, dict) else split.masks[sl])
         split.names = split.names[:subset]
+    return split
+
+
+def select_train_subset(split, n: int, seed: int):
+    """Keep ``n`` training samples drawn by ``seed``, leaving the global RNG alone. Sizes nest
+    for one seed (the 12 samples of ``n=12`` are among the 25 of ``n=25``), and every arm with
+    the same seed gets the same samples."""
+    total = len(split.names)
+    if not 0 < n <= total:
+        raise ValueError(f"train_subset must be in 1..{total}, got {n}")
+    idx = np.sort(np.random.default_rng(seed).permutation(total)[:n])
+
+    def take(v):
+        return {k: a[idx] for k, a in v.items()} if isinstance(v, dict) else v[idx]
+
+    split.images, split.masks = take(split.images), take(split.masks)
+    split.names = [split.names[i] for i in idx]
+    if split.vectors is not None:
+        split.vectors = take(split.vectors)
     return split
 
 
@@ -177,6 +197,7 @@ def run_training(
     task_overrides: dict | None = None,
     subset: int | None = None,
     split: str = "official",
+    train_subset: int | None = None,
 ) -> dict:
     dev = torch.device(device)
     ds = get_dataset(dataset)
@@ -236,6 +257,8 @@ def run_training(
         raise ValueError(f"provider {provider!r} does not support dict inputs; "
                          "use input_mode='stack'")
     train_split = get_split("train")
+    if train_subset is not None:  # labels are scarce, statistics stay those of the full split
+        train_split = select_train_subset(train_split, train_subset, seed)
     from ..providers.manyseg_provider import registry_weights
 
     rw = registry_weights(spec) if provider == "manyseg" else None
@@ -304,6 +327,7 @@ def run_training(
                           if hasattr(task, k)},
         "cudnn_benchmark": torch.backends.cudnn.benchmark,
         "subset": subset,
+        "train_subset": train_subset,
         "seed": seed,
         "split_scheme": split,
         "split_sizes": {"train": len(train_split.names), "val": len(val.names)},
