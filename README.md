@@ -8,8 +8,6 @@
 <p align="center">
 Segmentation and other dense-prediction models for PyTorch, built from
 <a href="https://github.com/huggingface/pytorch-image-models">timm</a> encoders.<br>
-Any number of bands, several inputs at different resolutions, metadata, and many outputs in one model.<br>
-<a href="https://manyseg.readthedocs.io/en/latest/docs/builder/">Model builder</a>: design a model in your browser and copy the code.<br>
 <a href="https://manyseg.readthedocs.io">Documentation</a> · <a href="https://pypi.org/project/manyseg/">PyPI</a>
 </p>
 
@@ -19,6 +17,28 @@ Any number of bands, several inputs at different resolutions, metadata, and many
     <img alt="ManySeg architecture: per-input encoders feed a fusion block, metadata conditions the decoder through FiLM, shared or per-head decoders feed named heads including instance outputs; every stage is swappable" src="docs/assets/architecture-light.svg" width="860">
   </picture>
 </p>
+
+## What ManySeg does
+
+- **timm encoders, any number of bands**: 46 tested CNNs, hierarchical transformers and plain
+  ViTs such as DINOv2, 41 at any input size. ImageNet weights are adapted to your bands;
+  SSL4EO and Satlas Sentinel-1/2 weights download on first use.
+- **Many inputs**: inputs at different resolutions, time series, change detection, metadata
+- **Many outputs**: segmentation, regression and image classification heads in one model,
+  each with the shared decoder or its own (U-Net, U-Net++, fastai-style U-Net, FPN, UPerNet,
+  DeepLabV3+, SegFormer)
+- **Objects and counts**: touching instances, point detection, density counting
+- **Vector outputs** *(experimental)*: footprints, fields, road graphs, LoD2 roofs and points
+  as GIS layers
+- **Deployment**: a save file with no pickle that holds the model's config and how to use it,
+  the Hugging Face Hub, `torch.compile`, `torch.export`, ONNX and int8 (a few encoders have
+  limits); large scenes with [ManyPred](https://github.com/DPIRD-DMA/ManyPred)
+- **Defaults backed by experiments**: 50+ experiments, negative results kept
+
+A model is a plain `nn.Module` for your own training loop; there are tested examples for
+fastai, Lightning, Accelerate and TorchGeo. Not sure how to combine the options? The
+[model builder](https://manyseg.readthedocs.io/en/latest/docs/builder/) draws the model and
+writes the code.
 
 > **Status: alpha.** Before 1.0 the API may change between minor versions; every change is
 > listed in [`CHANGELOG.md`](https://github.com/DPIRD-DMA/ManySeg/blob/main/CHANGELOG.md).
@@ -44,7 +64,7 @@ import torch
 from manyseg import create_model
 
 model = create_model(backbone="convnext_tiny", in_channels=4, num_classes=3)  # U-Net by default
-logits = model(torch.randn(2, 4, 257, 301))   # (2, 3, 257, 301): any size, odd or non-square
+logits = model(torch.randn(2, 4, 257, 301))   # (2, 3, 257, 301): most backbones take any size
 print(model.describe())                       # what was built, stage by stage
 ```
 
