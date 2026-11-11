@@ -42,12 +42,12 @@ THEMES = {
     "light": dict(ink="#0F172A", muted="#64748B", line="#94A3B8", plate="#F8FAFC", edge="#CBD5E1",
                   soft="#E2E8F0", a="#0D9488", a_soft="#CCFBF1", b="#6366F1", b_soft="#E0E7FF",
                   c="#F59E0B", c_soft="#FEF3C7", d="#F43F5E", bg="#FFFFFF"),
-    "dark": dict(ink="#F1F5F9", muted="#94A3B8", line="#64748B", plate="#1E293B", edge="#475569",
+    "dark": dict(ink="#F1F5F9", muted="#CBD5E1", line="#7C8BA1", plate="#1E293B", edge="#475569",
                  soft="#334155", a="#2DD4BF", a_soft="#134E4A", b="#818CF8", b_soft="#312E81",
                  c="#FBBF24", c_soft="#78350F", d="#FB7185", bg="#0D1117"),
 }
 
-W, H = 1000, 590
+W, H = 1000, 600
 META_Y = 410
 RULE_Y = 492
 COLS = {"in": 95, "enc": 290, "fuse": 490, "dec": 680, "out": 885}
@@ -66,7 +66,7 @@ def build(theme):
     # column headers
     for key, label in (("in", "INPUTS"), ("enc", "ENCODERS"), ("fuse", "FUSION"),
                        ("dec", "DECODER"), ("out", "HEADS")):
-        add(text(label, COLS[key], 34, 12.5, t["muted"], "bold", "middle", tracking=0.12))
+        add(text(label, COLS[key], 34, 13.5, t["muted"], "bold", "middle", tracking=0.12))
 
     # ---- inputs: stacked channel tiles; sar is smaller (half resolution)
     def stack(cx, cy, size, n, col, soft):
@@ -80,10 +80,10 @@ def build(theme):
 
     stack(COLS["in"], BRANCH_Y["a"], 68, 4, t["a"], t["a_soft"])
     stack(COLS["in"], BRANCH_Y["b"], 42, 2, t["b"], t["b_soft"])
-    add(text("optical", COLS["in"], BRANCH_Y["a"] + 62, 15, t["ink"], "bold", "middle"))
-    add(text("4 ch · full res", COLS["in"], BRANCH_Y["a"] + 80, 12.5, t["muted"], anchor="middle"))
-    add(text("sar", COLS["in"], BRANCH_Y["b"] + 50, 15, t["ink"], "bold", "middle"))
-    add(text("2 ch · ½ res", COLS["in"], BRANCH_Y["b"] + 68, 12.5, t["muted"], anchor="middle"))
+    add(text("optical", COLS["in"], BRANCH_Y["a"] + 62, 16.5, t["ink"], "bold", "middle"))
+    add(text("4 ch · full res", COLS["in"], BRANCH_Y["a"] + 80, 14, t["muted"], anchor="middle"))
+    add(text("sar", COLS["in"], BRANCH_Y["b"] + 50, 16.5, t["ink"], "bold", "middle"))
+    add(text("2 ch · ½ res", COLS["in"], BRANCH_Y["b"] + 68, 14, t["muted"], anchor="middle"))
 
     # ---- encoders: feature pyramids (wide = shallow, narrow = deep)
     def pyramid_bars(cx, cy, widths, col):
@@ -103,7 +103,7 @@ def build(theme):
         add(f'<path d="M{x_from} {cy} L{COLS["enc"] - 64} {cy}" stroke="{t["line"]}" stroke-width="1.5" '
             f'fill="none" marker-end="url(#arrow)"/>')
         ends[br] = pyramid_bars(COLS["enc"], cy, enc_w, col)
-        add(text(name, COLS["enc"], cy + 70, 13, t["muted"], anchor="middle"))
+        add(text(name, COLS["enc"], cy + 72, 14, t["muted"], anchor="middle"))
 
     # multi-scale features from both encoders converge on the fusion block
     fx0, fx1 = COLS["fuse"] - 48, COLS["fuse"] + 48
@@ -123,8 +123,8 @@ def build(theme):
     for py in FUSE_PORTS:
         add(f'<circle cx="{fx0}" cy="{py}" r="3" fill="{t["line"]}"/>')
         add(f'<circle cx="{fx1}" cy="{py}" r="3" fill="{t["line"]}"/>')
-    add(text("gated", COLS["fuse"], 215, 16, t["ink"], "bold", "middle"))
-    add(text("per level", COLS["fuse"], 233, 12, t["muted"], anchor="middle"))
+    add(text("gated", COLS["fuse"], 215, 17.5, t["ink"], "bold", "middle"))
+    add(text("per level", COLS["fuse"], 233, 14, t["muted"], anchor="middle"))
 
     # ---- decoder: takes fused multi-scale features, emits full-res features
     dec_w = [104, 82, 60, 38]
@@ -133,8 +133,8 @@ def build(theme):
         add(f'<path d="M{fx1} {y} L{dx - w/2 - 4:.1f} {y}" stroke="{t["line"]}" stroke-width="1.5" fill="none"/>')
         add(f'<rect x="{dx - w/2:.1f}" y="{y - 7}" width="{w}" height="14" rx="4" fill="{t["ink"]}" '
             f'fill-opacity="{0.85 - i*0.15:.2f}"/>')
-    add(text("unet", dx, 296, 16, t["ink"], "bold", "middle"))
-    add(text("+ fpn for boundary", dx, 314, 12, t["muted"], anchor="middle"))
+    add(text("unet", dx, 296, 17.5, t["ink"], "bold", "middle"))
+    add(text("+ fpn for boundary", dx, 314, 14, t["muted"], anchor="middle"))
 
     # ---- heads
     hx = COLS["out"]
@@ -149,15 +149,15 @@ def build(theme):
     for r, row in enumerate(mask):
         for c, v in enumerate(row):
             add(f'<rect x="{gx + c*(cell+gap)}" y="{gy + r*(cell+gap)}" width="{cell}" height="{cell}" rx="3" fill="{fill[v]}"/>')
-    add(text("water bodies", hx, gy + gw + 26, 15, t["ink"], "bold", "middle"))
-    add(text("extent · boundary · distance", hx, gy + gw + 43, 12.5, t["muted"], anchor="middle"))
+    add(text("water bodies", hx, gy + gw + 26, 16.5, t["ink"], "bold", "middle"))
+    add(text("extent · boundary · distance", hx, gy + gw + 43, 14, t["muted"], anchor="middle"))
 
     px, py = hx, 282
     add(f'<rect x="{px - 34}" y="{py - 17}" width="68" height="34" rx="17" fill="{t["plate"]}" '
         f'stroke="{t["edge"]}" stroke-width="1.5"/>')
-    add(text("0.37", px, py + 6, 16, t["ink"], "bold", "middle"))
-    add(text("water_area", hx, py + 40, 15, t["ink"], "bold", "middle"))
-    add(text("regression · per image", hx, py + 57, 12.5, t["muted"], anchor="middle"))
+    add(text("0.37", px, py + 6, 17.5, t["ink"], "bold", "middle"))
+    add(text("water_area", hx, py + 40, 16.5, t["ink"], "bold", "middle"))
+    add(text("regression · per image", hx, py + 57, 14, t["muted"], anchor="middle"))
 
     # decoder -> heads
     sx = dx + 58
@@ -176,16 +176,16 @@ def build(theme):
         y = py0 + i * (ph + pg)
         add(f'<rect x="{px0}" y="{y:.1f}" width="{pw}" height="{ph}" rx="8.5" fill="{t["c_soft"]}" '
             f'stroke="{t["c"]}" stroke-width="1.2"/>')
-        add(text(lab, COLS["in"], y + ph / 2 + 4, 11, t["ink"], anchor="middle"))
+        add(text(lab, COLS["in"], y + ph / 2 + 4, 12, t["ink"], anchor="middle"))
     stack_bottom = py0 + len(pills) * ph + (len(pills) - 1) * pg
-    add(text("meta", COLS["in"], stack_bottom + 22, 15, t["ink"], "bold", "middle"))
-    add(text("vector · no pixels", COLS["in"], stack_bottom + 40, 12.5, t["muted"], anchor="middle"))
+    add(text("meta", COLS["in"], stack_bottom + 22, 16.5, t["ink"], "bold", "middle"))
+    add(text("vector · no pixels", COLS["in"], stack_bottom + 40, 14, t["muted"], anchor="middle"))
     ex = COLS["enc"]
     add(f'<path d="M{px0 + pw + 12} {my} L{ex - 34} {my}" stroke="{t["line"]}" stroke-width="1.5" '
         f'fill="none" marker-end="url(#arrow)"/>')
     add(f'<rect x="{ex - 30}" y="{my - 13}" width="60" height="26" rx="13" fill="{t["c"]}"/>')
-    add(text("MLP", ex, my + 5, 13, t["bg"], "bold", "middle"))
-    add(text("embedding", ex, my + 32, 12.5, t["muted"], anchor="middle"))
+    add(text("MLP", ex, my + 5, 14, t["bg"], "bold", "middle"))
+    add(text("embedding", ex, my + 32, 14, t["muted"], anchor="middle"))
     film_x = (fx1 + dx - 52) / 2
     r = 18  # rounded elbow, matching the curved connectors elsewhere
     add(f'<path d="M{ex + 30} {my} L{film_x - r} {my} Q{film_x} {my}, {film_x} {my - r} '
@@ -196,7 +196,7 @@ def build(theme):
     for y in DEC_Y:
         add(f'<rect x="{film_x - 5}" y="{y - 5}" width="10" height="10" rx="2" fill="{t["c"]}" '
             f'stroke="{t["bg"]}" stroke-width="1.5"/>')
-    add(text("FiLM", film_x, DEC_Y[0] - 14, 12.5, t["c"], "bold", "middle"))
+    add(text("FiLM", film_x, DEC_Y[0] - 14, 14, t["c"], "bold", "middle"))
 
     # ---- swappable options under each column
     opts = {
@@ -212,7 +212,7 @@ def build(theme):
     add(f'<line x1="24" y1="{RULE_Y}" x2="{W - 24}" y2="{RULE_Y}" stroke="{t["edge"]}" stroke-width="1"/>')
     for key, lines in opts.items():
         for i, s in enumerate(lines):
-            add(text(s, COLS[key], RULE_Y + 26 + i * 18, 12.5, t["muted"], anchor="middle"))
+            add(text(s, COLS[key], RULE_Y + 27 + i * 20, 14, t["muted"], anchor="middle"))
 
     defs = (f'<defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" '
             f'orient="auto-start-reverse"><path d="M0 1 L9 5 L0 9 z" fill="{t["line"]}"/></marker></defs>')

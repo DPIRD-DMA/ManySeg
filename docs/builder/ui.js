@@ -602,7 +602,7 @@ function drawDiagram(s, D) {
     encPorts.push(ports);
     if (ftype !== "early") E.push(`<line class="edge" x1="${rows[i].inX}" y1="${cy}" x2="${X.enc - 4}" y2="${cy}" marker-end="url(#arr)"/>`);
     const label = enc.shared ? `shares ${enc.shared}${enc.inputs[0].share_norm ? " + BN" : ""}` : info.name;
-    P.push(`<text class="sub" x="${bx + 30}" y="${top + n * LEVEL + 12}" text-anchor="middle" style="font-family: var(--f-mono); font-size: 10.5px">${esc(label.length > 24 ? label.slice(0, 23) + "\u2026" : label)}</text>`);
+    P.push(`<text class="sub" x="${bx + 30}" y="${top + n * LEVEL + 12}" text-anchor="middle" style="font-family: var(--f-mono); font-size: 11.5px">${esc(label.length > 24 ? label.slice(0, 23) + "\u2026" : label)}</text>`);
     const r0 = enc.inputs.length === 1 ? enc.inputs[0] : null;
     if (r0 && r0.kind === "timeseries")
       P.push(`<text class="sub" x="${bx + 30}" y="${top + n * LEVEL + 25}" text-anchor="middle" style="fill: var(--accent-ink)">per date, then ${esc(r0.temporal)}</text>`);
