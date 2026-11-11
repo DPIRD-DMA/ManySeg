@@ -32,4 +32,5 @@ Each `experiments/E*/` folder records one experiment: its plan, decision rule, c
 Scripts read data from `MANYSEG_BENCH_DATA`; some also need `MANYSEG_RUNS` (frozen worktrees) or
 `MANYSEG_REPO`. Recorded paths in `runs/` use the same names, plus `$WORKSPACE` for the parent
 directory of the checkouts. Treat finished experiments as records: add an amendment rather than
-changing their results.
+changing their results. Commit hashes in older write-ups and run records predate a history
+rewrite; [`experiments/COMMIT_MAP.md`](experiments/COMMIT_MAP.md) maps them to this repository's.

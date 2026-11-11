@@ -130,6 +130,8 @@ def main() -> int:
     _copy_page(ROOT / "README.md", SRC / "index.md")
     _copy_page(ROOT / "CHANGELOG.md", SRC / "CHANGELOG.md")  # linked from README
     _copy_page(ROOT / "CONTRIBUTING.md", SRC / "CONTRIBUTING.md")  # linked from README
+    (SRC / "experiments").mkdir(parents=True, exist_ok=True)
+    _copy_page(ROOT / "experiments" / "COMMIT_MAP.md", SRC / "experiments" / "COMMIT_MAP.md")
     for _, name in DOCS:
         _copy_page(ROOT / "docs" / name, SRC / "docs" / name)
     (SRC / "examples").mkdir()
