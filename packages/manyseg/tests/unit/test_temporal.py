@@ -1,9 +1,17 @@
 """Time-series inputs (``"kind": "timeseries"``): one 2D encoder applied to every date, then a
 temporal aggregation per feature level (masked mean / max / lightweight temporal attention)."""
 
+import sys
+
 import pytest
 import torch
 from manyseg import create_model
+
+# PyTorch on Windows can run a bfloat16 Linear on the CPU with an instruction some processors lack
+# (0xc000001d, illegal instruction), which kills the worker; GitHub's Windows runners hit it
+# depending on their CPU. A PyTorch issue, not ManySeg's.
+WINDOWS_CPU_BF16 = pytest.mark.skipif(sys.platform == "win32",
+                                      reason="PyTorch's CPU bfloat16 Linear can crash on Windows")
 
 AGGS = ["mean", "max", "attention"]
 
@@ -206,7 +214,8 @@ def test_series_extra_name_reserved_without_vectors():
         build(extra={"s2_dates": {"kind": "timeseries", "in_channels": 4}})
 
 
-@pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16])
+@pytest.mark.parametrize("dtype", [pytest.param(torch.bfloat16, marks=WINDOWS_CPU_BF16),
+                                   torch.float16])
 @pytest.mark.parametrize("with_dates", [False, True])
 def test_attention_runs_in_half_dtypes(dtype, with_dates):
     """ManyPred casts the model and its float inputs to the inference dtype (float16 on GPUs)."""
