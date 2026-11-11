@@ -4,8 +4,7 @@ on:
   push:
     branches: [main]
     paths-ignore: ["experiments/**", "docs/**", "scripts/setonix/**", "**.md"]
-  pull_request:
-    paths-ignore: ["experiments/**", "docs/**", "scripts/setonix/**", "**.md"]
+  pull_request:  # no path filter: see the changes job
   schedule:
     - cron: "0 18 * * *"  # 02:00 AWST; the only place macOS runs outside PRs
   workflow_dispatch:
@@ -19,7 +18,37 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Required checks must report on every PR, so the workflow always runs and this job decides
+  # whether the PR touches anything outside experiments/, docs/, scripts/setonix/ and Markdown.
+  # When it doesn't, the jobs below still start and report success under their real names,
+  # with every step skipped.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.diff.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT" != pull_request ]; then echo "run=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          run=false
+          while IFS= read -r f; do
+            case "$f" in
+              experiments/*|docs/*|scripts/setonix/*|*.md) ;;
+              *) run=true ;;
+            esac
+          done < <(git diff --name-only "$BASE...$HEAD")
+          echo "changed files decide: run=$run"
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+
   unit:
+    needs: changes
     name: unit (${{ matrix.os }}, py${{ matrix.python }})
     runs-on: ${{ matrix.os }}
     strategy:
@@ -37,24 +66,30 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - if: needs.changes.outputs.run == 'true'
+        uses: actions/checkout@v4
+      - if: needs.changes.outputs.run == 'true'
+        uses: astral-sh/setup-uv@v6
       # geo: the dataset reader tests skip without it (all its packages ship wheels for every
       # OS / Python of the matrix); timm: the timm provider
-      - name: Install (CPU torch wheels on Linux)
+      - if: needs.changes.outputs.run == 'true'
+        name: Install (CPU torch wheels on Linux)
         run: |
           uv venv --python ${{ matrix.python }}
           uv pip install --torch-backend auto \
             -e "packages/manyseg[test]" -e "packages/manyseg-bench[manyseg,smp,fastai,timm,geo,test]"
-      - name: Library must install and import without the benchmark
+      - if: needs.changes.outputs.run == 'true'
+        name: Library must install and import without the benchmark
         run: |
           uv venv --python ${{ matrix.python }} /tmp/libonly
           VIRTUAL_ENV=/tmp/libonly uv pip install --torch-backend auto -e packages/manyseg
           PY=/tmp/libonly/bin/python; [ -f "$PY" ] || PY=/tmp/libonly/Scripts/python.exe  # Windows
           "$PY" -c "import manyseg, sys; assert 'manyseg_bench' not in sys.modules"
-      - name: manyseg unit tests
+      - if: needs.changes.outputs.run == 'true'
+        name: manyseg unit tests
         run: uv run --no-sync pytest packages/manyseg -n 2 -q
-      - name: manyseg-bench tests
+      - if: needs.changes.outputs.run == 'true'
+        name: manyseg-bench tests
         run: uv run --no-sync pytest packages/manyseg-bench -n 2 -q
 
   slow:
@@ -98,24 +133,34 @@ jobs:
         run: df -h / /tmp; du -sh /tmp/* 2>/dev/null | sort -h | tail -5
 
   lint:
+    needs: changes
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
-      - run: uvx ruff check packages examples notebooks scripts experiments/analyse_runs.py
-      - run: python3 scripts/sync_readme.py --check  # PyPI README matches the repository one
+      - if: needs.changes.outputs.run == 'true'
+        uses: actions/checkout@v4
+      - if: needs.changes.outputs.run == 'true'
+        uses: astral-sh/setup-uv@v6
+      - if: needs.changes.outputs.run == 'true'
+        run: uvx ruff check packages examples notebooks scripts experiments/analyse_runs.py
+      - if: needs.changes.outputs.run == 'true'
+        run: python3 scripts/sync_readme.py --check  # PyPI README matches the repository one
 
   package:
+    needs: changes
     name: build + install wheels
     runs-on: ubuntu-latest
     # PRs, nightly and on demand only (CI budget): builds both packages, checks the metadata and
     # installs the manyseg wheel alone into a clean env.
     if: github.event_name != 'push'
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
-      - run: uv build --all-packages -o dist && uvx twine check dist/*
-      - run: |
+      - if: needs.changes.outputs.run == 'true'
+        uses: actions/checkout@v4
+      - if: needs.changes.outputs.run == 'true'
+        uses: astral-sh/setup-uv@v6
+      - if: needs.changes.outputs.run == 'true'
+        run: uv build --all-packages -o dist && uvx twine check dist/*
+      - if: needs.changes.outputs.run == 'true'
+        run: |
           uv venv --python 3.12 /tmp/wheel
           VIRTUAL_ENV=/tmp/wheel uv pip install --torch-backend cpu dist/manyseg-*.whl
           /tmp/wheel/bin/python -c "import torch, importlib.util; from manyseg import create_model; m = create_model(backbone='resnet18', pretrained=False, in_channels=4, num_classes=3).eval(); assert m(torch.randn(1, 4, 65, 97)).shape == (1, 3, 65, 97); assert importlib.util.find_spec('manyseg_bench') is None"
